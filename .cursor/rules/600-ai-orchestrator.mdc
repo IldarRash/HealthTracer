@@ -1,0 +1,15 @@
+---
+description: AI orchestration rules for structured outputs, proposal flow, and safe plan updates
+globs: "{apps/api/src/modules/ai,packages/ai,packages/types}/**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# AI Orchestrator
+
+- AI tools return proposals, not direct database mutations.
+- Validate all AI outputs with Zod before domain services can apply them.
+- Store proposal intent, reason, target domain, validation status, and applied revision id.
+- Backend services decide whether a proposal is accepted, rejected, or superseded.
+- Accepted workout and nutrition changes create new revisions.
+- Reject unsupported intents and unsafe medical wording.
+- Use Context7 or current docs before adding unfamiliar AI SDK APIs.

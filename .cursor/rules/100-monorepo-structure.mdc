@@ -1,0 +1,16 @@
+---
+description: Monorepo boundaries for apps and shared packages
+globs: "{apps,packages}/**/*"
+alwaysApply: false
+---
+
+# Monorepo Structure
+
+- Use Turborepo, pnpm workspaces, and TypeScript.
+- Application code belongs in `apps/*`.
+- Reusable code belongs in `packages/*`.
+- Do not import directly from one app into another app.
+- Shared contracts and Zod schemas belong in `packages/types`.
+- Drizzle schema and migrations belong in `packages/db`.
+- Prompt helpers, tool schemas, and proposal helpers belong in `packages/ai`.
+- Shared TypeScript, lint, and env validation config belongs in `packages/config`.

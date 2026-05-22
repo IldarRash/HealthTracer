@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "AI Health Coach",
+    "slug": "ai-health-coach",
+    "scheme": "healthcoach",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android", "web"],
+    "plugins": ["expo-router"]
+  }
+}

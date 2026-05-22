@@ -1,0 +1,14 @@
+---
+description: Security and privacy rules for health data, secrets, MCP, database access, and destructive operations
+alwaysApply: true
+---
+
+# Security
+
+- Do not commit secrets, API keys, tokens, database URLs, or private health data.
+- Do not log sensitive health data, raw AI prompts containing private data, or document contents.
+- Require explicit user consent before collecting health integrations or documents.
+- Avoid diagnosis, treatment, or medical certainty language.
+- Do not run destructive database or filesystem operations without explicit approval.
+- Keep production database MCP disabled unless security-reviewed.
+- Prefer least privilege for service credentials and MCP access.
