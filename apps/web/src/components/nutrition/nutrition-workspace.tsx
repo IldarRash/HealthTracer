@@ -10,7 +10,7 @@ import {
   getActiveNutritionPlan,
   getTodayNutritionAdherence,
   listNutritionRevisions,
-  upsertNutritionAdherence,
+  upsertTodayNutritionAdherence,
 } from "../../lib/api";
 import {
   buildAdherenceState,
@@ -107,7 +107,7 @@ export function NutritionWorkspace() {
         throw new Error("Clerk session token is unavailable.");
       }
 
-      const result = await upsertNutritionAdherence(token, today, input);
+      const result = await upsertTodayNutritionAdherence(token, input);
       if (result.error || !result.data) {
         throw new Error(result.error ?? "Nutrition adherence could not be saved.");
       }
@@ -169,8 +169,9 @@ export function NutritionWorkspace() {
   }
 
   const adherenceRecord = adherenceQuery.data?.adherence ?? null;
+  const adherenceDate = adherenceRecord?.date ?? today;
   const adherenceState = buildAdherenceState({
-    date: today,
+    date: adherenceDate,
     payload,
     record: adherenceRecord,
   });
@@ -252,7 +253,7 @@ export function NutritionWorkspace() {
 
         <section className="panel panel-secondary panel-wide training-history-panel">
           <p className="section-label">Today&apos;s adherence</p>
-          <h2>Daily follow-through ({today})</h2>
+          <h2>Daily follow-through ({adherenceDate})</h2>
 
           {adherenceQuery.isLoading ? <p className="muted-text">Loading adherence…</p> : null}
           {adherenceQuery.isError ? (

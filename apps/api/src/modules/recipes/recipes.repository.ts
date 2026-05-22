@@ -14,6 +14,13 @@ export interface CreateRecommendationInput {
   status?: "pending" | "accepted";
 }
 
+export interface RecommendationLookupKey {
+  recipeId: string;
+  relatedNutritionPlanRevisionId: string | null;
+}
+
+const OPEN_RECOMMENDATION_STATUSES = ["pending", "accepted"] as const;
+
 @Injectable()
 export class RecipesRepository {
   constructor(@Inject(DATABASE) private readonly db: HealthDatabase) {}
@@ -106,6 +113,36 @@ export class RecipesRepository {
       .limit(1);
 
     return row ?? null;
+  }
+
+  async findOpenRecommendationsByKeys(
+    userId: string,
+    keys: RecommendationLookupKey[],
+  ) {
+    if (keys.length === 0) {
+      return [];
+    }
+
+    const recipeIds = [...new Set(keys.map((key) => key.recipeId))];
+
+    const rows = await this.db
+      .select()
+      .from(userRecipeRecommendations)
+      .where(
+        and(
+          eq(userRecipeRecommendations.userId, userId),
+          inArray(userRecipeRecommendations.recipeId, recipeIds),
+          inArray(userRecipeRecommendations.status, [...OPEN_RECOMMENDATION_STATUSES]),
+        ),
+      );
+
+    return rows.filter((row) =>
+      keys.some(
+        (key) =>
+          key.recipeId === row.recipeId &&
+          key.relatedNutritionPlanRevisionId === row.relatedNutritionPlanRevisionId,
+      ),
+    );
   }
 
   async createRecommendations(inputs: CreateRecommendationInput[]) {

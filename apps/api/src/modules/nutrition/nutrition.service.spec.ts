@@ -1,5 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NutritionService } from "./nutrition.service.js";
 
 const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
@@ -62,6 +62,10 @@ function createRepositoryMock(overrides: Record<string, unknown> = {}) {
 }
 
 describe("NutritionService", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("creates a new plan revision when no active plan exists", async () => {
     let appendCalled = false;
 
@@ -221,5 +225,94 @@ describe("NutritionService", () => {
 
     expect(lookupUserId).toBe(userId);
     expect(upsertUserId).toBe(userId);
+  });
+
+  it("upserts today adherence using the user timezone date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T23:30:00.000Z"));
+
+    let upsertDate: string | undefined;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        upsertAdherenceByUserIdAndDate: async (_resolvedUserId: string, date: string) => {
+          upsertDate = date;
+          return {
+            id: "adherence-1",
+            userId,
+            date,
+            hydrationLitersConsumed: 1.5,
+            mealCompletion: [],
+            targetCompletion: {},
+            notes: [],
+            createdAt: new Date("2026-05-22T23:30:00.000Z"),
+            updatedAt: new Date("2026-05-22T23:30:00.000Z"),
+          };
+        },
+      }) as never,
+      {
+        resolveFromAuth: async () => ({
+          id: userId,
+          email: "user@example.com",
+          displayName: null,
+          timezone: "Asia/Tokyo",
+          createdAt: "2026-05-22T12:00:00.000Z",
+          updatedAt: "2026-05-22T12:00:00.000Z",
+        }),
+      } as never,
+    );
+
+    const response = await service.upsertAdherenceForToday(auth as never, {
+      hydrationLitersConsumed: 1.5,
+    });
+
+    expect(upsertDate).toBe("2026-05-23");
+    expect(response.adherence?.date).toBe("2026-05-23");
+    expect(response.adherence?.hydrationLitersConsumed).toBe(1.5);
+  });
+
+  it("reads and writes today adherence against the same timezone-resolved date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T23:30:00.000Z"));
+
+    const dates: string[] = [];
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findAdherenceByUserIdAndDate: async (_resolvedUserId: string, date: string) => {
+          dates.push(`read:${date}`);
+          return null;
+        },
+        upsertAdherenceByUserIdAndDate: async (_resolvedUserId: string, date: string) => {
+          dates.push(`write:${date}`);
+          return {
+            id: "adherence-1",
+            userId,
+            date,
+            hydrationLitersConsumed: 1,
+            mealCompletion: [],
+            targetCompletion: {},
+            notes: [],
+            createdAt: new Date("2026-05-22T23:30:00.000Z"),
+            updatedAt: new Date("2026-05-22T23:30:00.000Z"),
+          };
+        },
+      }) as never,
+      {
+        resolveFromAuth: async () => ({
+          id: userId,
+          email: "user@example.com",
+          displayName: null,
+          timezone: "Asia/Tokyo",
+          createdAt: "2026-05-22T12:00:00.000Z",
+          updatedAt: "2026-05-22T12:00:00.000Z",
+        }),
+      } as never,
+    );
+
+    await service.getAdherenceForToday(auth as never);
+    await service.upsertAdherenceForToday(auth as never, { hydrationLitersConsumed: 1 });
+
+    expect(dates).toEqual(["read:2026-05-23", "write:2026-05-23"]);
   });
 });

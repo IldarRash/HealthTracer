@@ -70,7 +70,11 @@ export class HealthMetricsService {
 
     const inserted = [];
     let skipped = 0;
-    const metricTypes = new Set<SyncHealthMetricsInput["records"][number]["metricType"]>();
+    const observationRecords: Array<{
+      metricType: SyncHealthMetricsInput["records"][number]["metricType"];
+      observedAt: Date;
+      observedEndAt: Date | null;
+    }> = [];
 
     for (const record of input.records) {
       this.deviceConnectionsService.assertMetricScopeGranted(
@@ -86,6 +90,7 @@ export class HealthMetricsService {
         record: {
           ...record,
           normalizedPayload: this.metricsAiContextService.sanitizeSnapshotPayload(
+            record.metricType,
             record.normalizedPayload,
           ),
         },
@@ -93,7 +98,11 @@ export class HealthMetricsService {
 
       if (snapshot) {
         inserted.push(toHealthMetricSnapshot(snapshot));
-        metricTypes.add(record.metricType);
+        observationRecords.push({
+          metricType: record.metricType,
+          observedAt: new Date(record.observedAt),
+          observedEndAt: record.observedEndAt ? new Date(record.observedEndAt) : null,
+        });
       } else {
         skipped += 1;
       }
@@ -104,7 +113,7 @@ export class HealthMetricsService {
     const refreshed = await this.aggregateGenerationService.refreshForMetricTypes(
       user.id,
       consent.id,
-      [...metricTypes],
+      observationRecords,
     );
 
     return {

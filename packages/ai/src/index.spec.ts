@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  containsUnsafeDocumentSummaryLanguage,
   containsUnsafeMedicalLanguage,
   parseAiStructuredOutput,
   StubCoachAiProvider,
@@ -31,6 +32,27 @@ describe("ai safety helpers", () => {
   it("flags diagnosis wording", () => {
     expect(
       containsUnsafeMedicalLanguage("This sounds like a clinical diagnosis."),
+    ).toBe(true);
+  });
+
+  it("allows supported document type labels in document summary checks", () => {
+    expect(
+      containsUnsafeDocumentSummaryLanguage(
+        "Governed summary for a user-provided provider note titled \"Follow-up\".",
+      ),
+    ).toBe(false);
+    expect(
+      containsUnsafeDocumentSummaryLanguage(
+        "Governed summary for a user-provided med list titled \"Home list\".",
+      ),
+    ).toBe(false);
+  });
+
+  it("still blocks unsafe document summary wording", () => {
+    expect(
+      containsUnsafeDocumentSummaryLanguage(
+        "This summary confirms a diagnosis and emergency dosing guidance.",
+      ),
     ).toBe(true);
   });
 

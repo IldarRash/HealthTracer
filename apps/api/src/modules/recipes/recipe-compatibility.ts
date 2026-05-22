@@ -16,6 +16,20 @@ function normalizeTokens(values: string[]): string[] {
   return [...new Set(values.map(normalizeToken).filter(Boolean))];
 }
 
+const KNOWN_ALLERGEN_TOKENS = new Set([
+  "dairy",
+  "lactose",
+  "gluten",
+  "wheat",
+  "peanuts",
+  "tree_nuts",
+  "fish",
+  "egg",
+  "soy",
+  "shellfish",
+  "sesame",
+]);
+
 const RESTRICTION_CONFLICTS: Record<string, string[]> = {
   dairy_free: ["dairy", "contains_dairy", "lactose"],
   lactose_free: ["dairy", "contains_dairy", "lactose"],
@@ -40,18 +54,35 @@ function recipeTags(recipe: RecipeCompatibilityMetadata): string[] {
   return normalizeTokens([...recipe.allergenTags, ...recipe.restrictionTags]);
 }
 
+export function isSupportedHardProfileConstraint(constraint: string): boolean {
+  const normalized = normalizeToken(constraint);
+
+  return (
+    normalized in RESTRICTION_CONFLICTS || KNOWN_ALLERGEN_TOKENS.has(normalized)
+  );
+}
+
+function supportedProfileHardConstraints(profileConstraints: string[]): string[] {
+  return profileConstraints.filter(isSupportedHardProfileConstraint);
+}
+
 export function collectHardFilters(
   nutritionRestrictions: string[],
   nutritionAllergies: string[],
   profileConstraints: string[],
 ): HardFilterContext {
+  const supportedProfileConstraints = supportedProfileHardConstraints(profileConstraints);
+
   return {
     restrictions: normalizeTokens([
       ...nutritionRestrictions,
       ...nutritionAllergies,
-      ...profileConstraints,
+      ...supportedProfileConstraints,
     ]),
-    allergies: normalizeTokens([...nutritionAllergies, ...profileConstraints]),
+    allergies: normalizeTokens([
+      ...nutritionAllergies,
+      ...supportedProfileConstraints,
+    ]),
   };
 }
 

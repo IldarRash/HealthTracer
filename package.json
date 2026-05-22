@@ -11,7 +11,8 @@
     "typecheck": "turbo typecheck",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
-    "db:migrate": "corepack pnpm --dir packages/db db:migrate"
+    "db:migrate": "corepack pnpm --dir packages/db db:migrate",
+    "db:seed:recipes": "corepack pnpm --dir packages/db db:seed:recipes"
   },
   "devDependencies": {
     "@eslint/js": "latest",

@@ -11,6 +11,7 @@
     "build": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:seed:recipes": "node ./scripts/seed-recipes.mjs",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

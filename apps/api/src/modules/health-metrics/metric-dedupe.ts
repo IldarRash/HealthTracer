@@ -40,3 +40,55 @@ export function endOfUtcWeek(date: Date): Date {
 export function defaultPeriodTypeForMetric(metricType: HealthMetricType): "daily" | "weekly" {
   return metricType === "workout" ? "weekly" : "daily";
 }
+
+export interface MetricObservationRecord {
+  metricType: HealthMetricType;
+  observedAt: Date;
+  observedEndAt?: Date | null;
+}
+
+export interface MetricObservationPeriod {
+  metricType: HealthMetricType;
+  periodType: "daily" | "weekly";
+  periodStart: Date;
+  periodEnd: Date;
+  anchorDate: Date;
+}
+
+export function collectObservationPeriods(
+  records: MetricObservationRecord[],
+): MetricObservationPeriod[] {
+  const seen = new Set<string>();
+  const periods: MetricObservationPeriod[] = [];
+
+  for (const record of records) {
+    const observationTimes = [record.observedAt];
+    if (record.observedEndAt) {
+      observationTimes.push(record.observedEndAt);
+    }
+
+    for (const observationTime of observationTimes) {
+      const periodType = defaultPeriodTypeForMetric(record.metricType);
+      const periodStart =
+        periodType === "weekly" ? startOfUtcWeek(observationTime) : startOfUtcDay(observationTime);
+      const periodEnd =
+        periodType === "weekly" ? endOfUtcWeek(observationTime) : endOfUtcDay(observationTime);
+      const key = `${record.metricType}:${periodType}:${toUtcDateKey(periodStart)}`;
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      periods.push({
+        metricType: record.metricType,
+        periodType,
+        periodStart,
+        periodEnd,
+        anchorDate: observationTime,
+      });
+    }
+  }
+
+  return periods;
+}

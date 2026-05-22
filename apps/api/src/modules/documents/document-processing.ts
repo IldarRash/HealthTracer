@@ -51,7 +51,7 @@ const DEFAULT_CONSTRAINT =
 const KNOWN_WELLNESS_HINTS: ReadonlyArray<{ pattern: RegExp; constraint: string }> = [
   { pattern: /\blow[\s-]?impact\b/i, constraint: "May prefer low-impact activity choices." },
   { pattern: /\bhigh[\s-]?impact\b/i, constraint: "May prefer limiting high-impact activity." },
-  { pattern: /\brest day\b/i, constraint: "May prefer scheduled rest days." },
+  { pattern: /\brest days?\b/i, constraint: "May prefer scheduled rest days." },
   { pattern: /\bvegetarian\b/i, constraint: "May prefer vegetarian meal choices." },
   { pattern: /\bgluten[\s-]?free\b/i, constraint: "May prefer gluten-free meal choices." },
   { pattern: /\bdairy[\s-]?free\b/i, constraint: "May prefer dairy-free meal choices." },

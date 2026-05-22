@@ -70,6 +70,7 @@ export class HealthMetricsRepository {
   async listSnapshotsForPeriod(
     userId: string,
     metricType: HealthMetricType,
+    consentId: string,
     periodStart: Date,
     periodEnd: Date,
   ) {
@@ -79,6 +80,7 @@ export class HealthMetricsRepository {
       .where(
         and(
           eq(healthMetricSnapshots.userId, userId),
+          eq(healthMetricSnapshots.consentId, consentId),
           eq(healthMetricSnapshots.metricType, metricType),
           gte(healthMetricSnapshots.observedAt, periodStart),
           lte(healthMetricSnapshots.observedAt, periodEnd),

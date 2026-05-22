@@ -1,5 +1,6 @@
 import { healthMetricAggregates, healthMetricSnapshots } from "@health/db";
 import type { AiMetricsContextSummary, DeviceProvider, HealthMetricType } from "@health/types";
+import { parseNormalizedMetricPayload } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import { DeviceConnectionsRepository } from "../device-connections/device-connections.repository.js";
 import { isConsentActive } from "../device-connections/device-connection.mapper.js";
@@ -65,10 +66,14 @@ export class MetricsAiContextService {
     };
   }
 
-  sanitizeSnapshotPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  sanitizeSnapshotPayload(
+    metricType: HealthMetricType,
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const allowed = parseNormalizedMetricPayload(metricType, payload);
     const sanitized: Record<string, unknown> = {};
 
-    for (const [key, value] of Object.entries(payload)) {
+    for (const [key, value] of Object.entries(allowed)) {
       if (!SNAPSHOT_EXCLUDED_PAYLOAD_KEYS.has(key)) {
         sanitized[key] = value;
       }

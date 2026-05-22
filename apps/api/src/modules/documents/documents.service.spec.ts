@@ -3,7 +3,9 @@ import {
   ForbiddenException,
   NotFoundException,
 } from "@nestjs/common";
+import { containsUnsafeDocumentSummaryLanguage } from "@health/ai";
 import { describe, expect, it } from "vitest";
+import { buildGovernedDocumentSummary } from "./document-processing.js";
 import { DocumentsService } from "./documents.service.js";
 
 const auth = {
@@ -272,5 +274,157 @@ describe("DocumentsService", () => {
     expect(results.results).toHaveLength(1);
     expect(results.results[0]?.title).toBe("Sample note");
     expect(results.results[0]?.summarySnippet).toContain("Approved wellness summary");
+  });
+
+  it("tombstones summaries when deleting a document", async () => {
+    let tombstoned = false;
+    const service = new DocumentsService(
+      {
+        findActiveById: async () => documentRow,
+        tombstoneSummariesForDocument: async () => {
+          tombstoned = true;
+        },
+        softDelete: async () => ({
+          ...documentRow,
+          deletedAt: new Date("2026-05-22T13:00:00.000Z"),
+          revokedAt: new Date("2026-05-22T13:00:00.000Z"),
+          parseStatus: "revoked",
+        }),
+      } as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+    );
+    (service as unknown as { storage: { delete: () => Promise<void> } }).storage = {
+      delete: async () => undefined,
+    };
+
+    await service.deleteDocument(auth, documentRow.id);
+
+    expect(tombstoned).toBe(true);
+  });
+
+  it("tombstones summaries when revoking consent", async () => {
+    let tombstoned = false;
+    const service = new DocumentsService(
+      {
+        findActiveById: async () => documentRow,
+        updateConsent: async () => ({
+          ...documentRow,
+          parseStatus: "revoked",
+          revokedAt: new Date("2026-05-22T13:00:00.000Z"),
+        }),
+        tombstoneSummariesForDocument: async () => {
+          tombstoned = true;
+        },
+      } as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+    );
+
+    await service.updateConsent(auth, documentRow.id, { revoke: true });
+
+    expect(tombstoned).toBe(true);
+  });
+
+  it("approves safe governed summaries for clinical_note and medication_list types", async () => {
+    for (const documentType of ["clinical_note", "medication_list"] as const) {
+      const generated = buildGovernedDocumentSummary({
+        documentType,
+        title: "Follow-up packet",
+        plainText: "Prefer low-impact activity on rest days.",
+      });
+
+      expect(containsUnsafeDocumentSummaryLanguage(generated.summaryText)).toBe(false);
+
+      let reviewedStatus: string | null = null;
+      const service = new DocumentsService(
+        {
+          findActiveById: async () => ({
+            ...documentRow,
+            documentType,
+          }),
+          findLatestSummary: async () => ({
+            id: "14a08176-64a7-4a2d-8a44-581807368394",
+            healthDocumentId: documentRow.id,
+            userId: user.id,
+            summaryText: generated.summaryText,
+            extractedConstraints: generated.extractedConstraints,
+            searchIndexText: generated.searchIndexText,
+            reviewStatus: "pending_review",
+            reviewedAt: null,
+            generatedAt: new Date("2026-05-22T12:00:00.000Z"),
+            generatorVersion: "dev-v1",
+            createdAt: new Date("2026-05-22T12:00:00.000Z"),
+            updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+          }),
+          updateSummaryReview: async (_userId, _summaryId, reviewStatus) => {
+            reviewedStatus = reviewStatus;
+            return {
+              id: "14a08176-64a7-4a2d-8a44-581807368394",
+              healthDocumentId: documentRow.id,
+              userId: user.id,
+              summaryText: generated.summaryText,
+              extractedConstraints: generated.extractedConstraints,
+              reviewStatus,
+              reviewedAt: new Date("2026-05-22T12:00:00.000Z"),
+              generatedAt: new Date("2026-05-22T12:00:00.000Z"),
+              generatorVersion: "dev-v1",
+              createdAt: new Date("2026-05-22T12:00:00.000Z"),
+              updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+            };
+          },
+        } as never,
+        {
+          resolveFromAuth: async () => user,
+        } as never,
+      );
+
+      const summary = await service.reviewSummary(auth, documentRow.id, {
+        reviewStatus: "approved",
+      });
+
+      expect(reviewedStatus).toBe("approved");
+      expect(summary.reviewStatus).toBe("approved");
+    }
+  });
+
+  it("returns consent-approved search rows without post-limit starvation", async () => {
+    const service = new DocumentsService(
+      {
+        searchApprovedSummaries: async (_userId, _query, limit) => {
+          expect(limit).toBe(5);
+          return Array.from({ length: limit }, (_, index) => ({
+            document: {
+              ...documentRow,
+              id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+              title: `Doc ${index}`,
+            },
+            summary: {
+              id: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+              healthDocumentId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+              userId: user.id,
+              summaryText: `Approved wellness summary ${index}.`,
+              extractedConstraints: [],
+              searchIndexText: `approved wellness summary ${index}`,
+              reviewStatus: "approved" as const,
+              reviewedAt: new Date("2026-05-22T12:00:00.000Z"),
+              generatedAt: new Date("2026-05-22T12:00:00.000Z"),
+              generatorVersion: "dev-v1",
+              createdAt: new Date("2026-05-22T12:00:00.000Z"),
+              updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+            },
+          }));
+        },
+      } as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+    );
+
+    const results = await service.searchDocuments(auth, { q: "wellness", limit: 5 });
+
+    expect(results.results).toHaveLength(5);
   });
 });

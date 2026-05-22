@@ -15,7 +15,7 @@ import {
   getActiveNutritionPlan,
   getTodayNutritionAdherence,
   mobileQueryKeys,
-  upsertNutritionAdherence,
+  upsertTodayNutritionAdherence,
 } from "../../src/lib/api";
 import {
   buildAdherenceState,
@@ -133,7 +133,7 @@ export default function NutritionScreen() {
         throw new Error("Clerk session token is unavailable.");
       }
 
-      const result = await upsertNutritionAdherence(token, today, input);
+      const result = await upsertTodayNutritionAdherence(token, input);
       if (result.error || !result.data) {
         throw new Error(result.error ?? "Nutrition adherence could not be saved.");
       }
@@ -191,8 +191,9 @@ export default function NutritionScreen() {
 
   const payload = activeData.activeRevision!.payload;
   const adherenceRecord = adherenceQuery.data?.adherence ?? null;
+  const adherenceDate = adherenceRecord?.date ?? today;
   const adherenceState = buildAdherenceState({
-    date: today,
+    date: adherenceDate,
     payload,
     record: adherenceRecord,
   });
@@ -254,7 +255,7 @@ export default function NutritionScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Today&apos;s adherence</Text>
-        <Text style={styles.meta}>{today}</Text>
+        <Text style={styles.meta}>{adherenceDate}</Text>
 
         {adherenceQuery.isLoading ? <ActivityIndicator color="#2563eb" /> : null}
         {adherenceQuery.isError ? (

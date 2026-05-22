@@ -3,6 +3,7 @@ import {
   getActiveNutritionPlan,
   getTodayNutritionAdherence,
   upsertNutritionAdherence,
+  upsertTodayNutritionAdherence,
 } from "./api.js";
 
 const token = "test-token";
@@ -70,6 +71,62 @@ describe("mobile api helpers", () => {
   });
 
   it("rejects invalid adherence payloads before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      upsertTodayNutritionAdherence(token, {
+        hydrationLitersConsumed: -1,
+      }),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("upserts today nutrition adherence via the today endpoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(input)).toContain("/nutrition/adherence/today");
+        expect(init?.method).toBe("PUT");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          hydrationLitersConsumed: 1.5,
+        });
+
+        return new Response(
+          JSON.stringify({
+            adherence: {
+              id: "880099c6-3b5f-4383-8246-97b72bf61818",
+              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+              date: "2026-05-23",
+              hydrationLitersConsumed: 1.5,
+              mealCompletion: [],
+              targetCompletion: {
+                caloriesOnTarget: null,
+                proteinOnTarget: null,
+                carbsOnTarget: null,
+                fatOnTarget: null,
+              },
+              notes: [],
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-22T12:00:00.000Z",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+
+    const result = await upsertTodayNutritionAdherence(token, {
+      hydrationLitersConsumed: 1.5,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.adherence?.date).toBe("2026-05-23");
+    expect(result.data?.adherence?.hydrationLitersConsumed).toBe(1.5);
+  });
+
+  it("rejects invalid date-based adherence payloads before calling the API", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 

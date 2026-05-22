@@ -2,12 +2,11 @@ import { healthMetricSnapshots } from "@health/db";
 import type { HealthMetricType } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import {
-  defaultPeriodTypeForMetric,
+  collectObservationPeriods,
   endOfUtcDay,
-  endOfUtcWeek,
   startOfUtcDay,
-  startOfUtcWeek,
   toUtcDateKey,
+  type MetricObservationRecord,
 } from "./metric-dedupe.js";
 import { HealthMetricsRepository } from "./health-metrics.repository.js";
 
@@ -20,26 +19,29 @@ export class AggregateGenerationService {
   async refreshForMetricTypes(
     userId: string,
     consentId: string,
-    metricTypes: HealthMetricType[],
-    anchorDate = new Date(),
+    observationRecords: MetricObservationRecord[],
   ) {
+    const periods = collectObservationPeriods(observationRecords);
     const refreshed = [];
 
-    for (const metricType of metricTypes) {
-      const periodType = defaultPeriodTypeForMetric(metricType);
-      const periodStart =
-        periodType === "weekly" ? startOfUtcWeek(anchorDate) : startOfUtcDay(anchorDate);
-      const periodEnd =
-        periodType === "weekly" ? endOfUtcWeek(anchorDate) : endOfUtcDay(anchorDate);
-
+    for (const period of periods) {
       const snapshots = await this.healthMetricsRepository.listSnapshotsForPeriod(
         userId,
-        metricType,
-        periodStart,
-        periodEnd,
+        period.metricType,
+        consentId,
+        period.periodStart,
+        period.periodEnd,
       );
 
-      const aggregatePayload = buildAggregatePayload(metricType, snapshots, anchorDate);
+      const aggregatePayload = await buildAggregatePayload(
+        this.healthMetricsRepository,
+        userId,
+        consentId,
+        period.metricType,
+        snapshots,
+        period.periodEnd,
+        period.anchorDate,
+      );
 
       if (!aggregatePayload) {
         continue;
@@ -48,12 +50,12 @@ export class AggregateGenerationService {
       const aggregate = await this.healthMetricsRepository.upsertAggregate({
         userId,
         consentId,
-        metricType,
-        periodType,
-        periodStart: toUtcDateKey(periodStart),
-        periodEnd: toUtcDateKey(periodEnd),
+        metricType: period.metricType,
+        periodType: period.periodType,
+        periodStart: toUtcDateKey(period.periodStart),
+        periodEnd: toUtcDateKey(period.periodEnd),
         aggregatePayload,
-        sourceMetricTypes: [metricType],
+        sourceMetricTypes: [period.metricType],
       });
 
       refreshed.push(aggregate);
@@ -63,20 +65,38 @@ export class AggregateGenerationService {
   }
 }
 
-function buildAggregatePayload(
+async function buildAggregatePayload(
+  repository: HealthMetricsRepository,
+  userId: string,
+  consentId: string,
   metricType: HealthMetricType,
   snapshots: SnapshotRow[],
+  periodEnd: Date,
   anchorDate: Date,
-): Record<string, unknown> | null {
+): Promise<Record<string, unknown> | null> {
   if (snapshots.length === 0) {
     return null;
   }
 
   switch (metricType) {
     case "steps":
-      return buildStepsAggregate(snapshots, anchorDate);
+      return buildStepsAggregate(
+        repository,
+        userId,
+        consentId,
+        snapshots,
+        periodEnd,
+        anchorDate,
+      );
     case "sleep":
-      return buildSleepAggregate(snapshots, anchorDate);
+      return buildSleepAggregate(
+        repository,
+        userId,
+        consentId,
+        snapshots,
+        periodEnd,
+        anchorDate,
+      );
     case "weight":
       return buildWeightAggregate(snapshots, anchorDate);
     case "workout":
@@ -88,20 +108,43 @@ function buildAggregatePayload(
   }
 }
 
-function buildStepsAggregate(snapshots: SnapshotRow[], anchorDate: Date) {
+async function buildStepsAggregate(
+  repository: HealthMetricsRepository,
+  userId: string,
+  consentId: string,
+  snapshots: SnapshotRow[],
+  periodEnd: Date,
+  anchorDate: Date,
+) {
   const totalSteps = snapshots.reduce((sum, snapshot) => {
     const count = Number(snapshot.normalizedPayload.stepCount ?? 0);
     return sum + (Number.isFinite(count) ? count : 0);
   }, 0);
 
+  const sevenDayAverageSteps = await computeSevenDayAverage(
+    repository,
+    userId,
+    consentId,
+    "steps",
+    periodEnd,
+    (snapshot) => Number(snapshot.normalizedPayload.stepCount ?? 0),
+  );
+
   return {
     totalSteps,
-    sevenDayAverageSteps: totalSteps,
+    sevenDayAverageSteps,
     anchorDate: toUtcDateKey(anchorDate),
   };
 }
 
-function buildSleepAggregate(snapshots: SnapshotRow[], anchorDate: Date) {
+async function buildSleepAggregate(
+  repository: HealthMetricsRepository,
+  userId: string,
+  consentId: string,
+  snapshots: SnapshotRow[],
+  periodEnd: Date,
+  anchorDate: Date,
+) {
   const totalDurationMinutes = snapshots.reduce((sum, snapshot) => {
     const minutes = Number(snapshot.normalizedPayload.durationMinutes ?? 0);
     return sum + (Number.isFinite(minutes) ? minutes : 0);
@@ -110,12 +153,21 @@ function buildSleepAggregate(snapshots: SnapshotRow[], anchorDate: Date) {
   const latest = snapshots[0];
   const payload = latest?.normalizedPayload ?? {};
 
+  const sevenDayAverageMinutes = await computeSevenDayAverage(
+    repository,
+    userId,
+    consentId,
+    "sleep",
+    periodEnd,
+    (snapshot) => Number(snapshot.normalizedPayload.durationMinutes ?? 0),
+  );
+
   return {
     totalDurationMinutes,
     sleepWindowStart:
       typeof payload.intervalStart === "string" ? payload.intervalStart : null,
     sleepWindowEnd: typeof payload.intervalEnd === "string" ? payload.intervalEnd : null,
-    sevenDayAverageMinutes: totalDurationMinutes,
+    sevenDayAverageMinutes,
     anchorDate: toUtcDateKey(anchorDate),
   };
 }
@@ -176,4 +228,44 @@ function buildRecoveryAggregate(snapshots: SnapshotRow[]) {
       observedAt: snapshot.observedAt.toISOString(),
     })),
   };
+}
+
+async function computeSevenDayAverage(
+  repository: HealthMetricsRepository,
+  userId: string,
+  consentId: string,
+  metricType: HealthMetricType,
+  periodEnd: Date,
+  readValue: (snapshot: SnapshotRow) => number,
+): Promise<number> {
+  const windowEnd = endOfUtcDay(periodEnd);
+  const windowStart = startOfUtcDay(
+    new Date(windowEnd.getTime() - 6 * 24 * 60 * 60 * 1000),
+  );
+  const snapshots = await repository.listSnapshotsForPeriod(
+    userId,
+    metricType,
+    consentId,
+    windowStart,
+    windowEnd,
+  );
+
+  const dailyTotals = new Map<string, number>();
+
+  for (const snapshot of snapshots) {
+    const value = readValue(snapshot);
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+
+    const dayKey = toUtcDateKey(snapshot.observedAt);
+    dailyTotals.set(dayKey, (dailyTotals.get(dayKey) ?? 0) + value);
+  }
+
+  if (dailyTotals.size === 0) {
+    return 0;
+  }
+
+  const total = [...dailyTotals.values()].reduce((sum, value) => sum + value, 0);
+  return Number((total / dailyTotals.size).toFixed(2));
 }

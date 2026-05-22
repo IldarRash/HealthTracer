@@ -94,28 +94,34 @@ export const sleepSnapshotPayloadSchema = sleepNormalizedPayloadSchema.extend({
 
 export type SleepSnapshotPayload = z.infer<typeof sleepSnapshotPayloadSchema>;
 
-export const weightSnapshotPayloadSchema = z.object({
-  weightKg: z.number().positive().max(500),
-});
+export const weightSnapshotPayloadSchema = z
+  .object({
+    weightKg: z.number().positive().max(500),
+  })
+  .strict();
 
 export type WeightSnapshotPayload = z.infer<typeof weightSnapshotPayloadSchema>;
 
-export const workoutSnapshotPayloadSchema = z.object({
-  activityType: z.string().min(1).max(120),
-  durationMinutes: z.number().positive(),
-  intervalStart: isoDateTimeSchema,
-  intervalEnd: isoDateTimeSchema,
-  distanceMeters: z.number().nonnegative().optional(),
-  energyKcal: z.number().nonnegative().optional(),
-});
+export const workoutSnapshotPayloadSchema = z
+  .object({
+    activityType: z.string().min(1).max(120),
+    durationMinutes: z.number().positive(),
+    intervalStart: isoDateTimeSchema,
+    intervalEnd: isoDateTimeSchema,
+    distanceMeters: z.number().nonnegative().optional(),
+    energyKcal: z.number().nonnegative().optional(),
+  })
+  .strict();
 
 export type WorkoutSnapshotPayload = z.infer<typeof workoutSnapshotPayloadSchema>;
 
-export const recoveryInputSnapshotPayloadSchema = z.object({
-  inputType: recoveryInputTypeSchema,
-  value: z.union([z.number(), z.string().min(1).max(120)]),
-  unit: z.string().min(1).max(40).optional(),
-});
+export const recoveryInputSnapshotPayloadSchema = z
+  .object({
+    inputType: recoveryInputTypeSchema,
+    value: z.union([z.number(), z.string().min(1).max(120)]),
+    unit: z.string().min(1).max(40).optional(),
+  })
+  .strict();
 
 export type RecoveryInputSnapshotPayload = z.infer<
   typeof recoveryInputSnapshotPayloadSchema
@@ -303,15 +309,67 @@ export const connectDeviceSchema = z.object({
 
 export type ConnectDeviceInput = z.infer<typeof connectDeviceSchema>;
 
-export const providerMetricRecordSchema = z.object({
-  metricType: healthMetricTypeSchema,
+const providerMetricRecordBaseSchema = {
   sourceId: z.string().max(200).optional(),
   observedAt: isoDateTimeSchema,
   observedEndAt: isoDateTimeSchema.optional(),
   unit: z.string().min(1).max(40),
-  normalizedPayload: z.record(z.string(), z.unknown()),
   sourceDeviceLabel: z.string().max(120).optional(),
-});
+};
+
+export const providerMetricRecordSchema = z.discriminatedUnion("metricType", [
+  z
+    .object({
+      ...providerMetricRecordBaseSchema,
+      metricType: z.literal("steps"),
+      normalizedPayload: stepsSnapshotPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...providerMetricRecordBaseSchema,
+      metricType: z.literal("sleep"),
+      normalizedPayload: sleepNormalizedPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...providerMetricRecordBaseSchema,
+      metricType: z.literal("weight"),
+      normalizedPayload: weightSnapshotPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...providerMetricRecordBaseSchema,
+      metricType: z.literal("workout"),
+      normalizedPayload: workoutSnapshotPayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...providerMetricRecordBaseSchema,
+      metricType: z.literal("recovery_input"),
+      normalizedPayload: recoveryInputSnapshotPayloadSchema,
+    })
+    .strict(),
+]);
+
+const normalizedPayloadSchemaByMetricType = {
+  steps: stepsSnapshotPayloadSchema,
+  sleep: sleepNormalizedPayloadSchema,
+  weight: weightSnapshotPayloadSchema,
+  workout: workoutSnapshotPayloadSchema,
+  recovery_input: recoveryInputSnapshotPayloadSchema,
+} as const;
+
+export function parseNormalizedMetricPayload(
+  metricType: HealthMetricType,
+  payload: unknown,
+): Record<string, unknown> {
+  const schema = normalizedPayloadSchemaByMetricType[metricType];
+  return schema.parse(payload) as Record<string, unknown>;
+}
 
 export type ProviderMetricRecord = z.infer<typeof providerMetricRecordSchema>;
 

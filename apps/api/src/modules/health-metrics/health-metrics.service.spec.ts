@@ -2,6 +2,18 @@ import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { HealthMetricsService } from "./health-metrics.service.js";
 
+const stepPayload = {
+  stepCount: 5000,
+  intervalStart: "2026-05-22T00:00:00.000Z",
+  intervalEnd: "2026-05-22T23:59:59.000Z",
+};
+
+const sleepPayload = {
+  durationMinutes: 420,
+  intervalStart: "2026-05-22T22:00:00.000Z",
+  intervalEnd: "2026-05-23T06:00:00.000Z",
+};
+
 const auth = {
   clerkUserId: "user_123",
   displayName: "Test User",
@@ -75,7 +87,8 @@ describe("HealthMetricsService", () => {
         refreshForMetricTypes: async () => [{ id: "aggregate-1" }],
       } as never,
       {
-        sanitizeSnapshotPayload: (payload: Record<string, unknown>) => payload,
+        sanitizeSnapshotPayload: (_metricType: string, payload: Record<string, unknown>) =>
+          payload,
       } as never,
       {
         resolveFromAuth: async () => user,
@@ -90,14 +103,14 @@ describe("HealthMetricsService", () => {
           sourceId: "hk-step-1",
           observedAt: "2026-05-22T10:00:00.000Z",
           unit: "count",
-          normalizedPayload: { stepCount: 5000 },
+          normalizedPayload: stepPayload,
         },
         {
           metricType: "steps",
           sourceId: "hk-step-1",
           observedAt: "2026-05-22T10:00:00.000Z",
           unit: "count",
-          normalizedPayload: { stepCount: 5000 },
+          normalizedPayload: stepPayload,
         },
       ],
     });
@@ -125,10 +138,12 @@ describe("HealthMetricsService", () => {
       ingestedAt: new Date("2026-05-22T12:00:00.000Z"),
       createdAt: new Date("2026-05-22T12:00:00.000Z"),
     }));
-    const sanitizeSnapshotPayload = vi.fn((payload: Record<string, unknown>) => {
-      const { providerPayload: _providerPayload, rawSamples: _rawSamples, ...safe } = payload;
-      return safe;
-    });
+    const sanitizeSnapshotPayload = vi.fn(
+      (_metricType: string, payload: Record<string, unknown>) => {
+        const { providerPayload: _providerPayload, rawSamples: _rawSamples, ...safe } = payload;
+        return safe;
+      },
+    );
 
     const service = new HealthMetricsService(
       { insertSnapshotIfNew } as never,
@@ -166,7 +181,7 @@ describe("HealthMetricsService", () => {
           observedAt: "2026-05-22T07:00:00.000Z",
           unit: "minutes",
           normalizedPayload: {
-            durationMinutes: 420,
+            ...sleepPayload,
             rawSamples: [{ stage: "deep" }],
             providerPayload: { privateTimeline: true },
           },
@@ -175,6 +190,7 @@ describe("HealthMetricsService", () => {
     });
 
     expect(sanitizeSnapshotPayload).toHaveBeenCalledWith(
+      "sleep",
       expect.objectContaining({
         durationMinutes: 420,
         rawSamples: expect.any(Array),
@@ -184,7 +200,7 @@ describe("HealthMetricsService", () => {
     expect(insertSnapshotIfNew).toHaveBeenCalledWith(
       expect.objectContaining({
         record: expect.objectContaining({
-          normalizedPayload: { durationMinutes: 420 },
+          normalizedPayload: sleepPayload,
         }),
       }),
     );

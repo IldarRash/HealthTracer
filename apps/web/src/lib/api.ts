@@ -433,6 +433,17 @@ export async function getTodayNutritionAdherence(
   return apiFetch("/nutrition/adherence/today", token, nutritionAdherenceResponseSchema);
 }
 
+export async function upsertTodayNutritionAdherence(
+  token: string,
+  input: UpsertNutritionAdherenceInput,
+): Promise<ApiResult<NutritionAdherenceResponse>> {
+  const body = upsertNutritionAdherenceSchema.parse(input);
+  return apiFetch("/nutrition/adherence/today", token, nutritionAdherenceResponseSchema, {
+    method: "PUT",
+    body,
+  });
+}
+
 export async function getNutritionAdherenceForDate(
   token: string,
   date: string,

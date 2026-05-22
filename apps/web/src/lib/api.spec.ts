@@ -13,6 +13,7 @@ import {
   getLatestWeeklyProgressSummary,
   getTodayNutritionAdherence,
   upsertNutritionAdherence,
+  upsertTodayNutritionAdherence,
   getTodayDay,
   getTodayHistory,
   buildRecipeListQueryString,
@@ -298,6 +299,52 @@ describe("web api helpers", () => {
     expect(result.data).toEqual({ adherence: null });
   });
 
+  it("upserts today nutrition adherence via the today endpoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(input)).toContain("/nutrition/adherence/today");
+        expect(init?.method).toBe("PUT");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          hydrationLitersConsumed: 2,
+          notes: ["Updated"],
+        });
+
+        return new Response(
+          JSON.stringify({
+            adherence: {
+              id: "880099c6-3b5f-4383-8246-97b72bf61818",
+              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+              date: "2026-05-23",
+              hydrationLitersConsumed: 2,
+              mealCompletion: [],
+              targetCompletion: {
+                caloriesOnTarget: null,
+                proteinOnTarget: null,
+                carbsOnTarget: null,
+                fatOnTarget: null,
+              },
+              notes: ["Updated"],
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-22T13:00:00.000Z",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+
+    const result = await upsertTodayNutritionAdherence(token, {
+      hydrationLitersConsumed: 2,
+      notes: ["Updated"],
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.adherence?.date).toBe("2026-05-23");
+    expect(result.data?.adherence?.hydrationLitersConsumed).toBe(2);
+    expect(result.data?.adherence?.notes).toEqual(["Updated"]);
+  });
+
   it("upserts nutrition adherence for a date", async () => {
     vi.stubGlobal(
       "fetch",
@@ -343,6 +390,19 @@ describe("web api helpers", () => {
   });
 
   it("rejects invalid nutrition adherence payloads before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      upsertTodayNutritionAdherence(token, {
+        hydrationLitersConsumed: -1,
+      }),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid date-based nutrition adherence payloads before calling the API", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 

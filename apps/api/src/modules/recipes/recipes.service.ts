@@ -28,6 +28,8 @@ import {
   scoreRecipeMacroFit,
 } from "./recipe-compatibility.js";
 import { toRecipe, toUserRecipeRecommendation } from "./recipe.mapper.js";
+import { canTransitionRecipeRecommendationStatus } from "./recipe-recommendation-status.js";
+import type { CreateRecommendationInput } from "./recipes.repository.js";
 import { RecipesRepository } from "./recipes.repository.js";
 
 const GENERATED_RECOMMENDATION_LIMIT = 5;
@@ -112,7 +114,7 @@ export class RecipesService {
       };
     }
 
-    const created = await this.recipesRepository.createRecommendations(
+    const created = await this.createRecommendationsIdempotently(
       compatible.map(({ row, recipe }) => ({
         userId: user.id,
         recipeId: row.id,
@@ -158,6 +160,18 @@ export class RecipesService {
       throw new NotFoundException("Recipe recommendation not found.");
     }
 
+    const currentStatus = existing.recommendation.status as UserRecipeRecommendation["status"];
+
+    if (!canTransitionRecipeRecommendationStatus(currentStatus, input.status)) {
+      throw new BadRequestException(
+        `Cannot change recipe recommendation status from ${currentStatus} to ${input.status}.`,
+      );
+    }
+
+    if (currentStatus === input.status) {
+      return toUserRecipeRecommendation(existing.recommendation, toRecipe(existing.recipe));
+    }
+
     const updated = await this.recipesRepository.updateRecommendationStatus(
       user.id,
       recommendationId,
@@ -181,6 +195,8 @@ export class RecipesService {
     const revisionId =
       payload.relatedNutritionPlanRevisionId ?? activeContext?.revisionId ?? null;
 
+    let filterPayload: NutritionPlanPayload | undefined = activeContext?.payload;
+
     if (revisionId) {
       const owned = await this.nutritionRepository.findRevisionOwnedByUser(
         userId,
@@ -192,6 +208,8 @@ export class RecipesService {
           "Related nutrition plan revision was not found for this user.",
         );
       }
+
+      filterPayload = nutritionPlanPayloadSchema.parse(owned.payload);
     }
 
     const recipeIds = payload.recommendations.map((item) => item.recipeId);
