@@ -10,14 +10,17 @@
   "scripts": {
     "build": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "latest"
+    "drizzle-orm": "latest",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
+    "dotenv": "^17.4.2",
     "drizzle-kit": "latest"
   }
 }

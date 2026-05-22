@@ -11,14 +11,22 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.4.0",
+    "@health/config": "workspace:*",
+    "@health/types": "workspace:^",
     "@health/ui": "workspace:*",
     "@tanstack/react-query": "latest",
+    "class-variance-authority": "latest",
+    "clsx": "latest",
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "tailwind-merge": "latest",
+    "zod": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@types/react-dom": "latest",
+    "tailwindcss": "^3.4.19"
   }
 }

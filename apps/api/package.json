@@ -5,23 +5,31 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "node --watch --import @swc-node/register/esm-register src/main.ts",
     "lint": "eslint . --max-warnings=0",
     "start": "node dist/main.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@health/ai": "workspace:*",
     "@health/config": "workspace:*",
+    "@health/db": "workspace:^",
     "@health/types": "workspace:*",
     "@nestjs/common": "latest",
     "@nestjs/core": "latest",
     "@nestjs/platform-express": "latest",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.3",
+    "postgres": "^3.4.9",
     "reflect-metadata": "latest",
     "rxjs": "latest",
     "zod": "latest"
   },
   "devDependencies": {
+    "@swc-node/register": "^1.10.10",
+    "@swc/core": "^1.11.29",
     "tsx": "latest"
   }
 }

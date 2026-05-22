@@ -11,13 +11,18 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clerk/clerk-expo": "latest",
+    "@health/config": "workspace:*",
     "@tanstack/react-query": "latest",
     "expo": "latest",
     "expo-router": "latest",
+    "nativewind": "latest",
     "react": "latest",
-    "react-native": "latest"
+    "react-native": "latest",
+    "zod": "latest"
   },
   "devDependencies": {
-    "@types/react": "latest"
+    "@types/react": "latest",
+    "tailwindcss": "^3.4.19"
   }
 }

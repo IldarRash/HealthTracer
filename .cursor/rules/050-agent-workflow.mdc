@@ -1,0 +1,27 @@
+---
+description: Mandatory agent workflow for larger feature work
+alwaysApply: true
+---
+
+# Agent Workflow Enforcement
+
+- For larger feature work, follow the `Agent Workflow` in `AGENTS.md`; do not implement the whole feature directly in the main chat.
+- Feature Planner owns user-facing planning, orchestration, subagent coordination, and final status communication.
+- Feature Planner must never write implementation code for feature work. It may inspect files, refine docs/plans, and coordinate, but all code, tests, migrations, UI, design polish, and runtime fixes must be assigned to the appropriate subagent.
+- If Feature Planner notices a needed code change while orchestrating, it must stop before editing and create the smallest corrective task for Backend Implementer, Frontend Implementer, Test Writer, Visual Designer, Design System Agent, UI Polish Implementer, Implementation Reviewer, or App Runner as appropriate.
+- Feature Planner's goal is a fully working application feature, not only a written plan, code diff, or passing unit tests.
+- Before implementation, launch Product Analyst to clarify scope, acceptance criteria, risks, and the implementation plan, then write or update the feature brief in `docs/product/features`.
+- After plan approval, explicitly ask the user to confirm which subagents should be used or skipped. Propose the default role list and name any skipped roles for narrowed scope.
+- After subagent confirmation, invoke role-specific subagents in the workflow order as needed:
+  - Backend Implementer for NestJS, Drizzle, Zod, repositories, services, and backend tests.
+  - Frontend Implementer for Next.js, Expo, TanStack Query integration, and UI states.
+  - Visual Designer for screen-level UI direction when visual design is needed.
+  - Design System Agent for reusable tokens, primitives, accessibility, and cross-platform patterns.
+  - UI Polish Implementer only for approved visual-only polish.
+  - Test Writer for focused domain, API, schema, AI, and UI state tests.
+  - Implementation Reviewer for correctness, architecture fit, security, tests, and docs impact.
+  - App Runner for starting the local stack, checking the target flow in the running app, and reporting URLs, runtime status, blockers, and next owner.
+- Do not declare a larger feature complete until App Runner reports the relevant app flow as working, or until Feature Planner reports the concrete blocker that prevents runtime verification.
+- If runtime, review, visual, or test verification fails, route the smallest corrective task to the right subagent and repeat verification.
+- If the user narrows scope, keep the workflow but skip irrelevant roles explicitly, for example skip Expo/mobile roles for web-only work.
+- If a task is small enough not to need subagents, state that it is a small scoped change before implementing.

@@ -12,6 +12,8 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@health/types": "workspace:*"
+  },
   "devDependencies": {}
 }

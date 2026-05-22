@@ -1,21 +1,12 @@
-const surfaces = ["API health", "Workspace status", "Future proposal inspector"];
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 
-export default function HomePage() {
-  return (
-    <main className="shell">
-      <section className="card">
-        <p className="eyebrow">Developer shell</p>
-        <h1>AI Health Coach</h1>
-        <p>
-          Minimal web surface for debugging foundation state before product
-          domains are implemented.
-        </p>
-        <ul>
-          {surfaces.map((surface) => (
-            <li key={surface}>{surface}</li>
-          ))}
-        </ul>
-      </section>
-    </main>
-  );
+export default async function HomePage() {
+  const { isAuthenticated, redirectToSignIn } = await auth();
+
+  if (!isAuthenticated) {
+    return redirectToSignIn();
+  }
+
+  redirect("/chat");
 }

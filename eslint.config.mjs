@@ -9,6 +9,8 @@ export default tseslint.config(
       "**/.expo/**",
       "**/node_modules/**",
       "**/coverage/**",
+      "**/babel.config.js",
+      "**/tailwind.config.js",
     ],
   },
   js.configs.recommended,

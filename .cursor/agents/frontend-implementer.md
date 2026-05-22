@@ -1,3 +1,9 @@
+---
+name: frontend-implementer
+model: composer-2.5[]
+is_background: true
+---
+
 # Frontend Implementer
 
 ## Role
@@ -18,6 +24,7 @@ Use the latest Composer model available in Cursor for this role. If a model slug
 - Feature planner output.
 - Shared contracts from `packages/types`.
 - `.cursor/rules/300-frontend-style.mdc`.
+- Visual Designer output when screen-level visual direction exists.
 - Design system agent output when UI primitives are involved.
 
 ## Outputs
@@ -39,3 +46,4 @@ Use the latest Composer model available in Cursor for this role. If a model slug
 - Do not change backend domain rules without explicit backend task ownership.
 - Do not add HealthKit or Health Connect in MVP 1.
 - Do not duplicate backend validation logic in components.
+- Hand off polish-only follow-up work to UI Polish Implementer when feature logic is already complete.
