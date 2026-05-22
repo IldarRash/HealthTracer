@@ -5,6 +5,8 @@ import {
   chatTurnResponseSchema,
   completeWorkoutSessionSchema,
   nutritionPlanPayloadSchema,
+  nutritionAdherenceStateSchema,
+  upsertNutritionAdherenceSchema,
   proposalDecisionSchema,
   rawAiProposalSchema,
   scheduleWorkoutSessionSchema,
@@ -18,7 +20,13 @@ import {
   onboardingSchema,
   upsertUserProfileSchema,
   activeNutritionPlanResponseSchema,
+  generateRecipeRecommendationsResponseSchema,
   nutritionPlanRevisionSchema,
+  recipeSchema,
+  updateRecipeRecommendationStatusSchema,
+  adaptWorkoutPlanFromProgressChangesSchema,
+  generateWeeklyProgressSummarySchema,
+  weeklyProgressSummaryResponseSchema,
 } from "./index.js";
 
 describe("phase 2 contracts", () => {
@@ -144,6 +152,9 @@ describe("phase 3 contracts", () => {
         carbsGrams: 220,
         fatGrams: 70,
         hydrationLiters: 2.5,
+        mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+        preferences: ["Whole foods first"],
+        restrictions: ["No shellfish"],
         notes: ["Whole foods first"],
       }),
     ).not.toThrow();
@@ -157,9 +168,29 @@ describe("phase 3 contracts", () => {
         carbsGrams: 220,
         fatGrams: 70,
         hydrationLiters: 2.5,
+        mealStructure: [{ label: "Breakfast", timingHint: null }],
         notes: [],
       }),
     ).toThrow();
+  });
+
+  it("validates nutrition adherence payloads", () => {
+    expect(
+      nutritionAdherenceStateSchema.parse({
+        date: "2026-05-22",
+        hydrationLitersConsumed: 1.5,
+        mealCompletion: [{ label: "Breakfast", completed: true }],
+        targetCompletion: { caloriesOnTarget: true },
+        notes: ["Felt good today"],
+      }).hydrationLitersConsumed,
+    ).toBe(1.5);
+
+    expect(
+      upsertNutritionAdherenceSchema.parse({
+        hydrationLitersConsumed: 2,
+        notes: ["Light day"],
+      }).notes,
+    ).toEqual(["Light day"]);
   });
 
   it("accepts structured and legacy string workout exercises", () => {
@@ -355,6 +386,53 @@ describe("phase 4 contracts", () => {
     ).toThrow();
   });
 
+  it("rejects invalid workout plan payload shapes", () => {
+    expect(() =>
+      workoutPlanPayloadSchema.parse({
+        title: "",
+        summary: "Missing title.",
+        days: [{ day: "Day 1", focus: "Strength" }],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      workoutPlanPayloadSchema.parse({
+        title: "Strength base",
+        summary: "No training days.",
+        days: [],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects invalid workout session scheduling payloads", () => {
+    expect(() =>
+      scheduleWorkoutSessionSchema.parse({
+        workoutPlanRevisionId: "not-a-uuid",
+        plannedDate: "2026-05-23",
+        title: "Strength day",
+        exercises: [],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      scheduleWorkoutSessionSchema.parse({
+        workoutPlanRevisionId: revisionId,
+        plannedDate: "05/23/2026",
+        title: "Strength day",
+        exercises: [],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects invalid workout completion feedback bounds", () => {
+    expect(() =>
+      completeWorkoutSessionSchema.parse({
+        status: "completed",
+        feedback: { fatigue: 11, notes: "Too high." },
+      }),
+    ).toThrow();
+  });
+
   it("accepts adapt_workout_plan in raw AI proposals", () => {
     const proposal = rawAiProposalSchema.parse({
       intent: "adapt_workout_plan",
@@ -414,6 +492,181 @@ describe("phase 4 contracts", () => {
           summary: "Missing required nutrition targets.",
         },
         createdAt: timestamp,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("phase 7 recipe contracts", () => {
+  const timestamp = "2026-05-22T12:00:00.000Z";
+  const recipeId = "a1000001-0000-4000-8000-000000000001";
+
+  it("accepts recipe recommendation proposal payloads", () => {
+    expect(() =>
+      rawAiProposalSchema.parse({
+        intent: "recommend_recipes",
+        targetDomain: "recipe",
+        title: "Breakfast ideas for your plan",
+        reason: "These options fit your current estimated targets.",
+        proposedChanges: {
+          recommendations: [
+            {
+              recipeId,
+              reason: "High-protein breakfast with estimated macro fit.",
+              fitSummary: "Estimated macros align with your active plan.",
+            },
+          ],
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("parses recipe list and recommendation response shapes", () => {
+    expect(() =>
+      recipeSchema.parse({
+        id: recipeId,
+        name: "Greek yogurt berry bowl",
+        description: "Quick breakfast with protein and fiber.",
+        ingredients: [{ name: "Greek yogurt", quantity: 1, unit: "cup" }],
+        preparationSteps: ["Add yogurt to a bowl.", "Top with berries."],
+        servings: 1,
+        macroEstimates: {
+          estimatedCalories: 320,
+          proteinGrams: 24,
+          carbsGrams: 36,
+          fatGrams: 8,
+        },
+        mealTypes: ["breakfast"],
+        tags: ["high_protein"],
+        restrictionTags: ["contains_dairy"],
+        allergenTags: ["dairy"],
+        prepMinutes: 5,
+        cookMinutes: 0,
+        source: "health_tracer_seed",
+        status: "active",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    ).not.toThrow();
+
+    expect(
+      generateRecipeRecommendationsResponseSchema.parse({
+        recommendations: [],
+        relatedNutritionPlanRevisionId: null,
+        limitedReason: "no_active_nutrition_plan",
+      }).limitedReason,
+    ).toBe("no_active_nutrition_plan");
+  });
+
+  it("accepts recommendation status decisions without pending status", () => {
+    expect(
+      updateRecipeRecommendationStatusSchema.parse({ status: "accepted" }).status,
+    ).toBe("accepted");
+    expect(() =>
+      updateRecipeRecommendationStatusSchema.parse({ status: "pending" }),
+    ).toThrow();
+  });
+});
+
+describe("phase 10A progress contracts", () => {
+  const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+  const summaryId = "14a08176-64a7-4a2d-8a44-581807368394";
+  const timestamp = "2026-05-22T12:00:00.000Z";
+
+  it("parses weekly progress summary responses with partial workout data", () => {
+    const response = weeklyProgressSummaryResponseSchema.parse({
+      summary: {
+        id: summaryId,
+        userId,
+        weekStart: "2026-05-18",
+        weekEnd: "2026-05-24",
+        generatedAt: timestamp,
+        dataStatus: "partial",
+        sourceAggregates: {
+          workout: {
+            plannedCount: 3,
+            completedCount: 2,
+            skippedCount: 1,
+            adherencePercent: 67,
+            activeDays: 2,
+            sessionIds: ["78d40655-b4b5-47b3-b28e-470192e05f04"],
+            averageFatigue: 6,
+          },
+        },
+        deferredDomains: [
+          {
+            domain: "nutrition",
+            reason: "adherence_not_included",
+            message: "Nutrition adherence is not included in this weekly summary yet.",
+          },
+        ],
+        userMessage:
+          "Based on the workout entries available, you completed 2 of 3 planned sessions this week.",
+        supersededById: null,
+        createdAt: timestamp,
+      },
+      trends: [
+        {
+          id: "24b19287-75b8-4a3e-9c10-691908479405",
+          userId,
+          summaryId,
+          weekStart: "2026-05-18",
+          weekEnd: "2026-05-24",
+          domain: "workout",
+          trendType: "completion_rate",
+          direction: "up",
+          dataSufficiency: "partial",
+          supportingAggregate: { currentRate: 67, priorRate: 50 },
+          message:
+            "You completed a higher share of planned workouts this week than the prior week based on the entries available.",
+          createdAt: timestamp,
+        },
+      ],
+    });
+
+    expect(response.summary.dataStatus).toBe("partial");
+    expect(response.trends).toHaveLength(1);
+  });
+
+  it("accepts progress-derived workout adaptation proposal payloads", () => {
+    const payload = adaptWorkoutPlanFromProgressChangesSchema.parse({
+      plan: {
+        title: "Strength base",
+        summary: "Adjusted volume based on weekly completion patterns.",
+        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+      },
+      sourceSummaryId: summaryId,
+    });
+
+    expect(payload.sourceTrendObservationIds).toEqual([]);
+  });
+
+  it("defaults weekly summary generation refresh to false", () => {
+    expect(generateWeeklyProgressSummarySchema.parse({}).refresh).toBe(false);
+  });
+
+  it("rejects progress-derived workout adaptation payloads without training days", () => {
+    expect(() =>
+      adaptWorkoutPlanFromProgressChangesSchema.parse({
+        plan: {
+          title: "Strength base",
+          summary: "Missing days.",
+          days: [],
+        },
+        sourceSummaryId: summaryId,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects malformed progress summary source references", () => {
+    expect(() =>
+      adaptWorkoutPlanFromProgressChangesSchema.parse({
+        plan: {
+          title: "Strength base",
+          summary: "Adjusted volume based on weekly completion patterns.",
+          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        },
+        sourceSummaryId: "not-a-uuid",
       }),
     ).toThrow();
   });

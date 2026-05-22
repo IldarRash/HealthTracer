@@ -79,6 +79,14 @@ export const tokens = {
 
 export type StatusTone = "pending" | "success" | "error" | "info" | "neutral";
 
+export type PrivacyStatus =
+  | "not_connected"
+  | "consent_required"
+  | "active"
+  | "paused"
+  | "revoked"
+  | "unavailable";
+
 export const proposalStatusTone: Record<string, StatusTone> = {
   pending: "pending",
   pending_validation: "pending",
@@ -93,4 +101,22 @@ export const sessionStatusTone: Record<string, StatusTone> = {
   planned: "info",
   completed: "success",
   skipped: "neutral",
+};
+
+export const privacyStatusTone: Record<PrivacyStatus, StatusTone> = {
+  not_connected: "neutral",
+  consent_required: "pending",
+  active: "success",
+  paused: "info",
+  revoked: "error",
+  unavailable: "neutral",
+};
+
+export const privacyStatusLabel: Record<PrivacyStatus, string> = {
+  not_connected: "Not connected",
+  consent_required: "Consent needed",
+  active: "Sync active",
+  paused: "Sync paused",
+  revoked: "Access revoked",
+  unavailable: "Unavailable",
 };

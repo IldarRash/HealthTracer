@@ -15,7 +15,7 @@ import {
   toWorkoutPlanRevision,
   toWorkoutSession,
 } from "./workout.mapper.js";
-import { WorkoutsRepository } from "./workouts.repository.js";
+import { WorkoutsRepository, isPostgresUniqueViolation } from "./workouts.repository.js";
 
 @Injectable()
 export class WorkoutsService {
@@ -109,17 +109,29 @@ export class WorkoutsService {
     _intent: "create_workout_plan" | "adapt_workout_plan",
   ): Promise<string> {
     const parsedPayload = workoutPlanPayloadSchema.parse(payload);
-    const existingPlan = await this.workoutsRepository.findActivePlanByUserId(userId);
+    let existingPlan = await this.workoutsRepository.findActivePlanByUserId(userId);
 
     if (!existingPlan) {
-      const { revision } = await this.workoutsRepository.createPlanWithRevision(
-        userId,
-        parsedPayload,
-        reason,
-        "ai_proposal",
-      );
+      try {
+        const { revision } = await this.workoutsRepository.createPlanWithRevision(
+          userId,
+          parsedPayload,
+          reason,
+          "ai_proposal",
+        );
 
-      return `workout_revision:${revision.id}`;
+        return `workout_revision:${revision.id}`;
+      } catch (error) {
+        if (!isPostgresUniqueViolation(error)) {
+          throw error;
+        }
+
+        existingPlan = await this.workoutsRepository.findActivePlanByUserId(userId);
+
+        if (!existingPlan) {
+          throw error;
+        }
+      }
     }
 
     const revision = await this.workoutsRepository.appendRevision(

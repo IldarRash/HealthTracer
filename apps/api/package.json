@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --watch --import @swc-node/register/esm-register src/main.ts",
     "lint": "eslint . --max-warnings=0",
-    "start": "node dist/main.js",
+    "start": "node --import @swc-node/register/esm-register src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

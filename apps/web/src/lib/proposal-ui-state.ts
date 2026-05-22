@@ -1,4 +1,13 @@
-import type { AiProposal, ProposalTargetDomain } from "@health/types";
+import type { AiProposal, ProposalIntent, ProposalTargetDomain } from "@health/types";
+
+export function getProposalIntentLabel(intent: ProposalIntent): string | null {
+  switch (intent) {
+    case "adapt_workout_plan_from_progress":
+      return "Progress-based workout adaptation";
+    default:
+      return null;
+  }
+}
 
 export function getProposalDomainLabel(domain: ProposalTargetDomain): string {
   switch (domain) {
@@ -8,6 +17,8 @@ export function getProposalDomainLabel(domain: ProposalTargetDomain): string {
       return "Goal";
     case "nutrition":
       return "Nutrition";
+    case "recipe":
+      return "Recipe";
     case "profile":
       return "Profile";
     case "today":
@@ -25,6 +36,8 @@ export function getProposalDomainRoute(domain: ProposalTargetDomain): string | n
       return "/goals";
     case "nutrition":
       return "/nutrition";
+    case "recipe":
+      return "/recipes";
     case "profile":
       return "/profile";
     case "today":
@@ -41,6 +54,8 @@ export function getProposalDomainPillClass(domain: ProposalTargetDomain): string
       return "proposal-domain-pill--goal";
     case "nutrition":
       return "proposal-domain-pill--nutrition";
+    case "recipe":
+      return "proposal-domain-pill--recipe";
     case "profile":
       return "proposal-domain-pill--profile";
     case "today":

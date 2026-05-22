@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   date,
   index,
@@ -6,12 +7,13 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./users.js";
 
-// Deferred DB constraints (Phase 4 review): FK from active_revision_id to revisions,
-// partial unique index on user_id where status = active, unique (workout_plan_id, revision_number).
+// Same-plan active revision integrity is enforced in migration
+// 0012_workout_active_revision_same_plan via composite FK (id, active_revision_id).
 
 export const workoutPlans = pgTable(
   "workout_plans",
@@ -27,6 +29,9 @@ export const workoutPlans = pgTable(
   },
   (table) => ({
     userIdIdx: index("workout_plans_user_id_idx").on(table.userId),
+    userActiveIdx: uniqueIndex("workout_plans_user_active_idx")
+      .on(table.userId)
+      .where(sql`${table.status} = 'active'`),
   }),
 );
 
@@ -46,6 +51,14 @@ export const workoutPlanRevisions = pgTable(
   (table) => ({
     workoutPlanIdIdx: index("workout_plan_revisions_plan_id_idx").on(
       table.workoutPlanId,
+    ),
+    planRevisionNumberIdx: uniqueIndex("workout_plan_revisions_plan_revision_idx").on(
+      table.workoutPlanId,
+      table.revisionNumber,
+    ),
+    planIdRevisionIdIdx: uniqueIndex("workout_plan_revisions_plan_id_id_idx").on(
+      table.workoutPlanId,
+      table.id,
     ),
   }),
 );

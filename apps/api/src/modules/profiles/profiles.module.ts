@@ -9,6 +9,6 @@ import { ProfilesService } from "./profiles.service.js";
   imports: [DatabaseModule, UsersModule],
   controllers: [ProfilesController],
   providers: [ProfilesRepository, ProfilesService],
-  exports: [ProfilesService],
+  exports: [ProfilesService, ProfilesRepository],
 })
 export class ProfilesModule {}

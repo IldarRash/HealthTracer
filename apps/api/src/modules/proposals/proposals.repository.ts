@@ -4,6 +4,8 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
 
+type AiProposalRow = typeof aiProposals.$inferSelect;
+
 @Injectable()
 export class ProposalsRepository {
   constructor(@Inject(DATABASE) private readonly db: HealthDatabase) {}
@@ -56,6 +58,157 @@ export class ProposalsRepository {
       .returning();
 
     return proposal ?? null;
+  }
+
+  async acceptPendingProposal(
+    proposalId: string,
+    userId: string,
+    applyFn: (proposal: AiProposalRow) => Promise<string>,
+  ) {
+    let appliedReference: string | null = null;
+
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [pendingProposal] = await tx
+          .select()
+          .from(aiProposals)
+          .where(
+            and(
+              eq(aiProposals.id, proposalId),
+              eq(aiProposals.userId, userId),
+              eq(aiProposals.status, "pending"),
+            ),
+          )
+          .for("update");
+
+        if (!pendingProposal) {
+          return null;
+        }
+
+        appliedReference = await applyFn(pendingProposal);
+
+        const [acceptedProposal] = await tx
+          .update(aiProposals)
+          .set({
+            status: "accepted",
+            appliedReference,
+            validationStatus: "valid",
+            validationErrors: [],
+            userDecisionAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(aiProposals.id, proposalId),
+              eq(aiProposals.userId, userId),
+              eq(aiProposals.status, "pending"),
+            ),
+          )
+          .returning();
+
+        if (!acceptedProposal) {
+          throw new Error("Accepted proposal audit record could not be finalized.");
+        }
+
+        return acceptedProposal;
+      });
+    } catch (error) {
+      const recoveredProposal = await this.recoverAppliedReferenceAfterAcceptanceFailure(
+        proposalId,
+        userId,
+        appliedReference,
+      );
+
+      if (recoveredProposal) {
+        return recoveredProposal;
+      }
+
+      throw error;
+    }
+  }
+
+  async recoverAppliedReferenceAfterAcceptanceFailure(
+    proposalId: string,
+    userId: string,
+    appliedReference: string | null,
+  ) {
+    if (!appliedReference) {
+      return null;
+    }
+
+    return this.completePendingAcceptance(proposalId, userId, appliedReference);
+  }
+
+  async completePendingAcceptance(
+    proposalId: string,
+    userId: string,
+    appliedReference: string,
+  ) {
+    const [acceptedProposal] = await this.db
+      .update(aiProposals)
+      .set({
+        status: "accepted",
+        appliedReference,
+        validationStatus: "valid",
+        validationErrors: [],
+        userDecisionAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(aiProposals.id, proposalId),
+          eq(aiProposals.userId, userId),
+          eq(aiProposals.status, "pending"),
+        ),
+      )
+      .returning();
+
+    if (acceptedProposal) {
+      return acceptedProposal;
+    }
+
+    return this.repairAcceptedProposalReference(proposalId, userId, appliedReference);
+  }
+
+  async repairAcceptedProposalReference(
+    proposalId: string,
+    userId: string,
+    appliedReference: string,
+  ) {
+    const [repairedProposal] = await this.db
+      .update(aiProposals)
+      .set({
+        appliedReference,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(aiProposals.id, proposalId),
+          eq(aiProposals.userId, userId),
+          eq(aiProposals.status, "accepted"),
+          isNull(aiProposals.appliedReference),
+        ),
+      )
+      .returning();
+
+    if (repairedProposal) {
+      return repairedProposal;
+    }
+
+    const [existingProposal] = await this.db
+      .select()
+      .from(aiProposals)
+      .where(
+        and(
+          eq(aiProposals.id, proposalId),
+          eq(aiProposals.userId, userId),
+          eq(aiProposals.status, "accepted"),
+          eq(aiProposals.appliedReference, appliedReference),
+        ),
+      )
+      .limit(1);
+
+    return existingProposal ?? null;
   }
 
   async claimPendingForAccept(proposalId: string, userId: string) {

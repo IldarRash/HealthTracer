@@ -6,7 +6,10 @@ import {
   canSubmitScheduleForm,
   formatExerciseLabel,
   formatLocalIsoDate,
+  getRevisionNumberLabel,
+  getSessionRevisionNote,
   hasActiveWorkoutPlan,
+  isTerminalSessionStatus,
   isValidPlannedDate,
   sessionStatusLabel,
   sortSessionsByPlannedDate,
@@ -29,6 +32,40 @@ describe("training UI state", () => {
     expect(canCompleteSession({ status: "planned" })).toBe(true);
     expect(canCompleteSession({ status: "completed" })).toBe(false);
     expect(canCompleteSession({ status: "skipped" })).toBe(false);
+  });
+
+  it("detects terminal session statuses", () => {
+    expect(isTerminalSessionStatus("completed")).toBe(true);
+    expect(isTerminalSessionStatus("skipped")).toBe(true);
+    expect(isTerminalSessionStatus("planned")).toBe(false);
+  });
+
+  it("resolves revision labels and session revision notes", () => {
+    const revisions = [
+      { id: "rev-1", revisionNumber: 1 },
+      { id: "rev-2", revisionNumber: 2 },
+    ];
+
+    expect(getRevisionNumberLabel("rev-2", revisions)).toBe("#2");
+    expect(getRevisionNumberLabel("missing", revisions)).toBeNull();
+
+    expect(
+      getSessionRevisionNote({
+        session: { workoutPlanRevisionId: "rev-2", status: "planned" },
+        activeRevisionId: "rev-2",
+        revisions,
+      }),
+    ).toBe("Scheduled from active revision #2.");
+
+    expect(
+      getSessionRevisionNote({
+        session: { workoutPlanRevisionId: "rev-1", status: "completed" },
+        activeRevisionId: "rev-2",
+        revisions,
+      }),
+    ).toBe(
+      "Logged against prior revision #1. Sessions stay tied to the revision they were scheduled from.",
+    );
   });
 
   it("sorts sessions by planned date ascending", () => {
@@ -87,6 +124,39 @@ describe("training UI state", () => {
     expect(
       buildSessionTitleFromDay({ day: "Day 1", focus: "Strength" }),
     ).toBe("Day 1 · Strength");
+  });
+
+  it("detects when the Training tab should show the empty state", () => {
+    expect(hasActiveWorkoutPlan({ plan: null, activeRevision: null })).toBe(false);
+    expect(
+      hasActiveWorkoutPlan({
+        plan: { id: "3f98f3dd-806d-4386-8c5f-43499626c5d6" },
+        activeRevision: null,
+      }),
+    ).toBe(false);
+    expect(
+      hasActiveWorkoutPlan({
+        plan: null,
+        activeRevision: { id: "880099c6-3b5f-4383-8246-97b72bf61818" },
+      }),
+    ).toBe(false);
+  });
+
+  it("describes prior-revision planned sessions separately from terminal logs", () => {
+    const revisions = [
+      { id: "rev-1", revisionNumber: 1 },
+      { id: "rev-2", revisionNumber: 2 },
+    ];
+
+    expect(
+      getSessionRevisionNote({
+        session: { workoutPlanRevisionId: "rev-1", status: "planned" },
+        activeRevisionId: "rev-2",
+        revisions,
+      }),
+    ).toBe(
+      "Scheduled from prior revision #1. New sessions use your active revision.",
+    );
   });
 
   it("allows scheduling only with a valid date and selected day", () => {

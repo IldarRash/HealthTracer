@@ -13,6 +13,8 @@
   "dependencies": {
     "@clerk/clerk-expo": "latest",
     "@health/config": "workspace:*",
+    "@health/types": "workspace:*",
+    "@health/types": "workspace:^",
     "@tanstack/react-query": "latest",
     "expo": "latest",
     "expo-router": "latest",

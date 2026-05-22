@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildSessionCompletionUpdate } from "./workouts.repository.js";
+import {
+  buildSessionCompletionUpdate,
+  isPostgresUniqueViolation,
+} from "./workouts.repository.js";
 
 const completedAt = new Date("2026-05-23T12:00:00.000Z");
 
@@ -68,5 +71,20 @@ describe("buildSessionCompletionUpdate", () => {
 
     expect(second.completedAt).toBe(first.completedAt);
     expect(second.feedback).toEqual({ notes: "Again." });
+  });
+});
+
+describe("isPostgresUniqueViolation", () => {
+  it("detects direct postgres unique violations", () => {
+    expect(isPostgresUniqueViolation({ code: "23505" })).toBe(true);
+  });
+
+  it("detects wrapped postgres unique violations", () => {
+    expect(isPostgresUniqueViolation({ cause: { code: "23505" } })).toBe(true);
+  });
+
+  it("returns false for unrelated errors", () => {
+    expect(isPostgresUniqueViolation({ code: "23503" })).toBe(false);
+    expect(isPostgresUniqueViolation(new Error("failed"))).toBe(false);
   });
 });

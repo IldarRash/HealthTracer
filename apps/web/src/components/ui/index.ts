@@ -4,5 +4,12 @@ export { Button, buttonVariants, type ButtonProps } from "./button";
 export { Card, cardVariants, type CardProps } from "./card";
 export { ChatBubble, ChatComposer, ChatTranscript } from "./chat-bubble";
 export { DashboardCard, DashboardGrid } from "./dashboard-card";
+export {
+  ConsentScopeList,
+  ConsentStatusBadge,
+  PrivacyBoundaryNote,
+  RevocationState,
+  type ConsentScopeItem,
+} from "./privacy";
 export { ProposalConfirmation } from "./proposal-confirmation";
 export { EmptyState, ErrorState, LoadingState } from "./state-message";

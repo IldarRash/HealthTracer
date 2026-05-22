@@ -28,6 +28,7 @@ export const proposalTargetDomainEnum = pgEnum("proposal_target_domain", [
   "goal",
   "workout",
   "nutrition",
+  "recipe",
   "today",
   "general",
 ]);
@@ -38,8 +39,10 @@ export const proposalIntentEnum = pgEnum("proposal_intent", [
   "update_goal",
   "create_workout_plan",
   "adapt_workout_plan",
+  "adapt_workout_plan_from_progress",
   "create_nutrition_plan",
   "adjust_nutrition_plan",
+  "recommend_recipes",
   "create_today_checklist",
   "summarize_progress",
 ]);

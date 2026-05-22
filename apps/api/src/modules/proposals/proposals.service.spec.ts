@@ -45,6 +45,30 @@ function createRepositoryMock(overrides: Record<string, unknown> = {}) {
       status: "rejected" as const,
       userDecisionAt: new Date(),
     }),
+    acceptPendingProposal: async (
+      _proposalId: string,
+      _userId: string,
+      applyFn: (proposal: typeof pendingProposal) => Promise<string>,
+    ) => {
+      const appliedReference = await applyFn(pendingProposal);
+
+      return {
+        ...pendingProposal,
+        status: "accepted" as const,
+        appliedReference,
+        userDecisionAt: new Date(),
+      };
+    },
+    completePendingAcceptance: async (
+      _proposalId: string,
+      _userId: string,
+      appliedReference: string,
+    ) => ({
+      ...pendingProposal,
+      status: "accepted" as const,
+      appliedReference,
+      userDecisionAt: new Date(),
+    }),
     claimPendingForAccept: async () => ({
       ...pendingProposal,
       status: "accepted" as const,
@@ -123,20 +147,27 @@ describe("ProposalsService", () => {
 
   it("prevents double accept via pending claim guard", async () => {
     let applyCount = 0;
-    let claimCount = 0;
+    let acceptCount = 0;
 
     const service = new ProposalsService(
       createRepositoryMock({
-        claimPendingForAccept: async () => {
-          claimCount += 1;
+        acceptPendingProposal: async (
+          _proposalId: string,
+          _userId: string,
+          applyFn: (proposal: typeof pendingProposal) => Promise<string>,
+        ) => {
+          acceptCount += 1;
 
-          if (claimCount > 1) {
+          if (acceptCount > 1) {
             return null;
           }
+
+          const appliedReference = await applyFn(pendingProposal);
 
           return {
             ...pendingProposal,
             status: "accepted" as const,
+            appliedReference,
             userDecisionAt: new Date(),
           };
         },
@@ -163,14 +194,11 @@ describe("ProposalsService", () => {
     expect(applyCount).toBe(1);
   });
 
-  it("reverts the accept claim when apply fails", async () => {
-    let revertCalled = false;
-
+  it("leaves proposal pending when apply fails during acceptance", async () => {
     const service = new ProposalsService(
       createRepositoryMock({
-        revertAcceptedClaim: async () => {
-          revertCalled = true;
-          return pendingProposal;
+        acceptPendingProposal: async () => {
+          throw new Error("Apply failed.");
         },
       }) as never,
       {
@@ -189,18 +217,26 @@ describe("ProposalsService", () => {
     await expect(
       service.decideProposal(auth, pendingProposal.id, { decision: "accept" }),
     ).rejects.toThrow("Apply failed.");
-    expect(revertCalled).toBe(true);
   });
 
-  it("does not reopen a proposal if finalizing fails after apply succeeds", async () => {
-    let revertCalled = false;
+  it("returns accepted proposal when acceptance recovery persists appliedReference", async () => {
+    let applyCount = 0;
+    const appliedReference = `workout_revision:880099c6-3b5f-4383-8246-97b72bf61818`;
 
     const service = new ProposalsService(
       createRepositoryMock({
-        finalizeAcceptedProposal: async () => null,
-        revertAcceptedClaim: async () => {
-          revertCalled = true;
-          return pendingProposal;
+        acceptPendingProposal: async (
+          _proposalId: string,
+          _userId: string,
+          applyFn: (proposal: typeof pendingProposal) => Promise<string>,
+        ) => {
+          await applyFn(pendingProposal);
+          return {
+            ...pendingProposal,
+            status: "accepted" as const,
+            appliedReference,
+            userDecisionAt: new Date(),
+          };
         },
       }) as never,
       {
@@ -210,24 +246,101 @@ describe("ProposalsService", () => {
         validateStoredProposal: () => ({ valid: true, errors: [] }),
       } as never,
       {
-        applyAcceptedProposal: async () => `summary:${pendingProposal.id}`,
+        applyAcceptedProposal: async () => {
+          applyCount += 1;
+          return appliedReference;
+        },
       } as never,
     );
 
-    await expect(
-      service.decideProposal(auth, pendingProposal.id, { decision: "accept" }),
-    ).rejects.toBeInstanceOf(NotFoundException);
-    expect(revertCalled).toBe(false);
+    const result = await service.decideProposal(auth, pendingProposal.id, {
+      decision: "accept",
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.appliedReference).toBe(appliedReference);
+    expect(applyCount).toBe(1);
+  });
+
+  it("does not reapply on retry after acceptance recovery persisted the reference", async () => {
+    let applyCount = 0;
+    const appliedReference = `workout_revision:880099c6-3b5f-4383-8246-97b72bf61818`;
+    const acceptedProposal = {
+      ...pendingProposal,
+      status: "accepted" as const,
+      appliedReference,
+      userDecisionAt: new Date(),
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => acceptedProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({ valid: true, errors: [] }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCount += 1;
+          return appliedReference;
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, pendingProposal.id, {
+      decision: "accept",
+    });
+
+    expect(result.appliedReference).toBe(appliedReference);
+    expect(applyCount).toBe(0);
+  });
+
+  it("returns an already accepted proposal without reapplying", async () => {
+    let applyCalled = false;
+    const acceptedProposal = {
+      ...pendingProposal,
+      status: "accepted" as const,
+      appliedReference: `summary:${pendingProposal.id}`,
+      userDecisionAt: new Date(),
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => acceptedProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({ valid: true, errors: [] }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return `summary:${pendingProposal.id}`;
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, pendingProposal.id, {
+      decision: "accept",
+    });
+
+    expect(result.appliedReference).toBe(`summary:${pendingProposal.id}`);
+    expect(applyCalled).toBe(false);
   });
 
   it("blocks acceptance when validation fails", async () => {
     let applyCalled = false;
-    let claimCalled = false;
+    let acceptCalled = false;
 
     const service = new ProposalsService(
       createRepositoryMock({
-        claimPendingForAccept: async () => {
-          claimCalled = true;
+        acceptPendingProposal: async () => {
+          acceptCalled = true;
           return pendingProposal;
         },
       }) as never,
@@ -252,7 +365,7 @@ describe("ProposalsService", () => {
       service.decideProposal(auth, pendingProposal.id, { decision: "accept" }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(applyCalled).toBe(false);
-    expect(claimCalled).toBe(false);
+    expect(acceptCalled).toBe(false);
   });
 
   it("throws when deciding a non-pending proposal", async () => {
@@ -292,7 +405,7 @@ describe("ProposalsService", () => {
 
   it("blocks acceptance when proposal content fails safety checks", async () => {
     let applyCalled = false;
-    let claimCalled = false;
+    let acceptCalled = false;
     const unsafeProposal = {
       ...pendingProposal,
       title: "Treatment plan",
@@ -302,8 +415,8 @@ describe("ProposalsService", () => {
     const service = new ProposalsService(
       createRepositoryMock({
         findById: async () => unsafeProposal,
-        claimPendingForAccept: async () => {
-          claimCalled = true;
+        acceptPendingProposal: async () => {
+          acceptCalled = true;
           return unsafeProposal;
         },
         markValidation: async (
@@ -334,7 +447,327 @@ describe("ProposalsService", () => {
       service.decideProposal(auth, pendingProposal.id, { decision: "accept" }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(applyCalled).toBe(false);
-    expect(claimCalled).toBe(false);
+    expect(acceptCalled).toBe(false);
+  });
+
+  it("accepts a valid create_workout_plan proposal and records workout revision reference", async () => {
+    let applyCalled = false;
+    const workoutProposal = {
+      ...pendingProposal,
+      intent: "create_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "Strength base plan",
+      reason: "Build a repeatable three-day structure.",
+      proposedChanges: {
+        title: "Strength base",
+        summary: "Three repeatable training days.",
+        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => workoutProposal,
+        acceptPendingProposal: async (
+          _proposalId: string,
+          _userId: string,
+          applyFn: (proposal: typeof workoutProposal) => Promise<string>,
+        ) => {
+          const appliedReference = await applyFn(workoutProposal);
+          return {
+            ...workoutProposal,
+            status: "accepted" as const,
+            appliedReference,
+            userDecisionAt: new Date(),
+          };
+        },
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({ valid: true, errors: [] }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "workout_revision:880099c6-3b5f-4383-8246-97b72bf61818";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, workoutProposal.id, {
+      decision: "accept",
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.appliedReference).toBe(
+      "workout_revision:880099c6-3b5f-4383-8246-97b72bf61818",
+    );
+    expect(applyCalled).toBe(true);
+  });
+
+  it("rejects a today checklist proposal without applying domain changes", async () => {
+    let applyCalled = false;
+    const todayProposal = {
+      ...pendingProposal,
+      intent: "create_today_checklist" as const,
+      targetDomain: "today" as const,
+      title: "Daily checklist",
+      reason: "Start with hydration and recovery.",
+      proposedChanges: {
+        date: "2026-05-22",
+        items: [{ label: "Drink water", kind: "hydration" as const }],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => todayProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({ valid: true, errors: [] }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "daily_checklist:checklist-1";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, todayProposal.id, {
+      decision: "reject",
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(applyCalled).toBe(false);
+  });
+
+  it("rejects a recipe proposal without creating recommendations", async () => {
+    let applyCalled = false;
+    const recipeProposal = {
+      ...pendingProposal,
+      intent: "recommend_recipes" as const,
+      targetDomain: "recipe" as const,
+      title: "Recipe suggestions",
+      reason: "These options fit your active nutrition plan.",
+      proposedChanges: {
+        relatedNutritionPlanRevisionId: "ad000002-0000-4000-8000-000000000001",
+        recommendations: [
+          {
+            recipeId: "a1000001-0000-4000-8000-000000000001",
+            reason: "Fits your current lunch preferences.",
+            fitSummary: "Estimated macros are a reasonable fit for your plan.",
+          },
+        ],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => recipeProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({ valid: true, errors: [] }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "recipe_recommendation:rec-1";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, recipeProposal.id, {
+      decision: "reject",
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(applyCalled).toBe(false);
+  });
+
+  it("rejects a workout proposal without applying domain changes", async () => {
+    let applyCalled = false;
+    const workoutProposal = {
+      ...pendingProposal,
+      intent: "adapt_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "Reduce lower body volume",
+      reason: "Matches reported fatigue.",
+      proposedChanges: {
+        title: "Strength base",
+        summary: "Reduced volume for recovery.",
+        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => workoutProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({ valid: true, errors: [] }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "workout_revision:rev-1";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, workoutProposal.id, {
+      decision: "reject",
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(applyCalled).toBe(false);
+  });
+
+  it("rejects a nutrition proposal without applying domain changes", async () => {
+    let applyCalled = false;
+    const nutritionProposal = {
+      ...pendingProposal,
+      intent: "adjust_nutrition_plan" as const,
+      targetDomain: "nutrition" as const,
+      title: "Adjust hydration target",
+      reason: "Matches your training schedule.",
+      proposedChanges: {
+        title: "Balanced base",
+        summary: "Moderate macros and hydration.",
+        caloriesPerDay: 2200,
+        proteinGrams: 140,
+        carbsGrams: 220,
+        fatGrams: 70,
+        hydrationLiters: 3,
+        mealStructure: [{ label: "Breakfast", timingHint: null }],
+        preferences: [],
+        restrictions: [],
+        allergies: [],
+        notes: [],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => nutritionProposal,
+        claimPendingForReject: async () => ({
+          ...nutritionProposal,
+          status: "rejected" as const,
+          userDecisionAt: new Date(),
+        }),
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({ valid: true, errors: [] }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "nutrition_revision:rev-1";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, nutritionProposal.id, {
+      decision: "reject",
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(applyCalled).toBe(false);
+  });
+
+  it("blocks acceptance when workout proposal payload validation fails", async () => {
+    let applyCalled = false;
+    const workoutProposal = {
+      ...pendingProposal,
+      intent: "create_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "Strength base plan",
+      reason: "Missing training days.",
+      proposedChanges: {
+        title: "Strength base",
+        summary: "No days configured.",
+        days: [],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => workoutProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({
+          valid: false,
+          errors: ["proposedChanges.days: At least one training day is required."],
+        }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "workout_revision:rev-1";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, workoutProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+  });
+
+  it("blocks acceptance when workout proposal content fails safety checks", async () => {
+    let applyCalled = false;
+    const unsafeWorkoutProposal = {
+      ...pendingProposal,
+      intent: "create_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "Treatment plan",
+      reason: "You should take medication for your symptoms.",
+      proposedChanges: {
+        title: "Strength base",
+        summary: "Three repeatable training days.",
+        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => unsafeWorkoutProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      {
+        validateStoredProposal: () => ({ valid: true, errors: [] }),
+      } as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "workout_revision:rev-1";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, unsafeWorkoutProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
   });
 
   it("throws when deciding a rejected proposal", async () => {

@@ -210,6 +210,10 @@ export function ChatWorkspace() {
     sendMessageMutation.mutate(prompt);
   };
 
+  const handleProposalDecision = (updated: AiProposal) => {
+    setLocalProposals((proposals) => mergeProposalsById(proposals, [updated]));
+  };
+
   const isBootstrapping =
     threadsQuery.isLoading ||
     ensureThreadMutation.isPending ||
@@ -300,7 +304,11 @@ export function ChatWorkspace() {
                   {linkedProposals.length > 0 ? (
                     <div className="message-proposals">
                       {linkedProposals.map((proposal) => (
-                        <InlineProposalCard key={proposal.id} proposal={proposal} />
+                        <InlineProposalCard
+                          key={proposal.id}
+                          proposal={proposal}
+                          onDecision={handleProposalDecision}
+                        />
                       ))}
                     </div>
                   ) : null}

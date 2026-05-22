@@ -41,6 +41,10 @@ const nutritionPayload = {
   carbsGrams: 220,
   fatGrams: 70,
   hydrationLiters: 2.5,
+  mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+  preferences: ["Whole foods first"],
+  restrictions: ["No shellfish"],
+  allergies: [],
   notes: ["Prioritize whole foods."],
 };
 
@@ -50,6 +54,42 @@ const todayPayload = {
 };
 
 describe("ProposalApplyService", () => {
+  it("routes accepted adapt_workout_plan proposals through the workouts service", async () => {
+    let workoutsCalled = false;
+    let capturedIntent: string | undefined;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {
+        applyWorkoutPlanProposal: async (
+          _userId: string,
+          _payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          workoutsCalled = true;
+          capturedIntent = intent;
+          return "workout_revision:rev-adapt-1";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adapt_workout_plan",
+      targetDomain: "workout",
+      proposedChanges: workoutPayload,
+    });
+
+    expect(reference).toBe("workout_revision:rev-adapt-1");
+    expect(workoutsCalled).toBe(true);
+    expect(capturedIntent).toBe("adapt_workout_plan");
+  });
+
   it("routes accepted workout proposals through the workouts service", async () => {
     let workoutsCalled = false;
 
@@ -64,6 +104,7 @@ describe("ProposalApplyService", () => {
       } as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -74,6 +115,37 @@ describe("ProposalApplyService", () => {
     });
 
     expect(reference).toBe("workout_revision:rev-1");
+    expect(workoutsCalled).toBe(true);
+  });
+
+  it("routes accepted progress-derived workout proposals through the workouts service", async () => {
+    let workoutsCalled = false;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {
+        applyWorkoutPlanProposal: async () => {
+          workoutsCalled = true;
+          return "workout_revision:rev-progress";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adapt_workout_plan_from_progress",
+      targetDomain: "workout",
+      proposedChanges: {
+        plan: workoutPayload,
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+      },
+    });
+
+    expect(reference).toBe("workout_revision:rev-progress");
     expect(workoutsCalled).toBe(true);
   });
 
@@ -91,6 +163,7 @@ describe("ProposalApplyService", () => {
         },
       } as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -104,10 +177,47 @@ describe("ProposalApplyService", () => {
     expect(nutritionCalled).toBe(true);
   });
 
+  it("routes accepted recipe proposals through the recipes service", async () => {
+    let recipesCalled = false;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyRecipeRecommendationProposal: async () => {
+          recipesCalled = true;
+          return "recipe_recommendation:rec-1";
+        },
+      } as never,
+      {} as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "recommend_recipes",
+      targetDomain: "recipe",
+      proposedChanges: {
+        recommendations: [
+          {
+            recipeId: "a1000001-0000-4000-8000-000000000001",
+            reason: "Fits your breakfast protein target.",
+            fitSummary: "Estimated macros align with your plan.",
+          },
+        ],
+      },
+    });
+
+    expect(reference).toBe("recipe_recommendation:rec-1");
+    expect(recipesCalled).toBe(true);
+  });
+
   it("routes accepted today checklist proposals through the today service", async () => {
     let todayCalled = false;
 
     const service = new ProposalApplyService(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -150,6 +260,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -165,6 +276,7 @@ describe("ProposalApplyService", () => {
 
   it("throws for unsupported proposal intents", async () => {
     const service = new ProposalApplyService(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

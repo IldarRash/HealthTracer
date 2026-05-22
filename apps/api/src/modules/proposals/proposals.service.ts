@@ -54,11 +54,11 @@ export class ProposalsService {
       throw new NotFoundException("Proposal not found.");
     }
 
-    if (proposal.status !== "pending") {
-      throw new BadRequestException("Only pending proposals can be decided.");
-    }
-
     if (input.decision === "reject") {
+      if (proposal.status !== "pending") {
+        throw new BadRequestException("Only pending proposals can be decided.");
+      }
+
       const rejected = await this.proposalsRepository.claimPendingForReject(
         proposalId,
         user.id,
@@ -71,6 +71,20 @@ export class ProposalsService {
       }
 
       return toAiProposal(rejected);
+    }
+
+    if (proposal.status === "accepted") {
+      if (proposal.appliedReference) {
+        return toAiProposal(proposal);
+      }
+
+      throw new NotFoundException(
+        "Proposal acceptance is incomplete and cannot be retried safely.",
+      );
+    }
+
+    if (proposal.status !== "pending") {
+      throw new BadRequestException("Only pending proposals can be decided.");
     }
 
     const safetyErrors = validateProposalSafety({
@@ -95,37 +109,25 @@ export class ProposalsService {
       });
     }
 
-    const claimed = await this.proposalsRepository.claimPendingForAccept(
+    let acceptedProposal;
+
+    acceptedProposal = await this.proposalsRepository.acceptPendingProposal(
       proposalId,
       user.id,
+      (lockedProposal) =>
+        this.proposalApplyService.applyAcceptedProposal(auth, user.id, lockedProposal),
     );
 
-    if (!claimed) {
+    if (!acceptedProposal) {
+      const currentProposal = await this.proposalsRepository.findById(user.id, proposalId);
+
+      if (currentProposal?.status === "accepted" && currentProposal.appliedReference) {
+        return toAiProposal(currentProposal);
+      }
+
       throw new BadRequestException("Only pending proposals can be decided.");
     }
 
-    let appliedReference: string;
-
-    try {
-      appliedReference = await this.proposalApplyService.applyAcceptedProposal(
-        auth,
-        user.id,
-        claimed,
-      );
-    } catch (error) {
-      await this.proposalsRepository.revertAcceptedClaim(proposalId, user.id);
-      throw error;
-    }
-
-    const accepted = await this.proposalsRepository.finalizeAcceptedProposal(
-      proposalId,
-      appliedReference,
-    );
-
-    if (!accepted) {
-      throw new NotFoundException("Proposal not found.");
-    }
-
-    return toAiProposal(accepted);
+    return toAiProposal(acceptedProposal);
   }
 }

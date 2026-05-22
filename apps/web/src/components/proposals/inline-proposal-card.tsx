@@ -4,7 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import type { AiProposal } from "@health/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { decideProposal, getAcceptedProposalRefreshQueryKeys } from "../../lib/api";
+import { decideProposal, apiQueryKeys, getAcceptedProposalRefreshQueryKeys } from "../../lib/api";
 import {
   canAcceptProposal,
   canDecideProposal,
@@ -12,9 +12,11 @@ import {
   getProposalDomainLabel,
   getProposalDomainPillClass,
   getProposalDomainRoute,
+  getProposalIntentLabel,
   getProposalStatusBadgeTone,
   getProposalStatusLabel,
 } from "../../lib/proposal-ui-state";
+import { summarizeNutritionProposalChanges } from "../../lib/nutrition-ui-state";
 import { Badge, Button, ProposalConfirmation } from "../ui";
 
 type InlineProposalCardProps = {
@@ -41,7 +43,7 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
       return result.data;
     },
     onSuccess: (updated) => {
-      void queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", proposal.threadId] });
       for (const queryKey of getAcceptedProposalRefreshQueryKeys(updated)) {
         void queryClient.invalidateQueries({ queryKey });
@@ -55,8 +57,25 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
   const canDecide = canDecideProposal(proposal);
   const acceptDisabledReason = getAcceptDisabledReason(proposal);
   const domainRoute = getProposalDomainRoute(proposal.targetDomain);
+  const domainLabel = getProposalDomainLabel(proposal.targetDomain);
+  const intentLabel = getProposalIntentLabel(proposal.intent);
+  const appliedMessage =
+    proposal.targetDomain === "recipe"
+      ? "Recipe recommendations saved. Your nutrition targets are unchanged."
+      : proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition"
+      ? `Change applied to your ${domainLabel.toLowerCase()} plan.`
+      : proposal.targetDomain === "goal"
+        ? "Change applied to your goals."
+        : proposal.targetDomain === "profile"
+          ? "Change applied to your profile."
+          : "Change recorded in your coaching history.";
   const showValidationNotice =
     isPending && (!canAccept || proposal.validationErrors.length > 0);
+
+  const nutritionSummary =
+    proposal.targetDomain === "nutrition"
+      ? summarizeNutritionProposalChanges(proposal)
+      : [];
 
   return (
     <ProposalConfirmation
@@ -70,8 +89,13 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
           <span
             className={`proposal-domain-pill ${getProposalDomainPillClass(proposal.targetDomain)}`}
           >
-            {getProposalDomainLabel(proposal.targetDomain)}
+            {domainLabel}
           </span>
+          {intentLabel ? (
+            <span className="confirmation-card__meta">
+              {intentLabel} — accept only if you want this plan revision applied.
+            </span>
+          ) : null}
           <span className="confirmation-card__meta">{proposal.reason}</span>
         </>
       }
@@ -112,13 +136,21 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
             </Button>
             {domainRoute ? (
               <Link href={domainRoute} className="confirmation-card__link">
-                View on {getProposalDomainLabel(proposal.targetDomain)} →
+                View on {domainLabel} →
               </Link>
             ) : null}
           </>
         ) : null
       }
     >
+      {nutritionSummary.length > 0 ? (
+        <ul>
+          {nutritionSummary.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
+
       {showValidationNotice ? (
         <div className="notice notice-inline">
           {acceptDisabledReason ? <p className="proposal-meta">{acceptDisabledReason}</p> : null}
@@ -134,8 +166,7 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
 
       {proposal.status === "accepted" ? (
         <div className="confirmation-card__success">
-          Change applied to your {getProposalDomainLabel(proposal.targetDomain).toLowerCase()}{" "}
-          plan.
+          {appliedMessage}
           {domainRoute ? (
             <>
               {" "}

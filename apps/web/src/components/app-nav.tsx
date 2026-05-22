@@ -6,9 +6,14 @@ import { cn } from "../lib/utils";
 
 const links = [
   { href: "/chat", label: "Chat", featured: true },
+  { href: "/today", label: "Today" },
   { href: "/training", label: "Workouts" },
+  { href: "/progress", label: "Progress" },
   { href: "/goals", label: "Goals" },
   { href: "/nutrition", label: "Nutrition" },
+  { href: "/recipes", label: "Recipes" },
+  { href: "/metrics", label: "Metrics" },
+  { href: "/documents", label: "Documents" },
   { href: "/profile", label: "Profile" },
 ] as const;
 

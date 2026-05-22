@@ -7,6 +7,7 @@ import {
   getProposalDomainLabel,
   getProposalDomainPillClass,
   getProposalDomainRoute,
+  getProposalIntentLabel,
   getProposalStatusBadgeTone,
   getProposalStatusLabel,
   mergeProposalsById,
@@ -98,10 +99,20 @@ describe("proposal UI state", () => {
   it("maps proposal domains to user-facing labels and routes", () => {
     expect(getProposalDomainLabel("workout")).toBe("Workout");
     expect(getProposalDomainLabel("goal")).toBe("Goal");
+    expect(getProposalDomainLabel("recipe")).toBe("Recipe");
     expect(getProposalDomainRoute("nutrition")).toBe("/nutrition");
+    expect(getProposalDomainRoute("recipe")).toBe("/recipes");
     expect(getProposalDomainRoute("general")).toBeNull();
     expect(getProposalStatusLabel("pending")).toBe("Pending review");
     expect(getProposalDomainPillClass("profile")).toBe("proposal-domain-pill--profile");
+    expect(getProposalDomainPillClass("recipe")).toBe("proposal-domain-pill--recipe");
+  });
+
+  it("labels progress-derived workout adaptation intents", () => {
+    expect(getProposalIntentLabel("adapt_workout_plan_from_progress")).toContain(
+      "Progress-based",
+    );
+    expect(getProposalIntentLabel("adjust_nutrition_plan")).toBeNull();
   });
 
   it("maps lifecycle states to inline copy and badge tones", () => {

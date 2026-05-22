@@ -1,2 +1,10 @@
 export { colors } from "./colors";
-export { proposalStatusTone, sessionStatusTone, tokens, type StatusTone } from "./tokens";
+export {
+  privacyStatusLabel,
+  privacyStatusTone,
+  proposalStatusTone,
+  sessionStatusTone,
+  tokens,
+  type PrivacyStatus,
+  type StatusTone,
+} from "./tokens";

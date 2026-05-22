@@ -1,4 +1,15 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  date,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  real,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { users } from "./users.js";
 
 export const nutritionPlans = pgTable(
@@ -34,6 +45,32 @@ export const nutritionPlanRevisions = pgTable(
   (table) => ({
     nutritionPlanIdIdx: index("nutrition_plan_revisions_plan_id_idx").on(
       table.nutritionPlanId,
+    ),
+  }),
+);
+
+export const nutritionAdherence = pgTable(
+  "nutrition_adherence",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    hydrationLitersConsumed: real("hydration_liters_consumed"),
+    mealCompletion: jsonb("meal_completion").$type<unknown[]>().default([]).notNull(),
+    targetCompletion: jsonb("target_completion")
+      .$type<Record<string, unknown>>()
+      .default({})
+      .notNull(),
+    notes: jsonb("notes").$type<string[]>().default([]).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userDateUnique: uniqueIndex("nutrition_adherence_user_date_idx").on(
+      table.userId,
+      table.date,
     ),
   }),
 );

@@ -1,6 +1,11 @@
 import { InternalServerErrorException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
-import { toNutritionPlan, toNutritionPlanRevision } from "./nutrition.mapper.js";
+import {
+  mergeAdherenceInput,
+  toNutritionAdherenceRecord,
+  toNutritionPlan,
+  toNutritionPlanRevision,
+} from "./nutrition.mapper.js";
 
 describe("nutrition mappers", () => {
   const timestamp = new Date("2026-05-22T12:00:00.000Z");
@@ -34,13 +39,92 @@ describe("nutrition mappers", () => {
         carbsGrams: 220,
         fatGrams: 70,
         hydrationLiters: 2.5,
+        mealStructure: [{ label: "Breakfast", timingHint: null }],
+        preferences: [],
+        restrictions: [],
         notes: [],
       },
       createdAt: timestamp,
     });
 
     expect(revision.payload.title).toBe("Balanced base");
+    expect(revision.payload.mealStructure).toHaveLength(1);
     expect(revision.createdAt).toBe("2026-05-22T12:00:00.000Z");
+  });
+
+  it("maps adherence rows with structured completion state", () => {
+    const record = toNutritionAdherenceRecord({
+      id: "adherence-1",
+      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      date: "2026-05-22",
+      hydrationLitersConsumed: 1.75,
+      mealCompletion: [{ label: "Breakfast", completed: true }],
+      targetCompletion: { caloriesOnTarget: true },
+      notes: ["Felt good"],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+
+    expect(record.hydrationLitersConsumed).toBe(1.75);
+    expect(record.mealCompletion[0]?.completed).toBe(true);
+  });
+
+  it("merges partial adherence updates onto existing records", () => {
+    const merged = mergeAdherenceInput(
+      "2026-05-22",
+      {
+        hydrationLitersConsumed: 1,
+        mealCompletion: [{ label: "Breakfast", completed: false }],
+        targetCompletion: { caloriesOnTarget: false },
+        notes: ["Initial"],
+      } as never,
+      {
+        hydrationLitersConsumed: 2,
+        notes: ["Updated"],
+      },
+    );
+
+    expect(merged.hydrationLitersConsumed).toBe(2);
+    expect(merged.notes).toEqual(["Updated"]);
+    expect(merged.mealCompletion[0]?.completed).toBe(false);
+  });
+
+  it("merges partial target completion without clearing other flags", () => {
+    const merged = mergeAdherenceInput(
+      "2026-05-22",
+      {
+        hydrationLitersConsumed: null,
+        mealCompletion: [],
+        targetCompletion: {
+          caloriesOnTarget: true,
+          proteinOnTarget: false,
+          carbsOnTarget: null,
+          fatOnTarget: null,
+        },
+        notes: [],
+      } as never,
+      {
+        targetCompletion: { proteinOnTarget: true },
+      },
+    );
+
+    expect(merged.targetCompletion).toEqual({
+      caloriesOnTarget: true,
+      proteinOnTarget: true,
+      carbsOnTarget: null,
+      fatOnTarget: null,
+    });
+  });
+
+  it("creates default adherence state when no existing record is present", () => {
+    const merged = mergeAdherenceInput("2026-05-22", null, {
+      hydrationLitersConsumed: 1.25,
+    });
+
+    expect(merged.date).toBe("2026-05-22");
+    expect(merged.hydrationLitersConsumed).toBe(1.25);
+    expect(merged.mealCompletion).toEqual([]);
+    expect(merged.notes).toEqual([]);
   });
 
   it("throws a stable internal error when stored revision payload is invalid", () => {

@@ -1,6 +1,8 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { upsertNutritionAdherenceSchema } from "@health/types";
+import { Body, Controller, Get, Param, Put, UseGuards } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { ClerkAuthGuard } from "../../auth.guard.js";
+import { parseBody } from "../../common/zod.js";
 import { CurrentAuth } from "../../current-auth.decorator.js";
 import { NutritionService } from "./nutrition.service.js";
 
@@ -17,5 +19,42 @@ export class NutritionController {
   @Get("revisions")
   listRevisions(@CurrentAuth() auth: ClerkAuthContext) {
     return this.nutritionService.listCurrentRevisions(auth);
+  }
+
+  @Get("adherence/today")
+  getTodayAdherence(@CurrentAuth() auth: ClerkAuthContext) {
+    return this.nutritionService.getAdherenceForToday(auth);
+  }
+
+  @Put("adherence/today")
+  upsertTodayAdherence(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Body() body: unknown,
+  ) {
+    return this.nutritionService.upsertAdherenceForToday(
+      auth,
+      parseBody(upsertNutritionAdherenceSchema, body),
+    );
+  }
+
+  @Get("adherence/:date")
+  getAdherenceByDate(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Param("date") date: string,
+  ) {
+    return this.nutritionService.getAdherenceForDate(auth, date);
+  }
+
+  @Put("adherence/:date")
+  upsertAdherenceByDate(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Param("date") date: string,
+    @Body() body: unknown,
+  ) {
+    return this.nutritionService.upsertAdherenceForDate(
+      auth,
+      date,
+      parseBody(upsertNutritionAdherenceSchema, body),
+    );
   }
 }

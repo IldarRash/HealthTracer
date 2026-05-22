@@ -5,9 +5,27 @@ import type {
   WorkoutPlanPayload,
 } from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
+
+export function isPostgresUniqueViolation(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const directCode = (error as { code?: string }).code;
+  if (directCode === "23505") {
+    return true;
+  }
+
+  const cause = (error as { cause?: unknown }).cause;
+  if (typeof cause === "object" && cause !== null) {
+    return (cause as { code?: string }).code === "23505";
+  }
+
+  return false;
+}
 
 @Injectable()
 export class WorkoutsRepository {
@@ -111,6 +129,24 @@ export class WorkoutsRepository {
       .orderBy(desc(workoutSessions.plannedDate), desc(workoutSessions.createdAt));
   }
 
+  async listSessionsByUserIdInDateRange(
+    userId: string,
+    startDate: string,
+    endDate: string,
+  ) {
+    return this.db
+      .select()
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          gte(workoutSessions.plannedDate, startDate),
+          lte(workoutSessions.plannedDate, endDate),
+        ),
+      )
+      .orderBy(desc(workoutSessions.plannedDate), desc(workoutSessions.createdAt));
+  }
+
   async scheduleSession(
     userId: string,
     workoutPlanId: string,
@@ -133,6 +169,19 @@ export class WorkoutsRepository {
     }
 
     return session;
+  }
+
+  async listSessionsByUserAndPlannedDate(userId: string, plannedDate: string) {
+    return this.db
+      .select()
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          eq(workoutSessions.plannedDate, plannedDate),
+        ),
+      )
+      .orderBy(desc(workoutSessions.createdAt));
   }
 
   async findSessionByUserId(userId: string, sessionId: string) {
@@ -210,7 +259,11 @@ export class WorkoutsRepository {
         .where(eq(workoutPlans.id, plan.id))
         .returning();
 
-      return { plan: updatedPlan ?? plan, revision };
+      if (!updatedPlan) {
+        throw new Error("Failed to activate workout plan revision.");
+      }
+
+      return { plan: updatedPlan, revision };
     });
   }
 
@@ -221,6 +274,16 @@ export class WorkoutsRepository {
     source: string,
   ) {
     return this.db.transaction(async (tx) => {
+      const [lockedPlan] = await tx
+        .select({ id: workoutPlans.id, status: workoutPlans.status })
+        .from(workoutPlans)
+        .where(and(eq(workoutPlans.id, workoutPlanId), eq(workoutPlans.status, "active")))
+        .for("update");
+
+      if (!lockedPlan) {
+        throw new Error("Active workout plan not found.");
+      }
+
       const [latestRevision] = await tx
         .select()
         .from(workoutPlanRevisions)
@@ -251,7 +314,7 @@ export class WorkoutsRepository {
           activeRevisionId: revision.id,
           updatedAt: new Date(),
         })
-        .where(eq(workoutPlans.id, workoutPlanId));
+        .where(and(eq(workoutPlans.id, workoutPlanId), eq(workoutPlans.status, "active")));
 
       return revision;
     });

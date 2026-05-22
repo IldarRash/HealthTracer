@@ -1,9 +1,11 @@
 import type { AiProposalRow } from "../chat/chat.repository.js";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
+  adaptWorkoutPlanFromProgressChangesSchema,
   createGoalProposalChangesSchema,
   nutritionPlanPayloadSchema,
   profileProposalChangesSchema,
+  recipeRecommendationProposalPayloadSchema,
   todayChecklistPayloadSchema,
   updateGoalProposalChangesSchema,
   workoutPlanPayloadSchema,
@@ -12,6 +14,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { GoalsService } from "../goals/goals.service.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
 import { ProfilesService } from "../profiles/profiles.service.js";
+import { RecipesService } from "../recipes/recipes.service.js";
 import { TodayService } from "../today/today.service.js";
 import { WorkoutsService } from "../workouts/workouts.service.js";
 
@@ -22,6 +25,7 @@ export class ProposalApplyService {
     private readonly goalsService: GoalsService,
     private readonly workoutsService: WorkoutsService,
     private readonly nutritionService: NutritionService,
+    private readonly recipesService: RecipesService,
     private readonly todayService: TodayService,
   ) {}
 
@@ -54,14 +58,20 @@ export class ProposalApplyService {
         return `goal:${goal.id}`;
       }
       case "create_workout_plan":
-      case "adapt_workout_plan": {
-        const payload = workoutPlanPayloadSchema.parse(proposal.proposedChanges);
+      case "adapt_workout_plan":
+      case "adapt_workout_plan_from_progress": {
+        const payload =
+          proposal.intent === "adapt_workout_plan_from_progress"
+            ? adaptWorkoutPlanFromProgressChangesSchema.parse(proposal.proposedChanges).plan
+            : workoutPlanPayloadSchema.parse(proposal.proposedChanges);
 
         return this.workoutsService.applyWorkoutPlanProposal(
           userId,
           payload,
           proposal.reason,
-          proposal.intent,
+          proposal.intent === "adapt_workout_plan_from_progress"
+            ? "adapt_workout_plan"
+            : proposal.intent,
         );
       }
       case "create_nutrition_plan":
@@ -73,6 +83,17 @@ export class ProposalApplyService {
           payload,
           proposal.reason,
           proposal.intent,
+        );
+      }
+      case "recommend_recipes": {
+        const payload = recipeRecommendationProposalPayloadSchema.parse(
+          proposal.proposedChanges,
+        );
+
+        return this.recipesService.applyRecipeRecommendationProposal(
+          userId,
+          payload,
+          proposal.reason,
         );
       }
       case "create_today_checklist": {

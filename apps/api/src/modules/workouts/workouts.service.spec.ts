@@ -124,6 +124,40 @@ describe("WorkoutsService", () => {
     expect(session.feedback.notes).toBe("Felt strong.");
   });
 
+  it("appends a revision when create races with an existing active plan", async () => {
+    let findCount = 0;
+    let appendCalled = false;
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => {
+          findCount += 1;
+          return findCount === 1 ? null : { id: "plan-race-1" };
+        },
+        createPlanWithRevision: async () => {
+          throw Object.assign(new Error("duplicate active workout plan"), {
+            code: "23505",
+          });
+        },
+        appendRevision: async () => {
+          appendCalled = true;
+          return { id: "rev-append-race" };
+        },
+      } as never,
+      usersService as never,
+    );
+
+    const reference = await service.applyWorkoutPlanProposal(
+      userId,
+      payload,
+      "Starting a new plan.",
+      "create_workout_plan",
+    );
+
+    expect(reference).toBe("workout_revision:rev-append-race");
+    expect(appendCalled).toBe(true);
+  });
+
   it("creates a new plan revision for create_workout_plan intent", async () => {
     let appendCalled = false;
 
@@ -154,6 +188,9 @@ describe("WorkoutsService", () => {
 
   it("appends a revision when adapting an existing plan", async () => {
     let createCalled = false;
+    let appendPlanId: string | undefined;
+    let appendReason: string | undefined;
+    let appendPayload: typeof payload | undefined;
 
     const service = new WorkoutsService(
       {
@@ -162,7 +199,16 @@ describe("WorkoutsService", () => {
           createCalled = true;
           return { revision: { id: "rev-create-2" } };
         },
-        appendRevision: async () => ({ id: "rev-append-2" }),
+        appendRevision: async (
+          planId: string,
+          nextPayload: typeof payload,
+          reason: string,
+        ) => {
+          appendPlanId = planId;
+          appendPayload = nextPayload;
+          appendReason = reason;
+          return { id: "rev-append-2" };
+        },
       } as never,
       usersService as never,
     );
@@ -176,6 +222,9 @@ describe("WorkoutsService", () => {
 
     expect(reference).toBe("workout_revision:rev-append-2");
     expect(createCalled).toBe(false);
+    expect(appendPlanId).toBe("plan-1");
+    expect(appendReason).toBe("Adjusting the current plan.");
+    expect(appendPayload).toEqual(payload);
   });
 
   it("appends a revision for create_workout_plan when an active plan exists", async () => {

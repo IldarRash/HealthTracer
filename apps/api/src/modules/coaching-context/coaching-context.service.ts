@@ -1,8 +1,18 @@
-import type { Goal, User, UserProfile } from "@health/types";
+import type {
+  AiDocumentContextSummary,
+  AiMetricsContextSummary,
+  Goal,
+  User,
+  UserProfile,
+  WeeklyProgressSummaryResponse,
+} from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
+import { DocumentsService } from "../documents/documents.service.js";
 import { GoalsService } from "../goals/goals.service.js";
+import { MetricsAiContextService } from "../health-metrics/metrics-ai-context.service.js";
 import { NutritionRepository } from "../nutrition/nutrition.repository.js";
+import { ProgressService } from "../progress/progress.service.js";
 import { ProfilesService } from "../profiles/profiles.service.js";
 import { UsersService } from "../users/users.service.js";
 import { WorkoutsRepository } from "../workouts/workouts.repository.js";
@@ -13,6 +23,9 @@ export interface CoachingContextSnapshot {
   goals: Goal[];
   activeWorkoutRevisionId: string | null;
   activeNutritionRevisionId: string | null;
+  weeklyProgressSummary: WeeklyProgressSummaryResponse | null;
+  documentContext: AiDocumentContextSummary;
+  metricsSummary: AiMetricsContextSummary;
 }
 
 @Injectable()
@@ -23,15 +36,29 @@ export class CoachingContextService {
     private readonly goalsService: GoalsService,
     private readonly workoutsRepository: WorkoutsRepository,
     private readonly nutritionRepository: NutritionRepository,
+    private readonly progressService: ProgressService,
+    private readonly documentsService: DocumentsService,
+    private readonly metricsAiContextService: MetricsAiContextService,
   ) {}
 
   async buildSnapshot(auth: ClerkAuthContext): Promise<CoachingContextSnapshot> {
     const user = await this.usersService.resolveFromAuth(auth);
-    const [profile, goals, workoutPlan, nutritionPlan] = await Promise.all([
+    const [
+      profile,
+      goals,
+      workoutPlan,
+      nutritionPlan,
+      weeklyProgressSummary,
+      documentContext,
+      metricsSummary,
+    ] = await Promise.all([
       this.profilesService.getCurrentProfile(auth),
       this.goalsService.listCurrentGoals(auth),
       this.workoutsRepository.findActivePlanByUserId(user.id),
       this.nutritionRepository.findActivePlanByUserId(user.id),
+      this.progressService.getLatestSummarySnapshot(user.id),
+      this.documentsService.buildDocumentContextSummary(user.id),
+      this.metricsAiContextService.buildSummaryForUser(user.id),
     ]);
 
     return {
@@ -40,6 +67,9 @@ export class CoachingContextService {
       goals,
       activeWorkoutRevisionId: workoutPlan?.activeRevisionId ?? null,
       activeNutritionRevisionId: nutritionPlan?.activeRevisionId ?? null,
+      weeklyProgressSummary,
+      documentContext,
+      metricsSummary,
     };
   }
 
@@ -67,6 +97,30 @@ export class CoachingContextService {
       })),
       activeWorkoutRevisionId: snapshot.activeWorkoutRevisionId,
       activeNutritionRevisionId: snapshot.activeNutritionRevisionId,
+      weeklyProgressSummary: snapshot.weeklyProgressSummary
+        ? {
+            weekStart: snapshot.weeklyProgressSummary.summary.weekStart,
+            weekEnd: snapshot.weeklyProgressSummary.summary.weekEnd,
+            dataStatus: snapshot.weeklyProgressSummary.summary.dataStatus,
+            userMessage: snapshot.weeklyProgressSummary.summary.userMessage,
+            workout: snapshot.weeklyProgressSummary.summary.sourceAggregates.workout,
+            deferredDomains: snapshot.weeklyProgressSummary.summary.deferredDomains.map(
+              (domain) => ({
+                domain: domain.domain,
+                message: domain.message,
+              }),
+            ),
+            trends: snapshot.weeklyProgressSummary.trends.map((trend) => ({
+              domain: trend.domain,
+              trendType: trend.trendType,
+              direction: trend.direction,
+              dataSufficiency: trend.dataSufficiency,
+              message: trend.message,
+            })),
+          }
+        : null,
+      documentContext: snapshot.documentContext,
+      metricsSummary: snapshot.metricsSummary,
     };
   }
 }

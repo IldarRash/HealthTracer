@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
+import { todayChecklistPayloadSchema } from "./today.js";
+
+export { isoDateSchema, isoDateTimeSchema, isCalendarValidIsoDate } from "./dates.js";
 
 export const apiStatusSchema = z.enum(["ok"]);
 
@@ -10,12 +14,6 @@ export const healthResponseSchema = z.object({
 });
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
-
-export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
-  message: "Expected date in YYYY-MM-DD format",
-});
-
-export const isoDateTimeSchema = z.string().datetime();
 
 export const activityLevelSchema = z.enum([
   "sedentary",
@@ -217,6 +215,7 @@ export const proposalTargetDomainSchema = z.enum([
   "goal",
   "workout",
   "nutrition",
+  "recipe",
   "today",
   "general",
 ]);
@@ -229,8 +228,10 @@ export const proposalIntentSchema = z.enum([
   "update_goal",
   "create_workout_plan",
   "adapt_workout_plan",
+  "adapt_workout_plan_from_progress",
   "create_nutrition_plan",
   "adjust_nutrition_plan",
+  "recommend_recipes",
   "create_today_checklist",
   "summarize_progress",
 ]);
@@ -360,6 +361,13 @@ export type CompleteWorkoutSessionInput = z.infer<
   typeof completeWorkoutSessionSchema
 >;
 
+export const nutritionMealSlotSchema = z.object({
+  label: z.string().min(1).max(80),
+  timingHint: z.string().min(1).max(120).nullable().default(null),
+});
+
+export type NutritionMealSlot = z.infer<typeof nutritionMealSlotSchema>;
+
 export const nutritionPlanPayloadSchema = z.object({
   title: z.string().min(1).max(160),
   summary: z.string().min(1).max(1000),
@@ -368,10 +376,42 @@ export const nutritionPlanPayloadSchema = z.object({
   carbsGrams: z.number().int().nonnegative().max(1500).nullable(),
   fatGrams: z.number().int().nonnegative().max(1000).nullable(),
   hydrationLiters: z.number().positive().max(20).nullable(),
+  mealStructure: z.array(nutritionMealSlotSchema).max(8).default([]),
+  preferences: z.array(z.string().min(1).max(160)).max(20).default([]),
+  restrictions: z.array(z.string().min(1).max(160)).max(20).default([]),
+  allergies: z.array(z.string().min(1).max(160)).max(20).default([]),
   notes: z.array(z.string().min(1).max(240)).max(20).default([]),
 });
 
 export type NutritionPlanPayload = z.infer<typeof nutritionPlanPayloadSchema>;
+
+export function getNutritionPlanDomainErrors(payload: NutritionPlanPayload): string[] {
+  const errors: string[] = [];
+
+  const hasTarget =
+    payload.caloriesPerDay != null ||
+    payload.proteinGrams != null ||
+    payload.carbsGrams != null ||
+    payload.fatGrams != null ||
+    payload.hydrationLiters != null;
+
+  if (!hasTarget) {
+    errors.push(
+      "nutrition: At least one daily target (calories, macros, or hydration) is required.",
+    );
+  }
+
+  if (payload.mealStructure.length === 0) {
+    errors.push("nutrition: mealStructure must include at least one meal slot.");
+  }
+
+  const mealLabels = payload.mealStructure.map((meal) => meal.label.trim().toLowerCase());
+  if (new Set(mealLabels).size !== mealLabels.length) {
+    errors.push("nutrition: mealStructure labels must be unique.");
+  }
+
+  return errors;
+}
 
 export const nutritionPlanStatusSchema = z.enum(["active", "archived"]);
 
@@ -409,18 +449,256 @@ export type ActiveNutritionPlanResponse = z.infer<
   typeof activeNutritionPlanResponseSchema
 >;
 
-export const todayChecklistItemSchema = z.object({
-  label: z.string().min(1).max(160),
-  kind: z.enum(["workout", "nutrition", "hydration", "recovery", "habit"]),
+export const nutritionMealCompletionSchema = z.object({
+  label: z.string().min(1).max(80),
   completed: z.boolean().default(false),
 });
 
-export const todayChecklistPayloadSchema = z.object({
-  date: isoDateSchema,
-  items: z.array(todayChecklistItemSchema).min(1).max(30),
+export type NutritionMealCompletion = z.infer<typeof nutritionMealCompletionSchema>;
+
+export const nutritionTargetCompletionSchema = z.object({
+  caloriesOnTarget: z.boolean().nullable().default(null),
+  proteinOnTarget: z.boolean().nullable().default(null),
+  carbsOnTarget: z.boolean().nullable().default(null),
+  fatOnTarget: z.boolean().nullable().default(null),
 });
 
-export type TodayChecklistPayload = z.infer<typeof todayChecklistPayloadSchema>;
+export type NutritionTargetCompletion = z.infer<typeof nutritionTargetCompletionSchema>;
+
+export const nutritionAdherenceStateSchema = z.object({
+  date: isoDateSchema,
+  hydrationLitersConsumed: z.number().nonnegative().max(20).nullable().default(null),
+  mealCompletion: z.array(nutritionMealCompletionSchema).max(8).default([]),
+  targetCompletion: nutritionTargetCompletionSchema.default({
+    caloriesOnTarget: null,
+    proteinOnTarget: null,
+    carbsOnTarget: null,
+    fatOnTarget: null,
+  }),
+  notes: z.array(z.string().min(1).max(240)).max(10).default([]),
+});
+
+export type NutritionAdherenceState = z.infer<typeof nutritionAdherenceStateSchema>;
+
+export const upsertNutritionAdherenceSchema = z.object({
+  hydrationLitersConsumed: z.number().nonnegative().max(20).nullable().optional(),
+  mealCompletion: z.array(nutritionMealCompletionSchema).max(8).optional(),
+  targetCompletion: nutritionTargetCompletionSchema.partial().optional(),
+  notes: z.array(z.string().min(1).max(240)).max(10).optional(),
+});
+
+export type UpsertNutritionAdherenceInput = z.infer<typeof upsertNutritionAdherenceSchema>;
+
+export const nutritionAdherenceRecordSchema = nutritionAdherenceStateSchema.extend({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+
+export type NutritionAdherenceRecord = z.infer<typeof nutritionAdherenceRecordSchema>;
+
+export const nutritionAdherenceResponseSchema = z.object({
+  adherence: nutritionAdherenceRecordSchema.nullable(),
+});
+
+export type NutritionAdherenceResponse = z.infer<typeof nutritionAdherenceResponseSchema>;
+
+export const recipeMealTypeSchema = z.enum([
+  "breakfast",
+  "lunch",
+  "dinner",
+  "snack",
+]);
+
+export type RecipeMealType = z.infer<typeof recipeMealTypeSchema>;
+
+export const recipeStatusSchema = z.enum(["active", "archived"]);
+
+export type RecipeStatus = z.infer<typeof recipeStatusSchema>;
+
+export const recipeIngredientSchema = z.object({
+  name: z.string().min(1).max(160),
+  quantity: z.number().positive().max(10000).nullable().optional(),
+  unit: z.string().min(1).max(40).nullable().optional(),
+  notes: z.string().min(1).max(240).nullable().optional(),
+});
+
+export type RecipeIngredient = z.infer<typeof recipeIngredientSchema>;
+
+export const recipeMacroEstimatesSchema = z.object({
+  estimatedCalories: z.number().int().positive().max(10000),
+  proteinGrams: z.number().int().nonnegative().max(1000),
+  carbsGrams: z.number().int().nonnegative().max(1500),
+  fatGrams: z.number().int().nonnegative().max(1000),
+  fiberGrams: z.number().int().nonnegative().max(500).nullable().optional(),
+});
+
+export type RecipeMacroEstimates = z.infer<typeof recipeMacroEstimatesSchema>;
+
+export const recipeSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(160),
+  description: z.string().min(1).max(2000),
+  ingredients: z.array(recipeIngredientSchema).min(1).max(50),
+  preparationSteps: z.array(z.string().min(1).max(1000)).min(1).max(30),
+  servings: z.number().int().positive().max(20),
+  macroEstimates: recipeMacroEstimatesSchema,
+  mealTypes: z.array(recipeMealTypeSchema).min(1).max(4),
+  tags: z.array(z.string().min(1).max(80)).max(20).default([]),
+  restrictionTags: z.array(z.string().min(1).max(80)).max(20).default([]),
+  allergenTags: z.array(z.string().min(1).max(80)).max(20).default([]),
+  prepMinutes: z.number().int().nonnegative().max(600).nullable(),
+  cookMinutes: z.number().int().nonnegative().max(600).nullable(),
+  source: z.string().min(1).max(160),
+  status: recipeStatusSchema,
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+
+export type Recipe = z.infer<typeof recipeSchema>;
+
+export const recipeListQuerySchema = z.object({
+  mealType: recipeMealTypeSchema.optional(),
+  tags: z.array(z.string().min(1).max(80)).max(10).optional(),
+  compatibleWithRestrictions: z.array(z.string().min(1).max(80)).max(20).optional(),
+  minEstimatedCalories: z.coerce.number().int().nonnegative().max(10000).optional(),
+  maxEstimatedCalories: z.coerce.number().int().positive().max(10000).optional(),
+  minProteinGrams: z.coerce.number().int().nonnegative().max(1000).optional(),
+  maxProteinGrams: z.coerce.number().int().nonnegative().max(1000).optional(),
+});
+
+export type RecipeListQuery = z.infer<typeof recipeListQuerySchema>;
+
+export const recipeListResponseSchema = z.object({
+  recipes: z.array(recipeSchema),
+});
+
+export type RecipeListResponse = z.infer<typeof recipeListResponseSchema>;
+
+export const userRecipeRecommendationStatusSchema = z.enum([
+  "pending",
+  "accepted",
+  "dismissed",
+  "completed",
+]);
+
+export type UserRecipeRecommendationStatus = z.infer<
+  typeof userRecipeRecommendationStatusSchema
+>;
+
+export const userRecipeRecommendationSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  recipeId: z.string().uuid(),
+  recipe: recipeSchema.optional(),
+  relatedNutritionPlanRevisionId: z.string().uuid().nullable(),
+  reason: z.string().min(1).max(1000),
+  fitSummary: z.string().min(1).max(500),
+  status: userRecipeRecommendationStatusSchema,
+  shownAt: isoDateTimeSchema,
+  decidedAt: isoDateTimeSchema.nullable(),
+  completedAt: isoDateTimeSchema.nullable(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+
+export type UserRecipeRecommendation = z.infer<typeof userRecipeRecommendationSchema>;
+
+export const userRecipeRecommendationListResponseSchema = z.object({
+  recommendations: z.array(userRecipeRecommendationSchema),
+});
+
+export type UserRecipeRecommendationListResponse = z.infer<
+  typeof userRecipeRecommendationListResponseSchema
+>;
+
+export const updateRecipeRecommendationStatusSchema = z.object({
+  status: userRecipeRecommendationStatusSchema.extract([
+    "accepted",
+    "dismissed",
+    "completed",
+  ]),
+});
+
+export type UpdateRecipeRecommendationStatusInput = z.infer<
+  typeof updateRecipeRecommendationStatusSchema
+>;
+
+export const recipeRecommendationLimitedReasonSchema = z.enum([
+  "no_active_nutrition_plan",
+  "no_compatible_recipes",
+]);
+
+export type RecipeRecommendationLimitedReason = z.infer<
+  typeof recipeRecommendationLimitedReasonSchema
+>;
+
+export const generateRecipeRecommendationsResponseSchema = z.object({
+  recommendations: z.array(userRecipeRecommendationSchema),
+  relatedNutritionPlanRevisionId: z.string().uuid().nullable(),
+  limitedReason: recipeRecommendationLimitedReasonSchema.nullable(),
+});
+
+export type GenerateRecipeRecommendationsResponse = z.infer<
+  typeof generateRecipeRecommendationsResponseSchema
+>;
+
+export const recipeRecommendationItemProposalSchema = z.object({
+  recipeId: z.string().uuid(),
+  reason: z.string().min(1).max(1000),
+  fitSummary: z.string().min(1).max(500),
+});
+
+export type RecipeRecommendationItemProposal = z.infer<
+  typeof recipeRecommendationItemProposalSchema
+>;
+
+export const recipeRecommendationProposalPayloadSchema = z.object({
+  relatedNutritionPlanRevisionId: z.string().uuid().nullable().optional(),
+  recommendations: z.array(recipeRecommendationItemProposalSchema).min(1).max(10),
+});
+
+export type RecipeRecommendationProposalPayload = z.infer<
+  typeof recipeRecommendationProposalPayloadSchema
+>;
+
+export {
+  calculateTodayAdherence,
+  resolveProposalItemStatus,
+  todayAdherenceSummarySchema,
+  todayChecklistItemKindSchema,
+  todayChecklistItemSchema,
+  todayChecklistItemSourceRefSchema,
+  todayChecklistItemSourceTypeSchema,
+  todayChecklistItemStatusSchema,
+  todayChecklistProposalItemSchema,
+  todayChecklistRecordSchema,
+  todayChecklistPayloadSchema,
+  todayDailyFeedbackSchema,
+  todayDayResponseSchema,
+  todayHistoryEntrySchema,
+  todayHistoryQuerySchema,
+  todayHistoryResponseSchema,
+  updateTodayFeedbackSchema,
+  updateTodayItemStatusSchema,
+  type TodayAdherenceSummary,
+  type TodayChecklistItem,
+  type TodayChecklistItemKind,
+  type TodayChecklistItemSourceRef,
+  type TodayChecklistItemSourceType,
+  type TodayChecklistItemStatus,
+  type TodayChecklistPayload,
+  type TodayChecklistProposalItem,
+  type TodayChecklistRecord,
+  type TodayDailyFeedback,
+  type TodayDayResponse,
+  type TodayHistoryEntry,
+  type TodayHistoryQuery,
+  type TodayHistoryResponse,
+  type UpdateTodayFeedbackInput,
+  type UpdateTodayItemStatusInput,
+} from "./today.js";
 
 export const profileProposalChangesSchema = upsertUserProfileSchema;
 
@@ -431,12 +709,24 @@ export const updateGoalProposalChangesSchema = z.object({
   changes: updateGoalSchema,
 });
 
+export const adaptWorkoutPlanFromProgressChangesSchema = z.object({
+  plan: workoutPlanPayloadSchema,
+  sourceSummaryId: z.string().uuid().optional(),
+  sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
+});
+
+export type AdaptWorkoutPlanFromProgressChanges = z.infer<
+  typeof adaptWorkoutPlanFromProgressChangesSchema
+>;
+
 export const proposalChangesSchema = z.union([
   profileProposalChangesSchema,
   createGoalProposalChangesSchema,
   updateGoalProposalChangesSchema,
   workoutPlanPayloadSchema,
+  adaptWorkoutPlanFromProgressChangesSchema,
   nutritionPlanPayloadSchema,
+  recipeRecommendationProposalPayloadSchema,
   todayChecklistPayloadSchema,
   z.record(z.string(), z.unknown()),
 ]);
@@ -495,3 +785,122 @@ export const chatTurnResponseSchema = z.object({
 });
 
 export type ChatTurnResponse = z.infer<typeof chatTurnResponseSchema>;
+
+export * from "./device-metrics.js";
+export * from "./documents.js";
+
+export const progressDomainSchema = z.enum([
+  "workout",
+  "today",
+  "nutrition",
+  "recipes",
+  "recovery",
+]);
+
+export type ProgressDomain = z.infer<typeof progressDomainSchema>;
+
+export const progressDataStatusSchema = z.enum([
+  "sufficient",
+  "partial",
+  "insufficient",
+]);
+
+export type ProgressDataStatus = z.infer<typeof progressDataStatusSchema>;
+
+export const trendDataSufficiencySchema = z.enum([
+  "sufficient",
+  "partial",
+  "insufficient",
+]);
+
+export type TrendDataSufficiency = z.infer<typeof trendDataSufficiencySchema>;
+
+export const trendDirectionSchema = z.enum(["up", "down", "stable", "unknown"]);
+
+export type TrendDirection = z.infer<typeof trendDirectionSchema>;
+
+export const trendTypeSchema = z.enum([
+  "completion_rate",
+  "consistency",
+  "skip_rate",
+  "fatigue_pattern",
+]);
+
+export type TrendType = z.infer<typeof trendTypeSchema>;
+
+export const deferredProgressDomainSchema = z.object({
+  domain: progressDomainSchema,
+  reason: z.string().min(1).max(240),
+  message: z.string().min(1).max(500),
+});
+
+export type DeferredProgressDomain = z.infer<typeof deferredProgressDomainSchema>;
+
+export const workoutProgressAggregateSchema = z.object({
+  plannedCount: z.number().int().nonnegative(),
+  completedCount: z.number().int().nonnegative(),
+  skippedCount: z.number().int().nonnegative(),
+  adherencePercent: z.number().min(0).max(100).nullable(),
+  activeDays: z.number().int().min(0).max(7),
+  sessionIds: z.array(z.string().uuid()).max(50),
+  averageFatigue: z.number().min(1).max(10).nullable(),
+});
+
+export type WorkoutProgressAggregate = z.infer<typeof workoutProgressAggregateSchema>;
+
+export const progressSourceAggregatesSchema = z.object({
+  workout: workoutProgressAggregateSchema.nullable(),
+});
+
+export type ProgressSourceAggregates = z.infer<typeof progressSourceAggregatesSchema>;
+
+export const trendObservationSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  summaryId: z.string().uuid(),
+  weekStart: isoDateSchema,
+  weekEnd: isoDateSchema,
+  domain: progressDomainSchema,
+  trendType: trendTypeSchema,
+  direction: trendDirectionSchema,
+  dataSufficiency: trendDataSufficiencySchema,
+  supportingAggregate: z.record(z.string(), z.unknown()),
+  message: z.string().min(1).max(500),
+  createdAt: isoDateTimeSchema,
+});
+
+export type TrendObservation = z.infer<typeof trendObservationSchema>;
+
+export const weeklyProgressSummarySchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  weekStart: isoDateSchema,
+  weekEnd: isoDateSchema,
+  generatedAt: isoDateTimeSchema,
+  dataStatus: progressDataStatusSchema,
+  sourceAggregates: progressSourceAggregatesSchema,
+  deferredDomains: z.array(deferredProgressDomainSchema),
+  userMessage: z.string().min(1).max(1000),
+  supersededById: z.string().uuid().nullable(),
+  createdAt: isoDateTimeSchema,
+});
+
+export type WeeklyProgressSummary = z.infer<typeof weeklyProgressSummarySchema>;
+
+export const weeklyProgressSummaryResponseSchema = z.object({
+  summary: weeklyProgressSummarySchema,
+  trends: z.array(trendObservationSchema),
+});
+
+export type WeeklyProgressSummaryResponse = z.infer<
+  typeof weeklyProgressSummaryResponseSchema
+>;
+
+export const generateWeeklyProgressSummarySchema = z.object({
+  weekStart: isoDateSchema.optional(),
+  refresh: z.boolean().default(false),
+});
+
+export type GenerateWeeklyProgressSummaryInput = z.infer<
+  typeof generateWeeklyProgressSummarySchema
+>;

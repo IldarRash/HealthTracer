@@ -16,3 +16,19 @@ export function parseBody<TSchema extends z.ZodType>(
 
   return result.data;
 }
+
+export function parseQuery<TSchema extends z.ZodType>(
+  schema: TSchema,
+  value: unknown,
+): z.infer<TSchema> {
+  const result = schema.safeParse(value);
+
+  if (!result.success) {
+    throw new BadRequestException({
+      message: "Invalid query parameters",
+      issues: result.error.issues,
+    });
+  }
+
+  return result.data;
+}

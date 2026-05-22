@@ -13,6 +13,7 @@ export const apiEnvSchema = z.object({
     .url()
     .default("postgres://postgres:postgres@localhost:5432/health_tracer"),
   CLERK_JWKS_URL: z.string().url().optional(),
+  DOCUMENT_STORAGE_PATH: z.string().min(1).default(".data/documents"),
 });
 
 export const env = validateEnv(apiEnvSchema);

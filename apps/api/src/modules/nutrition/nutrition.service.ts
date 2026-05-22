@@ -1,12 +1,23 @@
 import type {
   ActiveNutritionPlanResponse,
+  NutritionAdherenceResponse,
   NutritionPlanPayload,
   NutritionPlanRevision,
+  UpsertNutritionAdherenceInput,
 } from "@health/types";
-import { Injectable } from "@nestjs/common";
+import {
+  getNutritionPlanDomainErrors,
+  isoDateSchema,
+  nutritionPlanPayloadSchema,
+} from "@health/types";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { UsersService } from "../users/users.service.js";
-import { toNutritionPlan, toNutritionPlanRevision } from "./nutrition.mapper.js";
+import {
+  toNutritionAdherenceRecord,
+  toNutritionPlan,
+  toNutritionPlanRevision,
+} from "./nutrition.mapper.js";
 import { NutritionRepository } from "./nutrition.repository.js";
 
 @Injectable()
@@ -48,18 +59,86 @@ export class NutritionService {
     return revisions.map(toNutritionPlanRevision);
   }
 
+  async getAdherenceForToday(auth: ClerkAuthContext): Promise<NutritionAdherenceResponse> {
+    const user = await this.usersService.resolveFromAuth(auth);
+    const date = getDateInTimezone(user.timezone);
+
+    return this.getAdherenceForDate(auth, date);
+  }
+
+  async upsertAdherenceForToday(
+    auth: ClerkAuthContext,
+    input: UpsertNutritionAdherenceInput,
+  ): Promise<NutritionAdherenceResponse> {
+    const user = await this.usersService.resolveFromAuth(auth);
+    const date = getDateInTimezone(user.timezone);
+    const row = await this.nutritionRepository.upsertAdherenceByUserIdAndDate(
+      user.id,
+      date,
+      input,
+    );
+
+    return {
+      adherence: toNutritionAdherenceRecord(row),
+    };
+  }
+
+  async getAdherenceForDate(
+    auth: ClerkAuthContext,
+    date: string,
+  ): Promise<NutritionAdherenceResponse> {
+    const parsedDate = parseAdherenceDate(date);
+    const user = await this.usersService.resolveFromAuth(auth);
+    const row = await this.nutritionRepository.findAdherenceByUserIdAndDate(
+      user.id,
+      parsedDate,
+    );
+
+    return {
+      adherence: row ? toNutritionAdherenceRecord(row) : null,
+    };
+  }
+
+  async upsertAdherenceForDate(
+    auth: ClerkAuthContext,
+    date: string,
+    input: UpsertNutritionAdherenceInput,
+  ): Promise<NutritionAdherenceResponse> {
+    const parsedDate = parseAdherenceDate(date);
+    const user = await this.usersService.resolveFromAuth(auth);
+    const row = await this.nutritionRepository.upsertAdherenceByUserIdAndDate(
+      user.id,
+      parsedDate,
+      input,
+    );
+
+    return {
+      adherence: toNutritionAdherenceRecord(row),
+    };
+  }
+
   async applyNutritionPlanProposal(
     userId: string,
     payload: NutritionPlanPayload,
     reason: string,
     _intent: "create_nutrition_plan" | "adjust_nutrition_plan",
   ): Promise<string> {
+    const parsedPayload = nutritionPlanPayloadSchema.parse(payload);
+    const domainErrors = getNutritionPlanDomainErrors(parsedPayload);
+
+    if (domainErrors.length > 0) {
+      throw new BadRequestException({
+        message: "Nutrition plan payload failed domain validation.",
+        validationErrors: domainErrors,
+      });
+    }
+
     const existingPlan = await this.nutritionRepository.findActivePlanByUserId(userId);
 
     if (!existingPlan) {
       const { revision } = await this.nutritionRepository.createPlanWithRevision(
         userId,
-        payload,
+        parsedPayload,
         reason,
         "ai_proposal",
       );
@@ -69,11 +148,39 @@ export class NutritionService {
 
     const revision = await this.nutritionRepository.appendRevision(
       existingPlan.id,
-      payload,
+      parsedPayload,
       reason,
       "ai_proposal",
     );
 
     return `nutrition_revision:${revision.id}`;
+  }
+}
+
+function parseAdherenceDate(date: string): string {
+  const parsed = isoDateSchema.safeParse(date);
+
+  if (!parsed.success) {
+    throw new BadRequestException("Expected date in YYYY-MM-DD format.");
+  }
+
+  return parsed.data;
+}
+
+function getDateInTimezone(timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
   }
 }

@@ -3,6 +3,7 @@ export {
   type ParsedAiStructuredOutput,
 } from "./structured-output.js";
 export {
+  containsUnsafeDocumentSummaryLanguage,
   containsUnsafeMedicalLanguage,
   validateProposalSafety,
   validateReplySafety,

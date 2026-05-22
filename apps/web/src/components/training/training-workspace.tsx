@@ -3,8 +3,10 @@
 import { useAuth } from "@clerk/nextjs";
 import type { WorkoutSession } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
+  apiQueryKeys,
   completeWorkoutSession,
   getActiveWorkoutPlan,
   listWorkoutRevisions,
@@ -16,10 +18,13 @@ import {
   canSubmitScheduleForm,
   formatExerciseLabel,
   formatLocalIsoDate,
+  getSessionRevisionNote,
   hasActiveWorkoutPlan,
+  isTerminalSessionStatus,
   sessionStatusLabel,
   sortSessionsByPlannedDate,
 } from "../../lib/training-ui-state";
+import { EmptyState, ErrorState, LoadingState } from "../ui";
 
 function formatTimestamp(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -48,7 +53,7 @@ export function TrainingWorkspace() {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
 
   const activePlanQuery = useQuery({
-    queryKey: ["workout-active"],
+    queryKey: apiQueryKeys.workoutActive,
     queryFn: async () => {
       const token = await getToken();
       if (!token) {
@@ -65,7 +70,7 @@ export function TrainingWorkspace() {
   });
 
   const revisionsQuery = useQuery({
-    queryKey: ["workout-revisions"],
+    queryKey: apiQueryKeys.workoutRevisions,
     queryFn: async () => {
       const token = await getToken();
       if (!token) {
@@ -114,8 +119,8 @@ export function TrainingWorkspace() {
     },
     onSuccess: () => {
       setPlannedDate(formatLocalIsoDate(new Date()));
-      void queryClient.invalidateQueries({ queryKey: ["workout-active"] });
-      void queryClient.invalidateQueries({ queryKey: ["workout-revisions"] });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutActive });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutRevisions });
     },
   });
 
@@ -147,14 +152,14 @@ export function TrainingWorkspace() {
       return result.data;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["workout-active"] });
-      void queryClient.invalidateQueries({ queryKey: ["workout-revisions"] });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutActive });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutRevisions });
     },
   });
 
   const active = activePlanQuery.data;
   const activeRevision = active?.activeRevision ?? null;
-  const payload = activeRevision?.payload;
+  const payload = activeRevision?.payload ?? null;
   const sessions = useMemo(
     () => sortSessionsByPlannedDate(active?.sessions ?? []),
     [active?.sessions],
@@ -171,10 +176,7 @@ export function TrainingWorkspace() {
       daysCount: payload.days.length,
     });
   const isBusy =
-    activePlanQuery.isLoading ||
-    revisionsQuery.isLoading ||
-    scheduleSessionMutation.isPending ||
-    completeSessionMutation.isPending;
+    scheduleSessionMutation.isPending || completeSessionMutation.isPending;
 
   const handleSchedule = () => {
     if (!canSchedule || scheduleSessionMutation.isPending) {
@@ -196,133 +198,155 @@ export function TrainingWorkspace() {
     });
   };
 
+  if (activePlanQuery.isLoading || revisionsQuery.isLoading) {
+    return <LoadingState title="Loading your training plan…" />;
+  }
+
+  if (activePlanQuery.isError) {
+    return (
+      <ErrorState
+        title="Workout plan unavailable"
+        description={
+          activePlanQuery.error instanceof Error
+            ? activePlanQuery.error.message
+            : "Your active workout plan could not be loaded."
+        }
+      />
+    );
+  }
+
+  if (revisionsQuery.isError) {
+    return (
+      <ErrorState
+        title="Revision history unavailable"
+        description={
+          revisionsQuery.error instanceof Error
+            ? revisionsQuery.error.message
+            : "Revision history could not be loaded."
+        }
+      />
+    );
+  }
+
+  if (!showPlan || !activeRevision || !payload) {
+    return (
+      <EmptyState
+        title="No active workout plan yet"
+        description="Accept a workout proposal in Chat to create your first plan revision. Training updates only after you approve a change."
+        action={
+          <Link href="/chat" className="confirmation-card__link">
+            Open Chat →
+          </Link>
+        }
+      />
+    );
+  }
+
   return (
     <div className="training-workspace" aria-busy={isBusy || undefined}>
-      {activePlanQuery.isLoading || revisionsQuery.isLoading ? (
-        <p className="muted-text">Loading your training plan…</p>
-      ) : null}
+      <div className="training-layout">
+        <section className="panel panel-prominent training-sessions-panel">
+          <p className="section-label">Today and upcoming</p>
+          <h2>Your sessions</h2>
 
-      {activePlanQuery.isError ? (
-        <p className="form-error" role="alert">
-          {activePlanQuery.error instanceof Error
-            ? activePlanQuery.error.message
-            : "Your active workout plan could not be loaded."}
-        </p>
-      ) : null}
+          <div className="training-schedule-form nested-card">
+            <div className="training-schedule-intro">
+              <p className="section-label">Schedule</p>
+              <h3>Schedule a session</h3>
+              <p className="muted-text">
+                Choose a training day from revision #{activeRevision.revisionNumber} and
+                add it to your calendar.
+              </p>
+            </div>
 
-      {revisionsQuery.isError ? (
-        <p className="form-error" role="alert">
-          {revisionsQuery.error instanceof Error
-            ? revisionsQuery.error.message
-            : "Revision history could not be loaded."}
-        </p>
-      ) : null}
-
-      {activePlanQuery.isSuccess && revisionsQuery.isSuccess && !showPlan ? (
-        <div className="notice notice-inline">
-          <p>
-            No active workout plan yet. Accept a workout proposal in Chat to create your
-            first revision, then return here to follow sessions.
-          </p>
-        </div>
-      ) : null}
-
-      {showPlan && activeRevision && payload ? (
-        <div className="training-layout">
-          <section className="panel panel-prominent training-sessions-panel">
-            <p className="section-label">Today and upcoming</p>
-            <h2>Your sessions</h2>
-
-            <div className="training-schedule-form nested-card">
-              <div className="training-schedule-intro">
-                <p className="section-label">Schedule</p>
-                <h3>Schedule a session</h3>
-                <p className="muted-text">
-                  Choose a training day from your active revision and add it to your calendar.
-                </p>
+            <div className="training-schedule-fields">
+              <div className="training-schedule-field">
+                <label htmlFor="session-planned-date">Planned date</label>
+                <input
+                  id="session-planned-date"
+                  className="training-schedule-input"
+                  type="date"
+                  value={plannedDate}
+                  disabled={scheduleSessionMutation.isPending}
+                  onChange={(event) => setPlannedDate(event.target.value)}
+                />
               </div>
 
-              <div className="training-schedule-fields">
-                <div className="training-schedule-field">
-                  <label htmlFor="session-planned-date">Planned date</label>
-                  <input
-                    id="session-planned-date"
-                    className="training-schedule-input"
-                    type="date"
-                    value={plannedDate}
-                    disabled={scheduleSessionMutation.isPending}
-                    onChange={(event) => setPlannedDate(event.target.value)}
-                  />
-                </div>
-
-                <div className="training-schedule-field">
-                  <label htmlFor="session-training-day">Training day</label>
-                  <select
-                    id="session-training-day"
-                    className="training-schedule-input"
-                    value={selectedDayIndex}
-                    disabled={scheduleSessionMutation.isPending}
-                    onChange={(event) => setSelectedDayIndex(Number(event.target.value))}
-                  >
-                    {payload.days.map((day, index) => (
-                      <option key={`${day.day}-${day.focus}`} value={index}>
-                        {buildSessionTitleFromDay(day)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {selectedDay ? (
-                  <div className="training-schedule-preview" aria-live="polite">
-                    <p className="section-label">Session preview</p>
-                    <div className="training-schedule-preview-header">
-                      <strong>{buildSessionTitleFromDay(selectedDay)}</strong>
-                    </div>
-                    {selectedDay.exercises.length > 0 ? (
-                      <ul className="training-exercise-list training-schedule-preview-exercises">
-                        {selectedDay.exercises.map((exercise, index) => (
-                          <li key={`schedule-${selectedDayIndex}-${index}`}>
-                            {formatExerciseLabel(exercise)}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="muted-text training-schedule-preview-empty">
-                        No exercises listed for this day.
-                      </p>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="training-schedule-actions action-row proposal-actions">
-                <button
-                  type="button"
-                  className="button button-primary"
-                  disabled={!canSchedule || scheduleSessionMutation.isPending}
-                  onClick={handleSchedule}
+              <div className="training-schedule-field">
+                <label htmlFor="session-training-day">Training day</label>
+                <select
+                  id="session-training-day"
+                  className="training-schedule-input"
+                  value={selectedDayIndex}
+                  disabled={scheduleSessionMutation.isPending}
+                  onChange={(event) => setSelectedDayIndex(Number(event.target.value))}
                 >
-                  {scheduleSessionMutation.isPending ? "Scheduling…" : "Schedule session"}
-                </button>
+                  {payload.days.map((day, index) => (
+                    <option key={`${day.day}-${day.focus}`} value={index}>
+                      {buildSessionTitleFromDay(day)}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {scheduleSessionMutation.isError ? (
-                <p className="form-error training-schedule-error" role="alert">
-                  {scheduleSessionMutation.error instanceof Error
-                    ? scheduleSessionMutation.error.message
-                    : "Session could not be scheduled."}
-                </p>
+              {selectedDay ? (
+                <div className="training-schedule-preview" aria-live="polite">
+                  <p className="section-label">Session preview</p>
+                  <div className="training-schedule-preview-header">
+                    <strong>{buildSessionTitleFromDay(selectedDay)}</strong>
+                  </div>
+                  {selectedDay.exercises.length > 0 ? (
+                    <ul className="training-exercise-list training-schedule-preview-exercises">
+                      {selectedDay.exercises.map((exercise, index) => (
+                        <li key={`schedule-${selectedDayIndex}-${index}`}>
+                          {formatExerciseLabel(exercise)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted-text training-schedule-preview-empty">
+                      No exercises listed for this day.
+                    </p>
+                  )}
+                </div>
               ) : null}
             </div>
 
-            {sessions.length === 0 ? (
-              <p className="muted-text">
-                No sessions on the calendar yet. They appear here when scheduled against
-                your active revision.
+            <div className="training-schedule-actions action-row proposal-actions">
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={!canSchedule || scheduleSessionMutation.isPending}
+                onClick={handleSchedule}
+              >
+                {scheduleSessionMutation.isPending ? "Scheduling…" : "Schedule session"}
+              </button>
+            </div>
+
+            {scheduleSessionMutation.isError ? (
+              <p className="form-error training-schedule-error" role="alert">
+                {scheduleSessionMutation.error instanceof Error
+                  ? scheduleSessionMutation.error.message
+                  : "Session could not be scheduled."}
               </p>
-            ) : (
-              <ul className="training-session-list">
-                {sessions.map((session) => (
+            ) : null}
+          </div>
+
+          {sessions.length === 0 ? (
+            <p className="muted-text">
+              No sessions on the calendar yet. They appear here when scheduled against
+              your active revision.
+            </p>
+          ) : (
+            <ul className="training-session-list">
+              {sessions.map((session) => {
+                const revisionNote = getSessionRevisionNote({
+                  session,
+                  activeRevisionId: activeRevision.id,
+                  revisions,
+                });
+
+                return (
                   <li key={session.id} className={sessionCardClass(session.status)}>
                     <div className="training-session-header">
                       <div>
@@ -333,6 +357,10 @@ export function TrainingWorkspace() {
                         {sessionStatusLabel(session.status)}
                       </span>
                     </div>
+
+                    {revisionNote ? (
+                      <p className="muted-text training-session-revision-note">{revisionNote}</p>
+                    ) : null}
 
                     {session.exercises.length > 0 ? (
                       <ul className="training-exercise-list">
@@ -346,27 +374,37 @@ export function TrainingWorkspace() {
 
                     {session.feedback.notes ? (
                       <div className="training-feedback-callout">
-                        <span className="training-feedback-label">Coach note</span>
+                        <span className="training-feedback-label">Session note</span>
                         <p>{session.feedback.notes}</p>
                       </div>
                     ) : null}
 
                     {session.completedAt ? (
                       <p className="muted-text">
-                        Logged {formatTimestamp(session.completedAt)}
+                        {isTerminalSessionStatus(session.status)
+                          ? "Logged"
+                          : "Updated"}{" "}
+                        {formatTimestamp(session.completedAt)}
+                      </p>
+                    ) : null}
+
+                    {isTerminalSessionStatus(session.status) ? (
+                      <p className="muted-text">
+                        This session is closed. It stays linked to the revision it was
+                        scheduled from.
                       </p>
                     ) : null}
 
                     {canCompleteSession(session) ? (
                       <div className="training-session-actions">
                         <label className="sr-only" htmlFor={`session-notes-${session.id}`}>
-                          Session notes for coach
+                          Session notes
                         </label>
                         <textarea
                           id={`session-notes-${session.id}`}
                           rows={2}
                           className="form-textarea training-notes-input"
-                          placeholder="Optional note for your coach (how it felt, adjustments)…"
+                          placeholder="Optional note (how it felt, adjustments you made)…"
                           value={feedbackNotes[session.id] ?? ""}
                           disabled={completeSessionMutation.isPending}
                           onChange={(event) =>
@@ -397,103 +435,107 @@ export function TrainingWorkspace() {
                       </div>
                     ) : null}
                   </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {completeSessionMutation.isError ? (
+            <p className="form-error" role="alert">
+              {completeSessionMutation.error instanceof Error
+                ? completeSessionMutation.error.message
+                : "Session could not be updated."}
+            </p>
+          ) : null}
+        </section>
+
+        <section className="panel panel-plan training-plan-panel">
+          <p className="section-label">Active revision</p>
+          <h2>{payload.title}</h2>
+          <p>{payload.summary}</p>
+
+          <dl className="training-meta">
+            <dt>Revision</dt>
+            <dd>#{activeRevision.revisionNumber}</dd>
+            <dt>Source</dt>
+            <dd>{activeRevision.source}</dd>
+            <dt>Updated</dt>
+            <dd>{formatTimestamp(activeRevision.createdAt)}</dd>
+            <dt>Why this revision</dt>
+            <dd>{activeRevision.reason}</dd>
+          </dl>
+
+          {payload.notes.length > 0 ? (
+            <div className="training-notes">
+              <h3>Coach notes</h3>
+              <ul>
+                {payload.notes.map((note) => (
+                  <li key={note}>{note}</li>
                 ))}
               </ul>
-            )}
+            </div>
+          ) : null}
 
-            {completeSessionMutation.isError ? (
-              <p className="form-error" role="alert">
-                {completeSessionMutation.error instanceof Error
-                  ? completeSessionMutation.error.message
-                  : "Session could not be updated."}
-              </p>
-            ) : null}
-          </section>
+          <h3>Training days</h3>
+          <ul className="training-day-list">
+            {payload.days.map((day) => (
+              <li key={`${day.day}-${day.focus}`} className="training-day-card nested-card">
+                <div className="training-day-header">
+                  <strong>{day.day}</strong>
+                  <span>{day.focus}</span>
+                </div>
+                {day.exercises.length > 0 ? (
+                  <ul className="training-exercise-list">
+                    {day.exercises.map((exercise, index) => (
+                      <li key={`${day.day}-${index}`}>{formatExerciseLabel(exercise)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted-text">No exercises listed for this day.</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
 
-          <section className="panel panel-plan training-plan-panel">
-            <p className="section-label">Active revision</p>
-            <h2>{payload.title}</h2>
-            <p>{payload.summary}</p>
-
-            <dl className="training-meta">
-              <dt>Revision</dt>
-              <dd>#{activeRevision.revisionNumber}</dd>
-              <dt>Source</dt>
-              <dd>{activeRevision.source}</dd>
-              <dt>Updated</dt>
-              <dd>{formatTimestamp(activeRevision.createdAt)}</dd>
-              <dt>Why this revision</dt>
-              <dd>{activeRevision.reason}</dd>
-            </dl>
-
-            {payload.notes.length > 0 ? (
-              <div className="training-notes">
-                <h3>Coach notes</h3>
-                <ul>
-                  {payload.notes.map((note) => (
-                    <li key={note}>{note}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            <h3>Training days</h3>
-            <ul className="training-day-list">
-              {payload.days.map((day) => (
-                <li key={`${day.day}-${day.focus}`} className="training-day-card nested-card">
-                  <div className="training-day-header">
-                    <strong>{day.day}</strong>
-                    <span>{day.focus}</span>
+        <section className="panel panel-secondary panel-wide training-history-panel">
+          <p className="section-label">Past revisions</p>
+          <h2>Revision history</h2>
+          <p className="muted-text">
+            Earlier revisions stay on record. Sessions you already scheduled keep their
+            original revision even after you adapt your plan.
+          </p>
+          {revisions.length === 0 ? (
+            <p className="muted-text">No earlier revisions yet.</p>
+          ) : (
+            <ul className="training-revision-list">
+              {revisions.map((revision) => (
+                <li
+                  key={revision.id}
+                  className={
+                    revision.id === activeRevision.id
+                      ? "training-revision-card nested-card active"
+                      : "training-revision-card nested-card"
+                  }
+                >
+                  <div className="training-revision-header">
+                    <strong>
+                      #{revision.revisionNumber} · {revision.payload.title}
+                    </strong>
+                    {revision.id === activeRevision.id ? (
+                      <span className="badge badge-valid">Active</span>
+                    ) : null}
                   </div>
-                  {day.exercises.length > 0 ? (
-                    <ul className="training-exercise-list">
-                      {day.exercises.map((exercise, index) => (
-                        <li key={`${day.day}-${index}`}>{formatExerciseLabel(exercise)}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="muted-text">No exercises listed for this day.</p>
-                  )}
+                  <p className="muted-text">{revision.reason}</p>
+                  <p className="muted-text">
+                    {revision.source} · {formatTimestamp(revision.createdAt)}
+                  </p>
                 </li>
               ))}
             </ul>
-          </section>
-
-          <section className="panel panel-secondary panel-wide training-history-panel">
-            <p className="section-label">Past revisions</p>
-            <h2>Revision history</h2>
-            {revisions.length === 0 ? (
-              <p className="muted-text">No earlier revisions yet.</p>
-            ) : (
-              <ul className="training-revision-list">
-                {revisions.map((revision) => (
-                  <li
-                    key={revision.id}
-                    className={
-                      revision.id === activeRevision.id
-                        ? "training-revision-card nested-card active"
-                        : "training-revision-card nested-card"
-                    }
-                  >
-                    <div className="training-revision-header">
-                      <strong>
-                        #{revision.revisionNumber} · {revision.payload.title}
-                      </strong>
-                      {revision.id === activeRevision.id ? (
-                        <span className="badge badge-valid">Active</span>
-                      ) : null}
-                    </div>
-                    <p className="muted-text">{revision.reason}</p>
-                    <p className="muted-text">
-                      {revision.source} · {formatTimestamp(revision.createdAt)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
-      ) : null}
+          )}
+        </section>
+      </div>
     </div>
   );
 }

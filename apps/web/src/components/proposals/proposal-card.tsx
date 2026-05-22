@@ -3,7 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import type { AiProposal } from "@health/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { decideProposal, getAcceptedProposalRefreshQueryKeys } from "../../lib/api";
+import { decideProposal, apiQueryKeys, getAcceptedProposalRefreshQueryKeys } from "../../lib/api";
 import {
   canAcceptProposal,
   canDecideProposal,
@@ -35,7 +35,7 @@ export function ProposalCard({ proposal, compact = false, onDecision }: Proposal
       return result.data;
     },
     onSuccess: (updated) => {
-      void queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", proposal.threadId] });
       for (const queryKey of getAcceptedProposalRefreshQueryKeys(updated)) {
         void queryClient.invalidateQueries({ queryKey });

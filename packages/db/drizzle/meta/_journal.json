@@ -29,6 +29,69 @@
       "when": 1779438420000,
       "tag": "0003_workout_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779440000000,
+      "tag": "0004_recipes",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779441000000,
+      "tag": "0004_daily_checklist_phase5",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779463095521,
+      "tag": "0005_lush_hawkeye",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779463500000,
+      "tag": "0005_workout_plan_invariants",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779463800000,
+      "tag": "0006_nutrition_adherence",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779464000000,
+      "tag": "0006_device_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779465000000,
+      "tag": "0007_health_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779463227665,
+      "tag": "0011_regular_night_nurse",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779466000000,
+      "tag": "0012_workout_active_revision_same_plan",
+      "breakpoints": true
     }
   ]
 }

@@ -4,11 +4,22 @@ import {
   chatMessages,
   chatThreads,
   dailyChecklists,
+  deviceConnections,
+  deviceConsents,
+  healthDocumentSummaries,
+  healthDocuments,
   goals,
+  healthMetricAggregates,
+  healthMetricSnapshots,
   nutritionPlanRevisions,
   nutritionPlans,
+  nutritionAdherence,
+  recipes,
+  trendObservations,
   userProfiles,
+  userRecipeRecommendations,
   users,
+  weeklyProgressSummaries,
   workoutPlanRevisions,
   workoutPlans,
   workoutSessions,
@@ -25,7 +36,13 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   workoutPlans: many(workoutPlans),
   workoutSessions: many(workoutSessions),
   nutritionPlans: many(nutritionPlans),
+  nutritionAdherence: many(nutritionAdherence),
   dailyChecklists: many(dailyChecklists),
+  recipeRecommendations: many(userRecipeRecommendations),
+  deviceConsents: many(deviceConsents),
+  deviceConnections: many(deviceConnections),
+  healthMetricSnapshots: many(healthMetricSnapshots),
+  healthMetricAggregates: many(healthMetricAggregates),
 }));
 
 export const userProfilesRelations = relations(userProfiles, ({ one }) => ({
@@ -126,9 +143,130 @@ export const nutritionPlanRevisionsRelations = relations(
   }),
 );
 
+export const nutritionAdherenceRelations = relations(nutritionAdherence, ({ one }) => ({
+  user: one(users, {
+    fields: [nutritionAdherence.userId],
+    references: [users.id],
+  }),
+}));
+
 export const dailyChecklistsRelations = relations(dailyChecklists, ({ one }) => ({
   user: one(users, {
     fields: [dailyChecklists.userId],
     references: [users.id],
   }),
 }));
+
+export const weeklyProgressSummariesRelations = relations(
+  weeklyProgressSummaries,
+  ({ many, one }) => ({
+    user: one(users, {
+      fields: [weeklyProgressSummaries.userId],
+      references: [users.id],
+    }),
+    trends: many(trendObservations),
+  }),
+);
+
+export const trendObservationsRelations = relations(trendObservations, ({ one }) => ({
+  user: one(users, {
+    fields: [trendObservations.userId],
+    references: [users.id],
+  }),
+  summary: one(weeklyProgressSummaries, {
+    fields: [trendObservations.summaryId],
+    references: [weeklyProgressSummaries.id],
+  }),
+}));
+
+export const recipesRelations = relations(recipes, ({ many }) => ({
+  recommendations: many(userRecipeRecommendations),
+}));
+
+export const userRecipeRecommendationsRelations = relations(
+  userRecipeRecommendations,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userRecipeRecommendations.userId],
+      references: [users.id],
+    }),
+    recipe: one(recipes, {
+      fields: [userRecipeRecommendations.recipeId],
+      references: [recipes.id],
+    }),
+    relatedNutritionPlanRevision: one(nutritionPlanRevisions, {
+      fields: [userRecipeRecommendations.relatedNutritionPlanRevisionId],
+      references: [nutritionPlanRevisions.id],
+    }),
+  }),
+);
+
+export const deviceConsentsRelations = relations(deviceConsents, ({ many, one }) => ({
+  user: one(users, {
+    fields: [deviceConsents.userId],
+    references: [users.id],
+  }),
+  connections: many(deviceConnections),
+  snapshots: many(healthMetricSnapshots),
+  aggregates: many(healthMetricAggregates),
+}));
+
+export const deviceConnectionsRelations = relations(deviceConnections, ({ one, many }) => ({
+  user: one(users, {
+    fields: [deviceConnections.userId],
+    references: [users.id],
+  }),
+  consent: one(deviceConsents, {
+    fields: [deviceConnections.consentId],
+    references: [deviceConsents.id],
+  }),
+  snapshots: many(healthMetricSnapshots),
+}));
+
+export const healthMetricSnapshotsRelations = relations(healthMetricSnapshots, ({ one }) => ({
+  user: one(users, {
+    fields: [healthMetricSnapshots.userId],
+    references: [users.id],
+  }),
+  consent: one(deviceConsents, {
+    fields: [healthMetricSnapshots.consentId],
+    references: [deviceConsents.id],
+  }),
+  deviceConnection: one(deviceConnections, {
+    fields: [healthMetricSnapshots.deviceConnectionId],
+    references: [deviceConnections.id],
+  }),
+}));
+
+export const healthMetricAggregatesRelations = relations(healthMetricAggregates, ({ one }) => ({
+  user: one(users, {
+    fields: [healthMetricAggregates.userId],
+    references: [users.id],
+  }),
+  consent: one(deviceConsents, {
+    fields: [healthMetricAggregates.consentId],
+    references: [deviceConsents.id],
+  }),
+}));
+
+export const healthDocumentsRelations = relations(healthDocuments, ({ many, one }) => ({
+  user: one(users, {
+    fields: [healthDocuments.userId],
+    references: [users.id],
+  }),
+  summaries: many(healthDocumentSummaries),
+}));
+
+export const healthDocumentSummariesRelations = relations(
+  healthDocumentSummaries,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [healthDocumentSummaries.userId],
+      references: [users.id],
+    }),
+    document: one(healthDocuments, {
+      fields: [healthDocumentSummaries.healthDocumentId],
+      references: [healthDocuments.id],
+    }),
+  }),
+);
