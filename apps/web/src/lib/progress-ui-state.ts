@@ -152,15 +152,34 @@ export function summarizeWorkoutAggregate(
       ? "Adherence not calculated"
       : `${aggregate.adherencePercent}% adherence`;
 
+  const detailParts = [
+    adherence,
+    `${aggregate.skippedCount} skipped`,
+    `${aggregate.activeDays} active day${aggregate.activeDays === 1 ? "" : "s"}`,
+  ];
+
+  if (aggregate.averageFatigue !== null) {
+    detailParts.push(`average fatigue ${aggregate.averageFatigue}/10`);
+  }
+
+  if (
+    aggregate.exercisePlannedCount > 0 &&
+    aggregate.exerciseCompletionPercent !== null
+  ) {
+    detailParts.push(`${aggregate.exerciseCompletionPercent}% exercises completed`);
+  }
+
+  if (aggregate.partialSessionCount > 0) {
+    detailParts.push(
+      `${aggregate.partialSessionCount} partial session${
+        aggregate.partialSessionCount === 1 ? "" : "s"
+      }`,
+    );
+  }
+
   return {
     headline: `${aggregate.completedCount} of ${aggregate.plannedCount} sessions completed`,
-    detail: `${adherence} · ${aggregate.skippedCount} skipped · ${aggregate.activeDays} active day${
-      aggregate.activeDays === 1 ? "" : "s"
-    }${
-      aggregate.averageFatigue === null
-        ? ""
-        : ` · average fatigue ${aggregate.averageFatigue}/10`
-    }`,
+    detail: detailParts.join(" · "),
   };
 }
 

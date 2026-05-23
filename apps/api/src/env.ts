@@ -7,6 +7,7 @@ import { z } from "zod";
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
 
 export const apiEnvSchema = z.object({
+  PORT: z.coerce.number().int().positive().optional(),
   API_PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z
     .string()
@@ -16,4 +17,9 @@ export const apiEnvSchema = z.object({
   DOCUMENT_STORAGE_PATH: z.string().min(1).default(".data/documents"),
 });
 
-export const env = validateEnv(apiEnvSchema);
+const parsedEnv = validateEnv(apiEnvSchema);
+
+export const env = {
+  ...parsedEnv,
+  API_PORT: parsedEnv.PORT ?? parsedEnv.API_PORT,
+};

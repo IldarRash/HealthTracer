@@ -14,6 +14,7 @@ import {
   getTodayNutritionAdherence,
   upsertNutritionAdherence,
   upsertTodayNutritionAdherence,
+  getWorkoutExecutionRefreshQueryKeys,
   getTodayDay,
   getTodayHistory,
   buildRecipeListQueryString,
@@ -35,11 +36,13 @@ import {
   parseApiErrorBody,
   reviewDocumentSummary,
   scheduleWorkoutSession,
+  startTodayWorkout,
   searchDocuments,
   updateDocumentConsent,
   updateTodayFeedback,
   updateRecipeRecommendationStatus,
   updateTodayItemStatus,
+  updateWorkoutSessionExercise,
 } from "./api.js";
 
 const token = "test-token";
@@ -624,6 +627,7 @@ describe("web api helpers", () => {
       },
       createdAt: "2026-05-22T08:00:00.000Z",
       updatedAt: "2026-05-22T08:00:00.000Z",
+      workout: null,
     };
 
     vi.stubGlobal(
@@ -717,6 +721,7 @@ describe("web api helpers", () => {
       },
       createdAt: "2026-05-22T08:00:00.000Z",
       updatedAt: "2026-05-22T12:00:00.000Z",
+      workout: null,
     };
 
     vi.stubGlobal(
@@ -1242,5 +1247,109 @@ describe("web api helpers", () => {
 
     expect(result.data).toBeUndefined();
     expect(result.error).toBe("Document processing failed.");
+  });
+
+  it("starts today workouts and updates session exercises", async () => {
+    const sessionId = "78d40655-b4b5-47b3-b28e-470192e05f04";
+    const exerciseId = "11111111-1111-4111-8111-111111111111";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "POST" && path.endsWith("/workouts/today/2026-05-23/start")) {
+          return new Response(
+            JSON.stringify({
+              sessionId,
+              workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+              workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+              plannedDate: "2026-05-23",
+              weekday: "friday",
+              title: "Strength day",
+              focus: "Lower body",
+              status: "planned",
+              exercises: [
+                {
+                  id: exerciseId,
+                  prescription: { snapshot: { name: "Back squat" }, sets: 4, reps: "5" },
+                  execution: { status: "planned" },
+                },
+              ],
+              isRestDay: false,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        if (
+          method === "PATCH" &&
+          path.endsWith(`/workouts/sessions/${sessionId}/exercises/${exerciseId}`)
+        ) {
+          return new Response(
+            JSON.stringify({
+              id: sessionId,
+              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+              workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+              workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+              plannedDate: "2026-05-23",
+              title: "Strength day",
+              status: "planned",
+              exercises: [
+                {
+                  id: exerciseId,
+                  prescription: { snapshot: { name: "Back squat" }, sets: 4, reps: "5" },
+                  execution: { status: "completed" },
+                },
+              ],
+              feedback: {},
+              completedAt: null,
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-23T12:00:00.000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    const started = await startTodayWorkout(token, "2026-05-23");
+    expect(started.data?.sessionId).toBe(sessionId);
+
+    const updated = await updateWorkoutSessionExercise(token, sessionId, exerciseId, {
+      status: "completed",
+    });
+    expect(updated.data?.exercises[0]).toMatchObject({
+      execution: { status: "completed" },
+    });
+  });
+
+  it("rejects empty workout exercise update payloads before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateWorkoutSessionExercise(
+        token,
+        "78d40655-b4b5-47b3-b28e-470192e05f04",
+        "11111111-1111-4111-8111-111111111111",
+        {},
+      ),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns workout execution refresh query keys", () => {
+    expect(getWorkoutExecutionRefreshQueryKeys()).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.todayDayPrefix,
+        apiQueryKeys.workoutActive,
+        apiQueryKeys.progressWeeklyCurrent,
+      ]),
+    );
   });
 });

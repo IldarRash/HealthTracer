@@ -1,7 +1,9 @@
 import {
   getNutritionPlanDomainErrors,
+  getWorkoutProposalDomainErrors,
   nutritionPlanPayloadSchema,
   recipeRecommendationProposalPayloadSchema,
+  workoutPlanProposalChangesSchema,
 } from "@health/types";
 import { describe, expect, it } from "vitest";
 import {
@@ -30,6 +32,35 @@ describe("ai structured output", () => {
     });
 
     expect(result.ok).toBe(false);
+  });
+
+  it("preserves workout proposedChanges from stub coach output", async () => {
+    const provider = new StubCoachAiProvider();
+    const coachOutput = await provider.generateCoachResponse({
+      userMessage: "Can you suggest a workout plan?",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const parsed = parseAiStructuredOutput(coachOutput);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    expect(parsed.value.proposals[0]?.proposedChanges).toMatchObject({
+      title: "Three day strength base",
+      summary: "A simple weekly structure for consistent training.",
+      days: expect.arrayContaining([
+        expect.objectContaining({ weekday: "monday", focus: "Full body strength" }),
+      ]),
+    });
+
+    const payload = workoutPlanProposalChangesSchema.parse(
+      parsed.value.proposals[0]?.proposedChanges,
+    );
+    expect(payload.days).toHaveLength(3);
   });
 });
 
@@ -103,8 +134,69 @@ describe("StubCoachAiProvider", () => {
       coachingContext: {},
     });
 
-    expect(result.proposals).toHaveLength(1);
-    expect(result.proposals[0]?.intent).toBe("create_workout_plan");
+    const proposals = result.proposals ?? [];
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.intent).toBe("create_workout_plan");
+
+    const payload = workoutPlanProposalChangesSchema.parse(proposals[0]?.proposedChanges);
+    expect(payload.days).toHaveLength(3);
+    expect(payload.days[0]?.weekday).toBe("monday");
+    expect(getWorkoutProposalDomainErrors(payload, { requireStructuredPlan: true })).toEqual([]);
+  });
+
+  it("returns an adapt proposal for easier training requests", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Can you make my workout easier this week?",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const proposals = result.proposals ?? [];
+    expect(proposals[0]?.intent).toBe("adapt_workout_plan");
+    const payload = workoutPlanProposalChangesSchema.parse(proposals[0]?.proposedChanges);
+    expect(payload.adaptationMetadata?.operations[0]?.operation).toBe("reduce_load");
+  });
+
+  it("returns a remove-exercise adapt proposal", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Please remove the farmer carry from my workout",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const proposals = result.proposals ?? [];
+    expect(proposals[0]?.intent).toBe("adapt_workout_plan");
+    const payload = workoutPlanProposalChangesSchema.parse(proposals[0]?.proposedChanges);
+    expect(payload.adaptationMetadata?.operations[0]?.operation).toBe("remove_exercise");
+  });
+
+  it("returns a swap proposal with pending exercise definitions", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Can you swap the row in my workout for a band exercise?",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const proposals = result.proposals ?? [];
+    expect(proposals[0]?.intent).toBe("adapt_workout_plan");
+    const payload = workoutPlanProposalChangesSchema.parse(proposals[0]?.proposedChanges);
+    expect(payload.adaptationMetadata?.operations[0]?.operation).toBe("swap_exercise");
+    expect(payload.pendingExercises?.["band-pull-apart"]?.name).toBe("Band Pull-Apart");
+  });
+
+  it("returns a progress-derived adapt proposal", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Adapt my workout based on weekly progress",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const proposals = result.proposals ?? [];
+    expect(proposals[0]?.intent).toBe("adapt_workout_plan_from_progress");
   });
 
   it("returns a nutrition proposal for meal-related messages", async () => {
@@ -115,11 +207,12 @@ describe("StubCoachAiProvider", () => {
       coachingContext: {},
     });
 
-    expect(result.proposals).toHaveLength(1);
-    expect(result.proposals[0]?.intent).toBe("create_nutrition_plan");
+    const proposals = result.proposals ?? [];
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.intent).toBe("create_nutrition_plan");
 
     const payload = nutritionPlanPayloadSchema.parse(
-      result.proposals[0]?.proposedChanges,
+      proposals[0]?.proposedChanges,
     );
     expect(payload.mealStructure).toEqual([
       { label: "Breakfast", timingHint: null },
@@ -137,12 +230,13 @@ describe("StubCoachAiProvider", () => {
 
     const parsed = parseAiStructuredOutput(result);
     expect(parsed.ok).toBe(true);
-    expect(result.proposals).toHaveLength(1);
-    expect(result.proposals[0]?.intent).toBe("recommend_recipes");
-    expect(result.proposals[0]?.targetDomain).toBe("recipe");
+    const proposals = result.proposals ?? [];
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.intent).toBe("recommend_recipes");
+    expect(proposals[0]?.targetDomain).toBe("recipe");
 
     const payload = recipeRecommendationProposalPayloadSchema.parse(
-      result.proposals[0]?.proposedChanges,
+      proposals[0]?.proposedChanges,
     );
     expect(payload.recommendations).toEqual([
       {

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
 import { todayChecklistPayloadSchema } from "./today.js";
+import {
+  adaptWorkoutPlanFromProgressChangesSchema,
+  workoutPlanProposalChangesSchema,
+} from "./workouts.js";
 
 export { isoDateSchema, isoDateTimeSchema, isCalendarValidIsoDate } from "./dates.js";
 
@@ -238,128 +242,96 @@ export const proposalIntentSchema = z.enum([
 
 export type ProposalIntent = z.infer<typeof proposalIntentSchema>;
 
-export const workoutExerciseSchema = z.object({
-  name: z.string().min(1).max(160),
-  target: z.string().min(1).max(240).nullable().optional(),
-  sets: z.number().int().positive().max(20).nullable().optional(),
-  reps: z.string().min(1).max(80).nullable().optional(),
-  notes: z.string().min(1).max(500).nullable().optional(),
-});
-
-export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
-
-export const workoutExercisePayloadSchema = z.union([
-  z.string().min(1).max(160),
+export {
+  activeWorkoutPlanResponseSchema,
+  adaptWorkoutPlanFromProgressChangesSchema,
+  buildExerciseDisplaySnapshotFromInput,
+  collectPendingExerciseRefs,
+  collectWorkoutPlanExerciseIds,
+  completeWorkoutSessionSchema,
+  countStructuredWorkoutSessionExerciseProgress,
+  deriveWorkoutSessionStatusFromExercises,
+  findReusableWorkoutSession,
+  findWorkoutPlanDayForWeekday,
+  getWorkoutPlanDomainErrors,
+  getWorkoutProposalDomainErrors,
+  inferWeekdayFromDayLabel,
+  isLegacyWorkoutPlanExerciseObject,
+  isStructuredWorkoutPlanExercise,
+  isStructuredWorkoutSessionExercise,
+  deterministicWorkoutSessionExerciseId,
+  normalizeWorkoutPlanDay,
+  normalizeWorkoutSessionExerciseEntry,
+  normalizeWorkoutSessionExercises,
+  normalizeWorkoutPlanExerciseEntry,
+  normalizeWorkoutPlanPayload,
+  pendingExerciseDefinitionSchema,
+  resolveWeekdayFromIsoDate,
+  scheduleWorkoutSessionSchema,
+  toWorkoutSessionExercisePrescription,
+  updateWorkoutSessionExerciseSchema,
+  stripWorkoutPlanProposalExtras,
+  summarizeWorkoutPlanForCoaching,
+  workoutAdaptationOperationRecordSchema,
+  workoutAdaptationOperationSchema,
+  workoutCompletionFeedbackSchema,
+  workoutExerciseDisplaySnapshotSchema,
+  workoutExercisePayloadSchema,
   workoutExerciseSchema,
-]);
-
-export const workoutPlanDaySchema = z.object({
-  day: z.string().min(1).max(80),
-  focus: z.string().min(1).max(160),
-  exercises: z.array(workoutExercisePayloadSchema).max(20).default([]),
-});
-
-export const workoutPlanPayloadSchema = z.object({
-  title: z.string().min(1).max(160),
-  summary: z.string().min(1).max(1000),
-  days: z.array(workoutPlanDaySchema).min(1).max(14),
-  notes: z.array(z.string().min(1).max(240)).max(20).default([]),
-});
-
-export type WorkoutPlanPayload = z.infer<typeof workoutPlanPayloadSchema>;
-
-export const workoutPlanStatusSchema = z.enum(["active", "archived"]);
-
-export type WorkoutPlanStatus = z.infer<typeof workoutPlanStatusSchema>;
-
-export const workoutSessionStatusSchema = z.enum([
-  "planned",
-  "completed",
-  "skipped",
-]);
-
-export type WorkoutSessionStatus = z.infer<typeof workoutSessionStatusSchema>;
-
-export const workoutCompletionFeedbackSchema = z.object({
-  fatigue: z.number().int().min(1).max(10).nullable().optional(),
-  notes: z.string().max(1000).nullable().optional(),
-});
-
-export type WorkoutCompletionFeedback = z.infer<
-  typeof workoutCompletionFeedbackSchema
->;
-
-export const workoutPlanSchema = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid(),
-  activeRevisionId: z.string().uuid().nullable(),
-  status: workoutPlanStatusSchema,
-  createdAt: isoDateTimeSchema,
-  updatedAt: isoDateTimeSchema,
-});
-
-export type WorkoutPlan = z.infer<typeof workoutPlanSchema>;
-
-export const workoutPlanRevisionSchema = z.object({
-  id: z.string().uuid(),
-  workoutPlanId: z.string().uuid(),
-  revisionNumber: z.number().int().positive(),
-  reason: z.string().min(1).max(1000),
-  source: z.string().min(1).max(80),
-  payload: workoutPlanPayloadSchema,
-  createdAt: isoDateTimeSchema,
-});
-
-export type WorkoutPlanRevision = z.infer<typeof workoutPlanRevisionSchema>;
-
-export const workoutSessionSchema = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid(),
-  workoutPlanId: z.string().uuid(),
-  workoutPlanRevisionId: z.string().uuid(),
-  plannedDate: isoDateSchema,
-  title: z.string().min(1).max(160),
-  status: workoutSessionStatusSchema,
-  exercises: z.array(workoutExercisePayloadSchema),
-  feedback: workoutCompletionFeedbackSchema,
-  completedAt: isoDateTimeSchema.nullable(),
-  createdAt: isoDateTimeSchema,
-  updatedAt: isoDateTimeSchema,
-});
-
-export type WorkoutSession = z.infer<typeof workoutSessionSchema>;
-
-export const activeWorkoutPlanResponseSchema = z.object({
-  plan: workoutPlanSchema.nullable(),
-  activeRevision: workoutPlanRevisionSchema.nullable(),
-  sessions: z.array(workoutSessionSchema),
-});
-
-export type ActiveWorkoutPlanResponse = z.infer<
-  typeof activeWorkoutPlanResponseSchema
->;
-
-export const scheduleWorkoutSessionSchema = z.object({
-  workoutPlanRevisionId: z.string().uuid(),
-  plannedDate: isoDateSchema,
-  title: z.string().min(1).max(160),
-  exercises: z.array(workoutExercisePayloadSchema).max(30).default([]),
-});
-
-export type ScheduleWorkoutSessionInput = z.infer<
-  typeof scheduleWorkoutSessionSchema
->;
-
-export const completeWorkoutSessionSchema = z.object({
-  status: workoutSessionStatusSchema.extract(["completed", "skipped"]).default(
-    "completed",
-  ),
-  feedback: workoutCompletionFeedbackSchema.default({}),
-});
-
-export type CompleteWorkoutSessionInput = z.infer<
-  typeof completeWorkoutSessionSchema
->;
+  workoutPlanAdaptationMetadataSchema,
+  workoutPlanDaySchema,
+  workoutPlanExerciseEntrySchema,
+  workoutPlanExerciseSchema,
+  workoutPlanPayloadSchema,
+  workoutPlanProposalChangesSchema,
+  workoutPlanProposalExtrasSchema,
+  workoutPlanRevisionSchema,
+  workoutPlanSchema,
+  workoutPlanStatusSchema,
+  workoutSessionExerciseEntrySchema,
+  workoutSessionExerciseExecutionSchema,
+  workoutSessionExercisePrescriptionSchema,
+  workoutSessionExerciseSchema,
+  workoutSessionExerciseStatusSchema,
+  workoutSessionSchema,
+  workoutSessionStatusSchema,
+  workoutWeekdaySchema,
+  WORKOUT_WEEKDAYS,
+  type ActiveWorkoutPlanResponse,
+  type AdaptWorkoutPlanFromProgressChanges,
+  type CompleteWorkoutSessionInput,
+  type PendingExerciseDefinition,
+  type ScheduleWorkoutSessionInput,
+  type UpdateWorkoutSessionExerciseInput,
+  type WorkoutAdaptationOperation,
+  type WorkoutAdaptationOperationRecord,
+  type WorkoutCompletionFeedback,
+  type WorkoutExercise,
+  type WorkoutExerciseDisplaySnapshot,
+  type WorkoutExercisePayload,
+  type WorkoutPlan,
+  type WorkoutPlanAdaptationMetadata,
+  type WorkoutPlanCoachingDaySummary,
+  type WorkoutPlanCoachingSummary,
+  type WorkoutPlanDay,
+  type WorkoutPlanDomainValidationOptions,
+  type WorkoutPlanExercise,
+  type WorkoutPlanExerciseEntry,
+  type WorkoutPlanPayload,
+  type WorkoutPlanProposalChanges,
+  type WorkoutPlanProposalExtras,
+  type WorkoutPlanRevision,
+  type WorkoutPlanStatus,
+  type WorkoutSession,
+  type WorkoutSessionExercise,
+  type WorkoutSessionExerciseEntry,
+  type WorkoutSessionExerciseExecution,
+  type WorkoutSessionExercisePrescription,
+  type WorkoutSessionExerciseProgressCounts,
+  type WorkoutSessionExerciseStatus,
+  type WorkoutSessionStatus,
+  type WorkoutWeekday,
+} from "./workouts.js";
 
 export const nutritionMealSlotSchema = z.object({
   label: z.string().min(1).max(80),
@@ -680,6 +652,7 @@ export {
   todayHistoryEntrySchema,
   todayHistoryQuerySchema,
   todayHistoryResponseSchema,
+  todayWorkoutDetailSchema,
   updateTodayFeedbackSchema,
   updateTodayItemStatusSchema,
   type TodayAdherenceSummary,
@@ -696,11 +669,13 @@ export {
   type TodayHistoryEntry,
   type TodayHistoryQuery,
   type TodayHistoryResponse,
+  type TodayWorkoutDetail,
   type UpdateTodayFeedbackInput,
   type UpdateTodayItemStatusInput,
 } from "./today.js";
 
-export const profileProposalChangesSchema = upsertUserProfileSchema;
+/** Strict so optional profile fields cannot match and strip other domain payloads in unions. */
+export const profileProposalChangesSchema = upsertUserProfileSchema.strict();
 
 export const createGoalProposalChangesSchema = createGoalSchema;
 
@@ -709,31 +684,149 @@ export const updateGoalProposalChangesSchema = z.object({
   changes: updateGoalSchema,
 });
 
-export const adaptWorkoutPlanFromProgressChangesSchema = z.object({
-  plan: workoutPlanPayloadSchema,
-  sourceSummaryId: z.string().uuid().optional(),
-  sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
-});
+export const emptyProposalChangesSchema = z.object({}).strict();
 
-export type AdaptWorkoutPlanFromProgressChanges = z.infer<
-  typeof adaptWorkoutPlanFromProgressChangesSchema
->;
+export function getProposedChangesSchemaForIntent(
+  intent: ProposalIntent,
+): z.ZodTypeAny {
+  switch (intent) {
+    case "update_profile":
+      return profileProposalChangesSchema;
+    case "create_goal":
+      return createGoalProposalChangesSchema;
+    case "update_goal":
+      return updateGoalProposalChangesSchema;
+    case "create_workout_plan":
+    case "adapt_workout_plan":
+      return workoutPlanProposalChangesSchema;
+    case "adapt_workout_plan_from_progress":
+      return adaptWorkoutPlanFromProgressChangesSchema;
+    case "create_nutrition_plan":
+    case "adjust_nutrition_plan":
+      return nutritionPlanPayloadSchema;
+    case "recommend_recipes":
+      return recipeRecommendationProposalPayloadSchema;
+    case "create_today_checklist":
+      return todayChecklistPayloadSchema;
+    case "summarize_progress":
+      return emptyProposalChangesSchema;
+    default: {
+      const _exhaustive: never = intent;
+      return _exhaustive;
+    }
+  }
+}
 
+function addProposedChangesIssues(
+  intent: ProposalIntent,
+  proposedChanges: unknown,
+  ctx: z.RefinementCtx,
+) {
+  const schema = getProposedChangesSchemaForIntent(intent);
+  const result = schema.safeParse(proposedChanges);
+
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      ctx.addIssue({
+        ...issue,
+        path: ["proposedChanges", ...issue.path],
+      });
+    }
+  }
+}
+
+/** Union for untyped contexts; domain-specific intents use getProposedChangesSchemaForIntent. */
 export const proposalChangesSchema = z.union([
-  profileProposalChangesSchema,
-  createGoalProposalChangesSchema,
-  updateGoalProposalChangesSchema,
-  workoutPlanPayloadSchema,
+  workoutPlanProposalChangesSchema,
   adaptWorkoutPlanFromProgressChangesSchema,
   nutritionPlanPayloadSchema,
   recipeRecommendationProposalPayloadSchema,
   todayChecklistPayloadSchema,
-  z.record(z.string(), z.unknown()),
+  createGoalProposalChangesSchema,
+  updateGoalProposalChangesSchema,
+  profileProposalChangesSchema,
+  emptyProposalChangesSchema,
 ]);
 
 export type ProposalChanges = z.infer<typeof proposalChangesSchema>;
 
-export const aiProposalSchema = z.object({
+const proposalTitleReasonFields = {
+  title: z.string().min(1).max(160),
+  reason: z.string().min(1).max(1000),
+};
+
+export const rawAiProposalSchema = z.discriminatedUnion("intent", [
+  z.object({
+    intent: z.literal("update_profile"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: profileProposalChangesSchema,
+  }),
+  z.object({
+    intent: z.literal("create_goal"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: createGoalProposalChangesSchema,
+  }),
+  z.object({
+    intent: z.literal("update_goal"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: updateGoalProposalChangesSchema,
+  }),
+  z.object({
+    intent: z.literal("create_workout_plan"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: workoutPlanProposalChangesSchema,
+  }),
+  z.object({
+    intent: z.literal("adapt_workout_plan"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: workoutPlanProposalChangesSchema,
+  }),
+  z.object({
+    intent: z.literal("adapt_workout_plan_from_progress"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: adaptWorkoutPlanFromProgressChangesSchema,
+  }),
+  z.object({
+    intent: z.literal("create_nutrition_plan"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: nutritionPlanPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("adjust_nutrition_plan"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: nutritionPlanPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("recommend_recipes"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: recipeRecommendationProposalPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("create_today_checklist"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: todayChecklistPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("summarize_progress"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: emptyProposalChangesSchema,
+  }),
+]);
+
+export type RawAiProposal = z.infer<typeof rawAiProposalSchema>;
+
+const aiProposalCoreSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
   threadId: z.string().uuid(),
@@ -742,7 +835,7 @@ export const aiProposalSchema = z.object({
   targetDomain: proposalTargetDomainSchema,
   title: z.string().min(1).max(160),
   reason: z.string().min(1).max(1000),
-  proposedChanges: proposalChangesSchema,
+  proposedChanges: z.unknown(),
   status: proposalStatusSchema,
   validationStatus: proposalValidationStatusSchema,
   validationErrors: z.array(z.string().min(1).max(500)).default([]),
@@ -752,17 +845,13 @@ export const aiProposalSchema = z.object({
   updatedAt: isoDateTimeSchema,
 });
 
-export type AiProposal = z.infer<typeof aiProposalSchema>;
-
-export const rawAiProposalSchema = z.object({
-  intent: proposalIntentSchema,
-  targetDomain: proposalTargetDomainSchema,
-  title: z.string().min(1).max(160),
-  reason: z.string().min(1).max(1000),
-  proposedChanges: proposalChangesSchema,
+export const aiProposalSchema = aiProposalCoreSchema.superRefine((proposal, ctx) => {
+  addProposedChangesIssues(proposal.intent, proposal.proposedChanges, ctx);
 });
 
-export type RawAiProposal = z.infer<typeof rawAiProposalSchema>;
+export type AiProposal = z.infer<typeof aiProposalCoreSchema> & {
+  proposedChanges: ProposalChanges;
+};
 
 export const aiStructuredOutputSchema = z.object({
   reply: z.string().min(1).max(8000),
@@ -770,6 +859,7 @@ export const aiStructuredOutputSchema = z.object({
 });
 
 export type AiStructuredOutput = z.infer<typeof aiStructuredOutputSchema>;
+export type AiStructuredOutputInput = z.input<typeof aiStructuredOutputSchema>;
 
 export const proposalDecisionSchema = z.object({
   decision: z.enum(["accept", "reject"]),
@@ -788,6 +878,7 @@ export type ChatTurnResponse = z.infer<typeof chatTurnResponseSchema>;
 
 export * from "./device-metrics.js";
 export * from "./documents.js";
+export * from "./exercises.js";
 
 export const progressDomainSchema = z.enum([
   "workout",
@@ -844,6 +935,12 @@ export const workoutProgressAggregateSchema = z.object({
   activeDays: z.number().int().min(0).max(7),
   sessionIds: z.array(z.string().uuid()).max(50),
   averageFatigue: z.number().min(1).max(10).nullable(),
+  exercisePlannedCount: z.number().int().nonnegative().default(0),
+  exerciseCompletedCount: z.number().int().nonnegative().default(0),
+  exerciseSkippedCount: z.number().int().nonnegative().default(0),
+  exerciseAdjustedCount: z.number().int().nonnegative().default(0),
+  exerciseCompletionPercent: z.number().min(0).max(100).nullable().default(null),
+  partialSessionCount: z.number().int().nonnegative().default(0),
 });
 
 export type WorkoutProgressAggregate = z.infer<typeof workoutProgressAggregateSchema>;

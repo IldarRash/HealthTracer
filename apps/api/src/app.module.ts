@@ -6,6 +6,7 @@ import { ChatModule } from "./modules/chat/chat.module.js";
 import { CoachingContextModule } from "./modules/coaching-context/coaching-context.module.js";
 import { DeviceConnectionsModule } from "./modules/device-connections/device-connections.module.js";
 import { DocumentsModule } from "./modules/documents/documents.module.js";
+import { ExercisesModule } from "./modules/exercises/exercises.module.js";
 import { GoalsModule } from "./modules/goals/goals.module.js";
 import { HealthMetricsModule } from "./modules/health-metrics/health-metrics.module.js";
 import { NutritionModule } from "./modules/nutrition/nutrition.module.js";
@@ -24,6 +25,7 @@ import { WorkoutsModule } from "./modules/workouts/workouts.module.js";
     ProfilesModule,
     GoalsModule,
     WorkoutsModule,
+    ExercisesModule,
     NutritionModule,
     RecipesModule,
     TodayModule,

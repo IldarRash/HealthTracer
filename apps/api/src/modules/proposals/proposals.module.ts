@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
+import { ExercisesModule } from "../exercises/exercises.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { ProfilesModule } from "../profiles/profiles.module.js";
@@ -18,6 +19,7 @@ import { ProposalsService } from "./proposals.service.js";
   imports: [
     DatabaseModule,
     UsersModule,
+    ExercisesModule,
     ProfilesModule,
     ProgressModule,
     GoalsModule,

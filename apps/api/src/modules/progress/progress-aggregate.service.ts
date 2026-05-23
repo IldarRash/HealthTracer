@@ -8,6 +8,10 @@ import type {
   WorkoutProgressAggregate,
   WorkoutSession,
 } from "@health/types";
+import {
+  countStructuredWorkoutSessionExerciseProgress,
+  isStructuredWorkoutSessionExercise,
+} from "@health/types";
 
 export interface WeekRange {
   weekStart: string;
@@ -121,6 +125,44 @@ export function aggregateWorkoutSessions(
         ) / 10
       : null;
 
+  let exercisePlannedCount = 0;
+  let exerciseCompletedCount = 0;
+  let exerciseSkippedCount = 0;
+  let exerciseAdjustedCount = 0;
+  let partialSessionCount = 0;
+
+  for (const session of weekSessions) {
+    const progress = countStructuredWorkoutSessionExerciseProgress(session.exercises);
+
+    exercisePlannedCount += progress.planned;
+    exerciseCompletedCount += progress.completed;
+    exerciseSkippedCount += progress.skipped;
+    exerciseAdjustedCount += progress.adjusted;
+
+    const hasStructuredExercises = session.exercises.some(isStructuredWorkoutSessionExercise);
+
+    if (
+      hasStructuredExercises &&
+      session.status === "planned" &&
+      progress.completed + progress.adjusted + progress.skipped > 0 &&
+      progress.planned > 0
+    ) {
+      partialSessionCount += 1;
+    }
+  }
+
+  const totalTrackedExercises =
+    exercisePlannedCount +
+    exerciseCompletedCount +
+    exerciseSkippedCount +
+    exerciseAdjustedCount;
+  const exerciseCompletionPercent =
+    totalTrackedExercises > 0
+      ? Math.round(
+          ((exerciseCompletedCount + exerciseAdjustedCount) / totalTrackedExercises) * 100,
+        )
+      : null;
+
   return {
     plannedCount,
     completedCount,
@@ -129,6 +171,12 @@ export function aggregateWorkoutSessions(
     activeDays,
     sessionIds: weekSessions.map((session) => session.id),
     averageFatigue,
+    exercisePlannedCount,
+    exerciseCompletedCount,
+    exerciseSkippedCount,
+    exerciseAdjustedCount,
+    exerciseCompletionPercent,
+    partialSessionCount,
   };
 }
 

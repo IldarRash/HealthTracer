@@ -1,21 +1,26 @@
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
+  collectWorkoutPlanExerciseIds,
   createGoalProposalChangesSchema,
   getNutritionPlanDomainErrors,
+  getWorkoutProposalDomainErrors,
   nutritionPlanPayloadSchema,
   profileProposalChangesSchema,
   rawAiProposalSchema,
   recipeRecommendationProposalPayloadSchema,
+  stripWorkoutPlanProposalExtras,
   todayChecklistPayloadSchema,
   updateGoalProposalChangesSchema,
-  workoutPlanPayloadSchema,
+  workoutPlanProposalChangesSchema,
   type AdaptWorkoutPlanFromProgressChanges,
   type NutritionPlanPayload,
   type ProposalIntent,
   type RawAiProposal,
+  type WorkoutPlanProposalChanges,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { z } from "zod";
+import { ExercisesService } from "../exercises/exercises.service.js";
 import { ProgressRepository } from "../progress/progress.repository.js";
 
 export interface ProposalValidationResult {
@@ -25,7 +30,10 @@ export interface ProposalValidationResult {
 
 @Injectable()
 export class ProposalValidationService {
-  constructor(private readonly progressRepository: ProgressRepository) {}
+  constructor(
+    private readonly progressRepository: ProgressRepository,
+    private readonly exercisesService: ExercisesService,
+  ) {}
 
   validateRawProposal(proposal: RawAiProposal): ProposalValidationResult {
     const envelope = rawAiProposalSchema.safeParse(proposal);
@@ -76,6 +84,28 @@ export class ProposalValidationService {
       }
     }
 
+    if (intent === "create_workout_plan" || intent === "adapt_workout_plan") {
+      const domainErrors = getWorkoutProposalDomainErrors(
+        result.data as WorkoutPlanProposalChanges,
+        { requireStructuredPlan: true },
+      );
+
+      if (domainErrors.length > 0) {
+        return { valid: false, errors: domainErrors };
+      }
+    }
+
+    if (intent === "adapt_workout_plan_from_progress") {
+      const domainErrors = getWorkoutProposalDomainErrors(
+        (result.data as AdaptWorkoutPlanFromProgressChanges).plan,
+        { requireStructuredPlan: true },
+      );
+
+      if (domainErrors.length > 0) {
+        return { valid: false, errors: domainErrors };
+      }
+    }
+
     return { valid: true, errors: [] };
   }
 
@@ -95,6 +125,30 @@ export class ProposalValidationService {
     }
 
     return this.getProgressProvenanceErrors(userId, parsed.data);
+  }
+
+  async validateExerciseReferences(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    const planChanges = extractWorkoutProposalChanges(intent, proposedChanges);
+
+    if (!planChanges) {
+      return [];
+    }
+
+    const plan = stripWorkoutPlanProposalExtras(planChanges);
+    const exerciseIds = collectWorkoutPlanExerciseIds(plan);
+    const inaccessibleExerciseIds = await this.exercisesService.findInaccessibleExerciseIds(
+      exerciseIds,
+      userId,
+    );
+
+    return inaccessibleExerciseIds.map(
+      (exerciseId) =>
+        `proposedChanges: exerciseId "${exerciseId}" was not found in the visible exercise catalog.`,
+    );
   }
 
   private async getProgressProvenanceErrors(
@@ -145,6 +199,23 @@ export class ProposalValidationService {
   }
 }
 
+function extractWorkoutProposalChanges(
+  intent: ProposalIntent,
+  proposedChanges: unknown,
+): WorkoutPlanProposalChanges | null {
+  if (intent === "create_workout_plan" || intent === "adapt_workout_plan") {
+    const parsed = workoutPlanProposalChangesSchema.safeParse(proposedChanges);
+    return parsed.success ? parsed.data : null;
+  }
+
+  if (intent === "adapt_workout_plan_from_progress") {
+    const parsed = adaptWorkoutPlanFromProgressChangesSchema.safeParse(proposedChanges);
+    return parsed.success ? parsed.data.plan : null;
+  }
+
+  return null;
+}
+
 function getChangesSchemaForIntent(
   intent: ProposalIntent,
 ): z.ZodType | null {
@@ -157,7 +228,7 @@ function getChangesSchemaForIntent(
       return updateGoalProposalChangesSchema;
     case "create_workout_plan":
     case "adapt_workout_plan":
-      return workoutPlanPayloadSchema;
+      return workoutPlanProposalChangesSchema;
     case "adapt_workout_plan_from_progress":
       return adaptWorkoutPlanFromProgressChangesSchema;
     case "create_nutrition_plan":

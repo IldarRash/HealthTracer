@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
+import {
+  workoutSessionExerciseSchema,
+  workoutSessionStatusSchema,
+  workoutWeekdaySchema,
+} from "./workouts.js";
 
 export const todayChecklistItemKindSchema = z.enum([
   "workout",
@@ -102,7 +107,24 @@ export const todayChecklistRecordSchema = z.object({
 
 export type TodayChecklistRecord = z.infer<typeof todayChecklistRecordSchema>;
 
-export const todayDayResponseSchema = todayChecklistRecordSchema;
+export const todayWorkoutDetailSchema = z.object({
+  sessionId: z.string().uuid(),
+  workoutPlanId: z.string().uuid(),
+  workoutPlanRevisionId: z.string().uuid(),
+  plannedDate: isoDateSchema,
+  weekday: workoutWeekdaySchema,
+  title: z.string().min(1).max(160),
+  focus: z.string().min(1).max(160),
+  status: workoutSessionStatusSchema,
+  exercises: z.array(workoutSessionExerciseSchema),
+  isRestDay: z.boolean().default(false),
+});
+
+export type TodayWorkoutDetail = z.infer<typeof todayWorkoutDetailSchema>;
+
+export const todayDayResponseSchema = todayChecklistRecordSchema.extend({
+  workout: todayWorkoutDetailSchema.nullable(),
+});
 
 export type TodayDayResponse = z.infer<typeof todayDayResponseSchema>;
 

@@ -100,6 +100,56 @@ describe("phase 3 contracts", () => {
     });
 
     expect(result.proposals).toHaveLength(1);
+    expect(result.proposals[0]?.proposedChanges).toMatchObject({
+      title: "Three day strength base",
+      summary: "A simple weekly structure for consistent training.",
+      days: [
+        {
+          day: "Monday",
+          focus: "Full body strength",
+          exercises: ["Goblet squat", "Push-up"],
+        },
+      ],
+    });
+  });
+
+  it("does not let optional profile fields swallow workout proposedChanges", () => {
+    const workoutPayload = {
+      title: "Three day strength base",
+      summary: "A simple weekly structure for consistent training.",
+      days: [{ day: "Monday", focus: "Full body strength", exercises: ["Goblet squat"] }],
+      notes: ["Stay consistent."],
+    };
+
+    expect(upsertUserProfileSchema.parse(workoutPayload)).toEqual({});
+
+    const parsed = rawAiProposalSchema.parse({
+      intent: "create_workout_plan",
+      targetDomain: "workout",
+      title: "Start a three day strength plan",
+      reason: "Matches your goals.",
+      proposedChanges: workoutPayload,
+    });
+
+    expect(parsed.proposedChanges).toEqual(workoutPayload);
+  });
+
+  it("still parses profile update proposals", () => {
+    const parsed = rawAiProposalSchema.parse({
+      intent: "update_profile",
+      targetDomain: "profile",
+      title: "Refresh profile details",
+      reason: "Keeps coaching context accurate.",
+      proposedChanges: {
+        activityLevel: "moderately_active",
+        preferences: ["morning workouts"],
+      },
+    });
+
+    expect(parsed.proposedChanges).toEqual({
+      activityLevel: "moderately_active",
+      preferences: ["morning workouts"],
+    });
   });
 
   it("rejects empty chat messages", () => {

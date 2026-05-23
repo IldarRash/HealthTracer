@@ -1,6 +1,7 @@
 import {
   completeWorkoutSessionSchema,
   scheduleWorkoutSessionSchema,
+  updateWorkoutSessionExerciseSchema,
 } from "@health/types";
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
@@ -42,6 +43,26 @@ export class WorkoutsController {
       auth,
       sessionId,
       parseBody(completeWorkoutSessionSchema, body),
+    );
+  }
+
+  @Post("today/:date/start")
+  startTodayWorkout(@CurrentAuth() auth: ClerkAuthContext, @Param("date") date: string) {
+    return this.workoutsService.startTodayWorkoutSession(auth, date);
+  }
+
+  @Patch("sessions/:sessionId/exercises/:exerciseId")
+  updateSessionExercise(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Param("sessionId") sessionId: string,
+    @Param("exerciseId") exerciseId: string,
+    @Body() body: unknown,
+  ) {
+    return this.workoutsService.updateSessionExercise(
+      auth,
+      sessionId,
+      exerciseId,
+      parseBody(updateWorkoutSessionExerciseSchema, body),
     );
   }
 }

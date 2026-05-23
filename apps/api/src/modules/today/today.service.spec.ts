@@ -1,3 +1,4 @@
+import type { TodayWorkoutDetail } from "@health/types";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
 import { TodayService } from "./today.service.js";
@@ -26,6 +27,12 @@ const itemId = "880099c6-3b5f-4383-8246-97b72bf61818";
 const date = "2026-05-22";
 const timestamp = new Date("2026-05-22T12:00:00.000Z");
 
+const workoutsService: {
+  ensureTodayWorkoutSession: () => Promise<TodayWorkoutDetail | null>;
+} = {
+  ensureTodayWorkoutSession: async () => null,
+};
+
 function buildChecklistRow(items: Record<string, unknown>[]) {
   return {
     id: checklistId,
@@ -40,9 +47,47 @@ function buildChecklistRow(items: Record<string, unknown>[]) {
   };
 }
 
+const planId = "3f98f3dd-806d-4386-8c5f-43499626c5d6";
+const revisionId = "880099c6-3b5f-4383-8246-97b72bf61818";
+const staleSessionId = "a1000001-0000-4000-8000-000000000099";
+const staleRevisionId = "b2000002-0000-4000-8000-000000000099";
+
+function buildSessionRow(
+  id: string,
+  revisionIdValue: string = revisionId,
+  title = "Strength day",
+  status = "planned",
+) {
+  return {
+    id,
+    title,
+    status,
+    workoutPlanId: planId,
+    workoutPlanRevisionId: revisionIdValue,
+  };
+}
+
+function createService(
+  todayRepository: unknown,
+  workoutsRepository: unknown,
+  workoutsServiceOverride: Partial<typeof workoutsService> = {},
+) {
+  const workoutsRepositoryWithDefaults = {
+    findActivePlanByUserId: async () => null,
+    ...(workoutsRepository as object),
+  };
+
+  return new TodayService(
+    todayRepository as never,
+    workoutsRepositoryWithDefaults as never,
+    { ...workoutsService, ...workoutsServiceOverride } as never,
+    usersService as never,
+  );
+}
+
 describe("TodayService", () => {
   it("rejects invalid ISO dates", async () => {
-    const service = new TodayService({} as never, {} as never, usersService as never);
+    const service = createService({}, {});
 
     await expect(service.getOrGenerateDay(auth, "05/22/2026")).rejects.toBeInstanceOf(
       BadRequestException,
@@ -55,7 +100,7 @@ describe("TodayService", () => {
   it("generates a checklist from workout sessions when none exists", async () => {
     let upsertCalled = false;
 
-    const service = new TodayService(
+    const service = createService(
       {
         findByUserAndDate: async () => null,
         upsertChecklist: async (
@@ -72,15 +117,8 @@ describe("TodayService", () => {
         },
       } as never,
       {
-        listSessionsByUserAndPlannedDate: async () => [
-          {
-            id: sessionId,
-            title: "Strength day",
-            status: "planned",
-          },
-        ],
+        listSessionsByUserAndPlannedDate: async () => [buildSessionRow(sessionId)],
       } as never,
-      usersService as never,
     );
 
     const day = await service.getOrGenerateDay(auth, date);
@@ -100,7 +138,7 @@ describe("TodayService", () => {
       source: { type: "workout_session", id: sessionId },
     };
 
-    const service = new TodayService(
+    const service = createService(
       {
         findByUserAndDate: async () => buildChecklistRow([existingItem]),
         updateChecklistState: async () => {
@@ -109,10 +147,9 @@ describe("TodayService", () => {
       } as never,
       {
         listSessionsByUserAndPlannedDate: async () => [
-          { id: sessionId, title: "Strength day", status: "completed" },
+          { ...buildSessionRow(sessionId), status: "completed" },
         ],
       } as never,
-      usersService as never,
     );
 
     const day = await service.updateItemStatus(auth, date, itemId, {
@@ -133,7 +170,7 @@ describe("TodayService", () => {
       source: { type: "workout_session", id: sessionId },
     };
 
-    const service = new TodayService(
+    const service = createService(
       {
         findByUserAndDate: async () => buildChecklistRow([existingItem]),
         updateChecklistState: async () =>
@@ -141,7 +178,7 @@ describe("TodayService", () => {
       } as never,
       {
         listSessionsByUserAndPlannedDate: async () => [
-          { id: sessionId, title: "Strength day", status: "planned" },
+          { ...buildSessionRow(sessionId), status: "planned" },
         ],
         findSessionByUserId: async () => ({
           id: sessionId,
@@ -161,7 +198,6 @@ describe("TodayService", () => {
           return { id: sessionId };
         },
       } as never,
-      usersService as never,
     );
 
     const day = await service.updateItemStatus(auth, date, itemId, {
@@ -183,7 +219,7 @@ describe("TodayService", () => {
       source: { type: "workout_session", id: sessionId },
     };
 
-    const service = new TodayService(
+    const service = createService(
       {
         findByUserAndDate: async () => buildChecklistRow([existingItem]),
         updateChecklistState: async () =>
@@ -191,7 +227,7 @@ describe("TodayService", () => {
       } as never,
       {
         listSessionsByUserAndPlannedDate: async () => [
-          { id: sessionId, title: "Strength day", status: "completed" },
+          { ...buildSessionRow(sessionId), status: "completed" },
         ],
         findSessionByUserId: async () => ({
           id: sessionId,
@@ -203,7 +239,6 @@ describe("TodayService", () => {
           return { id: sessionId };
         },
       } as never,
-      usersService as never,
     );
 
     const day = await service.updateItemStatus(auth, date, itemId, {
@@ -215,14 +250,13 @@ describe("TodayService", () => {
   });
 
   it("throws when updating an unknown checklist item", async () => {
-    const service = new TodayService(
+    const service = createService(
       {
         findByUserAndDate: async () => buildChecklistRow([]),
       } as never,
       {
         listSessionsByUserAndPlannedDate: async () => [],
       } as never,
-      usersService as never,
     );
 
     await expect(
@@ -240,7 +274,7 @@ describe("TodayService", () => {
       source: { type: "workout_session", id: sessionId },
     };
 
-    const service = new TodayService(
+    const service = createService(
       {
         findByUserAndDate: async () => buildChecklistRow([existingItem]),
         updateChecklistState: async () => {
@@ -249,10 +283,9 @@ describe("TodayService", () => {
       } as never,
       {
         listSessionsByUserAndPlannedDate: async () => [
-          { id: sessionId, title: "Strength day", status: "skipped" },
+          { ...buildSessionRow(sessionId), status: "skipped" },
         ],
       } as never,
-      usersService as never,
     );
 
     const day = await service.updateItemStatus(auth, date, itemId, {
@@ -263,7 +296,7 @@ describe("TodayService", () => {
   });
 
   it("generates an empty checklist when no workout sessions exist", async () => {
-    const service = new TodayService(
+    const service = createService(
       {
         findByUserAndDate: async () => null,
         upsertChecklist: async (
@@ -275,7 +308,6 @@ describe("TodayService", () => {
       {
         listSessionsByUserAndPlannedDate: async () => [],
       } as never,
-      usersService as never,
     );
 
     const day = await service.getOrGenerateDay(auth, date);
@@ -287,7 +319,7 @@ describe("TodayService", () => {
   it("passes history limit to the repository", async () => {
     let capturedLimit = 0;
 
-    const service = new TodayService(
+    const service = createService(
       {
         listRecentByUserId: async (_resolvedUserId: string, limit: number) => {
           capturedLimit = limit;
@@ -295,7 +327,6 @@ describe("TodayService", () => {
         },
       } as never,
       {} as never,
-      usersService as never,
     );
 
     const history = await service.getRecentHistory(auth, 14);
@@ -305,17 +336,62 @@ describe("TodayService", () => {
   });
 
   it("rejects invalid ISO dates on feedback updates", async () => {
-    const service = new TodayService({} as never, {} as never, usersService as never);
+    const service = createService({}, {});
 
     await expect(
       service.updateFeedback(auth, "2026/05/22", { notes: "Steady day." }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it("includes derived workout detail in the day response", async () => {
+    const workoutDetail = {
+      sessionId,
+      workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      plannedDate: date,
+      weekday: "friday" as const,
+      title: "Strength base — Lower body",
+      focus: "Lower body",
+      status: "planned" as const,
+      exercises: [
+        {
+          id: "a1000001-0000-4000-8000-000000000001",
+          prescription: { snapshot: { name: "Squat" }, sets: 3, reps: "8" },
+          execution: { status: "planned" as const },
+        },
+      ],
+      isRestDay: false,
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => null,
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: Record<string, unknown>[],
+        ) => buildChecklistRow(items),
+      },
+      {
+        listSessionsByUserAndPlannedDate: async () => [
+          buildSessionRow(sessionId, revisionId, workoutDetail.title),
+        ],
+      },
+      {
+        ensureTodayWorkoutSession: async (): Promise<TodayWorkoutDetail> => workoutDetail,
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(day.workout?.sessionId).toBe(sessionId);
+    expect(day.workout?.exercises).toHaveLength(1);
+  });
+
   it("merges accepted proposal items with existing workout-derived items", async () => {
     let upsertItems: { source: { type: string } }[] = [];
 
-    const service = new TodayService(
+    const service = createService(
       {
         findByUserAndDate: async () => null,
         createChecklistFromProposal: async (
@@ -329,10 +405,9 @@ describe("TodayService", () => {
       } as never,
       {
         listSessionsByUserAndPlannedDate: async () => [
-          { id: sessionId, title: "Strength day", status: "planned" },
+          { ...buildSessionRow(sessionId), status: "planned" },
         ],
       } as never,
-      usersService as never,
     );
 
     await service.applyTodayChecklistProposal(userId, {
@@ -342,5 +417,48 @@ describe("TodayService", () => {
 
     expect(upsertItems.some((item) => item.source.type === "workout_session")).toBe(true);
     expect(upsertItems.some((item) => item.source.type === "ai_proposal")).toBe(true);
+  });
+
+  it("excludes superseded workout sessions when an active plan revision exists", async () => {
+    let persistedItems: { source: { type: string; id?: string } }[] = [];
+    const staleItem = {
+      id: itemId,
+      label: "Old plan day",
+      kind: "workout",
+      status: "pending",
+      required: true,
+      source: { type: "workout_session", id: staleSessionId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([staleItem]),
+        updateChecklistState: async (
+          _resolvedUserId: string,
+          _checklistId: string,
+          items: { source: { type: string; id?: string } }[],
+        ) => {
+          persistedItems = items;
+          return buildChecklistRow(items);
+        },
+      } as never,
+      {
+        findActivePlanByUserId: async () => ({
+          id: planId,
+          activeRevisionId: revisionId,
+        }),
+        listSessionsByUserAndPlannedDate: async () => [
+          buildSessionRow(staleSessionId, staleRevisionId, "Old plan day"),
+          buildSessionRow(sessionId, revisionId, "Updated plan day"),
+        ],
+      } as never,
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(persistedItems).toHaveLength(1);
+    expect(persistedItems[0]?.source.id).toBe(sessionId);
+    expect(day.items).toHaveLength(1);
+    expect(day.items[0]?.source.id).toBe(sessionId);
   });
 });

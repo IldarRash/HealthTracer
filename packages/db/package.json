@@ -12,6 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed:recipes": "node ./scripts/seed-recipes.mjs",
+    "db:seed:exercises": "node ./scripts/seed-exercises.mjs",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

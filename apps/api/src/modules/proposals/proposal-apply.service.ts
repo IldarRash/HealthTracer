@@ -9,7 +9,7 @@ import {
   recipeRecommendationProposalPayloadSchema,
   todayChecklistPayloadSchema,
   updateGoalProposalChangesSchema,
-  workoutPlanPayloadSchema,
+  workoutPlanProposalChangesSchema,
 } from "@health/types";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { GoalsService } from "../goals/goals.service.js";
@@ -61,20 +61,26 @@ export class ProposalApplyService {
         return `goal:${goal.id}`;
       }
       case "create_workout_plan":
-      case "adapt_workout_plan":
-      case "adapt_workout_plan_from_progress": {
-        const payload =
-          proposal.intent === "adapt_workout_plan_from_progress"
-            ? adaptWorkoutPlanFromProgressChangesSchema.parse(proposal.proposedChanges).plan
-            : workoutPlanPayloadSchema.parse(proposal.proposedChanges);
+      case "adapt_workout_plan": {
+        const payload = workoutPlanProposalChangesSchema.parse(proposal.proposedChanges);
 
         return this.workoutsService.applyWorkoutPlanProposal(
           userId,
           payload,
           proposal.reason,
-          proposal.intent === "adapt_workout_plan_from_progress"
-            ? "adapt_workout_plan"
-            : proposal.intent,
+          proposal.intent,
+        );
+      }
+      case "adapt_workout_plan_from_progress": {
+        const changes = adaptWorkoutPlanFromProgressChangesSchema.parse(
+          proposal.proposedChanges,
+        );
+
+        return this.workoutsService.applyWorkoutPlanProposal(
+          userId,
+          changes.plan,
+          proposal.reason,
+          "adapt_workout_plan",
         );
       }
       case "create_nutrition_plan":

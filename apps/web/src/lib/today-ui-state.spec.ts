@@ -1,17 +1,41 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFeedbackPayload,
+  canExecuteTodayWorkout,
+  canStartTodayWorkout,
   canSubmitTodayFeedback,
   canUpdateTodayItem,
   formatAdherenceScore,
   formatAdherenceSummary,
   formatDisplayDate,
   formatLocalIsoDate,
+  hasTodayWorkoutExecutionStarted,
   historyEntrySummaryLabel,
   todayItemKindLabel,
   todayItemStatusBadgeClass,
   todayItemStatusLabel,
+  todayWorkoutStatusBadgeClass,
+  todayWorkoutSummaryLabel,
 } from "./today-ui-state.js";
+
+const sampleWorkout = {
+  sessionId: "78d40655-b4b5-47b3-b28e-470192e05f04",
+  workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+  workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+  plannedDate: "2026-05-23",
+  weekday: "friday" as const,
+  title: "Strength day",
+  focus: "Lower body",
+  status: "planned" as const,
+  exercises: [
+    {
+      id: "11111111-1111-4111-8111-111111111111",
+      prescription: { snapshot: { name: "Back squat" } },
+      execution: { status: "planned" as const },
+    },
+  ],
+  isRestDay: false,
+};
 
 describe("today UI state", () => {
   it("formats display dates from ISO strings", () => {
@@ -165,5 +189,53 @@ describe("today UI state", () => {
         hasFeedback: false,
       }),
     ).toBe("100% adherence · 1 task · No feedback");
+  });
+
+  it("detects when a today workout can be started or executed", () => {
+    expect(canStartTodayWorkout(sampleWorkout)).toBe(true);
+    expect(hasTodayWorkoutExecutionStarted(sampleWorkout)).toBe(false);
+    expect(canExecuteTodayWorkout(sampleWorkout)).toBe(true);
+    expect(todayWorkoutSummaryLabel(sampleWorkout)).toContain("Lower body");
+
+    const started = {
+      ...sampleWorkout,
+      exercises: [
+        {
+          ...sampleWorkout.exercises[0]!,
+          execution: { status: "completed" as const },
+        },
+      ],
+    };
+
+    expect(hasTodayWorkoutExecutionStarted(started)).toBe(true);
+    expect(canStartTodayWorkout(started)).toBe(false);
+    expect(canStartTodayWorkout({ ...sampleWorkout, isRestDay: true })).toBe(false);
+    expect(canExecuteTodayWorkout({ ...sampleWorkout, status: "completed" })).toBe(false);
+  });
+
+  it("maps workout status to badge classes", () => {
+    expect(todayWorkoutStatusBadgeClass("planned")).toBe("badge badge-session-planned");
+    expect(todayWorkoutStatusBadgeClass("completed")).toBe("badge badge-session-completed");
+  });
+
+  it("tracks exercise completion progress for execution state", () => {
+    const inProgress = {
+      ...sampleWorkout,
+      exercises: [
+        {
+          ...sampleWorkout.exercises[0]!,
+          execution: { status: "completed" as const },
+        },
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          prescription: { snapshot: { name: "Romanian deadlift" } },
+          execution: { status: "planned" as const },
+        },
+      ],
+    };
+
+    expect(hasTodayWorkoutExecutionStarted(inProgress)).toBe(true);
+    expect(canStartTodayWorkout(inProgress)).toBe(false);
+    expect(canExecuteTodayWorkout(inProgress)).toBe(true);
   });
 });

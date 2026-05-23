@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { ProposalValidationService } from "./proposal-validation.service.js";
 
+const structuredExercise = {
+  exerciseId: "b1000001-0000-4000-8000-000000000016",
+  snapshot: {
+    name: "Goblet Squat",
+    primaryMuscles: ["quads", "glutes"],
+    equipment: ["dumbbell", "kettlebell"],
+  },
+  sets: 3,
+  reps: "8",
+  recommendedLoadGuidance: "Choose a controlled working weight.",
+  restBetweenSetsSeconds: 90,
+};
+
 const workoutPlan = {
   title: "Strength base",
   summary: "Reduced volume based on weekly completion patterns.",
-  days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+  days: [{ weekday: "monday", focus: "Strength", exercises: [structuredExercise] }],
 };
 
 function createService(
@@ -15,36 +28,61 @@ function createService(
       trendIds: readonly string[],
     ) => Promise<Array<{ id: string; summaryId: string }>>;
   } = {},
+  exercisesService: {
+    findInaccessibleExerciseIds?: (
+      exerciseIds: readonly string[],
+      userId: string,
+    ) => Promise<string[]>;
+  } = {},
 ) {
-  return new ProposalValidationService({
-    summaryExistsForUser: async () => true,
-    findTrendsOwnedByUser: async () => [],
-    ...progressRepository,
-  } as never);
+  return new ProposalValidationService(
+    {
+      summaryExistsForUser: async () => true,
+      findTrendsOwnedByUser: async () => [],
+      ...progressRepository,
+    } as never,
+    {
+      findInaccessibleExerciseIds: async () => [],
+      ...exercisesService,
+    } as never,
+  );
 }
 
 describe("ProposalValidationService", () => {
   const service = createService();
 
   it("validates workout proposal payloads by intent", () => {
-    const result = service.validateStoredProposal("create_workout_plan", {
-      title: "Strength base",
-      summary: "Three repeatable training days.",
-      days: [{ day: "Day 1", focus: "Strength" }],
-    });
+    const result = service.validateStoredProposal("create_workout_plan", workoutPlan);
 
     expect(result.valid).toBe(true);
   });
 
   it("validates adapt_workout_plan payloads with the workout schema", () => {
-    const result = service.validateStoredProposal("adapt_workout_plan", {
-      title: "Strength base",
-      summary: "Reduced volume for recovery.",
-      days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
-    });
+    const result = service.validateStoredProposal("adapt_workout_plan", workoutPlan);
 
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it("rejects legacy workout proposals without weekday mapping", () => {
+    const result = service.validateStoredProposal("create_workout_plan", {
+      title: "Strength base",
+      summary: "Three repeatable training days.",
+      days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.includes("weekday"))).toBe(true);
+  });
+
+  it("rejects workout proposals with unsupported medical wording", () => {
+    const result = service.validateStoredProposal("create_workout_plan", {
+      ...workoutPlan,
+      summary: "Follow this clinical treatment protocol.",
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.includes("medical wording"))).toBe(true);
   });
 
   it("rejects workout proposals without training days", () => {
@@ -169,11 +207,7 @@ describe("ProposalValidationService", () => {
 
   it("validates adapt_workout_plan_from_progress payloads with plan and source refs", () => {
     const result = service.validateStoredProposal("adapt_workout_plan_from_progress", {
-      plan: {
-        title: "Strength base",
-        summary: "Reduced volume based on weekly completion patterns.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
-      },
+      plan: workoutPlan,
       sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
       sourceTrendObservationIds: ["24b19287-75b8-4a3e-9c10-691908479405"],
     });
@@ -198,11 +232,7 @@ describe("ProposalValidationService", () => {
 
   it("rejects progress-derived workout proposals with malformed source refs", () => {
     const result = service.validateStoredProposal("adapt_workout_plan_from_progress", {
-      plan: {
-        title: "Strength base",
-        summary: "Reduced volume based on weekly completion patterns.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
-      },
+      plan: workoutPlan,
       sourceSummaryId: "not-a-uuid",
     });
 
@@ -322,6 +352,142 @@ describe("ProposalValidationService", () => {
       );
 
       expect(errors).toEqual([]);
+    });
+  });
+
+  describe("exercise catalog references", () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const unknownExerciseId = "c1000001-0000-4000-8000-000000000099";
+
+    it("accepts proposals that reference accessible catalog exercises", async () => {
+      const exerciseService = createService({}, {
+        findInaccessibleExerciseIds: async (exerciseIds) =>
+          exerciseIds.filter((id) => id === unknownExerciseId),
+      });
+
+      const errors = await exerciseService.validateExerciseReferences(
+        userId,
+        "adapt_workout_plan",
+        workoutPlan,
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects proposals that reference unknown catalog exercise ids", async () => {
+      const exerciseService = createService({}, {
+        findInaccessibleExerciseIds: async (exerciseIds) =>
+          exerciseIds.filter((id) => id === unknownExerciseId),
+      });
+
+      const errors = await exerciseService.validateExerciseReferences(
+        userId,
+        "create_workout_plan",
+        {
+          ...workoutPlan,
+          days: [
+            {
+              weekday: "monday",
+              focus: "Strength",
+              exercises: [
+                {
+                  ...structuredExercise,
+                  exerciseId: unknownExerciseId,
+                },
+              ],
+            },
+          ],
+        },
+      );
+
+      expect(errors).toContain(
+        `proposedChanges: exerciseId "${unknownExerciseId}" was not found in the visible exercise catalog.`,
+      );
+    });
+
+    it("rejects pending exercise refs without matching pendingExercises definitions", () => {
+      const result = service.validateStoredProposal("adapt_workout_plan", {
+        ...workoutPlan,
+        days: [
+          {
+            weekday: "monday",
+            focus: "Strength",
+            exercises: [
+              {
+                pendingExerciseRef: "band-pull-apart",
+                snapshot: {
+                  name: "Band Pull-Apart",
+                  primaryMuscles: ["back"],
+                  equipment: ["resistance_band"],
+                },
+                sets: 3,
+                reps: "12",
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((error) => error.includes("pendingExercises"))).toBe(true);
+    });
+
+    it("accepts proposals with pending exercise refs and matching definitions", () => {
+      const result = service.validateStoredProposal("adapt_workout_plan", {
+        ...workoutPlan,
+        days: [
+          {
+            weekday: "monday",
+            focus: "Strength",
+            exercises: [
+              {
+                pendingExerciseRef: "band-pull-apart",
+                snapshot: {
+                  name: "Band Pull-Apart",
+                  primaryMuscles: ["back"],
+                  equipment: ["resistance_band"],
+                },
+                sets: 3,
+                reps: "12",
+              },
+            ],
+          },
+        ],
+        pendingExercises: {
+          "band-pull-apart": {
+            name: "Band Pull-Apart",
+            aliases: [],
+            primaryMuscles: ["back"],
+            secondaryMuscles: [],
+            equipment: ["resistance_band"],
+            movementPatterns: ["pull"],
+            difficulty: "beginner",
+            instructions: ["Pull the band apart with control."],
+            safetyNotes: ["Use a light band."],
+            source: "ai_generated",
+          },
+        },
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("accepts adaptation metadata on workout proposals", () => {
+      const result = service.validateStoredProposal("adapt_workout_plan", {
+        ...workoutPlan,
+        adaptationMetadata: {
+          operations: [
+            {
+              operation: "reduce_load",
+              description: "Lower recommended load guidance on Monday.",
+              weekday: "monday",
+            },
+          ],
+        },
+      });
+
+      expect(result.valid).toBe(true);
     });
   });
 });

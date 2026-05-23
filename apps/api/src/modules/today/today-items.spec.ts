@@ -3,22 +3,38 @@ import {
   applyItemStatusUpdate,
   buildChecklistState,
   createWorkoutChecklistItem,
+  filterWorkoutSessionsForChecklist,
   mapItemStatusToWorkoutStatus,
   mapWorkoutStatusToItemStatus,
   mergeProposalItemsWithExisting,
   mergeWorkoutSessionsIntoItems,
   normalizeProposalItems,
+  syncTodayChecklistWorkoutItems,
 } from "./today-items.js";
 
 const sessionId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+const staleSessionId = "78d40655-b4b5-47b3-b28e-470192e05f04";
+const planId = "3f98f3dd-806d-4386-8c5f-43499626c5d6";
+const revisionId = "880099c6-3b5f-4383-8246-97b72bf61818";
+const staleRevisionId = "a1000001-0000-4000-8000-000000000001";
+
+function buildSessionSummary(
+  id: string,
+  revision: string = revisionId,
+  title = "Strength day",
+) {
+  return {
+    id,
+    title,
+    status: "planned" as const,
+    workoutPlanId: planId,
+    workoutPlanRevisionId: revision,
+  };
+}
 
 describe("today-items merge and reconciliation", () => {
   it("creates workout-linked checklist items from planned sessions", () => {
-    const item = createWorkoutChecklistItem({
-      id: sessionId,
-      title: "Strength day",
-      status: "planned",
-    });
+    const item = createWorkoutChecklistItem(buildSessionSummary(sessionId));
 
     expect(item.source).toEqual({ type: "workout_session", id: sessionId });
     expect(item.status).toBe("pending");
@@ -26,33 +42,25 @@ describe("today-items merge and reconciliation", () => {
 
   it("merges generated workout items without duplicating session refs", () => {
     const merged = mergeWorkoutSessionsIntoItems([], [
-      { id: sessionId, title: "Strength day", status: "planned" },
-      { id: sessionId, title: "Strength day", status: "planned" },
+      buildSessionSummary(sessionId),
+      buildSessionSummary(sessionId),
     ]);
 
     expect(merged).toHaveLength(1);
   });
 
   it("syncs workout-linked item status from workout session state", () => {
-    const initial = createWorkoutChecklistItem({
-      id: sessionId,
-      title: "Strength day",
-      status: "planned",
-    });
+    const initial = createWorkoutChecklistItem(buildSessionSummary(sessionId));
 
     const merged = mergeWorkoutSessionsIntoItems([initial], [
-      { id: sessionId, title: "Strength day", status: "completed" },
+      { ...buildSessionSummary(sessionId), status: "completed" },
     ]);
 
     expect(merged[0]?.status).toBe("completed");
   });
 
   it("preserves workout items when merging accepted proposal items", () => {
-    const workoutItem = createWorkoutChecklistItem({
-      id: sessionId,
-      title: "Strength day",
-      status: "planned",
-    });
+    const workoutItem = createWorkoutChecklistItem(buildSessionSummary(sessionId));
     const proposalItems = normalizeProposalItems([
       { label: "Drink water", kind: "hydration" },
     ]);
@@ -71,11 +79,7 @@ describe("today-items merge and reconciliation", () => {
   });
 
   it("applies idempotent item status updates", () => {
-    const item = createWorkoutChecklistItem({
-      id: sessionId,
-      title: "Strength day",
-      status: "planned",
-    });
+    const item = createWorkoutChecklistItem(buildSessionSummary(sessionId));
     const first = applyItemStatusUpdate([item], item.id, "completed");
     const second = applyItemStatusUpdate(first, item.id, "completed");
 
@@ -85,11 +89,7 @@ describe("today-items merge and reconciliation", () => {
 
   it("builds checklist adherence from merged item state", () => {
     const state = buildChecklistState([
-      createWorkoutChecklistItem({
-        id: sessionId,
-        title: "Strength day",
-        status: "completed",
-      }),
+      createWorkoutChecklistItem({ ...buildSessionSummary(sessionId), status: "completed" }),
       ...normalizeProposalItems([{ label: "Stretch", kind: "recovery" }]),
     ]);
 
@@ -108,11 +108,7 @@ describe("today-items merge and reconciliation", () => {
   });
 
   it("replaces prior ai proposal items while preserving workout-derived items", () => {
-    const workoutItem = createWorkoutChecklistItem({
-      id: sessionId,
-      title: "Strength day",
-      status: "planned",
-    });
+    const workoutItem = createWorkoutChecklistItem(buildSessionSummary(sessionId));
     const priorProposalItems = normalizeProposalItems([
       { label: "Old stretch", kind: "recovery" },
     ]);
@@ -132,11 +128,7 @@ describe("today-items merge and reconciliation", () => {
   });
 
   it("applies idempotent skip updates", () => {
-    const item = createWorkoutChecklistItem({
-      id: sessionId,
-      title: "Strength day",
-      status: "planned",
-    });
+    const item = createWorkoutChecklistItem(buildSessionSummary(sessionId));
     const skipped = applyItemStatusUpdate([item], item.id, "skipped");
     const again = applyItemStatusUpdate(skipped, item.id, "skipped");
 
@@ -146,15 +138,38 @@ describe("today-items merge and reconciliation", () => {
 
   it("scores pending required items as incomplete adherence", () => {
     const state = buildChecklistState([
-      createWorkoutChecklistItem({
-        id: sessionId,
-        title: "Strength day",
-        status: "planned",
-      }),
+      createWorkoutChecklistItem(buildSessionSummary(sessionId)),
     ]);
 
     expect(state.adherence.totalRequired).toBe(1);
     expect(state.adherence.completedRequired).toBe(0);
     expect(state.adherence.score).toBe(0);
+  });
+
+  it("filters workout sessions to the active plan revision", () => {
+    const filtered = filterWorkoutSessionsForChecklist(
+      [
+        buildSessionSummary(sessionId, revisionId),
+        buildSessionSummary(staleSessionId, staleRevisionId, "Old plan day"),
+      ],
+      { planId, activeRevisionId: revisionId },
+    );
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.id).toBe(sessionId);
+  });
+
+  it("removes stale workout checklist items when syncing sessions", () => {
+    const staleItem = createWorkoutChecklistItem(
+      buildSessionSummary(staleSessionId, staleRevisionId, "Old plan day"),
+    );
+    const activeItem = createWorkoutChecklistItem(buildSessionSummary(sessionId));
+
+    const synced = syncTodayChecklistWorkoutItems([staleItem, activeItem], [
+      buildSessionSummary(sessionId),
+    ]);
+
+    expect(synced).toHaveLength(1);
+    expect(synced[0]?.source).toEqual({ type: "workout_session", id: sessionId });
   });
 });

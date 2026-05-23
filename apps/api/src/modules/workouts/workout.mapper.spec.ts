@@ -61,6 +61,15 @@ describe("workout mappers", () => {
     });
 
     expect(revision.payload.days[0]?.exercises).toHaveLength(2);
+    expect(revision.payload.days[0]?.weekday).toBe("monday");
+    expect(revision.payload.days[0]?.exercises[0]).toMatchObject({
+      snapshot: { name: "Squat" },
+    });
+    expect(revision.payload.days[0]?.exercises[1]).toMatchObject({
+      snapshot: { name: "RDL" },
+      sets: 3,
+      reps: "8",
+    });
     expect(session.exercises[0]).toMatchObject({ name: "Squat", sets: 3, reps: "8" });
     expect(session.feedback.fatigue).toBe(6);
     expect(session.completedAt).toBe("2026-05-22T12:00:00.000Z");

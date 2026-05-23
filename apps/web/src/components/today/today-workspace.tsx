@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { TodayDailyFeedback } from "@health/types";
+import type { TodayDailyFeedback, TodayWorkoutDetail } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -9,23 +9,42 @@ import {
   apiQueryKeys,
   getTodayDay,
   getTodayHistory,
+  getWorkoutExecutionRefreshQueryKeys,
+  startTodayWorkout,
   updateTodayFeedback,
   updateTodayItemStatus,
+  updateWorkoutSessionExercise,
 } from "../../lib/api";
 import {
   buildFeedbackPayload,
+  canExecuteTodayWorkout,
+  canStartTodayWorkout,
   canSubmitTodayFeedback,
   canUpdateTodayItem,
   formatAdherenceScore,
   formatAdherenceSummary,
   formatDisplayDate,
   formatLocalIsoDate,
+  hasTodayWorkoutExecutionStarted,
   historyEntrySummaryLabel,
+  sessionStatusLabel,
   todayItemCardClass,
   todayItemKindLabel,
   todayItemStatusBadgeClass,
   todayItemStatusLabel,
+  todayWorkoutStatusBadgeClass,
+  todayWorkoutSummaryLabel,
 } from "../../lib/today-ui-state";
+import {
+  canUpdateSessionExercise,
+  formatSessionExerciseDetailLines,
+  formatSessionExerciseExecutionSummary,
+  formatSessionExercisePrescription,
+  groupSessionExercisesByCircuit,
+  isTerminalSessionStatus,
+  sessionExerciseStatusBadgeClass,
+  sessionExerciseStatusLabel,
+} from "../../lib/training-ui-state";
 import { EmptyState, ErrorState, LoadingState } from "../ui";
 
 const HISTORY_LIMIT = 7;
@@ -40,6 +59,245 @@ function feedbackToFormState(feedback: TodayDailyFeedback | null): {
     energy: feedback?.energy != null ? String(feedback.energy) : "",
     difficulty: feedback?.difficulty != null ? String(feedback.difficulty) : "",
   };
+}
+
+type TodayWorkoutPanelProps = {
+  workout: TodayWorkoutDetail;
+  selectedDate: string;
+  isBusy: boolean;
+  onRefresh: () => void;
+};
+
+function TodayWorkoutPanel({
+  workout,
+  selectedDate,
+  isBusy,
+  onRefresh,
+}: TodayWorkoutPanelProps) {
+  const { getToken } = useAuth();
+  const [updatingExerciseId, setUpdatingExerciseId] = useState<string | null>(null);
+  const [executionVisible, setExecutionVisible] = useState(
+    () => hasTodayWorkoutExecutionStarted(workout) || !canStartTodayWorkout(workout),
+  );
+
+  useEffect(() => {
+    setExecutionVisible(
+      hasTodayWorkoutExecutionStarted(workout) || !canStartTodayWorkout(workout),
+    );
+  }, [workout]);
+
+  const startWorkoutMutation = useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Clerk session token is unavailable.");
+      }
+
+      const result = await startTodayWorkout(token, selectedDate);
+      if (result.error || !result.data) {
+        throw new Error(result.error ?? "Workout could not be started.");
+      }
+
+      return result.data;
+    },
+    onSuccess: () => {
+      setExecutionVisible(true);
+      onRefresh();
+    },
+  });
+
+  const updateExerciseMutation = useMutation({
+    mutationFn: async ({
+      exerciseId,
+      status,
+    }: {
+      exerciseId: string;
+      status: "completed" | "skipped" | "adjusted";
+    }) => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Clerk session token is unavailable.");
+      }
+
+      const result = await updateWorkoutSessionExercise(
+        token,
+        workout.sessionId,
+        exerciseId,
+        { status },
+      );
+      if (result.error || !result.data) {
+        throw new Error(result.error ?? "Exercise could not be updated.");
+      }
+
+      return result.data;
+    },
+    onMutate: ({ exerciseId }) => {
+      setUpdatingExerciseId(exerciseId);
+    },
+    onSettled: () => {
+      setUpdatingExerciseId(null);
+    },
+    onSuccess: () => {
+      onRefresh();
+    },
+  });
+
+  const workoutBusy =
+    isBusy || startWorkoutMutation.isPending || updateExerciseMutation.isPending;
+  const exerciseGroups = groupSessionExercisesByCircuit(workout.exercises);
+  const showStartAction = canStartTodayWorkout(workout) && !executionVisible;
+  const showExerciseList = canExecuteTodayWorkout(workout) && executionVisible;
+
+  const handleExerciseStatus = (
+    exerciseId: string,
+    status: "completed" | "skipped" | "adjusted",
+  ) => {
+    if (updateExerciseMutation.isPending) {
+      return;
+    }
+
+    updateExerciseMutation.mutate({ exerciseId, status });
+  };
+
+  return (
+    <section
+      className={`today-workout-panel nested-card training-session-card training-session-card--${workout.status}`}
+      aria-labelledby="today-workout-heading"
+    >
+      <p className="section-label">Today&apos;s workout</p>
+      <div className="training-session-header">
+        <div>
+          <h3 id="today-workout-heading">{workout.title}</h3>
+          <p className="muted-text">{todayWorkoutSummaryLabel(workout)}</p>
+        </div>
+        <span className={todayWorkoutStatusBadgeClass(workout.status)}>
+          {sessionStatusLabel(workout.status)}
+        </span>
+      </div>
+
+      {workout.isRestDay ? (
+        <p className="muted-text">Rest day — no structured workout to run.</p>
+      ) : null}
+
+      {!workout.isRestDay && showStartAction ? (
+        <div className="today-workout-start action-row proposal-actions">
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={workoutBusy}
+            onClick={() => startWorkoutMutation.mutate()}
+          >
+            {startWorkoutMutation.isPending ? "Starting…" : "Start workout"}
+          </button>
+        </div>
+      ) : null}
+
+      {showExerciseList ? (
+        <div className="today-workout-exercises">
+          {exerciseGroups.map((group, groupIndex) => (
+            <div key={`${group.circuitLabel ?? "standalone"}-${groupIndex}`} className="today-workout-group">
+              {group.circuitLabel ? (
+                <p className="section-label today-workout-circuit-label">{group.circuitLabel}</p>
+              ) : null}
+              <ul className="training-exercise-list today-workout-exercise-list">
+                {group.exercises.map((exercise) => {
+                  const executionSummary = formatSessionExerciseExecutionSummary(exercise);
+                  const detailLines = formatSessionExerciseDetailLines(exercise);
+
+                  return (
+                    <li
+                      key={exercise.id}
+                      className={`today-workout-exercise nested-card training-session-card--${exercise.execution.status === "adjusted" ? "planned" : exercise.execution.status}`}
+                    >
+                      <div className="today-workout-exercise-header">
+                        <strong>{formatSessionExercisePrescription(exercise)}</strong>
+                        <span className={sessionExerciseStatusBadgeClass(exercise.execution.status)}>
+                          {sessionExerciseStatusLabel(exercise.execution.status)}
+                        </span>
+                      </div>
+
+                      {detailLines.length > 0 ? (
+                        <ul className="today-workout-exercise-details">
+                          {detailLines.map((line) => (
+                            <li key={line} className="muted-text">
+                              {line}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+
+                      {executionSummary ? (
+                        <p className="muted-text today-workout-exercise-log">{executionSummary}</p>
+                      ) : null}
+
+                      {canUpdateSessionExercise(exercise) ? (
+                        <div className="action-row proposal-actions today-item-actions">
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            disabled={workoutBusy}
+                            onClick={() => handleExerciseStatus(exercise.id, "completed")}
+                          >
+                            {updatingExerciseId === exercise.id && updateExerciseMutation.isPending
+                              ? "Saving…"
+                              : "Complete"}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={workoutBusy}
+                            onClick={() => handleExerciseStatus(exercise.id, "skipped")}
+                          >
+                            Skip
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={workoutBusy}
+                            onClick={() => handleExerciseStatus(exercise.id, "adjusted")}
+                          >
+                            Adjusted
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="muted-text">Exercise logged for this session.</p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {!workout.isRestDay && isTerminalSessionStatus(workout.status) ? (
+        <p className="muted-text">
+          This workout is closed for the day. Review your program in{" "}
+          <Link href="/training" className="confirmation-card__link">
+            Workouts
+          </Link>
+          .
+        </p>
+      ) : null}
+
+      {startWorkoutMutation.isError ? (
+        <p className="form-error" role="alert">
+          {startWorkoutMutation.error instanceof Error
+            ? startWorkoutMutation.error.message
+            : "Workout could not be started."}
+        </p>
+      ) : null}
+
+      {updateExerciseMutation.isError ? (
+        <p className="form-error" role="alert">
+          {updateExerciseMutation.error instanceof Error
+            ? updateExerciseMutation.error.message
+            : "Exercise could not be updated."}
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 export function TodayWorkspace() {
@@ -97,9 +355,9 @@ export function TodayWorkspace() {
   }, [dayQuery.data?.feedback, selectedDate]);
 
   const invalidateTodayQueries = () => {
-    void queryClient.invalidateQueries({ queryKey: apiQueryKeys.todayDayPrefix });
-    void queryClient.invalidateQueries({ queryKey: apiQueryKeys.todayHistoryPrefix });
-    void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutActive });
+    for (const queryKey of getWorkoutExecutionRefreshQueryKeys()) {
+      void queryClient.invalidateQueries({ queryKey });
+    }
   };
 
   const updateItemMutation = useMutation({
@@ -252,6 +510,15 @@ export function TodayWorkspace() {
               </p>
             ) : null}
           </div>
+
+          {day?.workout ? (
+            <TodayWorkoutPanel
+              workout={day.workout}
+              selectedDate={selectedDate}
+              isBusy={isBusy}
+              onRefresh={invalidateTodayQueries}
+            />
+          ) : null}
 
           {items.length === 0 ? (
             <EmptyState

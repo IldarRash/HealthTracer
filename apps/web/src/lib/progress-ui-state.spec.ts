@@ -39,8 +39,35 @@ describe("progress UI state", () => {
         activeDays: 2,
         sessionIds: ["78d40655-b4b5-47b3-b28e-470192e05f04"],
         averageFatigue: 6,
+        exercisePlannedCount: 0,
+        exerciseCompletedCount: 0,
+        exerciseSkippedCount: 0,
+        exerciseAdjustedCount: 0,
+        exerciseCompletionPercent: null,
+        partialSessionCount: 0,
       }).headline,
     ).toBe("2 of 3 sessions completed");
+  });
+
+  it("includes exercise completion and partial session counts in workout detail", () => {
+    const summary = summarizeWorkoutAggregate({
+      plannedCount: 2,
+      completedCount: 1,
+      skippedCount: 0,
+      adherencePercent: 50,
+      activeDays: 1,
+      sessionIds: ["78d40655-b4b5-47b3-b28e-470192e05f04"],
+      averageFatigue: null,
+      exercisePlannedCount: 8,
+      exerciseCompletedCount: 6,
+      exerciseSkippedCount: 1,
+      exerciseAdjustedCount: 1,
+      exerciseCompletionPercent: 75,
+      partialSessionCount: 1,
+    });
+
+    expect(summary.detail).toContain("75% exercises completed");
+    expect(summary.detail).toContain("1 partial session");
   });
 
   it("marks deferred domains as unavailable rather than hidden", () => {

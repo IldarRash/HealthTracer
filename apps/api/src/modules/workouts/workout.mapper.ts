@@ -1,7 +1,8 @@
 import { workoutPlanRevisions, workoutPlans, workoutSessions } from "@health/db";
 import {
+  normalizeWorkoutPlanPayload,
   workoutCompletionFeedbackSchema,
-  workoutExercisePayloadSchema,
+  workoutSessionExerciseEntrySchema,
   workoutPlanPayloadSchema,
   type WorkoutPlan,
   type WorkoutPlanRevision,
@@ -48,7 +49,9 @@ export function toWorkoutPlanRevision(
     revisionNumber: row.revisionNumber,
     reason: row.reason,
     source: row.source,
-    payload: parseStoredValue(workoutPlanPayloadSchema, row.payload, "revision payload"),
+    payload: normalizeWorkoutPlanPayload(
+      parseStoredValue(workoutPlanPayloadSchema, row.payload, "revision payload"),
+    ),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -63,7 +66,7 @@ export function toWorkoutSession(row: WorkoutSessionRow): WorkoutSession {
     title: row.title,
     status: row.status as WorkoutSession["status"],
     exercises: parseStoredValue(
-      workoutExercisePayloadSchema.array(),
+      workoutSessionExerciseEntrySchema.array(),
       row.exercises,
       "session exercises",
     ),

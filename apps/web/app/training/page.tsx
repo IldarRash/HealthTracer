@@ -14,7 +14,7 @@ export default async function TrainingPage() {
     <AppLayout>
       <PageHeader
         title="Workouts & Training"
-        description="Schedule sessions, review your active plan, and track weekly workout progress in one place."
+        description="Review your active day-by-day program, revision history, and weekly workout progress."
       />
       <PageContent>
         <TrainingWorkspace />

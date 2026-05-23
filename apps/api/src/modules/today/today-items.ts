@@ -9,7 +9,15 @@ import {
   resolveProposalItemStatus,
 } from "@health/types";
 
-type WorkoutSessionSummary = Pick<WorkoutSession, "id" | "title" | "status">;
+type WorkoutSessionSummary = Pick<
+  WorkoutSession,
+  "id" | "title" | "status" | "workoutPlanId" | "workoutPlanRevisionId"
+>;
+
+export interface ActiveWorkoutPlanChecklistContext {
+  planId: string;
+  activeRevisionId: string;
+}
 
 export function mapWorkoutStatusToItemStatus(
   sessionStatus: WorkoutSession["status"],
@@ -68,6 +76,46 @@ export function normalizeProposalItems(
       type: "ai_proposal" as const,
     },
   }));
+}
+
+export function filterWorkoutSessionsForChecklist(
+  sessions: WorkoutSessionSummary[],
+  activePlan: ActiveWorkoutPlanChecklistContext | null,
+): WorkoutSessionSummary[] {
+  if (!activePlan) {
+    return sessions;
+  }
+
+  return sessions.filter(
+    (session) =>
+      session.workoutPlanId === activePlan.planId &&
+      session.workoutPlanRevisionId === activePlan.activeRevisionId,
+  );
+}
+
+export function pruneSupersededWorkoutChecklistItems(
+  items: TodayChecklistItem[],
+  retainedSessionIds: ReadonlySet<string>,
+): TodayChecklistItem[] {
+  return items.filter((item) => {
+    if (item.source.type !== "workout_session" || !item.source.id) {
+      return true;
+    }
+
+    return retainedSessionIds.has(item.source.id);
+  });
+}
+
+export function syncTodayChecklistWorkoutItems(
+  items: TodayChecklistItem[],
+  sessions: WorkoutSessionSummary[],
+): TodayChecklistItem[] {
+  const retainedSessionIds = new Set(sessions.map((session) => session.id));
+
+  return mergeWorkoutSessionsIntoItems(
+    pruneSupersededWorkoutChecklistItems(items, retainedSessionIds),
+    sessions,
+  );
 }
 
 export function mergeWorkoutSessionsIntoItems(

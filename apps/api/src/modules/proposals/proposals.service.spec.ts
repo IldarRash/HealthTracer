@@ -93,6 +93,7 @@ function createValidationServiceMock(overrides: Record<string, unknown> = {}) {
   return {
     validateStoredProposal: () => ({ valid: true, errors: [] }),
     validateProvenanceOwnership: async () => [],
+    validateExerciseReferences: async () => [],
     ...overrides,
   };
 }
@@ -766,6 +767,74 @@ describe("ProposalsService", () => {
     await expect(
       service.decideProposal(auth, pendingProposal.id, { decision: "accept" }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("blocks acceptance when workout proposal references unknown catalog exercises", async () => {
+    let applyCalled = false;
+    const unknownExerciseId = "c1000001-0000-4000-8000-000000000099";
+    const workoutProposal = {
+      ...pendingProposal,
+      intent: "adapt_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "Swap to unknown exercise",
+      reason: "Testing catalog validation.",
+      proposedChanges: {
+        title: "Strength base",
+        summary: "References an unknown exercise id.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Strength",
+            exercises: [
+              {
+                exerciseId: unknownExerciseId,
+                snapshot: {
+                  name: "Unknown Move",
+                  primaryMuscles: ["back"],
+                  equipment: ["bodyweight"],
+                },
+                sets: 3,
+                reps: "8",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => workoutProposal,
+        markValidation: async (
+          _id: string,
+          status: "invalid" | "valid" | "pending_validation",
+          errors: string[],
+        ) => ({
+          ...workoutProposal,
+          validationStatus: status,
+          validationErrors: errors,
+        }),
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateExerciseReferences: async () => [
+          `proposedChanges: exerciseId "${unknownExerciseId}" was not found in the visible exercise catalog.`,
+        ],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "workout_revision:rev-1";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, workoutProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
   });
 
   it("blocks acceptance when progress-derived workout provenance is foreign or missing", async () => {

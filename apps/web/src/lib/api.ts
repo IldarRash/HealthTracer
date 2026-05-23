@@ -25,7 +25,9 @@ import {
   recipeSchema,
   syncHealthMetricsSchema,
   scheduleWorkoutSessionSchema,
+  todayWorkoutDetailSchema,
   updateRecipeRecommendationStatusSchema,
+  updateWorkoutSessionExerciseSchema,
   userRecipeRecommendationListResponseSchema,
   userRecipeRecommendationSchema,
   workoutPlanRevisionSchema,
@@ -63,8 +65,10 @@ import {
   type UserProfile,
   type TodayDayResponse,
   type TodayHistoryResponse,
+  type TodayWorkoutDetail,
   type UpdateTodayFeedbackInput,
   type UpdateTodayItemStatusInput,
+  type UpdateWorkoutSessionExerciseInput,
   type WeeklyProgressSummaryResponse,
   type WorkoutPlanRevision,
   type WorkoutSession,
@@ -334,6 +338,43 @@ export async function completeWorkoutSession(
     workoutSessionSchema,
     { method: "PATCH", body },
   );
+}
+
+export async function startTodayWorkout(
+  token: string,
+  date: string,
+): Promise<ApiResult<TodayWorkoutDetail>> {
+  return apiFetch(
+    `/workouts/today/${encodeURIComponent(date)}/start`,
+    token,
+    todayWorkoutDetailSchema,
+    { method: "POST" },
+  );
+}
+
+export async function updateWorkoutSessionExercise(
+  token: string,
+  sessionId: string,
+  exerciseId: string,
+  input: UpdateWorkoutSessionExerciseInput,
+): Promise<ApiResult<WorkoutSession>> {
+  const body = updateWorkoutSessionExerciseSchema.parse(input);
+  return apiFetch(
+    `/workouts/sessions/${sessionId}/exercises/${encodeURIComponent(exerciseId)}`,
+    token,
+    workoutSessionSchema,
+    { method: "PATCH", body },
+  );
+}
+
+export function getWorkoutExecutionRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    apiQueryKeys.todayDayPrefix,
+    apiQueryKeys.todayHistoryPrefix,
+    apiQueryKeys.workoutActive,
+    apiQueryKeys.progressWeeklyLatest,
+    apiQueryKeys.progressWeeklyCurrent,
+  ];
 }
 
 export async function getActiveNutritionPlan(

@@ -1,4 +1,11 @@
-import type { AiStructuredOutput } from "@health/types";
+import type { AiStructuredOutputInput } from "@health/types";
+import {
+  stubProgressAdaptedWorkoutPlan,
+  stubReducedLoadWorkoutPlan,
+  stubRemoveExerciseWorkoutPlan,
+  stubStructuredWorkoutPlan,
+  stubSwapExerciseWorkoutPlan,
+} from "./stub-workout-plan.js";
 
 export interface CoachAiRequest {
   readonly userMessage: string;
@@ -10,7 +17,7 @@ export interface CoachAiRequest {
 }
 
 export interface CoachAiProvider {
-  generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutput>;
+  generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput>;
 }
 
 const SAFE_DEFAULT_REPLY =
@@ -19,12 +26,90 @@ const SAFE_DEFAULT_REPLY =
 /** Seed fixture recipe id from packages/db/drizzle/seeds/recipes.sql */
 const STUB_RECIPE_ID = "a1000001-0000-4000-8000-000000000001";
 
+function stubCoachOutput(value: unknown): AiStructuredOutputInput {
+  return value as AiStructuredOutputInput;
+}
+
 export class StubCoachAiProvider implements CoachAiProvider {
-  async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutput> {
+  async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput> {
     const normalized = request.userMessage.toLowerCase();
 
     if (normalized.includes("workout") || normalized.includes("training")) {
-      return {
+      if (
+        normalized.includes("progress") ||
+        normalized.includes("completion") ||
+        normalized.includes("weekly")
+      ) {
+        return stubCoachOutput({
+          reply:
+            "Based on your recent weekly training patterns, I drafted a lighter revision you can review first. Nothing changes until you accept the proposal.",
+          proposals: [
+            {
+              intent: "adapt_workout_plan_from_progress",
+              targetDomain: "workout",
+              title: "Reduce load based on weekly progress",
+              reason:
+                "Your recent completion pattern suggests a lighter week could support consistency.",
+              proposedChanges: stubProgressAdaptedWorkoutPlan,
+            },
+          ],
+        });
+      }
+
+      if (normalized.includes("remove")) {
+        return stubCoachOutput({
+          reply:
+            "I can remove that exercise from your active plan. Review the revised program before anything changes.",
+          proposals: [
+            {
+              intent: "adapt_workout_plan",
+              targetDomain: "workout",
+              title: "Remove a conditioning exercise",
+              reason: "This keeps the weekly structure while simplifying Wednesday work.",
+              proposedChanges: stubRemoveExerciseWorkoutPlan,
+            },
+          ],
+        });
+      }
+
+      if (normalized.includes("swap") || normalized.includes("replace")) {
+        return stubCoachOutput({
+          reply:
+            "I can swap that exercise for a band-friendly option. Review the proposal before it updates your plan.",
+          proposals: [
+            {
+              intent: "adapt_workout_plan",
+              targetDomain: "workout",
+              title: "Swap a pulling exercise",
+              reason: "This keeps pulling work available with minimal equipment.",
+              proposedChanges: stubSwapExerciseWorkoutPlan,
+            },
+          ],
+        });
+      }
+
+      if (
+        normalized.includes("reduce") ||
+        normalized.includes("easier") ||
+        normalized.includes("adapt") ||
+        normalized.includes("lighter")
+      ) {
+        return stubCoachOutput({
+          reply:
+            "I drafted a lighter version of your current plan you can review first. Nothing changes until you accept the proposal.",
+          proposals: [
+            {
+              intent: "adapt_workout_plan",
+              targetDomain: "workout",
+              title: "Reduce load for this week",
+              reason: "This lowers recommended load while keeping your weekly structure intact.",
+              proposedChanges: stubReducedLoadWorkoutPlan,
+            },
+          ],
+        });
+      }
+
+      return stubCoachOutput({
         reply:
           "I can suggest a simple strength plan you can review first. Nothing changes until you accept the proposal.",
         proposals: [
@@ -33,34 +118,14 @@ export class StubCoachAiProvider implements CoachAiProvider {
             targetDomain: "workout",
             title: "Start a three day strength plan",
             reason: "This gives you a repeatable weekly structure to build consistency.",
-            proposedChanges: {
-              title: "Three day strength base",
-              summary: "A simple weekly structure for consistent training.",
-              days: [
-                {
-                  day: "Monday",
-                  focus: "Full body strength",
-                  exercises: ["Goblet squat", "Push-up"],
-                },
-                {
-                  day: "Wednesday",
-                  focus: "Conditioning",
-                  exercises: ["Brisk walk", "Plank"],
-                },
-                {
-                  day: "Friday",
-                  focus: "Full body strength",
-                  exercises: ["Romanian deadlift", "Row"],
-                },
-              ],
-            },
+            proposedChanges: stubStructuredWorkoutPlan,
           },
         ],
-      };
+      });
     }
 
     if (normalized.includes("recipe")) {
-      return {
+      return stubCoachOutput({
         reply:
           "Here are recipe ideas that fit your current plan. Review them before anything is saved.",
         proposals: [
@@ -80,11 +145,11 @@ export class StubCoachAiProvider implements CoachAiProvider {
             },
           },
         ],
-      };
+      });
     }
 
     if (normalized.includes("nutrition") || normalized.includes("meal")) {
-      return {
+      return stubCoachOutput({
         reply:
           "Here is a starter nutrition plan outline you can approve or reject before it is saved.",
         proposals: [
@@ -106,11 +171,11 @@ export class StubCoachAiProvider implements CoachAiProvider {
             },
           },
         ],
-      };
+      });
     }
 
     if (normalized.includes("today") || normalized.includes("checklist")) {
-      return {
+      return stubCoachOutput({
         reply: "I drafted a Today checklist you can review before it is saved.",
         proposals: [
           {
@@ -127,12 +192,12 @@ export class StubCoachAiProvider implements CoachAiProvider {
             },
           },
         ],
-      };
+      });
     }
 
-    return {
+    return stubCoachOutput({
       reply: SAFE_DEFAULT_REPLY,
       proposals: [],
-    };
+    });
   }
 }

@@ -6,6 +6,7 @@ import {
   dailyChecklists,
   deviceConnections,
   deviceConsents,
+  exercises,
   healthDocumentSummaries,
   healthDocuments,
   goals,
@@ -39,6 +40,7 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   nutritionAdherence: many(nutritionAdherence),
   dailyChecklists: many(dailyChecklists),
   recipeRecommendations: many(userRecipeRecommendations),
+  exercises: many(exercises),
   deviceConsents: many(deviceConsents),
   deviceConnections: many(deviceConnections),
   healthMetricSnapshots: many(healthMetricSnapshots),
@@ -181,6 +183,13 @@ export const trendObservationsRelations = relations(trendObservations, ({ one })
 
 export const recipesRelations = relations(recipes, ({ many }) => ({
   recommendations: many(userRecipeRecommendations),
+}));
+
+export const exercisesRelations = relations(exercises, ({ one }) => ({
+  user: one(users, {
+    fields: [exercises.userId],
+    references: [users.id],
+  }),
 }));
 
 export const userRecipeRecommendationsRelations = relations(

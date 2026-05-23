@@ -27,7 +27,7 @@ function buildSession(
     plannedDate: overrides.plannedDate,
     title: overrides.title ?? "Training day",
     status: overrides.status,
-    exercises: [],
+    exercises: overrides.exercises ?? [],
     feedback: overrides.feedback ?? {},
     completedAt: overrides.completedAt ?? null,
     createdAt: timestamp,
@@ -69,6 +69,51 @@ describe("ProgressAggregateService", () => {
     expect(aggregate.skippedCount).toBe(1);
     expect(aggregate.adherencePercent).toBe(33);
     expect(aggregate.activeDays).toBe(2);
+    expect(aggregate.exerciseCompletedCount).toBe(0);
+    expect(aggregate.partialSessionCount).toBe(0);
+  });
+
+  it("aggregates structured exercise completion and partial sessions", () => {
+    const aggregate = aggregateWorkoutSessions(
+      [
+        buildSession({
+          plannedDate: "2026-05-19",
+          status: "planned",
+          exercises: [
+            {
+              id: "a1000001-0000-4000-8000-000000000001",
+              prescription: { snapshot: { name: "Squat" } },
+              execution: { status: "completed" },
+            },
+            {
+              id: "a1000001-0000-4000-8000-000000000002",
+              prescription: { snapshot: { name: "Lunge" } },
+              execution: { status: "planned" },
+            },
+          ],
+        }),
+        buildSession({
+          id: "88d40655-b4b5-47b3-b28e-470192e05f05",
+          plannedDate: "2026-05-21",
+          status: "completed",
+          exercises: [
+            {
+              id: "a1000001-0000-4000-8000-000000000003",
+              prescription: { snapshot: { name: "Push-up" } },
+              execution: { status: "adjusted", loadAdjustmentNotes: "Knee-friendly angle." },
+            },
+          ],
+        }),
+      ],
+      "2026-05-18",
+      "2026-05-24",
+    );
+
+    expect(aggregate.exerciseCompletedCount).toBe(1);
+    expect(aggregate.exerciseAdjustedCount).toBe(1);
+    expect(aggregate.exercisePlannedCount).toBe(1);
+    expect(aggregate.exerciseCompletionPercent).toBe(67);
+    expect(aggregate.partialSessionCount).toBe(1);
   });
 
   it("labels insufficient summary data when no workouts exist", () => {

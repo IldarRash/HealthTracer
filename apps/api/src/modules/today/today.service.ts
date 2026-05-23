@@ -14,14 +14,16 @@ import {
 } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { UsersService } from "../users/users.service.js";
+import { WorkoutsService } from "../workouts/workouts.service.js";
 import { WorkoutsRepository } from "../workouts/workouts.repository.js";
 import {
   applyItemStatusUpdate,
   buildChecklistState,
+  filterWorkoutSessionsForChecklist,
   findWorkoutSessionIdForItem,
   mergeProposalItemsWithExisting,
-  mergeWorkoutSessionsIntoItems,
   normalizeProposalItems,
+  syncTodayChecklistWorkoutItems,
 } from "./today-items.js";
 import {
   adherenceScoreValue,
@@ -35,21 +37,20 @@ export class TodayService {
   constructor(
     private readonly todayRepository: TodayRepository,
     private readonly workoutsRepository: WorkoutsRepository,
+    private readonly workoutsService: WorkoutsService,
     private readonly usersService: UsersService,
   ) {}
 
   async getOrGenerateDay(auth: ClerkAuthContext, dateInput: string): Promise<TodayDayResponse> {
     const date = this.parseDate(dateInput);
     const user = await this.usersService.resolveFromAuth(auth);
-    const sessions = await this.workoutsRepository.listSessionsByUserAndPlannedDate(
-      user.id,
-      date,
-    ).then((rows) => rows.map(toWorkoutSessionSummary));
+    const workout = await this.workoutsService.ensureTodayWorkoutSession(auth, date);
+    const sessions = await this.listChecklistWorkoutSessions(user.id, date);
 
     const existing = await this.todayRepository.findByUserAndDate(user.id, date);
 
     if (!existing) {
-      const generatedItems = mergeWorkoutSessionsIntoItems([], sessions);
+      const generatedItems = syncTodayChecklistWorkoutItems([], sessions);
       const { items, adherence } = buildChecklistState(generatedItems);
       const checklist = await this.todayRepository.upsertChecklist(
         user.id,
@@ -59,10 +60,10 @@ export class TodayService {
         adherenceScoreValue(adherence),
       );
 
-      return toTodayChecklistRecord(checklist);
+      return this.buildDayResponse(checklist, workout);
     }
 
-    const syncedItems = mergeWorkoutSessionsIntoItems(
+    const syncedItems = syncTodayChecklistWorkoutItems(
       toTodayChecklistRecord(existing).items,
       sessions,
     );
@@ -82,10 +83,10 @@ export class TodayService {
         throw new NotFoundException("Daily checklist not found.");
       }
 
-      return toTodayChecklistRecord(updated);
+      return this.buildDayResponse(updated, workout);
     }
 
-    return toTodayChecklistRecord(existing);
+    return this.buildDayResponse(existing, workout);
   }
 
   async updateItemStatus(
@@ -136,7 +137,9 @@ export class TodayService {
       throw new NotFoundException("Daily checklist not found.");
     }
 
-    return toTodayChecklistRecord(updated);
+    const workout = await this.workoutsService.ensureTodayWorkoutSession(auth, date);
+
+    return this.buildDayResponse(updated, workout);
   }
 
   async updateFeedback(
@@ -153,7 +156,7 @@ export class TodayService {
       throw new NotFoundException("Daily checklist not found.");
     }
 
-    return toTodayChecklistRecord(updated);
+    return this.buildDayResponse(updated, day.workout ?? null);
   }
 
   async getRecentHistory(
@@ -174,14 +177,11 @@ export class TodayService {
   ): Promise<string> {
     const date = this.parseDate(payload.date);
     const existing = await this.todayRepository.findByUserAndDate(userId, date);
-    const sessions = await this.workoutsRepository.listSessionsByUserAndPlannedDate(
-      userId,
-      date,
-    ).then((rows) => rows.map(toWorkoutSessionSummary));
+    const sessions = await this.listChecklistWorkoutSessions(userId, date);
     const proposalItems = normalizeProposalItems(payload.items);
     const existingItems = existing ? toTodayChecklistRecord(existing).items : [];
     const mergedItems = mergeProposalItemsWithExisting(existingItems, proposalItems);
-    const withWorkouts = mergeWorkoutSessionsIntoItems(mergedItems, sessions);
+    const withWorkouts = syncTodayChecklistWorkoutItems(mergedItems, sessions);
     const { items, adherence } = buildChecklistState(withWorkouts);
 
     const checklist = await this.todayRepository.createChecklistFromProposal(
@@ -193,6 +193,33 @@ export class TodayService {
     );
 
     return `daily_checklist:${checklist.id}`;
+  }
+
+  private async listChecklistWorkoutSessions(userId: string, date: string) {
+    const [activePlan, sessionRows] = await Promise.all([
+      this.workoutsRepository.findActivePlanByUserId(userId),
+      this.workoutsRepository.listSessionsByUserAndPlannedDate(userId, date),
+    ]);
+
+    const activePlanContext =
+      activePlan?.activeRevisionId != null
+        ? { planId: activePlan.id, activeRevisionId: activePlan.activeRevisionId }
+        : null;
+
+    return filterWorkoutSessionsForChecklist(
+      sessionRows.map(toWorkoutSessionChecklistSummary),
+      activePlanContext,
+    );
+  }
+
+  private buildDayResponse(
+    row: Parameters<typeof toTodayChecklistRecord>[0],
+    workout: TodayDayResponse["workout"],
+  ): TodayDayResponse {
+    return {
+      ...toTodayChecklistRecord(row),
+      workout,
+    };
   }
 
   private parseDate(value: string): string {
@@ -212,16 +239,20 @@ type WorkoutSessionRow = {
   id: string;
   title: string;
   status: string;
+  workoutPlanId: string;
+  workoutPlanRevisionId: string;
 };
 
-function toWorkoutSessionSummary(session: WorkoutSessionRow): Pick<
+function toWorkoutSessionChecklistSummary(session: WorkoutSessionRow): Pick<
   WorkoutSession,
-  "id" | "title" | "status"
+  "id" | "title" | "status" | "workoutPlanId" | "workoutPlanRevisionId"
 > {
   return {
     id: session.id,
     title: session.title,
     status: session.status as WorkoutSession["status"],
+    workoutPlanId: session.workoutPlanId,
+    workoutPlanRevisionId: session.workoutPlanRevisionId,
   };
 }
 

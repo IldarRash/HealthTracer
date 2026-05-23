@@ -5,6 +5,11 @@ import type {
   User,
   UserProfile,
   WeeklyProgressSummaryResponse,
+  WorkoutPlanCoachingSummary,
+} from "@health/types";
+import {
+  summarizeWorkoutPlanForCoaching,
+  workoutPlanPayloadSchema,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
@@ -22,6 +27,7 @@ export interface CoachingContextSnapshot {
   profile: UserProfile | null;
   goals: Goal[];
   activeWorkoutRevisionId: string | null;
+  activeWorkoutPlanSummary: WorkoutPlanCoachingSummary | null;
   activeNutritionRevisionId: string | null;
   weeklyProgressSummary: WeeklyProgressSummaryResponse | null;
   documentContext: AiDocumentContextSummary;
@@ -61,11 +67,26 @@ export class CoachingContextService {
       this.metricsAiContextService.buildSummaryForUser(user.id),
     ]);
 
+    let activeWorkoutPlanSummary: WorkoutPlanCoachingSummary | null = null;
+
+    if (workoutPlan?.activeRevisionId) {
+      const activeRevision = await this.workoutsRepository.findActiveRevisionByPlanId(
+        workoutPlan.id,
+        workoutPlan.activeRevisionId,
+      );
+      const parsedPayload = workoutPlanPayloadSchema.safeParse(activeRevision?.payload);
+
+      if (parsedPayload.success) {
+        activeWorkoutPlanSummary = summarizeWorkoutPlanForCoaching(parsedPayload.data);
+      }
+    }
+
     return {
       user,
       profile,
       goals,
       activeWorkoutRevisionId: workoutPlan?.activeRevisionId ?? null,
+      activeWorkoutPlanSummary,
       activeNutritionRevisionId: nutritionPlan?.activeRevisionId ?? null,
       weeklyProgressSummary,
       documentContext,
@@ -96,6 +117,7 @@ export class CoachingContextService {
         title: goal.title,
       })),
       activeWorkoutRevisionId: snapshot.activeWorkoutRevisionId,
+      activeWorkoutPlan: snapshot.activeWorkoutPlanSummary,
       activeNutritionRevisionId: snapshot.activeNutritionRevisionId,
       weeklyProgressSummary: snapshot.weeklyProgressSummary
         ? {
@@ -111,6 +133,7 @@ export class CoachingContextService {
               }),
             ),
             trends: snapshot.weeklyProgressSummary.trends.map((trend) => ({
+              id: trend.id,
               domain: trend.domain,
               trendType: trend.trendType,
               direction: trend.direction,

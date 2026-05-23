@@ -28,6 +28,32 @@ const usersService = {
   }),
 };
 
+const exercisesService = {
+  findInaccessibleExerciseIds: async () => [],
+  findOrCreateExercise: async (input: {
+    name: string;
+    userId: string | null;
+  }) => ({
+    id: "d1000001-0000-4000-8000-000000000099",
+    name: input.name,
+    normalizedName: input.name.toLowerCase(),
+    aliases: [],
+    primaryMuscles: ["back"],
+    secondaryMuscles: [],
+    equipment: ["resistance_band"],
+    movementPatterns: ["pull"],
+    difficulty: "beginner",
+    instructions: ["Pull with control."],
+    safetyNotes: ["Use a light band."],
+    source: "ai_generated",
+    validationStatus: "pending_validation",
+    status: "active",
+    userId: input.userId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }),
+};
+
 describe("WorkoutsService", () => {
   it("returns an empty active plan state when the user has no plan", async () => {
     const service = new WorkoutsService(
@@ -35,6 +61,7 @@ describe("WorkoutsService", () => {
         findActivePlanByUserId: async () => null,
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     await expect(service.getCurrentActivePlan(auth)).resolves.toEqual({
@@ -71,6 +98,7 @@ describe("WorkoutsService", () => {
         }),
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const session = await service.scheduleCurrentSession(auth, {
@@ -109,6 +137,7 @@ describe("WorkoutsService", () => {
         }),
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const session = await service.completeCurrentSession(
@@ -145,6 +174,7 @@ describe("WorkoutsService", () => {
         },
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const reference = await service.applyWorkoutPlanProposal(
@@ -156,6 +186,34 @@ describe("WorkoutsService", () => {
 
     expect(reference).toBe("workout_revision:rev-append-race");
     expect(appendCalled).toBe(true);
+  });
+
+  it("rejects apply when workout payload has no exercises", async () => {
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => null,
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    await expect(
+      service.applyWorkoutPlanProposal(
+        userId,
+        {
+          title: "Strength base",
+          summary: "Empty plan.",
+          days: [{ day: "Day 1", focus: "Strength", exercises: [] }],
+          notes: [],
+        },
+        "Starting a new plan.",
+        "create_workout_plan",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        validationErrors: ["workout: At least one plan day must include exercises."],
+      },
+    });
   });
 
   it("creates a new plan revision for create_workout_plan intent", async () => {
@@ -173,6 +231,7 @@ describe("WorkoutsService", () => {
         },
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const reference = await service.applyWorkoutPlanProposal(
@@ -211,6 +270,7 @@ describe("WorkoutsService", () => {
         },
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const reference = await service.applyWorkoutPlanProposal(
@@ -244,6 +304,7 @@ describe("WorkoutsService", () => {
         },
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const reference = await service.applyWorkoutPlanProposal(
@@ -298,6 +359,7 @@ describe("WorkoutsService", () => {
         listSessionsByPlanId: async () => [sessionRow],
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const result = await service.getCurrentActivePlan(auth);
@@ -333,6 +395,7 @@ describe("WorkoutsService", () => {
         ].filter(() => resolvedUserId === userId),
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const revisions = await service.listCurrentRevisions(auth);
@@ -347,6 +410,7 @@ describe("WorkoutsService", () => {
         findActiveRevisionForUser: async () => null,
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     await expect(
@@ -369,6 +433,7 @@ describe("WorkoutsService", () => {
         }),
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     await expect(
@@ -419,6 +484,7 @@ describe("WorkoutsService", () => {
         },
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const first = await service.completeCurrentSession(
@@ -479,6 +545,7 @@ describe("WorkoutsService", () => {
         },
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     const skipped = await service.completeCurrentSession(auth, storedSession.id, {
@@ -502,12 +569,166 @@ describe("WorkoutsService", () => {
     vi.useRealTimers();
   });
 
+  it("persists pending exercises and resolves refs before creating a revision", async () => {
+    let persistedPayload: typeof payload | undefined;
+    let findOrCreateCalled = false;
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => null,
+        createPlanWithRevision: async (
+          _userId: string,
+          nextPayload: typeof payload,
+        ) => {
+          persistedPayload = nextPayload;
+          return { revision: { id: "rev-pending-1" } };
+        },
+      } as never,
+      usersService as never,
+      {
+        findInaccessibleExerciseIds: async () => [],
+        findOrCreateExercise: async () => {
+          findOrCreateCalled = true;
+          return {
+            id: "d1000001-0000-4000-8000-000000000099",
+            name: "Band Pull-Apart",
+            normalizedName: "band pull-apart",
+            aliases: [],
+            primaryMuscles: ["back"],
+            secondaryMuscles: [],
+            equipment: ["resistance_band"],
+            movementPatterns: ["pull"],
+            difficulty: "beginner",
+            instructions: ["Pull with control."],
+            safetyNotes: ["Use a light band."],
+            source: "ai_generated",
+            validationStatus: "pending_validation",
+            status: "active",
+            userId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+        },
+      } as never,
+    );
+
+    const reference = await service.applyWorkoutPlanProposal(
+      userId,
+      {
+        title: "Strength base",
+        summary: "Swap in a band option.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Strength",
+            exercises: [
+              {
+                pendingExerciseRef: "band-pull-apart",
+                snapshot: {
+                  name: "Band Pull-Apart",
+                  primaryMuscles: ["back"],
+                  equipment: ["resistance_band"],
+                },
+                sets: 3,
+                reps: "12",
+              },
+            ],
+          },
+        ],
+        notes: [],
+        pendingExercises: {
+          "band-pull-apart": {
+            name: "Band Pull-Apart",
+            aliases: [],
+            primaryMuscles: ["back"],
+            secondaryMuscles: [],
+            equipment: ["resistance_band"],
+            movementPatterns: ["pull"],
+            difficulty: "beginner",
+            instructions: ["Pull the band apart with control."],
+            safetyNotes: ["Use a light band."],
+            source: "ai_generated",
+          },
+        },
+      },
+      "Swapping to a band-friendly pull.",
+      "adapt_workout_plan",
+    );
+
+    expect(reference).toBe("workout_revision:rev-pending-1");
+    expect(findOrCreateCalled).toBe(true);
+    expect(persistedPayload?.days[0]?.exercises[0]).toMatchObject({
+      exerciseId: "d1000001-0000-4000-8000-000000000099",
+      snapshot: {
+        name: "Band Pull-Apart",
+        primaryMuscles: ["back"],
+        equipment: ["resistance_band"],
+      },
+    });
+    expect(
+      (persistedPayload?.days[0]?.exercises[0] as { pendingExerciseRef?: string })
+        .pendingExerciseRef,
+    ).toBeUndefined();
+  });
+
+  it("rejects apply when referenced catalog exercise ids are inaccessible", async () => {
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => null,
+      } as never,
+      usersService as never,
+      {
+        findInaccessibleExerciseIds: async () => [
+          "c1000001-0000-4000-8000-000000000099",
+        ],
+      } as never,
+    );
+
+    await expect(
+      service.applyWorkoutPlanProposal(
+        userId,
+        {
+          title: "Strength base",
+          summary: "Unknown exercise reference.",
+          days: [
+            {
+              weekday: "monday",
+              focus: "Strength",
+              exercises: [
+                {
+                  exerciseId: "c1000001-0000-4000-8000-000000000099",
+                  snapshot: {
+                    name: "Unknown Move",
+                    primaryMuscles: ["back"],
+                    equipment: ["bodyweight"],
+                  },
+                  sets: 3,
+                  reps: "8",
+                },
+              ],
+            },
+          ],
+          notes: [],
+        },
+        "Invalid exercise reference.",
+        "adapt_workout_plan",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        validationErrors: [
+          'proposedChanges: exerciseId "c1000001-0000-4000-8000-000000000099" was not found in the visible exercise catalog.',
+        ],
+      },
+    });
+  });
+
   it("rejects completion when the session is not found for the user", async () => {
     const service = new WorkoutsService(
       {
         completeSession: async () => null,
       } as never,
       usersService as never,
+      exercisesService as never,
     );
 
     await expect(
@@ -516,5 +737,355 @@ describe("WorkoutsService", () => {
         feedback: {},
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("reuses an existing session without rematerializing for the same weekday", async () => {
+    let materializeCalled = false;
+    const planRow = {
+      id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      userId,
+      activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      status: "active",
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+    const revisionRow = {
+      id: "880099c6-3b5f-4383-8246-97b72bf61818",
+      workoutPlanId: planRow.id,
+      revisionNumber: 1,
+      reason: "Starting plan",
+      source: "ai_proposal",
+      payload: {
+        title: "Strength base",
+        summary: "Three training days.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Lower body",
+            exercises: [
+              {
+                exerciseId: "c1000001-0000-4000-8000-000000000099",
+                snapshot: { name: "Squat", primaryMuscles: ["quads"], equipment: ["barbell"] },
+                sets: 3,
+                reps: "8",
+              },
+            ],
+          },
+        ],
+        notes: [],
+      },
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+    };
+    const existingSession = {
+      id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+      userId,
+      workoutPlanId: planRow.id,
+      workoutPlanRevisionId: revisionRow.id,
+      plannedDate: "2026-05-18",
+      title: "Strength base — Lower body",
+      status: "planned",
+      exercises: [
+        {
+          id: "a1000001-0000-4000-8000-000000000001",
+          prescription: { snapshot: { name: "Squat" }, sets: 3, reps: "8" },
+          execution: { status: "planned" },
+        },
+      ],
+      feedback: {},
+      completedAt: null,
+      createdAt: new Date("2026-05-22T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => planRow,
+        findActiveRevisionByPlanId: async () => revisionRow,
+        listSessionsByUserAndPlannedDate: async () => [existingSession],
+        materializeSession: async () => {
+          materializeCalled = true;
+          return existingSession;
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    const workout = await service.ensureTodayWorkoutSession(auth, "2026-05-18");
+
+    expect(materializeCalled).toBe(false);
+    expect(workout?.sessionId).toBe(existingSession.id);
+    expect(workout?.weekday).toBe("monday");
+  });
+
+  it("returns null when the active plan has no workout for the weekday", async () => {
+    const planRow = {
+      id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      userId,
+      activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      status: "active",
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+    const revisionRow = {
+      id: "880099c6-3b5f-4383-8246-97b72bf61818",
+      workoutPlanId: planRow.id,
+      revisionNumber: 1,
+      reason: "Starting plan",
+      source: "ai_proposal",
+      payload: {
+        title: "Strength base",
+        summary: "Monday-only plan.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Lower body",
+            exercises: [
+              {
+                exerciseId: "c1000001-0000-4000-8000-000000000099",
+                snapshot: { name: "Squat", primaryMuscles: ["quads"], equipment: ["barbell"] },
+                sets: 3,
+                reps: "8",
+              },
+            ],
+          },
+        ],
+        notes: [],
+      },
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+    };
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => planRow,
+        findActiveRevisionByPlanId: async () => revisionRow,
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    await expect(service.ensureTodayWorkoutSession(auth, "2026-05-23")).resolves.toBeNull();
+  });
+
+  it("throws when starting a workout on a rest day", async () => {
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => null,
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    await expect(
+      service.startTodayWorkoutSession(auth, "2026-05-23"),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("keeps session planned when only some exercises are completed", async () => {
+    const exerciseIdOne = "a1000001-0000-4000-8000-000000000001";
+    const exerciseIdTwo = "a1000001-0000-4000-8000-000000000002";
+    const sessionRow = {
+      id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+      userId,
+      workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      plannedDate: "2026-05-18",
+      title: "Strength base — Lower body",
+      status: "planned",
+      exercises: [
+        {
+          id: exerciseIdOne,
+          prescription: { snapshot: { name: "Squat" }, sets: 3, reps: "8" },
+          execution: { status: "planned" },
+        },
+        {
+          id: exerciseIdTwo,
+          prescription: { snapshot: { name: "Lunge" }, sets: 3, reps: "10" },
+          execution: { status: "planned" },
+        },
+      ],
+      feedback: {},
+      completedAt: null,
+      createdAt: new Date("2026-05-22T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+
+    let updatedStatus: string | undefined;
+
+    const service = new WorkoutsService(
+      {
+        findSessionByUserId: async () => sessionRow,
+        updateSessionState: async (
+          _resolvedUserId: string,
+          _sessionId: string,
+          input: { status?: string; exercises?: unknown[] },
+        ) => {
+          updatedStatus = input.status;
+          return {
+            ...sessionRow,
+            status: input.status ?? sessionRow.status,
+            exercises: input.exercises ?? sessionRow.exercises,
+          };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    const session = await service.updateSessionExercise(auth, sessionRow.id, exerciseIdOne, {
+      status: "completed",
+    });
+
+    expect(updatedStatus).toBe("planned");
+    expect(session.status).toBe("planned");
+    expect(
+      (session.exercises[0] as { execution: { status: string } }).execution.status,
+    ).toBe("completed");
+    expect(
+      (session.exercises[1] as { execution: { status: string } }).execution.status,
+    ).toBe("planned");
+  });
+
+  it("materializes and returns today's workout from the active weekday plan", async () => {
+    let materializeCalled = false;
+    const planRow = {
+      id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      userId,
+      activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      status: "active",
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+    const revisionRow = {
+      id: "880099c6-3b5f-4383-8246-97b72bf61818",
+      workoutPlanId: planRow.id,
+      revisionNumber: 1,
+      reason: "Starting plan",
+      source: "ai_proposal",
+      payload: {
+        title: "Strength base",
+        summary: "Three training days.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Lower body",
+            exercises: [
+              {
+                exerciseId: "c1000001-0000-4000-8000-000000000099",
+                snapshot: { name: "Squat", primaryMuscles: ["quads"], equipment: ["barbell"] },
+                sets: 3,
+                reps: "8",
+              },
+            ],
+          },
+        ],
+        notes: [],
+      },
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+    };
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => planRow,
+        findActiveRevisionByPlanId: async () => revisionRow,
+        listSessionsByUserAndPlannedDate: async () => [],
+        materializeSession: async (
+          resolvedUserId: string,
+          workoutPlanId: string,
+          workoutPlanRevisionId: string,
+          plannedDate: string,
+          title: string,
+          exercises: unknown[],
+        ) => {
+          materializeCalled = true;
+          expect(resolvedUserId).toBe(userId);
+          expect(workoutPlanId).toBe(planRow.id);
+          expect(workoutPlanRevisionId).toBe(revisionRow.id);
+          expect(plannedDate).toBe("2026-05-18");
+          expect(title).toContain("Lower body");
+          expect(exercises).toHaveLength(1);
+
+          return {
+            id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+            userId,
+            workoutPlanId,
+            workoutPlanRevisionId,
+            plannedDate,
+            title,
+            status: "planned",
+            exercises,
+            feedback: {},
+            completedAt: null,
+            createdAt: new Date("2026-05-22T12:00:00.000Z"),
+            updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+          };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    const workout = await service.ensureTodayWorkoutSession(auth, "2026-05-18");
+
+    expect(materializeCalled).toBe(true);
+    expect(workout?.weekday).toBe("monday");
+    expect(workout?.exercises).toHaveLength(1);
+  });
+
+  it("updates structured exercise execution and completes the session", async () => {
+    const exerciseId = "a1000001-0000-4000-8000-000000000001";
+    const sessionRow = {
+      id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+      userId,
+      workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      plannedDate: "2026-05-18",
+      title: "Strength base — Lower body",
+      status: "planned",
+      exercises: [
+        {
+          id: exerciseId,
+          prescription: { snapshot: { name: "Squat" }, sets: 3, reps: "8" },
+          execution: { status: "planned" },
+        },
+      ],
+      feedback: {},
+      completedAt: null,
+      createdAt: new Date("2026-05-22T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+
+    let updatedStatus: string | undefined;
+
+    const service = new WorkoutsService(
+      {
+        findSessionByUserId: async () => sessionRow,
+        updateSessionState: async (
+          resolvedUserId: string,
+          sessionId: string,
+          input: { status?: string; exercises?: unknown[] },
+        ) => {
+          expect(resolvedUserId).toBe(userId);
+          expect(sessionId).toBe(sessionRow.id);
+          updatedStatus = input.status;
+          return {
+            ...sessionRow,
+            status: input.status ?? sessionRow.status,
+            exercises: input.exercises ?? sessionRow.exercises,
+            completedAt: new Date("2026-05-18T12:00:00.000Z"),
+          };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    const session = await service.updateSessionExercise(auth, sessionRow.id, exerciseId, {
+      status: "completed",
+    });
+
+    expect(updatedStatus).toBe("completed");
+    expect(session.status).toBe("completed");
   });
 });

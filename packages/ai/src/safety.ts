@@ -1,4 +1,10 @@
-import type { RawAiProposal } from "@health/types";
+export interface ProposalSafetyInput {
+  readonly intent: string;
+  readonly targetDomain: string;
+  readonly title: string;
+  readonly reason: string;
+  readonly proposedChanges: unknown;
+}
 
 const UNSAFE_MEDICAL_PATTERNS = [
   /\bdiagnos(e|is|ed|ing)\b/i,
@@ -61,7 +67,7 @@ export function containsUnsafeDocumentSummaryLanguage(text: string): boolean {
   return UNSAFE_DOCUMENT_SUMMARY_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
-function collectProposalText(proposal: RawAiProposal): string[] {
+function collectProposalText(proposal: ProposalSafetyInput): string[] {
   return [
     proposal.title,
     proposal.reason,
@@ -69,7 +75,7 @@ function collectProposalText(proposal: RawAiProposal): string[] {
   ];
 }
 
-export function validateProposalSafety(proposal: RawAiProposal): string[] {
+export function validateProposalSafety(proposal: ProposalSafetyInput): string[] {
   const errors: string[] = [];
 
   for (const text of collectProposalText(proposal)) {

@@ -187,6 +187,7 @@ describe("phase 5 today contracts", () => {
         },
         createdAt: timestamp,
         updatedAt: timestamp,
+        workout: null,
       }),
     ).not.toThrow();
 

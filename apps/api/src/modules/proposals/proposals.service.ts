@@ -104,7 +104,18 @@ export class ProposalsService {
         proposal.intent,
         proposal.proposedChanges,
       );
-    const validationErrors = [...safetyErrors, ...validation.errors, ...provenanceErrors];
+    const exerciseReferenceErrors =
+      await this.proposalValidationService.validateExerciseReferences(
+        user.id,
+        proposal.intent,
+        proposal.proposedChanges,
+      );
+    const validationErrors = [
+      ...safetyErrors,
+      ...validation.errors,
+      ...provenanceErrors,
+      ...exerciseReferenceErrors,
+    ];
 
     if (validationErrors.length > 0) {
       await this.proposalsRepository.markValidation(proposalId, "invalid", validationErrors);

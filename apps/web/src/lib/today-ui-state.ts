@@ -4,9 +4,12 @@ import type {
   TodayChecklistItemStatus,
   TodayDailyFeedback,
   TodayHistoryEntry,
+  TodayWorkoutDetail,
 } from "@health/types";
+import { isTerminalSessionStatus, sessionStatusLabel } from "./training-ui-state";
 
 export { formatLocalIsoDate } from "./training-ui-state";
+export { sessionStatusLabel } from "./training-ui-state";
 
 export function formatDisplayDate(isoDate: string): string {
   const [year, month, day] = isoDate.split("-").map(Number);
@@ -159,6 +162,40 @@ export function historyEntrySummaryLabel(entry: TodayHistoryEntry): string {
   const feedbackLabel = entry.hasFeedback ? "Feedback saved" : "No feedback";
 
   return `${scoreLabel} · ${taskLabel} · ${feedbackLabel}`;
+}
+
+export function hasTodayWorkoutExecutionStarted(
+  workout: Pick<TodayWorkoutDetail, "exercises">,
+): boolean {
+  return workout.exercises.some((exercise) => exercise.execution.status !== "planned");
+}
+
+export function canStartTodayWorkout(
+  workout: Pick<TodayWorkoutDetail, "isRestDay" | "status" | "exercises">,
+): boolean {
+  if (workout.isRestDay || isTerminalSessionStatus(workout.status)) {
+    return false;
+  }
+
+  return !hasTodayWorkoutExecutionStarted(workout);
+}
+
+export function canExecuteTodayWorkout(
+  workout: Pick<TodayWorkoutDetail, "isRestDay" | "status">,
+): boolean {
+  return !workout.isRestDay && !isTerminalSessionStatus(workout.status);
+}
+
+export function todayWorkoutStatusBadgeClass(
+  status: TodayWorkoutDetail["status"],
+): string {
+  return `badge badge-session-${status}`;
+}
+
+export function todayWorkoutSummaryLabel(
+  workout: Pick<TodayWorkoutDetail, "focus" | "plannedDate" | "status">,
+): string {
+  return `${workout.focus} · ${formatDisplayDate(workout.plannedDate)} · ${sessionStatusLabel(workout.status)}`;
 }
 
 function isValidFeedbackScale(value: string): boolean {

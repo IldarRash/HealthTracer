@@ -147,6 +147,79 @@ export class WorkoutsRepository {
       .orderBy(desc(workoutSessions.plannedDate), desc(workoutSessions.createdAt));
   }
 
+  async findSessionByUserPlanRevisionAndDate(
+    userId: string,
+    workoutPlanId: string,
+    workoutPlanRevisionId: string,
+    plannedDate: string,
+  ) {
+    const [session] = await this.db
+      .select()
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          eq(workoutSessions.workoutPlanId, workoutPlanId),
+          eq(workoutSessions.workoutPlanRevisionId, workoutPlanRevisionId),
+          eq(workoutSessions.plannedDate, plannedDate),
+        ),
+      )
+      .orderBy(desc(workoutSessions.createdAt))
+      .limit(1);
+
+    return session ?? null;
+  }
+
+  async materializeSession(
+    userId: string,
+    workoutPlanId: string,
+    workoutPlanRevisionId: string,
+    plannedDate: string,
+    title: string,
+    exercises: unknown[],
+  ) {
+    const [session] = await this.db
+      .insert(workoutSessions)
+      .values({
+        userId,
+        workoutPlanId,
+        workoutPlanRevisionId,
+        plannedDate,
+        title,
+        exercises,
+      })
+      .returning();
+
+    if (!session) {
+      throw new Error("Failed to materialize workout session.");
+    }
+
+    return session;
+  }
+
+  async updateSessionState(
+    userId: string,
+    sessionId: string,
+    input: {
+      exercises?: unknown[];
+      status?: string;
+      completedAt?: Date | null;
+    },
+  ) {
+    const [session] = await this.db
+      .update(workoutSessions)
+      .set({
+        ...(input.exercises !== undefined ? { exercises: input.exercises } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.completedAt !== undefined ? { completedAt: input.completedAt } : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(workoutSessions.id, sessionId), eq(workoutSessions.userId, userId)))
+      .returning();
+
+    return session ?? null;
+  }
+
   async scheduleSession(
     userId: string,
     workoutPlanId: string,
