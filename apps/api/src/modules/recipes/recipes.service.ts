@@ -220,10 +220,7 @@ export class RecipesService {
       throw new BadRequestException("One or more proposed recipes were not found.");
     }
 
-    const hardFilters = await this.resolveHardFilters(
-      userId,
-      activeContext?.payload,
-    );
+    const hardFilters = await this.resolveHardFilters(userId, filterPayload);
 
     for (const item of payload.recommendations) {
       const recipe = recipeById.get(item.recipeId);
@@ -241,7 +238,7 @@ export class RecipesService {
       }
     }
 
-    const created = await this.recipesRepository.createRecommendations(
+    const created = await this.createRecommendationsIdempotently(
       payload.recommendations.map((item) => ({
         userId,
         recipeId: item.recipeId,
@@ -295,5 +292,68 @@ export class RecipesService {
       payload?.allergies ?? [],
       profile?.constraints ?? [],
     );
+  }
+
+  private async createRecommendationsIdempotently(inputs: CreateRecommendationInput[]) {
+    if (inputs.length === 0) {
+      return [];
+    }
+
+    const userId = inputs[0]!.userId;
+    const keys = inputs.map((input) => ({
+      recipeId: input.recipeId,
+      relatedNutritionPlanRevisionId: input.relatedNutritionPlanRevisionId,
+    }));
+    const existingOpen = await this.recipesRepository.findOpenRecommendationsByKeys(
+      userId,
+      keys,
+    );
+    const existingByKey = new Map(
+      existingOpen.map((recommendation) => [
+        this.recommendationLookupKey(
+          recommendation.recipeId,
+          recommendation.relatedNutritionPlanRevisionId,
+        ),
+        recommendation,
+      ]),
+    );
+    const toCreate = inputs.filter(
+      (input) =>
+        !existingByKey.has(
+          this.recommendationLookupKey(
+            input.recipeId,
+            input.relatedNutritionPlanRevisionId,
+          ),
+        ),
+    );
+    const created =
+      toCreate.length > 0
+        ? await this.recipesRepository.createRecommendations(toCreate)
+        : [];
+    const createdByKey = new Map(
+      created.map((recommendation) => [
+        this.recommendationLookupKey(
+          recommendation.recipeId,
+          recommendation.relatedNutritionPlanRevisionId,
+        ),
+        recommendation,
+      ]),
+    );
+
+    return inputs.map((input) => {
+      const lookupKey = this.recommendationLookupKey(
+        input.recipeId,
+        input.relatedNutritionPlanRevisionId,
+      );
+
+      return existingByKey.get(lookupKey) ?? createdByKey.get(lookupKey)!;
+    });
+  }
+
+  private recommendationLookupKey(
+    recipeId: string,
+    relatedNutritionPlanRevisionId: string | null,
+  ) {
+    return `${recipeId}:${relatedNutritionPlanRevisionId ?? "null"}`;
   }
 }

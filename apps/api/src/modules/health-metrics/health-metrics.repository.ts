@@ -8,7 +8,7 @@ import type {
   ProviderMetricRecord,
 } from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
 import { buildMetricDedupeKey } from "./metric-dedupe.js";
@@ -82,8 +82,11 @@ export class HealthMetricsRepository {
           eq(healthMetricSnapshots.userId, userId),
           eq(healthMetricSnapshots.consentId, consentId),
           eq(healthMetricSnapshots.metricType, metricType),
-          gte(healthMetricSnapshots.observedAt, periodStart),
           lte(healthMetricSnapshots.observedAt, periodEnd),
+          gte(
+            sql`coalesce(${healthMetricSnapshots.observedEndAt}, ${healthMetricSnapshots.observedAt})`,
+            periodStart,
+          ),
         ),
       )
       .orderBy(desc(healthMetricSnapshots.observedAt));

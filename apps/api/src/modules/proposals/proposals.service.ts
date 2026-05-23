@@ -98,7 +98,13 @@ export class ProposalsService {
       proposal.intent,
       proposal.proposedChanges,
     );
-    const validationErrors = [...safetyErrors, ...validation.errors];
+    const provenanceErrors =
+      await this.proposalValidationService.validateProvenanceOwnership(
+        user.id,
+        proposal.intent,
+        proposal.proposedChanges,
+      );
+    const validationErrors = [...safetyErrors, ...validation.errors, ...provenanceErrors];
 
     if (validationErrors.length > 0) {
       await this.proposalsRepository.markValidation(proposalId, "invalid", validationErrors);

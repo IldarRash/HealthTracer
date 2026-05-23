@@ -1,7 +1,14 @@
 import { healthMetricAggregates, healthMetricSnapshots } from "@health/db";
-import type { AiMetricsContextSummary, DeviceProvider, HealthMetricType } from "@health/types";
+import type {
+  AiMetricsContextSummary,
+  DeviceProvider,
+  HealthMetricType,
+  NormalizedMetricPayloadByType,
+  ProviderMetricRecord,
+} from "@health/types";
 import { parseNormalizedMetricPayload } from "@health/types";
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
+import { ZodError } from "zod";
 import { DeviceConnectionsRepository } from "../device-connections/device-connections.repository.js";
 import { isConsentActive } from "../device-connections/device-connection.mapper.js";
 import { HealthMetricsRepository } from "./health-metrics.repository.js";
@@ -15,13 +22,6 @@ const AI_SAFE_METRIC_TYPES = new Set<HealthMetricType>([
   "weight",
   "workout",
   "recovery_input",
-]);
-
-const SNAPSHOT_EXCLUDED_PAYLOAD_KEYS = new Set([
-  "stageSummary",
-  "rawSamples",
-  "heartRateSeries",
-  "providerPayload",
 ]);
 
 @Injectable()
@@ -66,20 +66,55 @@ export class MetricsAiContextService {
     };
   }
 
-  sanitizeSnapshotPayload(
-    metricType: HealthMetricType,
-    payload: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const allowed = parseNormalizedMetricPayload(metricType, payload);
-    const sanitized: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(allowed)) {
-      if (!SNAPSHOT_EXCLUDED_PAYLOAD_KEYS.has(key)) {
-        sanitized[key] = value;
+  sanitizeSnapshotPayload<T extends HealthMetricType>(
+    metricType: T,
+    payload: unknown,
+  ): NormalizedMetricPayloadByType[T] {
+    try {
+      return parseNormalizedMetricPayload(metricType, payload);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BadRequestException({
+          message: "Invalid normalized metric payload",
+          issues: error.issues,
+        });
       }
-    }
 
-    return sanitized;
+      throw error;
+    }
+  }
+
+  sanitizeProviderMetricRecord(record: ProviderMetricRecord): ProviderMetricRecord {
+    switch (record.metricType) {
+      case "steps":
+        return {
+          ...record,
+          normalizedPayload: this.sanitizeSnapshotPayload("steps", record.normalizedPayload),
+        };
+      case "sleep":
+        return {
+          ...record,
+          normalizedPayload: this.sanitizeSnapshotPayload("sleep", record.normalizedPayload),
+        };
+      case "weight":
+        return {
+          ...record,
+          normalizedPayload: this.sanitizeSnapshotPayload("weight", record.normalizedPayload),
+        };
+      case "workout":
+        return {
+          ...record,
+          normalizedPayload: this.sanitizeSnapshotPayload("workout", record.normalizedPayload),
+        };
+      case "recovery_input":
+        return {
+          ...record,
+          normalizedPayload: this.sanitizeSnapshotPayload(
+            "recovery_input",
+            record.normalizedPayload,
+          ),
+        };
+    }
   }
 }
 

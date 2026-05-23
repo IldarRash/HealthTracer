@@ -3,6 +3,7 @@ import { DatabaseModule } from "../../database/database.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { ProfilesModule } from "../profiles/profiles.module.js";
+import { ProgressModule } from "../progress/progress.module.js";
 import { RecipesModule } from "../recipes/recipes.module.js";
 import { TodayModule } from "../today/today.module.js";
 import { UsersModule } from "../users/users.module.js";
@@ -18,6 +19,7 @@ import { ProposalsService } from "./proposals.service.js";
     DatabaseModule,
     UsersModule,
     ProfilesModule,
+    ProgressModule,
     GoalsModule,
     WorkoutsModule,
     NutritionModule,

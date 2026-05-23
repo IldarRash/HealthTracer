@@ -55,6 +55,19 @@ export interface MetricObservationPeriod {
   anchorDate: Date;
 }
 
+export function snapshotOverlapsPeriod(
+  observedAt: Date,
+  observedEndAt: Date | null | undefined,
+  periodStart: Date,
+  periodEnd: Date,
+): boolean {
+  const intervalEnd = observedEndAt ?? observedAt;
+  return (
+    observedAt.getTime() <= periodEnd.getTime() &&
+    intervalEnd.getTime() >= periodStart.getTime()
+  );
+}
+
 export function collectObservationPeriods(
   records: MetricObservationRecord[],
 ): MetricObservationPeriod[] {

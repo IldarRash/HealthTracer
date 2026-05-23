@@ -3,6 +3,7 @@ import type { ClerkAuthContext } from "../../auth.types.js";
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
   createGoalProposalChangesSchema,
+  generateWeeklyProgressSummarySchema,
   nutritionPlanPayloadSchema,
   profileProposalChangesSchema,
   recipeRecommendationProposalPayloadSchema,
@@ -14,6 +15,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { GoalsService } from "../goals/goals.service.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
 import { ProfilesService } from "../profiles/profiles.service.js";
+import { ProgressService } from "../progress/progress.service.js";
 import { RecipesService } from "../recipes/recipes.service.js";
 import { TodayService } from "../today/today.service.js";
 import { WorkoutsService } from "../workouts/workouts.service.js";
@@ -27,6 +29,7 @@ export class ProposalApplyService {
     private readonly nutritionService: NutritionService,
     private readonly recipesService: RecipesService,
     private readonly todayService: TodayService,
+    private readonly progressService: ProgressService,
   ) {}
 
   async applyAcceptedProposal(
@@ -101,8 +104,15 @@ export class ProposalApplyService {
 
         return this.todayService.applyTodayChecklistProposal(userId, payload);
       }
-      case "summarize_progress":
-        return `summary:${proposal.id}`;
+      case "summarize_progress": {
+        const input = generateWeeklyProgressSummarySchema.parse(proposal.proposedChanges ?? {});
+        const result = await this.progressService.generateWeeklySummary(auth, {
+          weekStart: input.weekStart,
+          refresh: true,
+        });
+
+        return `summary:${result.summary.id}`;
+      }
       default:
         throw new BadRequestException("Unsupported proposal intent.");
     }

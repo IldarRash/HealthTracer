@@ -86,6 +86,13 @@ export function TrainingWorkspace() {
     },
   });
 
+  const invalidateAfterSessionChange = () => {
+    void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutActive });
+    void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutRevisions });
+    void queryClient.invalidateQueries({ queryKey: apiQueryKeys.todayDayPrefix });
+    void queryClient.invalidateQueries({ queryKey: apiQueryKeys.todayHistoryPrefix });
+  };
+
   const scheduleSessionMutation = useMutation({
     mutationFn: async () => {
       const token = await getToken();
@@ -119,8 +126,7 @@ export function TrainingWorkspace() {
     },
     onSuccess: () => {
       setPlannedDate(formatLocalIsoDate(new Date()));
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutActive });
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutRevisions });
+      invalidateAfterSessionChange();
     },
   });
 
@@ -152,8 +158,7 @@ export function TrainingWorkspace() {
       return result.data;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutActive });
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.workoutRevisions });
+      invalidateAfterSessionChange();
     },
   });
 

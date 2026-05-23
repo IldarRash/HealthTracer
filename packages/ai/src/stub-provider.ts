@@ -16,6 +16,9 @@ export interface CoachAiProvider {
 const SAFE_DEFAULT_REPLY =
   "Thanks for sharing that. I can help with wellness coaching, habit planning, and structured suggestions you can review before anything changes.";
 
+/** Seed fixture recipe id from packages/db/drizzle/seeds/recipes.sql */
+const STUB_RECIPE_ID = "a1000001-0000-4000-8000-000000000001";
+
 export class StubCoachAiProvider implements CoachAiProvider {
   async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutput> {
     const normalized = request.userMessage.toLowerCase();
@@ -56,6 +59,30 @@ export class StubCoachAiProvider implements CoachAiProvider {
       };
     }
 
+    if (normalized.includes("recipe")) {
+      return {
+        reply:
+          "Here are recipe ideas that fit your current plan. Review them before anything is saved.",
+        proposals: [
+          {
+            intent: "recommend_recipes",
+            targetDomain: "recipe",
+            title: "Breakfast recipe ideas for your plan",
+            reason: "These options align with your current estimated nutrition targets.",
+            proposedChanges: {
+              recommendations: [
+                {
+                  recipeId: STUB_RECIPE_ID,
+                  reason: "High-protein breakfast with estimated macro fit.",
+                  fitSummary: "Estimated macros align with your active plan.",
+                },
+              ],
+            },
+          },
+        ],
+      };
+    }
+
     if (normalized.includes("nutrition") || normalized.includes("meal")) {
       return {
         reply:
@@ -74,6 +101,7 @@ export class StubCoachAiProvider implements CoachAiProvider {
               carbsGrams: 220,
               fatGrams: 70,
               hydrationLiters: 2.5,
+              mealStructure: [{ label: "Breakfast", timingHint: null }],
               notes: ["Prioritize whole foods and regular meal timing."],
             },
           },

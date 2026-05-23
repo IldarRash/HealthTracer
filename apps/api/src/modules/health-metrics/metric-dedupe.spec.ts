@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildMetricDedupeKey, collectObservationPeriods, toUtcDateKey } from "./metric-dedupe.js";
+import {
+  buildMetricDedupeKey,
+  collectObservationPeriods,
+  snapshotOverlapsPeriod,
+  toUtcDateKey,
+} from "./metric-dedupe.js";
 
 describe("buildMetricDedupeKey", () => {
   it("uses provider source id when available", () => {
@@ -34,6 +39,50 @@ describe("buildMetricDedupeKey", () => {
     ).toBe(
       "android_health_connect:sleep:2026-05-22T22:00:00.000Z:2026-05-23T06:00:00.000Z",
     );
+  });
+});
+
+describe("snapshotOverlapsPeriod", () => {
+  it("includes cross-midnight sleep when the wake day overlaps the period", () => {
+    const periodStart = new Date("2026-05-23T00:00:00.000Z");
+    const periodEnd = new Date("2026-05-23T23:59:59.999Z");
+
+    expect(
+      snapshotOverlapsPeriod(
+        new Date("2026-05-22T22:00:00.000Z"),
+        new Date("2026-05-23T06:00:00.000Z"),
+        periodStart,
+        periodEnd,
+      ),
+    ).toBe(true);
+  });
+
+  it("excludes intervals that end before the period starts", () => {
+    const periodStart = new Date("2026-05-23T00:00:00.000Z");
+    const periodEnd = new Date("2026-05-23T23:59:59.999Z");
+
+    expect(
+      snapshotOverlapsPeriod(
+        new Date("2026-05-22T20:00:00.000Z"),
+        new Date("2026-05-22T22:00:00.000Z"),
+        periodStart,
+        periodEnd,
+      ),
+    ).toBe(false);
+  });
+
+  it("includes point-in-time snapshots within the period", () => {
+    const periodStart = new Date("2026-05-22T00:00:00.000Z");
+    const periodEnd = new Date("2026-05-22T23:59:59.999Z");
+
+    expect(
+      snapshotOverlapsPeriod(
+        new Date("2026-05-22T10:00:00.000Z"),
+        null,
+        periodStart,
+        periodEnd,
+      ),
+    ).toBe(true);
   });
 });
 

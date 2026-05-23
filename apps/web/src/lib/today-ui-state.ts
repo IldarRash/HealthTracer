@@ -5,9 +5,9 @@ import type {
   TodayDailyFeedback,
   TodayHistoryEntry,
 } from "@health/types";
-import { formatLocalIsoDate } from "./training-ui-state.js";
+import { formatLocalIsoDate } from "./training-ui-state";
 
-export { formatLocalIsoDate } from "./training-ui-state.js";
+export { formatLocalIsoDate } from "./training-ui-state";
 
 export function formatDisplayDate(isoDate: string): string {
   const [year, month, day] = isoDate.split("-").map(Number);

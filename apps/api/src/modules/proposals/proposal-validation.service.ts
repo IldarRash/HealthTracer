@@ -9,12 +9,14 @@ import {
   todayChecklistPayloadSchema,
   updateGoalProposalChangesSchema,
   workoutPlanPayloadSchema,
+  type AdaptWorkoutPlanFromProgressChanges,
   type NutritionPlanPayload,
   type ProposalIntent,
   type RawAiProposal,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { z } from "zod";
+import { ProgressRepository } from "../progress/progress.repository.js";
 
 export interface ProposalValidationResult {
   valid: boolean;
@@ -23,6 +25,8 @@ export interface ProposalValidationResult {
 
 @Injectable()
 export class ProposalValidationService {
+  constructor(private readonly progressRepository: ProgressRepository) {}
+
   validateRawProposal(proposal: RawAiProposal): ProposalValidationResult {
     const envelope = rawAiProposalSchema.safeParse(proposal);
 
@@ -73,6 +77,71 @@ export class ProposalValidationService {
     }
 
     return { valid: true, errors: [] };
+  }
+
+  async validateProvenanceOwnership(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "adapt_workout_plan_from_progress") {
+      return [];
+    }
+
+    const parsed = adaptWorkoutPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    return this.getProgressProvenanceErrors(userId, parsed.data);
+  }
+
+  private async getProgressProvenanceErrors(
+    userId: string,
+    payload: AdaptWorkoutPlanFromProgressChanges,
+  ): Promise<string[]> {
+    const errors: string[] = [];
+
+    if (payload.sourceSummaryId) {
+      const summaryExists = await this.progressRepository.summaryExistsForUser(
+        userId,
+        payload.sourceSummaryId,
+      );
+
+      if (!summaryExists) {
+        errors.push(
+          "proposedChanges.sourceSummaryId: Weekly progress summary was not found for this user.",
+        );
+      }
+    }
+
+    const trendIds = payload.sourceTrendObservationIds;
+
+    if (trendIds.length > 0) {
+      const ownedTrends = await this.progressRepository.findTrendsOwnedByUser(
+        userId,
+        trendIds,
+      );
+
+      if (ownedTrends.length !== trendIds.length) {
+        errors.push(
+          "proposedChanges.sourceTrendObservationIds: One or more cited trend observations were not found for this user.",
+        );
+      } else if (payload.sourceSummaryId) {
+        const mismatched = ownedTrends.some(
+          (trend) => trend.summaryId !== payload.sourceSummaryId,
+        );
+
+        if (mismatched) {
+          errors.push(
+            "proposedChanges.sourceTrendObservationIds: One or more cited trend observations do not belong to the cited weekly progress summary.",
+          );
+        }
+      }
+    }
+
+    return errors;
   }
 }
 

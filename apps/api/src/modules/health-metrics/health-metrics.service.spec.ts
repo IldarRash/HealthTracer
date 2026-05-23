@@ -1,6 +1,8 @@
 import { BadRequestException } from "@nestjs/common";
+import type { ProviderMetricRecord, SyncHealthMetricsInput } from "@health/types";
 import { describe, expect, it, vi } from "vitest";
 import { HealthMetricsService } from "./health-metrics.service.js";
+import { MetricsAiContextService } from "./metrics-ai-context.service.js";
 
 const stepPayload = {
   stepCount: 5000,
@@ -87,8 +89,7 @@ describe("HealthMetricsService", () => {
         refreshForMetricTypes: async () => [{ id: "aggregate-1" }],
       } as never,
       {
-        sanitizeSnapshotPayload: (_metricType: string, payload: Record<string, unknown>) =>
-          payload,
+        sanitizeProviderMetricRecord: (record: ProviderMetricRecord) => record,
       } as never,
       {
         resolveFromAuth: async () => user,
@@ -120,30 +121,9 @@ describe("HealthMetricsService", () => {
     expect(result.aggregatesRefreshed).toBe(1);
   });
 
-  it("sanitizes private provider fields before inserting snapshots", async () => {
-    const insertSnapshotIfNew = vi.fn(async (input) => ({
-      id: "snapshot-1",
-      userId: user.id,
-      consentId: input.consentId,
-      deviceConnectionId: input.deviceConnectionId,
-      metricType: input.record.metricType,
-      provider: input.provider,
-      sourceId: input.record.sourceId ?? null,
-      dedupeKey: "apple_healthkit:sleep:hk-sleep-1",
-      observedAt: new Date(input.record.observedAt),
-      observedEndAt: null,
-      unit: input.record.unit,
-      normalizedPayload: input.record.normalizedPayload,
-      sourceDeviceLabel: null,
-      ingestedAt: new Date("2026-05-22T12:00:00.000Z"),
-      createdAt: new Date("2026-05-22T12:00:00.000Z"),
-    }));
-    const sanitizeSnapshotPayload = vi.fn(
-      (_metricType: string, payload: Record<string, unknown>) => {
-        const { providerPayload: _providerPayload, rawSamples: _rawSamples, ...safe } = payload;
-        return safe;
-      },
-    );
+  it("rejects sync records with raw normalized payload fields", async () => {
+    const insertSnapshotIfNew = vi.fn();
+    const metricsAiContextService = new MetricsAiContextService({} as never, {} as never);
 
     const service = new HealthMetricsService(
       { insertSnapshotIfNew } as never,
@@ -164,46 +144,32 @@ describe("HealthMetricsService", () => {
       {
         refreshForMetricTypes: async () => [],
       } as never,
-      {
-        sanitizeSnapshotPayload,
-      } as never,
+      metricsAiContextService,
       {
         resolveFromAuth: async () => user,
       } as never,
     );
 
-    await service.syncMetrics(auth, {
-      deviceConnectionId: "connection-id",
-      records: [
-        {
-          metricType: "sleep",
-          sourceId: "hk-sleep-1",
-          observedAt: "2026-05-22T07:00:00.000Z",
-          unit: "minutes",
-          normalizedPayload: {
-            ...sleepPayload,
-            rawSamples: [{ stage: "deep" }],
-            providerPayload: { privateTimeline: true },
-          },
-        },
-      ],
-    });
+    await expect(
+      service.syncMetrics(auth, {
+        deviceConnectionId: "connection-id",
+        records: [
+          {
+            metricType: "sleep",
+            sourceId: "hk-sleep-1",
+            observedAt: "2026-05-22T07:00:00.000Z",
+            unit: "minutes",
+            normalizedPayload: {
+              ...sleepPayload,
+              rawSamples: [{ stage: "deep" }],
+              providerPayload: { privateTimeline: true },
+            },
+          } as SyncHealthMetricsInput["records"][number],
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(sanitizeSnapshotPayload).toHaveBeenCalledWith(
-      "sleep",
-      expect.objectContaining({
-        durationMinutes: 420,
-        rawSamples: expect.any(Array),
-        providerPayload: expect.any(Object),
-      }),
-    );
-    expect(insertSnapshotIfNew).toHaveBeenCalledWith(
-      expect.objectContaining({
-        record: expect.objectContaining({
-          normalizedPayload: sleepPayload,
-        }),
-      }),
-    );
+    expect(insertSnapshotIfNew).not.toHaveBeenCalled();
   });
 
   it("rejects sync when metric scope is not granted", async () => {
@@ -220,7 +186,7 @@ describe("HealthMetricsService", () => {
       } as never,
       {} as never,
       {} as never,
-      { sanitizeSnapshotPayload: (payload: Record<string, unknown>) => payload } as never,
+      { sanitizeProviderMetricRecord: (record: ProviderMetricRecord) => record } as never,
       { resolveFromAuth: async () => user } as never,
     );
 
@@ -232,7 +198,7 @@ describe("HealthMetricsService", () => {
             metricType: "sleep",
             observedAt: "2026-05-22T22:00:00.000Z",
             unit: "minutes",
-            normalizedPayload: { durationMinutes: 420 },
+            normalizedPayload: sleepPayload,
           },
         ],
       }),

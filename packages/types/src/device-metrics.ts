@@ -94,6 +94,8 @@ export const sleepSnapshotPayloadSchema = sleepNormalizedPayloadSchema.extend({
 
 export type SleepSnapshotPayload = z.infer<typeof sleepSnapshotPayloadSchema>;
 
+export type SleepNormalizedPayload = z.infer<typeof sleepNormalizedPayloadSchema>;
+
 export const weightSnapshotPayloadSchema = z
   .object({
     weightKg: z.number().positive().max(500),
@@ -363,12 +365,20 @@ const normalizedPayloadSchemaByMetricType = {
   recovery_input: recoveryInputSnapshotPayloadSchema,
 } as const;
 
-export function parseNormalizedMetricPayload(
-  metricType: HealthMetricType,
+export type NormalizedMetricPayloadByType = {
+  steps: StepsSnapshotPayload;
+  sleep: SleepNormalizedPayload;
+  weight: WeightSnapshotPayload;
+  workout: WorkoutSnapshotPayload;
+  recovery_input: RecoveryInputSnapshotPayload;
+};
+
+export function parseNormalizedMetricPayload<T extends HealthMetricType>(
+  metricType: T,
   payload: unknown,
-): Record<string, unknown> {
+): NormalizedMetricPayloadByType[T] {
   const schema = normalizedPayloadSchemaByMetricType[metricType];
-  return schema.parse(payload) as Record<string, unknown>;
+  return schema.parse(payload) as NormalizedMetricPayloadByType[T];
 }
 
 export type ProviderMetricRecord = z.infer<typeof providerMetricRecordSchema>;

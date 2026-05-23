@@ -54,22 +54,43 @@ describe("phase 8 device metrics contracts", () => {
     expect(payload.records).toHaveLength(1);
   });
 
-  it("strips unmodeled provider fields from sync records", () => {
-    const payload = syncHealthMetricsSchema.parse({
-      deviceConnectionId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
-      records: [
-        {
-          metricType: "steps",
-          sourceId: "hk-step-1",
-          observedAt: "2026-05-22T08:00:00.000Z",
-          unit: "count",
-          normalizedPayload: { stepCount: 8421 },
-          rawProviderPayload: { privateSamples: [1, 2, 3] },
-        },
-      ],
-    });
+  it("rejects unmodeled provider fields on sync records", () => {
+    expect(() =>
+      syncHealthMetricsSchema.parse({
+        deviceConnectionId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+        records: [
+          {
+            metricType: "steps",
+            sourceId: "hk-step-1",
+            observedAt: "2026-05-22T08:00:00.000Z",
+            unit: "count",
+            normalizedPayload: {
+              stepCount: 8421,
+              intervalStart: "2026-05-22T00:00:00.000Z",
+              intervalEnd: "2026-05-22T23:59:59.000Z",
+            },
+            rawProviderPayload: { privateSamples: [1, 2, 3] },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
 
-    expect(payload.records[0]).not.toHaveProperty("rawProviderPayload");
+  it("rejects raw fields inside normalized sync payloads", () => {
+    expect(() =>
+      providerMetricRecordSchema.parse({
+        metricType: "sleep",
+        observedAt: "2026-05-22T07:00:00.000Z",
+        unit: "minutes",
+        normalizedPayload: {
+          durationMinutes: 420,
+          intervalStart: "2026-05-22T22:00:00.000Z",
+          intervalEnd: "2026-05-23T06:00:00.000Z",
+          rawSamples: [{ stage: "deep" }],
+          providerPayload: { privateTimeline: true },
+        },
+      }),
+    ).toThrow();
   });
 
   it("validates AI metric summary shape", () => {

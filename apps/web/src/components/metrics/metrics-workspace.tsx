@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { MetricScope } from "@health/types";
+import type { MetricScope, SyncHealthMetricsInput } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
@@ -252,7 +252,7 @@ export function MetricsWorkspace() {
 
       const result = await syncHealthMetrics(token, {
         deviceConnectionId: connection.id,
-        records,
+        records: records as SyncHealthMetricsInput["records"],
       });
 
       if (result.error) {

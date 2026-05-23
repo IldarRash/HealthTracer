@@ -1,6 +1,6 @@
 import { trendObservations, weeklyProgressSummaries } from "@health/db";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
 import type { TrendDraft } from "./progress-aggregate.service.js";
@@ -122,6 +122,40 @@ export class ProgressRepository {
         trends: trendRows,
       };
     });
+  }
+
+  async summaryExistsForUser(userId: string, summaryId: string) {
+    const [row] = await this.db
+      .select({ id: weeklyProgressSummaries.id })
+      .from(weeklyProgressSummaries)
+      .where(
+        and(
+          eq(weeklyProgressSummaries.id, summaryId),
+          eq(weeklyProgressSummaries.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    return !!row;
+  }
+
+  async findTrendsOwnedByUser(userId: string, trendIds: readonly string[]) {
+    if (trendIds.length === 0) {
+      return [];
+    }
+
+    return this.db
+      .select({
+        id: trendObservations.id,
+        summaryId: trendObservations.summaryId,
+      })
+      .from(trendObservations)
+      .where(
+        and(
+          eq(trendObservations.userId, userId),
+          inArray(trendObservations.id, [...trendIds]),
+        ),
+      );
   }
 
   async getSummaryResponseById(userId: string, summaryId: string) {

@@ -89,6 +89,14 @@ function createRepositoryMock(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createValidationServiceMock(overrides: Record<string, unknown> = {}) {
+  return {
+    validateStoredProposal: () => ({ valid: true, errors: [] }),
+    validateProvenanceOwnership: async () => [],
+    ...overrides,
+  };
+}
+
 describe("ProposalsService", () => {
   it("rejects a proposal without applying domain changes", async () => {
     let applyCalled = false;
@@ -98,9 +106,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -125,9 +131,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -175,9 +179,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCount += 1;
@@ -204,9 +206,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           throw new Error("Apply failed.");
@@ -242,9 +242,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCount += 1;
@@ -279,9 +277,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCount += 1;
@@ -314,9 +310,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -347,12 +341,12 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
+      createValidationServiceMock({
         validateStoredProposal: () => ({
           valid: false,
           errors: ["proposedChanges: Invalid"],
         }),
-      } as never,
+      }) as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -432,9 +426,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -485,9 +477,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -528,9 +518,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -574,9 +562,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -615,9 +601,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -670,9 +654,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -711,12 +693,12 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
+      createValidationServiceMock({
         validateStoredProposal: () => ({
           valid: false,
           errors: ["proposedChanges.days: At least one training day is required."],
         }),
-      } as never,
+      }) as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -753,9 +735,7 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {
-        validateStoredProposal: () => ({ valid: true, errors: [] }),
-      } as never,
+      createValidationServiceMock() as never,
       {
         applyAcceptedProposal: async () => {
           applyCalled = true;
@@ -779,12 +759,57 @@ describe("ProposalsService", () => {
       {
         resolveFromAuth: async () => user,
       } as never,
-      {} as never,
+      createValidationServiceMock() as never,
       {} as never,
     );
 
     await expect(
       service.decideProposal(auth, pendingProposal.id, { decision: "accept" }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("blocks acceptance when progress-derived workout provenance is foreign or missing", async () => {
+    let applyCalled = false;
+    const progressWorkoutProposal = {
+      ...pendingProposal,
+      intent: "adapt_workout_plan_from_progress" as const,
+      targetDomain: "workout" as const,
+      title: "Adjust training volume",
+      reason: "Weekly completion patterns suggest a lighter week.",
+      proposedChanges: {
+        plan: {
+          title: "Strength base",
+          summary: "Reduced volume based on weekly completion patterns.",
+          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        },
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: ["24b19287-75b8-4a3e-9c10-691908479405"],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => progressWorkoutProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateProvenanceOwnership: async () => [
+          "proposedChanges.sourceSummaryId: Weekly progress summary was not found for this user.",
+        ],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "workout_revision:rev-progress";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, progressWorkoutProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
   });
 });

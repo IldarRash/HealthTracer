@@ -496,6 +496,8 @@ describe("web api helpers", () => {
       apiQueryKeys.nutritionRevisions,
       apiQueryKeys.nutritionAdherenceToday,
       apiQueryKeys.nutritionAdherencePrefix,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
     ]);
     expect(
       getAcceptedProposalRefreshQueryKeys({
@@ -509,6 +511,8 @@ describe("web api helpers", () => {
       apiQueryKeys.workoutRevisions,
       apiQueryKeys.progressWeeklyLatest,
       apiQueryKeys.progressWeeklyCurrent,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
     ]);
     expect(
       getAcceptedProposalRefreshQueryKeys({
@@ -523,6 +527,8 @@ describe("web api helpers", () => {
       apiQueryKeys.workoutRevisions,
       apiQueryKeys.progressWeeklyLatest,
       apiQueryKeys.progressWeeklyCurrent,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
     ]);
     expect(
       getAcceptedProposalRefreshQueryKeys({
@@ -530,7 +536,12 @@ describe("web api helpers", () => {
         targetDomain: "general",
         intent: "summarize_progress",
       }),
-    ).toEqual([apiQueryKeys.dashboardState, apiQueryKeys.proposals]);
+    ).toEqual([
+      apiQueryKeys.dashboardState,
+      apiQueryKeys.proposals,
+      apiQueryKeys.progressWeeklyLatest,
+      apiQueryKeys.progressWeeklyCurrent,
+    ]);
     expect(
       getAcceptedProposalRefreshQueryKeys({
         ...baseProposal,
@@ -921,7 +932,7 @@ describe("web api helpers", () => {
     await expect(
       updateRecipeRecommendationStatus(token, "a1000001-0000-4000-8000-000000000002", {
         status: "pending",
-      } as UpdateRecipeRecommendationStatusInput),
+      } as unknown as UpdateRecipeRecommendationStatusInput),
     ).rejects.toThrow();
 
     expect(fetchMock).not.toHaveBeenCalled();

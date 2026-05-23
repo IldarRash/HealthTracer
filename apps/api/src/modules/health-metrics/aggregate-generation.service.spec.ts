@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { AggregateGenerationService } from "./aggregate-generation.service.js";
+import {
+  endOfUtcWeek,
+  snapshotOverlapsPeriod,
+  startOfUtcWeek,
+} from "./metric-dedupe.js";
 
 const stepIntervals = {
   intervalStart: "2026-05-22T00:00:00.000Z",
@@ -177,6 +182,147 @@ describe("AggregateGenerationService", () => {
           anchorDate: "2026-05-20",
         }),
       }),
+    );
+  });
+
+  it("includes cross-midnight sleep in the wake-day daily aggregate", async () => {
+    const crossMidnightSleep = {
+      normalizedPayload: {
+        durationMinutes: 480,
+        intervalStart: "2026-05-22T22:00:00.000Z",
+        intervalEnd: "2026-05-23T06:00:00.000Z",
+      },
+      observedAt: new Date("2026-05-22T22:00:00.000Z"),
+      observedEndAt: new Date("2026-05-23T06:00:00.000Z"),
+    };
+    const upsertAggregate = vi.fn(async (input) => ({
+      id: "aggregate-id",
+      ...input,
+      calculatedAt: new Date("2026-05-23T12:00:00.000Z"),
+      createdAt: new Date("2026-05-23T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-23T12:00:00.000Z"),
+    }));
+    const listSnapshotsForPeriod = vi.fn(
+      async (
+        _userId: string,
+        metricType: string,
+        _consentId: string,
+        periodStart: Date,
+        periodEnd: Date,
+      ) => {
+        if (metricType !== "sleep") {
+          return [];
+        }
+
+        return snapshotOverlapsPeriod(
+          crossMidnightSleep.observedAt,
+          crossMidnightSleep.observedEndAt,
+          periodStart,
+          periodEnd,
+        )
+          ? [crossMidnightSleep]
+          : [];
+      },
+    );
+
+    const service = new AggregateGenerationService({
+      listSnapshotsForPeriod,
+      upsertAggregate,
+    } as never);
+
+    await service.refreshForMetricTypes("user-id", "consent-id", [
+      {
+        metricType: "sleep",
+        observedAt: new Date("2026-05-22T22:00:00.000Z"),
+        observedEndAt: new Date("2026-05-23T06:00:00.000Z"),
+      },
+    ]);
+
+    expect(upsertAggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metricType: "sleep",
+        periodStart: "2026-05-23",
+        periodEnd: "2026-05-23",
+        aggregatePayload: expect.objectContaining({
+          totalDurationMinutes: 480,
+          sleepWindowStart: "2026-05-22T22:00:00.000Z",
+          sleepWindowEnd: "2026-05-23T06:00:00.000Z",
+        }),
+      }),
+    );
+  });
+
+  it("includes spanning workouts in the overlapping weekly aggregate", async () => {
+    const spanningWorkout = {
+      normalizedPayload: {
+        durationMinutes: 90,
+        activityType: "running",
+      },
+      observedAt: new Date("2026-05-18T10:00:00.000Z"),
+      observedEndAt: new Date("2026-05-26T10:00:00.000Z"),
+    };
+    const upsertAggregate = vi.fn(async (input) => ({
+      id: "aggregate-id",
+      ...input,
+      calculatedAt: new Date("2026-05-26T12:00:00.000Z"),
+      createdAt: new Date("2026-05-26T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-26T12:00:00.000Z"),
+    }));
+    const listSnapshotsForPeriod = vi.fn(
+      async (
+        _userId: string,
+        metricType: string,
+        _consentId: string,
+        periodStart: Date,
+        periodEnd: Date,
+      ) => {
+        if (metricType !== "workout") {
+          return [];
+        }
+
+        return snapshotOverlapsPeriod(
+          spanningWorkout.observedAt,
+          spanningWorkout.observedEndAt,
+          periodStart,
+          periodEnd,
+        )
+          ? [spanningWorkout]
+          : [];
+      },
+    );
+
+    const service = new AggregateGenerationService({
+      listSnapshotsForPeriod,
+      upsertAggregate,
+    } as never);
+
+    await service.refreshForMetricTypes("user-id", "consent-id", [
+      {
+        metricType: "workout",
+        observedAt: new Date("2026-05-18T10:00:00.000Z"),
+        observedEndAt: new Date("2026-05-26T10:00:00.000Z"),
+      },
+    ]);
+
+    expect(upsertAggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metricType: "workout",
+        periodType: "weekly",
+        periodStart: "2026-05-25",
+        periodEnd: "2026-05-31",
+        aggregatePayload: expect.objectContaining({
+          workoutCount: 1,
+          totalDurationMinutes: 90,
+          activityMix: { running: 1 },
+        }),
+      }),
+    );
+    expect(listSnapshotsForPeriod).toHaveBeenCalledWith(
+      "user-id",
+      "workout",
+      "consent-id",
+      startOfUtcWeek(new Date("2026-05-26T10:00:00.000Z")),
+      endOfUtcWeek(new Date("2026-05-26T10:00:00.000Z")),
     );
   });
 });

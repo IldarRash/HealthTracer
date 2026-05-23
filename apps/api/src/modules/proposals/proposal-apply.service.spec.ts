@@ -76,6 +76,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -105,6 +106,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -130,6 +132,7 @@ describe("ProposalApplyService", () => {
           return "workout_revision:rev-progress";
         },
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -164,6 +167,7 @@ describe("ProposalApplyService", () => {
       } as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -191,6 +195,7 @@ describe("ProposalApplyService", () => {
           return "recipe_recommendation:rec-1";
         },
       } as never,
+      {} as never,
       {} as never,
     );
 
@@ -228,6 +233,7 @@ describe("ProposalApplyService", () => {
           return "daily_checklist:checklist-1";
         },
       } as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -241,26 +247,43 @@ describe("ProposalApplyService", () => {
     expect(todayCalled).toBe(true);
   });
 
-  it("returns a summary reference without calling domain services", async () => {
-    let domainCalled = false;
+  it("routes accepted summarize_progress proposals through the progress service", async () => {
+    const summaryId = "a2000002-0000-4000-8000-000000000002";
+    let progressCalled = false;
+    let capturedInput: { weekStart?: string; refresh: boolean } | undefined;
 
     const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
       {
-        upsertCurrentProfile: async () => {
-          domainCalled = true;
-          return { id: "profile-1" };
+        generateWeeklySummary: async (
+          _auth: typeof auth,
+          input: { weekStart?: string; refresh: boolean },
+        ) => {
+          progressCalled = true;
+          capturedInput = input;
+          return {
+            summary: {
+              id: summaryId,
+              userId,
+              weekStart: "2026-05-19",
+              weekEnd: "2026-05-25",
+              generatedAt: "2026-05-23T12:00:00.000Z",
+              dataStatus: "partial",
+              sourceAggregates: { workout: null },
+              deferredDomains: ["nutrition"],
+              userMessage: "You completed 2 of 3 planned workouts this week.",
+              supersededById: null,
+              createdAt: "2026-05-23T12:00:00.000Z",
+            },
+            trends: [],
+          };
         },
       } as never,
-      {
-        createCurrentGoal: async () => {
-          domainCalled = true;
-          return { id: "goal-1" };
-        },
-      } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -270,12 +293,14 @@ describe("ProposalApplyService", () => {
       proposedChanges: {},
     });
 
-    expect(reference).toBe(`summary:${baseProposal.id}`);
-    expect(domainCalled).toBe(false);
+    expect(reference).toBe(`summary:${summaryId}`);
+    expect(progressCalled).toBe(true);
+    expect(capturedInput).toEqual({ weekStart: undefined, refresh: true });
   });
 
   it("throws for unsupported proposal intents", async () => {
     const service = new ProposalApplyService(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

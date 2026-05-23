@@ -99,7 +99,10 @@ describe("ChatService", () => {
           replySafetyErrors: [],
         }),
       } as never,
-      new ProposalValidationService(),
+      new ProposalValidationService({
+        summaryExistsForUser: async () => true,
+        findTrendsOwnedByUser: async () => [],
+      } as never),
     );
 
     const result = await service.sendMessage(auth, thread.id, {

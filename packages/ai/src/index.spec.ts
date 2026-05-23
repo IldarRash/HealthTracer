@@ -1,3 +1,8 @@
+import {
+  getNutritionPlanDomainErrors,
+  nutritionPlanPayloadSchema,
+  recipeRecommendationProposalPayloadSchema,
+} from "@health/types";
 import { describe, expect, it } from "vitest";
 import {
   containsUnsafeDocumentSummaryLanguage,
@@ -112,5 +117,39 @@ describe("StubCoachAiProvider", () => {
 
     expect(result.proposals).toHaveLength(1);
     expect(result.proposals[0]?.intent).toBe("create_nutrition_plan");
+
+    const payload = nutritionPlanPayloadSchema.parse(
+      result.proposals[0]?.proposedChanges,
+    );
+    expect(payload.mealStructure).toEqual([
+      { label: "Breakfast", timingHint: null },
+    ]);
+    expect(getNutritionPlanDomainErrors(payload)).toEqual([]);
+  });
+
+  it("returns a recipe recommendation proposal for recipe-related messages", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Can you suggest some breakfast recipes?",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const parsed = parseAiStructuredOutput(result);
+    expect(parsed.ok).toBe(true);
+    expect(result.proposals).toHaveLength(1);
+    expect(result.proposals[0]?.intent).toBe("recommend_recipes");
+    expect(result.proposals[0]?.targetDomain).toBe("recipe");
+
+    const payload = recipeRecommendationProposalPayloadSchema.parse(
+      result.proposals[0]?.proposedChanges,
+    );
+    expect(payload.recommendations).toEqual([
+      {
+        recipeId: "a1000001-0000-4000-8000-000000000001",
+        reason: "High-protein breakfast with estimated macro fit.",
+        fitSummary: "Estimated macros align with your active plan.",
+      },
+    ]);
   });
 });

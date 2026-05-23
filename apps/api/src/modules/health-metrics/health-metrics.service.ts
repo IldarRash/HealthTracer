@@ -87,13 +87,7 @@ export class HealthMetricsService {
         consentId: consent.id,
         deviceConnectionId: connection.id,
         provider: connection.provider,
-        record: {
-          ...record,
-          normalizedPayload: this.metricsAiContextService.sanitizeSnapshotPayload(
-            record.metricType,
-            record.normalizedPayload,
-          ),
-        },
+        record: this.metricsAiContextService.sanitizeProviderMetricRecord(record),
       });
 
       if (snapshot) {

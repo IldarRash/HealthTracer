@@ -102,6 +102,7 @@ function createService({
       listRecommendationsByUserId: async () => [],
       findRecommendationById: async () => null,
       createRecommendations: async () => [],
+      findOpenRecommendationsByKeys: async () => [],
       updateRecommendationStatus: async () => null,
       ...recipesRepository,
     } as never,
@@ -231,6 +232,43 @@ describe("RecipesService", () => {
     expect(nutritionRevisionMutated).toBe(false);
   });
 
+  it("reuses existing open recommendations instead of creating duplicates on regenerate", async () => {
+    const existingRecommendation = createRecommendationRow({
+      reason: "Previously generated recommendation.",
+      fitSummary: "Existing fit summary.",
+    });
+    let createRecommendationsCalled = false;
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async () => [createRecipeRow()],
+        findOpenRecommendationsByKeys: async (_userId, keys) => {
+          expect(keys).toEqual([
+            {
+              recipeId: compatibleRecipeId,
+              relatedNutritionPlanRevisionId: nutritionRevisionId,
+            },
+          ]);
+
+          return [existingRecommendation];
+        },
+        createRecommendations: async () => {
+          createRecommendationsCalled = true;
+          return [];
+        },
+      },
+    });
+
+    const result = await service.generateCurrentRecommendations(auth);
+
+    expect(createRecommendationsCalled).toBe(false);
+    expect(result.recommendations).toHaveLength(1);
+    expect(result.recommendations[0]?.id).toBe(recommendationId);
+    expect(result.recommendations[0]?.recipeId).toBe(compatibleRecipeId);
+    expect(result.recommendations[0]?.reason).toBe("Previously generated recommendation.");
+    expect(result.relatedNutritionPlanRevisionId).toBe(nutritionRevisionId);
+    expect(result.limitedReason).toBeNull();
+  });
+
   it("applies accepted recipe proposals as pending recommendations without nutrition revision changes", async () => {
     const originalPayload = structuredClone(activeNutritionPayload);
     const createdInputs: unknown[] = [];
@@ -290,6 +328,117 @@ describe("RecipesService", () => {
     ]);
     expect(activeNutritionPayload).toEqual(originalPayload);
     expect(nutritionRevisionMutated).toBe(false);
+  });
+
+  it("validates proposal recipes against referenced revision filters, not the active revision", async () => {
+    let createRecommendationsCalled = false;
+    const referencedRevisionPayload = {
+      ...activeNutritionPayload,
+      allergies: ["peanuts"],
+    };
+    const activeRevisionPayload = {
+      ...activeNutritionPayload,
+      allergies: [],
+    };
+    const service = createService({
+      recipesRepository: {
+        findActiveRecipesByIds: async () => [
+          createRecipeRow({
+            id: incompatibleRecipeId,
+            name: "Peanut tempeh bowl",
+            allergenTags: ["peanuts"],
+          }),
+        ],
+        createRecommendations: async () => {
+          createRecommendationsCalled = true;
+          return [];
+        },
+      },
+      nutritionRepository: {
+        findActiveRevisionByPlanId: async () => ({
+          id: nutritionRevisionId,
+          nutritionPlanId,
+          revisionNumber: 2,
+          reason: "Updated plan",
+          source: "ai_proposal",
+          payload: activeRevisionPayload,
+          createdAt: new Date("2026-05-22T13:00:00.000Z"),
+        }),
+        findRevisionOwnedByUser: async () => ({
+          id: nutritionRevisionId,
+          nutritionPlanId,
+          revisionNumber: 1,
+          reason: "Initial plan",
+          source: "ai_proposal",
+          payload: referencedRevisionPayload,
+          createdAt: new Date("2026-05-22T12:00:00.000Z"),
+        }),
+      },
+    });
+
+    await expect(
+      service.applyRecipeRecommendationProposal(
+        user.id,
+        {
+          relatedNutritionPlanRevisionId: nutritionRevisionId,
+          recommendations: [
+            {
+              recipeId: incompatibleRecipeId,
+              reason: "High protein option.",
+              fitSummary: "Estimated macros fit your plan.",
+            },
+          ],
+        },
+        "Review these recipe ideas.",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(createRecommendationsCalled).toBe(false);
+  });
+
+  it("reuses existing open recommendations instead of creating duplicates on proposal apply", async () => {
+    const existingRecommendation = createRecommendationRow({
+      reason: "Previously applied recommendation.",
+      fitSummary: "Existing fit summary.",
+    });
+    let createRecommendationsCalled = false;
+    const service = createService({
+      recipesRepository: {
+        findActiveRecipesByIds: async () => [createRecipeRow()],
+        findOpenRecommendationsByKeys: async (_userId, keys) => {
+          expect(keys).toEqual([
+            {
+              recipeId: compatibleRecipeId,
+              relatedNutritionPlanRevisionId: nutritionRevisionId,
+            },
+          ]);
+
+          return [existingRecommendation];
+        },
+        createRecommendations: async () => {
+          createRecommendationsCalled = true;
+          return [];
+        },
+      },
+    });
+
+    const reference = await service.applyRecipeRecommendationProposal(
+      user.id,
+      {
+        relatedNutritionPlanRevisionId: nutritionRevisionId,
+        recommendations: [
+          {
+            recipeId: compatibleRecipeId,
+            reason: "Fits your current lunch preferences.",
+            fitSummary: "Estimated macros are a reasonable fit for your plan.",
+          },
+        ],
+      },
+      "Review these recipe ideas.",
+    );
+
+    expect(createRecommendationsCalled).toBe(false);
+    expect(reference).toBe(`recipe_recommendation:${recommendationId}`);
   });
 
   it("rejects incompatible recipes from accepted recipe proposal payloads", async () => {

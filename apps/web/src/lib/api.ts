@@ -263,6 +263,8 @@ export function getAcceptedProposalRefreshQueryKeys(
         apiQueryKeys.workoutRevisions,
         apiQueryKeys.progressWeeklyLatest,
         apiQueryKeys.progressWeeklyCurrent,
+        apiQueryKeys.todayDayPrefix,
+        apiQueryKeys.todayHistoryPrefix,
       ];
     case "nutrition":
       return [
@@ -271,6 +273,8 @@ export function getAcceptedProposalRefreshQueryKeys(
         apiQueryKeys.nutritionRevisions,
         apiQueryKeys.nutritionAdherenceToday,
         apiQueryKeys.nutritionAdherencePrefix,
+        apiQueryKeys.todayDayPrefix,
+        apiQueryKeys.todayHistoryPrefix,
       ];
     case "recipe":
       return [
@@ -285,7 +289,13 @@ export function getAcceptedProposalRefreshQueryKeys(
         apiQueryKeys.todayHistoryPrefix,
       ];
     case "general":
-      return commonKeys;
+      return proposal.intent === "summarize_progress"
+        ? [
+            ...commonKeys,
+            apiQueryKeys.progressWeeklyLatest,
+            apiQueryKeys.progressWeeklyCurrent,
+          ]
+        : commonKeys;
   }
 }
 

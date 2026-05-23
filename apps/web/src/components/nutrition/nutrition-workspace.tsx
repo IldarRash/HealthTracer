@@ -117,6 +117,8 @@ export function NutritionWorkspace() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: apiQueryKeys.nutritionAdherenceToday });
       void queryClient.invalidateQueries({ queryKey: apiQueryKeys.nutritionAdherencePrefix });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.todayDayPrefix });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.todayHistoryPrefix });
     },
   });
 

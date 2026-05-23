@@ -77,7 +77,7 @@ describe("MetricsAiContextService", () => {
     expect(summary.items).toEqual([]);
   });
 
-  it("allowlists normalized snapshot payloads by metric type", () => {
+  it("accepts normalized snapshot payloads matching the metric schema", () => {
     const service = new MetricsAiContextService({} as never, {} as never);
 
     expect(
@@ -85,9 +85,6 @@ describe("MetricsAiContextService", () => {
         stepCount: 1000,
         intervalStart: "2026-05-22T00:00:00.000Z",
         intervalEnd: "2026-05-22T23:59:59.000Z",
-        heartRateSeries: [62, 64, 63],
-        rawSamples: [{ bpm: 62 }],
-        providerPayload: { secret: true },
       }),
     ).toEqual({
       stepCount: 1000,
@@ -96,8 +93,19 @@ describe("MetricsAiContextService", () => {
     });
   });
 
-  it("rejects unlisted normalized payload keys during sanitization", () => {
+  it("rejects raw or unlisted normalized payload keys during sanitization", () => {
     const service = new MetricsAiContextService({} as never, {} as never);
+
+    expect(() =>
+      service.sanitizeSnapshotPayload("steps", {
+        stepCount: 1000,
+        intervalStart: "2026-05-22T00:00:00.000Z",
+        intervalEnd: "2026-05-22T23:59:59.000Z",
+        heartRateSeries: [62, 64, 63],
+        rawSamples: [{ bpm: 62 }],
+        providerPayload: { secret: true },
+      }),
+    ).toThrow();
 
     expect(() =>
       service.sanitizeSnapshotPayload("weight", {

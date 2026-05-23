@@ -1,8 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { ProposalValidationService } from "./proposal-validation.service.js";
 
+const workoutPlan = {
+  title: "Strength base",
+  summary: "Reduced volume based on weekly completion patterns.",
+  days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+};
+
+function createService(
+  progressRepository: {
+    summaryExistsForUser?: (userId: string, summaryId: string) => Promise<boolean>;
+    findTrendsOwnedByUser?: (
+      userId: string,
+      trendIds: readonly string[],
+    ) => Promise<Array<{ id: string; summaryId: string }>>;
+  } = {},
+) {
+  return new ProposalValidationService({
+    summaryExistsForUser: async () => true,
+    findTrendsOwnedByUser: async () => [],
+    ...progressRepository,
+  } as never);
+}
+
 describe("ProposalValidationService", () => {
-  const service = new ProposalValidationService();
+  const service = createService();
 
   it("validates workout proposal payloads by intent", () => {
     const result = service.validateStoredProposal("create_workout_plan", {
@@ -199,5 +221,107 @@ describe("ProposalValidationService", () => {
 
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  describe("progress provenance ownership", () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const summaryId = "14a08176-64a7-4a2d-8a44-581807368394";
+    const trendId = "24b19287-75b8-4a3e-9c10-691908479405";
+
+    it("accepts owned progress summary and trend references", async () => {
+      const provenanceService = createService({
+        summaryExistsForUser: async () => true,
+        findTrendsOwnedByUser: async () => [{ id: trendId, summaryId }],
+      });
+
+      const errors = await provenanceService.validateProvenanceOwnership(
+        userId,
+        "adapt_workout_plan_from_progress",
+        {
+          plan: workoutPlan,
+          sourceSummaryId: summaryId,
+          sourceTrendObservationIds: [trendId],
+        },
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects foreign or missing progress summary references", async () => {
+      const provenanceService = createService({
+        summaryExistsForUser: async () => false,
+      });
+
+      const errors = await provenanceService.validateProvenanceOwnership(
+        userId,
+        "adapt_workout_plan_from_progress",
+        {
+          plan: workoutPlan,
+          sourceSummaryId: summaryId,
+        },
+      );
+
+      expect(errors).toContain(
+        "proposedChanges.sourceSummaryId: Weekly progress summary was not found for this user.",
+      );
+    });
+
+    it("rejects foreign or missing trend observation references", async () => {
+      const provenanceService = createService({
+        summaryExistsForUser: async () => true,
+        findTrendsOwnedByUser: async () => [],
+      });
+
+      const errors = await provenanceService.validateProvenanceOwnership(
+        userId,
+        "adapt_workout_plan_from_progress",
+        {
+          plan: workoutPlan,
+          sourceSummaryId: summaryId,
+          sourceTrendObservationIds: [trendId],
+        },
+      );
+
+      expect(errors).toContain(
+        "proposedChanges.sourceTrendObservationIds: One or more cited trend observations were not found for this user.",
+      );
+    });
+
+    it("rejects trend observations that do not belong to the cited summary", async () => {
+      const provenanceService = createService({
+        summaryExistsForUser: async () => true,
+        findTrendsOwnedByUser: async () => [
+          { id: trendId, summaryId: "34c29398-86c9-5b4f-ad21-7a2919585046" },
+        ],
+      });
+
+      const errors = await provenanceService.validateProvenanceOwnership(
+        userId,
+        "adapt_workout_plan_from_progress",
+        {
+          plan: workoutPlan,
+          sourceSummaryId: summaryId,
+          sourceTrendObservationIds: [trendId],
+        },
+      );
+
+      expect(errors).toContain(
+        "proposedChanges.sourceTrendObservationIds: One or more cited trend observations do not belong to the cited weekly progress summary.",
+      );
+    });
+
+    it("skips provenance checks for other intents", async () => {
+      const provenanceService = createService({
+        summaryExistsForUser: async () => false,
+      });
+
+      const errors = await provenanceService.validateProvenanceOwnership(
+        userId,
+        "create_workout_plan",
+        workoutPlan,
+      );
+
+      expect(errors).toEqual([]);
+    });
   });
 });
