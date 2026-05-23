@@ -4,6 +4,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
+import type { ProviderRecipeDraft } from "./recipe-catalog-provider.js";
 
 export interface CreateRecommendationInput {
   userId: string;
@@ -82,6 +83,71 @@ export class RecipesRepository {
       .select()
       .from(recipes)
       .where(and(inArray(recipes.id, recipeIds), eq(recipes.status, "active")));
+  }
+
+  async findActiveRecipeByProviderExternalId(provider: string, externalId: string) {
+    const [recipe] = await this.db
+      .select()
+      .from(recipes)
+      .where(
+        and(
+          eq(recipes.provider, provider),
+          eq(recipes.externalId, externalId),
+          eq(recipes.status, "active"),
+        ),
+      )
+      .limit(1);
+
+    return recipe ?? null;
+  }
+
+  async upsertProviderRecipes(inputs: ProviderRecipeDraft[]) {
+    if (inputs.length === 0) {
+      return [];
+    }
+
+    const upserted = [];
+
+    for (const input of inputs) {
+      const values = {
+        provider: input.provider,
+        externalId: input.externalId,
+        name: input.name,
+        description: input.description,
+        ingredients: input.ingredients,
+        preparationSteps: input.preparationSteps,
+        servings: input.servings,
+        estimatedCalories: input.macroEstimates.estimatedCalories,
+        proteinGrams: input.macroEstimates.proteinGrams,
+        carbsGrams: input.macroEstimates.carbsGrams,
+        fatGrams: input.macroEstimates.fatGrams,
+        fiberGrams: input.macroEstimates.fiberGrams ?? null,
+        mealTypes: input.mealTypes,
+        tags: input.tags,
+        restrictionTags: input.restrictionTags,
+        allergenTags: input.allergenTags,
+        prepMinutes: input.prepMinutes,
+        cookMinutes: input.cookMinutes,
+        source: input.source,
+        status: "active" as const,
+        updatedAt: new Date(),
+      };
+
+      const [row] = await this.db
+        .insert(recipes)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [recipes.provider, recipes.externalId],
+          set: values,
+        })
+        .returning();
+
+      if (row) {
+        upserted.push(row);
+      }
+    }
+
+    return upserted;
   }
 
   async listRecommendationsByUserId(userId: string) {

@@ -1,7 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { AppLayout } from "../../src/components/app-layout";
-import { GoalsWorkspace } from "../../src/components/goals/goals-workspace";
-import { PageContent, PageHeader } from "../../src/components/ui";
+import { redirect } from "next/navigation";
 
 export default async function GoalsPage() {
   const { isAuthenticated, redirectToSignIn } = await auth();
@@ -10,15 +8,5 @@ export default async function GoalsPage() {
     return redirectToSignIn();
   }
 
-  return (
-    <AppLayout>
-      <PageHeader
-        title="Goals"
-        description="Track active wellness goals and progress your coach helps you refine."
-      />
-      <PageContent>
-        <GoalsWorkspace />
-      </PageContent>
-    </AppLayout>
-  );
+  redirect("/profile#goals");
 }

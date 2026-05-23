@@ -1,3 +1,5 @@
+/* global process, console */
+
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

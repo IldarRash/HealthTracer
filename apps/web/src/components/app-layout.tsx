@@ -1,4 +1,3 @@
-import { UserButton } from "@clerk/nextjs";
 import type { ReactNode } from "react";
 import { AppNav } from "./app-nav";
 import { AppShell, AppShellHeader, AppShellMain } from "./ui";
@@ -11,11 +10,7 @@ type AppLayoutProps = {
 export function AppLayout({ children, variant = "default" }: AppLayoutProps) {
   return (
     <AppShell variant={variant === "chat" ? "chat" : "default"}>
-      <AppShellHeader
-        brand="AI Health Coach"
-        nav={<AppNav />}
-        actions={<UserButton />}
-      />
+      <AppShellHeader brand="AI Health Coach" nav={<AppNav />} />
       <AppShellMain
         variant={
           variant === "chat" ? "chat" : variant === "dashboard" ? "dashboard" : "default"

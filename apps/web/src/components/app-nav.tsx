@@ -1,50 +1,40 @@
 "use client";
 
+import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { isNavLinkActive, PRIMARY_NAV_LINKS } from "../lib/nav-ui-state";
 import { cn } from "../lib/utils";
-
-const links = [
-  { href: "/chat", label: "Chat", featured: true },
-  { href: "/today", label: "Today" },
-  { href: "/training", label: "Workouts" },
-  { href: "/progress", label: "Progress" },
-  { href: "/goals", label: "Goals" },
-  { href: "/nutrition", label: "Nutrition" },
-  { href: "/recipes", label: "Recipes" },
-  { href: "/metrics", label: "Metrics" },
-  { href: "/documents", label: "Documents" },
-  { href: "/profile", label: "Profile" },
-] as const;
-
-function isActivePath(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
 
 export function AppNav() {
   const pathname = usePathname();
 
   return (
     <nav aria-label="Main navigation" className="app-nav app-nav--coach">
-      {links.map((link) => {
-        const active = isActivePath(pathname, link.href);
-        const isFeatured = "featured" in link && link.featured;
+      <div className="app-nav__links">
+        {PRIMARY_NAV_LINKS.map((link) => {
+          const active = isNavLinkActive(pathname, link);
+          const isFeatured = link.featured === true;
 
-        return (
-          <Link
-            key={link.href}
-            href={link.href}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "app-nav__link",
-              isFeatured && "app-nav__link--featured",
-              active && !isFeatured && "app-nav__link--active",
-            )}
-          >
-            {link.label}
-          </Link>
-        );
-      })}
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "app-nav__link",
+                isFeatured && "app-nav__link--featured",
+                active && !isFeatured && "app-nav__link--active",
+              )}
+            >
+              {link.label}
+            </Link>
+          );
+        })}
+      </div>
+      <div className="app-nav__account" aria-label="Account">
+        <UserButton />
+      </div>
     </nav>
   );
 }

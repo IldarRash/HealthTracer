@@ -4,7 +4,7 @@
       "command": "npx",
       "args": ["-y", "@upstash/context7-mcp"],
       "env": {
-        "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
+        "CONTEXT7_API_KEY": "ctx7sk-464d96aa-39c0-47b8-a2ad-27a248c58e49"
       }
     },
     "postgres-dev": {

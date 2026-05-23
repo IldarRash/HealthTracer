@@ -1,7 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { AppLayout } from "../../src/components/app-layout";
-import { RecipesWorkspace } from "../../src/components/recipes/recipes-workspace";
-import { PageContent, PageHeader } from "../../src/components/ui";
+import { redirect } from "next/navigation";
 
 export default async function RecipesPage() {
   const { isAuthenticated, redirectToSignIn } = await auth();
@@ -10,15 +8,5 @@ export default async function RecipesPage() {
     return redirectToSignIn();
   }
 
-  return (
-    <AppLayout>
-      <PageHeader
-        title="Recipes"
-        description="Browse meal ideas and save plan-fit recommendations without changing your nutrition targets."
-      />
-      <PageContent>
-        <RecipesWorkspace />
-      </PageContent>
-    </AppLayout>
-  );
+  redirect("/nutrition");
 }

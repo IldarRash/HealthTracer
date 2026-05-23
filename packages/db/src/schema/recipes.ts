@@ -5,6 +5,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { nutritionPlanRevisions } from "./nutrition.js";
@@ -31,12 +32,18 @@ export const recipes = pgTable(
     prepMinutes: integer("prep_minutes"),
     cookMinutes: integer("cook_minutes"),
     source: text("source").notNull(),
+    provider: text("provider"),
+    externalId: text("external_id"),
     status: text("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     statusIdx: index("recipes_status_idx").on(table.status),
+    providerExternalIdx: uniqueIndex("recipes_provider_external_id_idx").on(
+      table.provider,
+      table.externalId,
+    ),
   }),
 );
 

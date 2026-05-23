@@ -14,29 +14,29 @@
   --color-brand-800: #1e3a8a;
   --color-brand-900: #172554;
 
-  --color-surface-app: #f4f7fb;
-  --color-surface-card: #ffffff;
-  --color-surface-muted: #f1f5f9;
-  --color-surface-inset: #f8fafc;
-  --color-surface-elevated: #ffffff;
+  --color-surface-app: #0a0a0a;
+  --color-surface-card: #141414;
+  --color-surface-muted: #1c1c1c;
+  --color-surface-inset: #111111;
+  --color-surface-elevated: #1a1a1a;
 
-  --color-text-primary: #0f172a;
-  --color-text-secondary: #475569;
-  --color-text-muted: #64748b;
-  --color-text-inverse: #ffffff;
+  --color-text-primary: #f5f5f3;
+  --color-text-secondary: #c8c8c4;
+  --color-text-muted: #9a9a96;
+  --color-text-inverse: #0a0a0a;
 
-  --color-border-default: #e2e8f0;
-  --color-border-strong: #cbd5e1;
-  --color-border-focus: var(--color-brand-500);
+  --color-border-default: #2a2a2a;
+  --color-border-strong: #3a3a3a;
+  --color-border-focus: var(--color-coach-400);
 
   --color-status-pending-bg: #fef3c7;
-  --color-status-pending-text: #92400e;
+  --color-status-pending-text: #d97706;
   --color-status-pending-border: #fcd34d;
   --color-status-success-bg: #dcfce7;
-  --color-status-success-text: #166534;
+  --color-status-success-text: #15803d;
   --color-status-success-border: #86efac;
   --color-status-error-bg: #fee2e2;
-  --color-status-error-text: #991b1b;
+  --color-status-error-text: #b91c1c;
   --color-status-error-border: #fca5a5;
   --color-status-info-bg: #eff6ff;
   --color-status-info-text: #1d4ed8;
@@ -65,10 +65,12 @@
   --radius-xl: 1.5rem;
   --radius-full: 9999px;
 
-  --shadow-card: 0 1px 3px rgb(15 23 42 / 6%), 0 8px 24px rgb(15 23 42 / 6%);
-  --shadow-elevated: 0 24px 60px rgb(15 23 42 / 8%);
-  --shadow-focus: 0 0 0 3px rgb(37 99 235 / 18%);
-  --shadow-brand-soft: 0 8px 24px rgb(37 99 235 / 8%);
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 35%), 0 8px 24px rgb(0 0 0 / 25%);
+  --shadow-card-light: 0 1px 2px rgb(0 0 0 / 4%), 0 4px 16px rgb(0 0 0 / 6%);
+  --shadow-elevated: 0 24px 60px rgb(0 0 0 / 45%);
+  --shadow-composer: 0 -4px 24px rgb(0 0 0 / 8%);
+  --shadow-focus: 0 0 0 3px rgb(45 212 191 / 28%);
+  --shadow-brand-soft: 0 8px 24px rgb(20 184 166 / 18%);
 
   --font-sans:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -79,11 +81,16 @@
   --font-size-lg: 1.125rem;
   --font-size-xl: 1.25rem;
   --font-size-2xl: 1.75rem;
+  --font-size-chat: 0.9375rem;
+  --font-size-meta: 0.8125rem;
+  --font-size-section-label: 0.6875rem;
+  --font-size-metric-hero: clamp(2.5rem, 4vw, 3rem);
 
   --layout-shell-max: 80rem;
-  --layout-content-max: 64rem;
+  --layout-content-max: 72rem;
   --layout-chat-max: 48rem;
   --layout-nav-height: 3.5rem;
+  --touch-target-min: 2.75rem;
 
   /* Wellness coach accent — prefer over brand blue for primary coaching actions */
   --color-coach-50: #f0fdfa;
@@ -97,9 +104,20 @@
   --color-surface-sidebar-hover: #1e1e1e;
   --color-surface-sidebar-active: #262626;
   --color-surface-hero-dark: #1a1a1a;
+  --color-surface-content: #f7f7f5;
+  --color-surface-content-elevated: #ffffff;
+  --color-surface-content-muted: #f0f0ed;
   --color-text-sidebar: #ececea;
   --color-text-sidebar-muted: #9a9a96;
   --color-text-on-dark: #f5f5f3;
+  --color-text-on-light: #0f0f0f;
+  --color-text-on-light-secondary: #5c5c58;
+
+  /* Semantic aliases — design direction ↔ implementation */
+  --color-surface-nav-dark: var(--color-surface-sidebar);
+  --color-accent-coach: var(--color-coach-600);
+  --color-accent-coach-hover: var(--color-coach-700);
+  --color-accent-coach-subtle: var(--color-coach-100);
 
   --focus-outline: 2px solid var(--color-border-focus);
   --focus-outline-offset: 2px;
@@ -167,8 +185,8 @@ dd {
 
 .app-shell__header {
   align-items: center;
-  background: rgb(255 255 255 / 92%);
-  backdrop-filter: blur(10px);
+  background: rgb(10 10 10 / 94%);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--color-border-default);
   display: flex;
   flex-wrap: wrap;
@@ -191,11 +209,6 @@ dd {
 .app-shell__nav {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.app-shell__actions {
-  display: flex;
-  gap: var(--space-2);
 }
 
 .app-shell__main {
@@ -223,7 +236,7 @@ dd {
 
 .page-header__eyebrow,
 .eyebrow {
-  color: var(--color-brand-600);
+  color: var(--color-coach-400);
   font-size: var(--font-size-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -268,16 +281,36 @@ dd {
    ========================================================================== */
 
 .app-nav {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+  justify-content: space-between;
+  width: 100%;
+}
+
+.app-nav__links {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .app-nav--coach {
-  background: var(--color-surface-inset);
+  background: var(--color-surface-muted);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-full);
   padding: var(--space-1);
+}
+
+.app-nav__account {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: var(--space-1);
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--color-border-default);
 }
 
 .app-nav a,
@@ -309,26 +342,31 @@ dd {
 .app-nav a[aria-current="page"],
 .app-nav__link[aria-current="page"],
 .app-nav__link--active {
-  background: var(--color-surface-card);
-  border-color: var(--color-brand-500);
+  background: var(--color-surface-elevated);
+  border-color: var(--color-coach-500);
   box-shadow: var(--shadow-focus);
-  color: var(--color-brand-700);
+  color: var(--color-coach-400);
 }
 
 .app-nav__link--featured {
-  background: var(--color-brand-500);
-  border-color: var(--color-brand-500);
+  background: linear-gradient(135deg, var(--color-coach-500) 0%, var(--color-coach-600) 100%);
+  border-color: var(--color-coach-500);
+  box-shadow: var(--shadow-brand-soft);
   color: var(--color-text-inverse);
+  font-size: var(--font-size-base);
+  font-weight: 700;
+  min-height: 2.5rem;
+  padding: 0.55rem 1.15rem;
 }
 
 .app-nav__link--featured:hover {
-  background: var(--color-brand-600);
-  border-color: var(--color-brand-600);
+  background: linear-gradient(135deg, var(--color-coach-400) 0%, var(--color-coach-600) 100%);
+  border-color: var(--color-coach-400);
   color: var(--color-text-inverse);
 }
 
 .app-nav__link--featured[aria-current="page"] {
-  background: var(--color-brand-600);
+  background: linear-gradient(135deg, var(--color-coach-400) 0%, var(--color-coach-700) 100%);
   box-shadow: var(--shadow-brand-soft);
   color: var(--color-text-inverse);
 }
@@ -341,13 +379,29 @@ dd {
 
   .app-nav,
   .app-nav--coach {
+    align-items: stretch;
+    border-radius: var(--radius-lg);
+    flex-direction: column;
     justify-content: flex-start;
+    width: 100%;
+  }
+
+  .app-nav__links {
+    flex-wrap: nowrap;
     overflow-x: auto;
     scrollbar-width: none;
     width: 100%;
   }
 
-  .app-nav::-webkit-scrollbar,
+  .app-nav__account {
+    border-left: none;
+    border-top: 1px solid var(--color-border-default);
+    justify-content: flex-end;
+    margin-left: 0;
+    padding: var(--space-2) var(--space-1) 0;
+  }
+
+  .app-nav__links::-webkit-scrollbar,
   .app-nav--coach::-webkit-scrollbar {
     display: none;
   }
@@ -355,6 +409,8 @@ dd {
   .app-nav a,
   .app-nav__link {
     flex: 0 0 auto;
+    min-height: var(--touch-target-min);
+    min-width: var(--touch-target-min);
   }
 }
 
@@ -452,7 +508,7 @@ dd {
 }
 
 .dashboard-card {
-  background: linear-gradient(180deg, var(--color-surface-card) 0%, var(--color-surface-inset) 100%);
+  background: linear-gradient(180deg, var(--color-surface-card) 0%, var(--color-surface-muted) 100%);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
@@ -481,6 +537,7 @@ dd {
 .dashboard-card__value {
   color: var(--color-text-primary);
   font-size: clamp(1.5rem, 2.5vw, 2rem);
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.1;
@@ -535,23 +592,23 @@ dd {
 }
 
 .button-primary {
-  background: var(--color-brand-500);
+  background: var(--color-coach-600);
   color: var(--color-text-inverse);
 }
 
 .button-primary:hover:not(:disabled) {
-  background: var(--color-brand-600);
+  background: var(--color-coach-700);
 }
 
 .button-secondary {
-  background: var(--color-surface-card);
+  background: var(--color-surface-muted);
   border-color: var(--color-border-strong);
   color: var(--color-text-primary);
 }
 
 .button-secondary:hover:not(:disabled) {
-  border-color: var(--color-brand-500);
-  color: var(--color-brand-700);
+  border-color: var(--color-coach-500);
+  color: var(--color-coach-400);
 }
 
 .button-ghost {
@@ -913,7 +970,7 @@ dd {
   animation: ds-spin 700ms linear infinite;
   border: 2px solid var(--color-border-default);
   border-radius: 50%;
-  border-top-color: var(--color-brand-500);
+  border-top-color: var(--color-coach-500);
   height: 1.25rem;
   width: 1.25rem;
 }
@@ -1203,6 +1260,42 @@ dd {
 
 .goals span {
   color: var(--color-text-muted);
+}
+
+.training-progress-section {
+  border-top: 1px solid var(--color-border-default);
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+  scroll-margin-top: calc(var(--layout-nav-height) + var(--space-4));
+}
+
+.profile-hub .profile-section {
+  scroll-margin-top: calc(var(--layout-nav-height) + var(--space-4));
+}
+
+.profile-section__header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.profile-section__header h2 {
+  margin: 0 0 var(--space-2);
+}
+
+.profile-account__details {
+  margin-top: var(--space-3);
+}
+
+.profile-documents .documents-workspace {
+  margin-top: 0;
+}
+
+.profile-documents .notice:first-child {
+  margin-top: 0;
 }
 
 .training-workspace {
@@ -1707,7 +1800,7 @@ dd {
   border-radius: 0;
   border-right: none;
   bottom: 0;
-  box-shadow: 0 -4px 24px rgb(15 23 42 / 8%);
+  box-shadow: var(--shadow-composer);
   margin: 0;
   max-width: none;
   padding: var(--space-4);
@@ -1870,7 +1963,7 @@ dd {
 }
 
 .dashboard-hero__value {
-  font-size: clamp(2.25rem, 4vw, 2.75rem);
+  font-size: var(--font-size-metric-hero);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   letter-spacing: -0.03em;

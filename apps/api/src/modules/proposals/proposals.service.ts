@@ -115,9 +115,7 @@ export class ProposalsService {
       });
     }
 
-    let acceptedProposal;
-
-    acceptedProposal = await this.proposalsRepository.acceptPendingProposal(
+    const acceptedProposal = await this.proposalsRepository.acceptPendingProposal(
       proposalId,
       user.id,
       (lockedProposal) =>

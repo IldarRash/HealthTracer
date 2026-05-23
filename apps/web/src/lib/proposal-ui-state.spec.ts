@@ -100,8 +100,9 @@ describe("proposal UI state", () => {
     expect(getProposalDomainLabel("workout")).toBe("Workout");
     expect(getProposalDomainLabel("goal")).toBe("Goal");
     expect(getProposalDomainLabel("recipe")).toBe("Recipe");
+    expect(getProposalDomainRoute("goal")).toBe("/profile#goals");
     expect(getProposalDomainRoute("nutrition")).toBe("/nutrition");
-    expect(getProposalDomainRoute("recipe")).toBe("/recipes");
+    expect(getProposalDomainRoute("recipe")).toBe("/nutrition");
     expect(getProposalDomainRoute("general")).toBeNull();
     expect(getProposalStatusLabel("pending")).toBe("Pending review");
     expect(getProposalDomainPillClass("profile")).toBe("proposal-domain-pill--profile");

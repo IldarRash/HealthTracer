@@ -8,7 +8,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
-import { adherenceScoreValue, serializeChecklistItems, serializeFeedback } from "./today.mapper.js";
+import { serializeChecklistItems, serializeFeedback } from "./today.mapper.js";
 
 @Injectable()
 export class TodayRepository {

@@ -266,8 +266,11 @@ describe("TodayService", () => {
     const service = new TodayService(
       {
         findByUserAndDate: async () => null,
-        upsertChecklist: async (_resolvedUserId, _resolvedDate, items) =>
-          buildChecklistRow(items),
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: Record<string, unknown>[],
+        ) => buildChecklistRow(items),
       } as never,
       {
         listSessionsByUserAndPlannedDate: async () => [],
@@ -286,7 +289,7 @@ describe("TodayService", () => {
 
     const service = new TodayService(
       {
-        listRecentByUserId: async (_resolvedUserId, limit) => {
+        listRecentByUserId: async (_resolvedUserId: string, limit: number) => {
           capturedLimit = limit;
           return [];
         },

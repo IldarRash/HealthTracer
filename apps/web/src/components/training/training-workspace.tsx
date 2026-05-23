@@ -25,6 +25,7 @@ import {
   sortSessionsByPlannedDate,
 } from "../../lib/training-ui-state";
 import { EmptyState, ErrorState, LoadingState } from "../ui";
+import { TrainingProgressPanel } from "./training-progress-panel";
 
 function formatTimestamp(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -235,15 +236,20 @@ export function TrainingWorkspace() {
 
   if (!showPlan || !activeRevision || !payload) {
     return (
-      <EmptyState
-        title="No active workout plan yet"
-        description="Accept a workout proposal in Chat to create your first plan revision. Training updates only after you approve a change."
-        action={
-          <Link href="/chat" className="confirmation-card__link">
-            Open Chat →
-          </Link>
-        }
-      />
+      <div className="training-workspace">
+        <EmptyState
+          title="No active workout plan yet"
+          description="Accept a workout proposal in Chat to create your first plan revision. Training updates only after you approve a change."
+          action={
+            <Link href="/chat" className="confirmation-card__link">
+              Open Chat →
+            </Link>
+          }
+        />
+        <section id="progress" className="training-progress-section" aria-label="Weekly progress">
+          <TrainingProgressPanel />
+        </section>
+      </div>
     );
   }
 
@@ -541,6 +547,10 @@ export function TrainingWorkspace() {
           )}
         </section>
       </div>
+
+      <section id="progress" className="training-progress-section" aria-label="Weekly progress">
+        <TrainingProgressPanel />
+      </section>
     </div>
   );
 }

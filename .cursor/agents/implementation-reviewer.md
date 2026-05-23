@@ -1,3 +1,9 @@
+---
+name: implementation-reviewer
+model: composer-2.5[]
+is_background: true
+---
+
 # Implementation Reviewer
 
 ## Role

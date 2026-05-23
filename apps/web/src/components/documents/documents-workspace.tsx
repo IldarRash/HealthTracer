@@ -32,7 +32,6 @@ import {
   parseStatusLabel,
   reviewStatusBadgeTone,
   reviewStatusLabel,
-  SAMPLE_DOCUMENT_TEXT,
 } from "../../lib/documents-ui-state";
 import {
   Badge,
@@ -67,9 +66,9 @@ export function DocumentsWorkspace() {
   const queryClient = useQueryClient();
 
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [title, setTitle] = useState("Dev smoke wellness note");
+  const [title, setTitle] = useState("");
   const [documentType, setDocumentType] = useState<DocumentType>("other");
-  const [sampleText, setSampleText] = useState(SAMPLE_DOCUMENT_TEXT);
+  const [sampleText, setSampleText] = useState("");
   const [consentScopes, setConsentScopes] = useState<DocumentConsentScope[]>([
     ...DEFAULT_DOCUMENT_CONSENT_SCOPES,
   ]);
@@ -351,11 +350,11 @@ export function DocumentsWorkspace() {
 
       <div className="documents-layout">
         <section className="panel panel-prominent">
-          <p className="section-label">Development upload</p>
-          <h2>Submit sample text</h2>
+          <p className="section-label">Document upload</p>
+          <h2>Add document text</h2>
           <p className="muted-text">
-            Local smoke flow uses synthetic <code>text/plain</code> sample text. Do not upload
-            real private health documents in development.
+            Paste text only when you want it stored for wellness coaching context. You can revoke
+            consent or delete the document later.
           </p>
 
           <form
@@ -433,7 +432,7 @@ export function DocumentsWorkspace() {
             </fieldset>
 
             <label className="form-field" htmlFor="document-sample-text">
-              Sample text
+              Document text
               <textarea
                 id="document-sample-text"
                 name="document-sample-text"
@@ -443,7 +442,7 @@ export function DocumentsWorkspace() {
                 onChange={(event) => setSampleText(event.target.value)}
               />
               <span className="form-help">
-                Synthetic wellness note used for parse and summary smoke testing.
+                Keep only the portions you consent to store and summarize for coaching context.
               </span>
             </label>
 
@@ -459,12 +458,12 @@ export function DocumentsWorkspace() {
               aria-busy={uploadMutation.isPending}
             >
               {uploadMutation.isPending ? (
-                <p className="muted-text">Uploading sample document…</p>
+                <p className="muted-text">Uploading document…</p>
               ) : null}
             </div>
 
             <Button type="submit" disabled={!canUpload || uploadMutation.isPending}>
-              Upload sample document
+              Upload document
             </Button>
           </form>
         </section>
@@ -476,7 +475,7 @@ export function DocumentsWorkspace() {
           {documents.length === 0 ? (
             <EmptyState
               title="No documents yet"
-              description="Upload the development sample text to start the parse, review, and search smoke flow."
+              description="Upload document text with consent to start parsing, review, and approved-summary search."
             />
           ) : (
             <ul className="documents-list">

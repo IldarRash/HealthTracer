@@ -13,8 +13,8 @@ export default async function TrainingPage() {
   return (
     <AppLayout>
       <PageHeader
-        title="Workouts"
-        description="Review your active workout revision, schedule sessions, and track completion."
+        title="Workouts & Training"
+        description="Schedule sessions, review your active plan, and track weekly workout progress in one place."
       />
       <PageContent>
         <TrainingWorkspace />

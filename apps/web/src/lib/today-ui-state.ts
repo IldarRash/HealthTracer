@@ -5,7 +5,6 @@ import type {
   TodayDailyFeedback,
   TodayHistoryEntry,
 } from "@health/types";
-import { formatLocalIsoDate } from "./training-ui-state";
 
 export { formatLocalIsoDate } from "./training-ui-state";
 

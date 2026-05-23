@@ -359,7 +359,11 @@ describe("DocumentsService", () => {
             createdAt: new Date("2026-05-22T12:00:00.000Z"),
             updatedAt: new Date("2026-05-22T12:00:00.000Z"),
           }),
-          updateSummaryReview: async (_userId, _summaryId, reviewStatus) => {
+          updateSummaryReview: async (
+            _userId: string,
+            _summaryId: string,
+            reviewStatus: "approved" | "rejected",
+          ) => {
             reviewedStatus = reviewStatus;
             return {
               id: "14a08176-64a7-4a2d-8a44-581807368394",
@@ -393,7 +397,7 @@ describe("DocumentsService", () => {
   it("returns consent-approved search rows without post-limit starvation", async () => {
     const service = new DocumentsService(
       {
-        searchApprovedSummaries: async (_userId, _query, limit) => {
+        searchApprovedSummaries: async (_userId: string, _query: string, limit: number) => {
           expect(limit).toBe(5);
           return Array.from({ length: limit }, (_, index) => ({
             document: {

@@ -24,6 +24,8 @@ import {
   getProposalDomainLabel,
   getProposalStatusLabel,
 } from "../../lib/proposal-ui-state";
+import { DocumentsWorkspace } from "../documents/documents-workspace";
+import { GoalsWorkspace } from "../goals/goals-workspace";
 import { DashboardCard, DashboardGrid, EmptyState, ErrorState, LoadingState } from "../ui";
 
 export function ProfileDashboard() {
@@ -46,17 +48,8 @@ export function ProfileDashboard() {
         listProposals(token),
       ]);
 
-      const errors = [
-        user.error,
-        profile.error,
-        goals.error,
-        workout.error,
-        nutrition.error,
-        proposals.error,
-      ].filter((error): error is string => Boolean(error));
-
-      if (errors.length > 0) {
-        throw new Error(errors[0]);
+      if (user.error) {
+        throw new Error(user.error);
       }
 
       return {
@@ -66,22 +59,25 @@ export function ProfileDashboard() {
         workout: workout.data ?? { plan: null, activeRevision: null, sessions: [] },
         nutrition: nutrition.data ?? { plan: null, activeRevision: null },
         proposals: proposals.data ?? [],
+        errors: [profile.error, goals.error, workout.error, nutrition.error, proposals.error].filter(
+          (error): error is string => Boolean(error),
+        ),
       };
     },
   });
 
   if (dashboardQuery.isLoading) {
-    return <LoadingState title="Loading your coaching snapshot…" />;
+    return <LoadingState title="Loading your profile…" />;
   }
 
   if (dashboardQuery.isError) {
     return (
       <ErrorState
-        title="Dashboard unavailable"
+        title="Profile unavailable"
         description={
           dashboardQuery.error instanceof Error
             ? dashboardQuery.error.message
-            : "Your profile dashboard could not be loaded."
+            : "Your profile could not be loaded."
         }
       />
     );
@@ -100,10 +96,38 @@ export function ProfileDashboard() {
   const nutritionRevision = data.nutrition.activeRevision;
 
   return (
-    <div className="page-content">
+    <div className="page-content profile-hub">
+      <section id="account" className="dashboard-section profile-account">
+        <p className="section-label">Account</p>
+        <h2>Signed in as {displayName}</h2>
+        <dl className="profile-account__details">
+          <dt>Email</dt>
+          <dd>{data.user?.email ?? "Not available"}</dd>
+          {data.user?.displayName ? (
+            <>
+              <dt>Display name</dt>
+              <dd>{data.user.displayName}</dd>
+            </>
+          ) : null}
+        </dl>
+        <p className="dashboard-card__hint">
+          Use the account control beside Profile in the header to manage sign-in and security
+          settings.
+        </p>
+      </section>
+
       <p className="dashboard-greeting">
         {getTimeOfDayGreeting()}, {displayName} — here&apos;s your coaching snapshot
       </p>
+
+      {data.errors.length > 0 ? (
+        <section className="notice notice-inline" role="status">
+          <p>
+            Some profile sections could not refresh just now. The available coaching context is
+            shown below.
+          </p>
+        </section>
+      ) : null}
 
       <DashboardGrid className="dashboard-grid--profile">
         <section className="dashboard-hero">
@@ -215,33 +239,76 @@ export function ProfileDashboard() {
             />
           )}
         </DashboardCard>
-
-        <section className="dashboard-section">
-          <h2>Profile details</h2>
-          {data.profile ? (
-            <dl>
-              <dt>Activity level</dt>
-              <dd>{data.profile.activityLevel ?? "Not set"}</dd>
-              <dt>Training experience</dt>
-              <dd>{data.profile.trainingExperience ?? "Not set"}</dd>
-              <dt>Preferences</dt>
-              <dd>{data.profile.preferences.join(", ") || "None listed"}</dd>
-              <dt>Constraints</dt>
-              <dd>{data.profile.constraints.join(", ") || "None listed"}</dd>
-            </dl>
-          ) : (
-            <EmptyState
-              title="Profile not set up yet"
-              description="Your coach can help you fill in preferences and constraints through Chat."
-              action={
-                <Link href="/chat" className="confirmation-card__link">
-                  Edit in Chat →
-                </Link>
-              }
-            />
-          )}
-        </section>
       </DashboardGrid>
+
+      <section id="goals" className="dashboard-section profile-section">
+        <div className="profile-section__header">
+          <div>
+            <p className="section-label">Goals</p>
+            <h2>Your wellness goals</h2>
+            <p className="dashboard-card__hint">
+              Goals are created and updated through coach proposals. Ask in Chat to add or refine
+              a goal.
+            </p>
+          </div>
+          <Link href="/chat" className="button button-secondary button-sm">
+            Edit in Chat
+          </Link>
+        </div>
+        <GoalsWorkspace />
+      </section>
+
+      <section id="profile-details" className="dashboard-section profile-section">
+        <div className="profile-section__header">
+          <div>
+            <p className="section-label">Coaching profile</p>
+            <h2>Preferences and constraints</h2>
+            <p className="dashboard-card__hint">
+              Profile details guide coaching suggestions. Direct edits happen through Chat
+              proposals.
+            </p>
+          </div>
+          <Link href="/chat" className="button button-secondary button-sm">
+            Update in Chat
+          </Link>
+        </div>
+        {data.profile ? (
+          <dl>
+            <dt>Activity level</dt>
+            <dd>{data.profile.activityLevel ?? "Not set"}</dd>
+            <dt>Training experience</dt>
+            <dd>{data.profile.trainingExperience ?? "Not set"}</dd>
+            <dt>Preferences</dt>
+            <dd>{data.profile.preferences.join(", ") || "None listed"}</dd>
+            <dt>Constraints</dt>
+            <dd>{data.profile.constraints.join(", ") || "None listed"}</dd>
+          </dl>
+        ) : (
+          <EmptyState
+            title="Profile not set up yet"
+            description="Your coach can help you fill in preferences and constraints through Chat."
+            action={
+              <Link href="/chat" className="confirmation-card__link">
+                Set up in Chat →
+              </Link>
+            }
+          />
+        )}
+      </section>
+
+      <section id="documents" className="dashboard-section profile-section profile-documents">
+        <div className="profile-section__header">
+          <div>
+            <p className="section-label">Documents</p>
+            <h2>Health documents</h2>
+            <p className="dashboard-card__hint">
+              Upload with explicit consent, review structured summaries, and control how document
+              context is used for wellness coaching.
+            </p>
+          </div>
+        </div>
+        <DocumentsWorkspace />
+      </section>
     </div>
   );
 }

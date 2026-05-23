@@ -33,11 +33,11 @@ export function getProposalDomainRoute(domain: ProposalTargetDomain): string | n
     case "workout":
       return "/training";
     case "goal":
-      return "/goals";
+      return "/profile#goals";
     case "nutrition":
       return "/nutrition";
     case "recipe":
-      return "/recipes";
+      return "/nutrition";
     case "profile":
       return "/profile";
     case "today":

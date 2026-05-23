@@ -1,6 +1,10 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
+import { GENERIC_RECIPE_CATALOG_CATEGORIES } from "./generic-recipe-catalog-categories.js";
+import type { ProviderRecipeDraft } from "./recipe-catalog-provider.js";
+import type { RecommendationLookupKey } from "./recipes.repository.js";
 import { RecipesService } from "./recipes.service.js";
+import { APPROXIMATE_MACRO_SOURCE } from "./themealdb-recipe.mapper.js";
 
 const auth = {
   clerkUserId: "user_123",
@@ -58,6 +62,8 @@ function createRecipeRow(overrides: Record<string, unknown> = {}) {
     prepMinutes: 15,
     cookMinutes: 10,
     source: "Curated catalog",
+    provider: null,
+    externalId: null,
     status: "active",
     createdAt: new Date("2026-05-22T12:00:00.000Z"),
     updatedAt: new Date("2026-05-22T12:00:00.000Z"),
@@ -83,16 +89,45 @@ function createRecommendationRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createProviderDraft(overrides: Partial<ProviderRecipeDraft> = {}): ProviderRecipeDraft {
+  return {
+    provider: "themealdb",
+    externalId: "52772",
+    name: "Vegetable curry",
+    description: "Vegetable curry from TheMealDB (Vegetarian). Macro values are approximate estimates.",
+    ingredients: [{ name: "Mixed vegetables", quantity: null, unit: null }],
+    preparationSteps: ["Simmer vegetables with spices."],
+    servings: 1,
+    macroEstimates: {
+      estimatedCalories: 550,
+      proteinGrams: 25,
+      carbsGrams: 45,
+      fatGrams: 20,
+      fiberGrams: 8,
+    },
+    mealTypes: ["lunch", "dinner"],
+    tags: ["vegetarian"],
+    restrictionTags: ["plant_based"],
+    allergenTags: [],
+    prepMinutes: null,
+    cookMinutes: null,
+    source: APPROXIMATE_MACRO_SOURCE,
+    ...overrides,
+  };
+}
+
 function createService({
   recipesRepository = {},
   nutritionRepository = {},
   profilesRepository = {},
   usersService = {},
+  recipeCatalogProvider = {},
 }: {
   recipesRepository?: Record<string, unknown>;
   nutritionRepository?: Record<string, unknown>;
   profilesRepository?: Record<string, unknown>;
   usersService?: Record<string, unknown>;
+  recipeCatalogProvider?: Record<string, unknown>;
 } = {}) {
   const service = new RecipesService(
     {
@@ -103,6 +138,7 @@ function createService({
       findRecommendationById: async () => null,
       createRecommendations: async () => [],
       findOpenRecommendationsByKeys: async () => [],
+      upsertProviderRecipes: async () => [],
       updateRecommendationStatus: async () => null,
       ...recipesRepository,
     } as never,
@@ -142,6 +178,11 @@ function createService({
     {
       resolveFromAuth: async () => user,
       ...usersService,
+    } as never,
+    {
+      providerName: "themealdb",
+      fetchByGenericCategories: async () => [],
+      ...recipeCatalogProvider,
     } as never,
   );
 
@@ -241,7 +282,7 @@ describe("RecipesService", () => {
     const service = createService({
       recipesRepository: {
         listActiveRecipes: async () => [createRecipeRow()],
-        findOpenRecommendationsByKeys: async (_userId, keys) => {
+        findOpenRecommendationsByKeys: async (_userId: string, keys: RecommendationLookupKey[]) => {
           expect(keys).toEqual([
             {
               recipeId: compatibleRecipeId,
@@ -405,7 +446,7 @@ describe("RecipesService", () => {
     const service = createService({
       recipesRepository: {
         findActiveRecipesByIds: async () => [createRecipeRow()],
-        findOpenRecommendationsByKeys: async (_userId, keys) => {
+        findOpenRecommendationsByKeys: async (_userId: string, keys: RecommendationLookupKey[]) => {
           expect(keys).toEqual([
             {
               recipeId: compatibleRecipeId,
@@ -477,5 +518,170 @@ describe("RecipesService", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(createRecommendationsCalled).toBe(false);
+  });
+
+  it("returns no_active_nutrition_plan without calling the external catalog provider", async () => {
+    let providerCalled = false;
+    const service = createService({
+      nutritionRepository: {
+        findActivePlanByUserId: async () => null,
+      },
+      recipeCatalogProvider: {
+        fetchByGenericCategories: async () => {
+          providerCalled = true;
+          return [];
+        },
+      },
+    });
+
+    const result = await service.generateCurrentRecommendations(auth);
+
+    expect(result.limitedReason).toBe("no_active_nutrition_plan");
+    expect(result.recommendations).toEqual([]);
+    expect(providerCalled).toBe(false);
+  });
+
+  it("returns no_compatible_recipes when catalog and provider data are all filtered out", async () => {
+    const incompatibleRecipe = createRecipeRow({
+      id: incompatibleRecipeId,
+      name: "Peanut tempeh bowl",
+      allergenTags: ["peanuts"],
+    });
+    let upsertCalled = false;
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async () => [incompatibleRecipe],
+        upsertProviderRecipes: async () => {
+          upsertCalled = true;
+          return [];
+        },
+      },
+      recipeCatalogProvider: {
+        fetchByGenericCategories: async () => [
+          createProviderDraft({
+            externalId: "99999",
+            name: "Peanut stew",
+            ingredients: [{ name: "Peanut butter", quantity: null, unit: null }],
+            allergenTags: ["peanuts"],
+          }),
+        ],
+      },
+    });
+
+    const result = await service.generateCurrentRecommendations(auth);
+
+    expect(result.limitedReason).toBe("no_compatible_recipes");
+    expect(result.recommendations).toEqual([]);
+    expect(upsertCalled).toBe(true);
+  });
+
+  it("upserts provider catalog drafts before scoring compatible recommendations", async () => {
+    const providerRecipeId = "c4000001-0000-4000-8000-000000000001";
+    const providerDraft = createProviderDraft();
+    const providerRecipeRow = createRecipeRow({
+      id: providerRecipeId,
+      name: providerDraft.name,
+      description: providerDraft.description,
+      ingredients: providerDraft.ingredients,
+      preparationSteps: providerDraft.preparationSteps,
+      estimatedCalories: providerDraft.macroEstimates.estimatedCalories,
+      proteinGrams: providerDraft.macroEstimates.proteinGrams,
+      carbsGrams: providerDraft.macroEstimates.carbsGrams,
+      fatGrams: providerDraft.macroEstimates.fatGrams,
+      fiberGrams: providerDraft.macroEstimates.fiberGrams,
+      mealTypes: providerDraft.mealTypes,
+      tags: providerDraft.tags,
+      restrictionTags: providerDraft.restrictionTags,
+      allergenTags: providerDraft.allergenTags,
+      source: providerDraft.source,
+      provider: providerDraft.provider,
+      externalId: providerDraft.externalId,
+    });
+    let fetchedCategories: readonly string[] | undefined;
+    let upsertInputs: ProviderRecipeDraft[] | undefined;
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async () => [providerRecipeRow],
+        upsertProviderRecipes: async (inputs: ProviderRecipeDraft[]) => {
+          upsertInputs = inputs;
+          return [providerRecipeRow];
+        },
+        createRecommendations: async (inputs: unknown[]) =>
+          inputs.map((input, index) =>
+            createRecommendationRow({
+              ...(input as Record<string, unknown>),
+              recipeId: providerRecipeId,
+              id: `b200000${index + 1}-0000-4000-8000-000000000001`,
+            }),
+          ),
+      },
+      recipeCatalogProvider: {
+        fetchByGenericCategories: async (categories: readonly string[]) => {
+          fetchedCategories = categories;
+          return [providerDraft];
+        },
+      },
+    });
+
+    const result = await service.generateCurrentRecommendations(auth);
+
+    expect(fetchedCategories).toEqual(GENERIC_RECIPE_CATALOG_CATEGORIES);
+    expect(upsertInputs).toEqual([providerDraft]);
+    expect(result.limitedReason).toBeNull();
+    expect(result.recommendations).toHaveLength(1);
+    expect(result.recommendations[0]?.recipeId).toBe(providerRecipeId);
+    expect(result.recommendations[0]?.recipe?.source).toBe(APPROXIMATE_MACRO_SOURCE);
+  });
+
+  it("uses only generic catalog categories for provider fetch and never user health data", async () => {
+    const captured: { categories?: readonly string[] } = {};
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async () => [createRecipeRow()],
+        createRecommendations: async (inputs: unknown[]) =>
+          inputs.map((input) => createRecommendationRow(input as Record<string, unknown>)),
+      },
+      profilesRepository: {
+        findByUserId: async () => ({
+          id: "c3000001-0000-4000-8000-000000000001",
+          userId: user.id,
+          constraints: ["peanuts", "vegan"],
+        }),
+      },
+      recipeCatalogProvider: {
+        fetchByGenericCategories: async (categories: readonly string[]) => {
+          captured.categories = categories;
+          return [];
+        },
+      },
+    });
+
+    await service.generateCurrentRecommendations(auth);
+
+    expect(captured.categories).toEqual(GENERIC_RECIPE_CATALOG_CATEGORIES);
+    expect(JSON.stringify(captured.categories)).not.toMatch(
+      /peanut|vegan|user|email|2100|150|allerg/i,
+    );
+  });
+
+  it("falls back to the seeded catalog when the external provider fails", async () => {
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async () => [createRecipeRow()],
+        createRecommendations: async (inputs: unknown[]) =>
+          inputs.map((input) => createRecommendationRow(input as Record<string, unknown>)),
+      },
+      recipeCatalogProvider: {
+        fetchByGenericCategories: async () => {
+          throw new Error("provider unavailable");
+        },
+      },
+    });
+
+    const result = await service.generateCurrentRecommendations(auth);
+
+    expect(result.limitedReason).toBeNull();
+    expect(result.recommendations).toHaveLength(1);
+    expect(result.recommendations[0]?.recipeId).toBe(compatibleRecipeId);
   });
 });

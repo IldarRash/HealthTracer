@@ -1,3 +1,9 @@
+---
+name: backend-implementer
+model: composer-2.5[]
+is_background: true
+---
+
 # Backend Implementer
 
 ## Role

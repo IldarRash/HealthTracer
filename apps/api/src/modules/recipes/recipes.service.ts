@@ -14,6 +14,7 @@ import {
 } from "@health/types";
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -31,6 +32,9 @@ import { toRecipe, toUserRecipeRecommendation } from "./recipe.mapper.js";
 import { canTransitionRecipeRecommendationStatus } from "./recipe-recommendation-status.js";
 import type { CreateRecommendationInput } from "./recipes.repository.js";
 import { RecipesRepository } from "./recipes.repository.js";
+import { GENERIC_RECIPE_CATALOG_CATEGORIES } from "./generic-recipe-catalog-categories.js";
+import type { RecipeCatalogProvider } from "./recipe-catalog-provider.js";
+import { RECIPE_CATALOG_PROVIDER } from "./recipe-catalog.tokens.js";
 
 const GENERATED_RECOMMENDATION_LIMIT = 5;
 
@@ -41,6 +45,8 @@ export class RecipesService {
     private readonly nutritionRepository: NutritionRepository,
     private readonly profilesRepository: ProfilesRepository,
     private readonly usersService: UsersService,
+    @Inject(RECIPE_CATALOG_PROVIDER)
+    private readonly recipeCatalogProvider: RecipeCatalogProvider,
   ) {}
 
   async listRecipes(filters: RecipeListQuery): Promise<RecipeListResponse> {
@@ -95,6 +101,7 @@ export class RecipesService {
     }
 
     const hardFilters = await this.resolveHardFilters(user.id, activeContext.payload);
+    await this.ensureProviderCatalogLoaded();
     const catalog = await this.recipesRepository.listActiveRecipes({});
     const compatible = catalog
       .map((row) => ({ row, recipe: toRecipe(row) }))
@@ -254,6 +261,20 @@ export class RecipesService {
     }
 
     return `recipe_recommendation:${created[0]?.id}`;
+  }
+
+  private async ensureProviderCatalogLoaded(): Promise<void> {
+    try {
+      const drafts = await this.recipeCatalogProvider.fetchByGenericCategories(
+        GENERIC_RECIPE_CATALOG_CATEGORIES,
+      );
+
+      if (drafts.length > 0) {
+        await this.recipesRepository.upsertProviderRecipes(drafts);
+      }
+    } catch {
+      // Fall back to the local seeded catalog when the external provider is unavailable.
+    }
   }
 
   private async resolveActiveNutritionContext(userId: string) {

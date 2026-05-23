@@ -1,3 +1,5 @@
+/* global module */
+
 /**
  * Turbopack lacks webpack's extensionAlias, so TypeScript ESM `.js` specifiers
  * in workspace packages must be rewritten before module resolution.

@@ -14,7 +14,7 @@ export default async function ProfilePage() {
     <AppLayout variant="dashboard">
       <PageHeader
         title="Profile"
-        description="Your wellness coaching snapshot, habits, and structured plan progress."
+        description="Your account, coaching profile, goals, and health documents in one hub."
       />
       <ProfileDashboard />
     </AppLayout>
