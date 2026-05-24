@@ -196,6 +196,16 @@ export function getWorkoutPlanDayLabel(
   return day.day ?? (day.weekday ? WEEKDAY_LABELS[day.weekday] : "Training day");
 }
 
+export function getWorkoutPlanDayKey(
+  day: Pick<WorkoutPlanDay, "day" | "weekday" | "focus">,
+  index?: number,
+): string {
+  const identity = day.weekday ?? day.day ?? "training-day";
+  const suffix = index == null ? "" : `-${index}`;
+
+  return `${identity}-${day.focus}${suffix}`;
+}
+
 export function buildSessionTitleFromDay(
   day: Pick<WorkoutPlanDay, "day" | "weekday" | "focus">,
 ): string {

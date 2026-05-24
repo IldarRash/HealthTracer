@@ -11,6 +11,7 @@ import {
   formatSessionExerciseDetailLines,
   formatSessionExerciseExecutionSummary,
   formatSessionExercisePrescription,
+  getWorkoutPlanDayKey,
   getWorkoutPlanDayLabel,
   groupSessionExercisesByCircuit,
   getRevisionNumberLabel,
@@ -168,6 +169,18 @@ describe("training UI state", () => {
     ).toBe("Monday · Upper body");
     expect(getWorkoutPlanDayLabel({ weekday: "wednesday" })).toBe("Wednesday");
     expect(getWorkoutPlanDayLabel({ day: "Day 2" })).toBe("Day 2");
+  });
+
+  it("builds stable React keys from weekday or legacy day labels", () => {
+    expect(
+      getWorkoutPlanDayKey({ weekday: "monday", focus: "Upper body" }),
+    ).toBe("monday-Upper body");
+    expect(getWorkoutPlanDayKey({ day: "Day 1", focus: "Strength" })).toBe(
+      "Day 1-Strength",
+    );
+    expect(getWorkoutPlanDayKey({ weekday: "friday", focus: "Lower body" }, 2)).toBe(
+      "friday-Lower body-2",
+    );
   });
 
   it("converts catalog-backed plan exercises for session scheduling", () => {

@@ -3,6 +3,7 @@ import type {
   TodayChecklistItemKind,
   TodayChecklistItemStatus,
   TodayDailyFeedback,
+  TodayDayResponse,
   TodayHistoryEntry,
   TodayWorkoutDetail,
 } from "@health/types";
@@ -148,6 +149,31 @@ export function buildFeedbackPayload(input: {
   }
 
   return payload;
+}
+
+export function mergeTodayHistoryWithCurrentDay(
+  entries: readonly TodayHistoryEntry[],
+  currentDay: TodayDayResponse | null | undefined,
+): TodayHistoryEntry[] {
+  if (!currentDay) {
+    return [...entries];
+  }
+
+  return entries.map((entry) => {
+    if (entry.date !== currentDay.date) {
+      return entry;
+    }
+
+    const hasFeedback =
+      currentDay.feedback !== null && Object.keys(currentDay.feedback).length > 0;
+
+    return {
+      ...entry,
+      adherence: currentDay.adherence,
+      itemCount: currentDay.items.length,
+      hasFeedback,
+    };
+  });
 }
 
 export function historyEntrySummaryLabel(entry: TodayHistoryEntry): string {

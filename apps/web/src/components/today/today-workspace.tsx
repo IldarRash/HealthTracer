@@ -27,6 +27,7 @@ import {
   formatLocalIsoDate,
   hasTodayWorkoutExecutionStarted,
   historyEntrySummaryLabel,
+  mergeTodayHistoryWithCurrentDay,
   sessionStatusLabel,
   todayItemCardClass,
   todayItemKindLabel,
@@ -472,7 +473,7 @@ export function TodayWorkspace() {
     skippedRequired: 0,
     skippedOptional: 0,
   };
-  const historyEntries = historyQuery.data ?? [];
+  const historyEntries = mergeTodayHistoryWithCurrentDay(historyQuery.data ?? [], day);
 
   return (
     <div className="training-workspace today-workspace" aria-busy={isBusy || undefined}>

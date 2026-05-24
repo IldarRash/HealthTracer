@@ -845,13 +845,16 @@ const aiProposalCoreSchema = z.object({
   updatedAt: isoDateTimeSchema,
 });
 
+type AiProposalPersistedFields = Omit<
+  z.infer<typeof aiProposalCoreSchema>,
+  "intent" | "proposedChanges"
+>;
+
+export type AiProposal = AiProposalPersistedFields & RawAiProposal;
+
 export const aiProposalSchema = aiProposalCoreSchema.superRefine((proposal, ctx) => {
   addProposedChangesIssues(proposal.intent, proposal.proposedChanges, ctx);
-});
-
-export type AiProposal = z.infer<typeof aiProposalCoreSchema> & {
-  proposedChanges: ProposalChanges;
-};
+}) as z.ZodType<AiProposal>;
 
 export const aiStructuredOutputSchema = z.object({
   reply: z.string().min(1).max(8000),

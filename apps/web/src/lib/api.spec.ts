@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import type { AiProposal, UpdateRecipeRecommendationStatusInput } from "@health/types";
+import { aiProposalSchema, type AiProposal, type UpdateRecipeRecommendationStatusInput } from "@health/types";
 import {
   completeWorkoutSession,
   decideProposal,
@@ -46,6 +46,76 @@ import {
 } from "./api.js";
 
 const token = "test-token";
+
+const acceptedProposalFixtureIds = {
+  id: "14a08176-64a7-4a2d-8a44-581807368394",
+  userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+  threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+};
+
+function createAcceptedProposal(
+  intent: AiProposal["intent"],
+  targetDomain: AiProposal["targetDomain"],
+  proposedChanges: unknown,
+): AiProposal {
+  return aiProposalSchema.parse({
+    ...acceptedProposalFixtureIds,
+    sourceMessageId: null,
+    intent,
+    targetDomain,
+    title: "Test proposal",
+    reason: "Test reason for the proposal.",
+    proposedChanges,
+    status: "accepted",
+    validationStatus: "valid",
+    validationErrors: [],
+    userDecisionAt: "2026-05-22T12:00:00.000Z",
+    appliedReference: "ref:test",
+    createdAt: "2026-05-22T12:00:00.000Z",
+    updatedAt: "2026-05-22T12:00:00.000Z",
+  });
+}
+
+const sampleNutritionProposalChanges = {
+  title: "Balanced base",
+  summary: "Consistent meals with moderate targets.",
+  caloriesPerDay: 2200,
+  proteinGrams: 140,
+  carbsGrams: 220,
+  fatGrams: 70,
+  hydrationLiters: 2.5,
+  mealStructure: [{ label: "Breakfast", timingHint: null }],
+  preferences: [],
+  restrictions: [],
+  allergies: [],
+  notes: [],
+};
+
+const sampleWorkoutProposalChanges = {
+  title: "Strength base",
+  summary: "Three-day split with compound lifts.",
+  days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+};
+
+const sampleAdaptWorkoutFromProgressChanges = {
+  plan: sampleWorkoutProposalChanges,
+  sourceTrendObservationIds: [],
+};
+
+const sampleRecipeRecommendationChanges = {
+  recommendations: [
+    {
+      recipeId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      reason: "Matches your protein target.",
+      fitSummary: "High-protein lunch option.",
+    },
+  ],
+};
+
+const sampleTodayChecklistChanges = {
+  date: "2026-05-22",
+  items: [{ label: "Drink water", kind: "hydration" as const }],
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -473,24 +543,11 @@ describe("web api helpers", () => {
   });
 
   it("returns targeted refresh keys for accepted proposal domains", () => {
-    const baseProposal: AiProposal = {
-      id: "14a08176-64a7-4a2d-8a44-581807368394",
-      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
-      threadId: "24b19287-75b8-4a3e-9c10-691908479405",
-      sourceMessageId: null,
-      intent: "adjust_nutrition_plan",
-      targetDomain: "nutrition",
-      title: "Adjust nutrition targets",
-      reason: "Matches your current training context.",
-      proposedChanges: {},
-      status: "accepted",
-      validationStatus: "valid",
-      validationErrors: [],
-      userDecisionAt: "2026-05-22T12:00:00.000Z",
-      appliedReference: "nutrition_revision:880099c6-3b5f-4383-8246-97b72bf61818",
-      createdAt: "2026-05-22T12:00:00.000Z",
-      updatedAt: "2026-05-22T12:00:00.000Z",
-    };
+    const baseProposal = createAcceptedProposal(
+      "adjust_nutrition_plan",
+      "nutrition",
+      sampleNutritionProposalChanges,
+    );
 
     expect(getAcceptedProposalRefreshQueryKeys(baseProposal)).toEqual([
       apiQueryKeys.dashboardState,
@@ -503,10 +560,9 @@ describe("web api helpers", () => {
       apiQueryKeys.todayHistoryPrefix,
     ]);
     expect(
-      getAcceptedProposalRefreshQueryKeys({
-        ...baseProposal,
-        targetDomain: "workout",
-      }),
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("create_workout_plan", "workout", sampleWorkoutProposalChanges),
+      ),
     ).toEqual([
       apiQueryKeys.dashboardState,
       apiQueryKeys.proposals,
@@ -518,11 +574,13 @@ describe("web api helpers", () => {
       apiQueryKeys.todayHistoryPrefix,
     ]);
     expect(
-      getAcceptedProposalRefreshQueryKeys({
-        ...baseProposal,
-        targetDomain: "workout",
-        intent: "adapt_workout_plan_from_progress",
-      }),
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal(
+          "adapt_workout_plan_from_progress",
+          "workout",
+          sampleAdaptWorkoutFromProgressChanges,
+        ),
+      ),
     ).toEqual([
       apiQueryKeys.dashboardState,
       apiQueryKeys.proposals,
@@ -534,11 +592,9 @@ describe("web api helpers", () => {
       apiQueryKeys.todayHistoryPrefix,
     ]);
     expect(
-      getAcceptedProposalRefreshQueryKeys({
-        ...baseProposal,
-        targetDomain: "general",
-        intent: "summarize_progress",
-      }),
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("summarize_progress", "general", {}),
+      ),
     ).toEqual([
       apiQueryKeys.dashboardState,
       apiQueryKeys.proposals,
@@ -546,23 +602,26 @@ describe("web api helpers", () => {
       apiQueryKeys.progressWeeklyCurrent,
     ]);
     expect(
-      getAcceptedProposalRefreshQueryKeys({
-        ...baseProposal,
-        targetDomain: "goal",
-      }),
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("create_goal", "goal", {
+          type: "fat_loss",
+          title: "Lose 5 kg",
+        }),
+      ),
     ).toEqual([apiQueryKeys.dashboardState, apiQueryKeys.proposals, apiQueryKeys.goals]);
     expect(
-      getAcceptedProposalRefreshQueryKeys({
-        ...baseProposal,
-        targetDomain: "profile",
-      }),
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("update_profile", "profile", {}),
+      ),
     ).toEqual([apiQueryKeys.dashboardState, apiQueryKeys.proposals, apiQueryKeys.profile]);
     expect(
-      getAcceptedProposalRefreshQueryKeys({
-        ...baseProposal,
-        targetDomain: "recipe",
-        intent: "recommend_recipes",
-      }),
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal(
+          "recommend_recipes",
+          "recipe",
+          sampleRecipeRecommendationChanges,
+        ),
+      ),
     ).toEqual([
       apiQueryKeys.dashboardState,
       apiQueryKeys.proposals,
@@ -570,22 +629,9 @@ describe("web api helpers", () => {
       apiQueryKeys.recipesCatalog,
     ]);
     expect(
-      getAcceptedProposalRefreshQueryKeys({
-        ...baseProposal,
-        targetDomain: "today",
-      }),
-    ).toEqual([
-      apiQueryKeys.dashboardState,
-      apiQueryKeys.proposals,
-      apiQueryKeys.todayDayPrefix,
-      apiQueryKeys.todayHistoryPrefix,
-    ]);
-    expect(
-      getAcceptedProposalRefreshQueryKeys({
-        ...baseProposal,
-        targetDomain: "today",
-        intent: "create_today_checklist",
-      }),
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("create_today_checklist", "today", sampleTodayChecklistChanges),
+      ),
     ).toEqual([
       apiQueryKeys.dashboardState,
       apiQueryKeys.proposals,

@@ -11,6 +11,7 @@ import {
   formatLocalIsoDate,
   hasTodayWorkoutExecutionStarted,
   historyEntrySummaryLabel,
+  mergeTodayHistoryWithCurrentDay,
   todayItemKindLabel,
   todayItemStatusBadgeClass,
   todayItemStatusLabel,
@@ -189,6 +190,70 @@ describe("today UI state", () => {
         hasFeedback: false,
       }),
     ).toBe("100% adherence · 1 task · No feedback");
+  });
+
+  it("overlays fresh day adherence onto matching history entries", () => {
+    const staleHistory = [
+      {
+        date: "2026-05-23",
+        adherence: {
+          score: 0,
+          completedRequired: 0,
+          totalRequired: 1,
+          completedOptional: 0,
+          skippedRequired: 0,
+          skippedOptional: 0,
+        },
+        itemCount: 1,
+        hasFeedback: false,
+      },
+      {
+        date: "2026-05-22",
+        adherence: {
+          score: 0.5,
+          completedRequired: 1,
+          totalRequired: 2,
+          completedOptional: 0,
+          skippedRequired: 0,
+          skippedOptional: 0,
+        },
+        itemCount: 2,
+        hasFeedback: false,
+      },
+    ];
+
+    const merged = mergeTodayHistoryWithCurrentDay(staleHistory, {
+      id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      userId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      date: "2026-05-23",
+      items: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          label: "Strength day",
+          kind: "workout",
+          status: "completed",
+          required: true,
+          source: { type: "workout_session", id: "78d40655-b4b5-47b3-b28e-470192e05f04" },
+        },
+      ],
+      source: "generated",
+      feedback: null,
+      adherence: {
+        score: 1,
+        completedRequired: 1,
+        totalRequired: 1,
+        completedOptional: 0,
+        skippedRequired: 0,
+        skippedOptional: 0,
+      },
+      createdAt: "2026-05-23T12:00:00.000Z",
+      updatedAt: "2026-05-23T12:00:00.000Z",
+      workout: null,
+    });
+
+    expect(merged[0]?.adherence.score).toBe(1);
+    expect(formatAdherenceScore(merged[0]!.adherence)).toBe("100%");
+    expect(merged[1]?.adherence.score).toBe(0.5);
   });
 
   it("detects when a today workout can be started or executed", () => {

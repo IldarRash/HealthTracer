@@ -11,6 +11,7 @@ import {
 import {
   formatExerciseLabel,
   formatLocalIsoDate,
+  getWorkoutPlanDayKey,
   getWorkoutPlanDayLabel,
   hasActiveWorkoutPlan,
 } from "../../lib/training-ui-state";
@@ -162,7 +163,7 @@ export function TrainingWorkspace() {
           <h3>Training days</h3>
           <ul className="training-day-list">
             {payload.days.map((day) => (
-              <li key={`${day.day}-${day.focus}`} className="training-day-card nested-card">
+              <li key={getWorkoutPlanDayKey(day)} className="training-day-card nested-card">
                 <div className="training-day-header">
                   <strong>{getWorkoutPlanDayLabel(day)}</strong>
                   <span>{day.focus}</span>
@@ -170,7 +171,9 @@ export function TrainingWorkspace() {
                 {day.exercises.length > 0 ? (
                   <ul className="training-exercise-list">
                     {day.exercises.map((exercise, index) => (
-                      <li key={`${day.day}-${index}`}>{formatExerciseLabel(exercise)}</li>
+                      <li key={getWorkoutPlanDayKey(day, index)}>
+                        {formatExerciseLabel(exercise)}
+                      </li>
                     ))}
                   </ul>
                 ) : (
