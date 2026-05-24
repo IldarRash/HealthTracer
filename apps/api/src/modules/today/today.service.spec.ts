@@ -51,6 +51,21 @@ const planId = "3f98f3dd-806d-4386-8c5f-43499626c5d6";
 const revisionId = "880099c6-3b5f-4383-8246-97b72bf61818";
 const staleSessionId = "a1000001-0000-4000-8000-000000000099";
 const staleRevisionId = "b2000002-0000-4000-8000-000000000099";
+const habitDefinitionId = "c3000003-0000-4000-8000-000000000003";
+const habitPlanId = "d4000004-0000-4000-8000-000000000004";
+const habitRevisionId = "e5000005-0000-4000-8000-000000000005";
+
+function buildActiveHabitRevision(habits: Record<string, unknown>[]) {
+  return {
+    id: habitRevisionId,
+    habitPlanId,
+    revisionNumber: 1,
+    reason: "Initial plan",
+    source: "ai_proposal",
+    payload: { habits },
+    createdAt: timestamp,
+  };
+}
 
 function buildSessionRow(
   id: string,
@@ -71,10 +86,17 @@ function createService(
   todayRepository: unknown,
   workoutsRepository: unknown,
   workoutsServiceOverride: Partial<typeof workoutsService> = {},
+  habitsRepository: unknown = {},
 ) {
   const workoutsRepositoryWithDefaults = {
     findActivePlanByUserId: async () => null,
     ...(workoutsRepository as object),
+  };
+
+  const habitsRepositoryWithDefaults = {
+    findActivePlanByUserId: async () => null,
+    upsertCompletion: async () => ({}),
+    ...(habitsRepository as object),
   };
 
   return new TodayService(
@@ -82,6 +104,7 @@ function createService(
     workoutsRepositoryWithDefaults as never,
     { ...workoutsService, ...workoutsServiceOverride } as never,
     usersService as never,
+    habitsRepositoryWithDefaults as never,
   );
 }
 
@@ -460,5 +483,438 @@ describe("TodayService", () => {
     expect(persistedItems[0]?.source.id).toBe(sessionId);
     expect(day.items).toHaveLength(1);
     expect(day.items[0]?.source.id).toBe(sessionId);
+  });
+
+  it("materializes scheduled habit items when an active plan exists", async () => {
+    let persistedItems: { source: { type: string; id?: string } }[] = [];
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => null,
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: { source: { type: string; id?: string } }[],
+        ) => {
+          persistedItems = items;
+          return buildChecklistRow(items);
+        },
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(persistedItems).toHaveLength(1);
+    expect(persistedItems[0]?.source).toEqual({ type: "habit", id: habitDefinitionId });
+    expect(day.items[0]?.kind).toBe("habit");
+  });
+
+  it("upserts habit completion when a habit-linked item status changes", async () => {
+    let completionUpserted = false;
+    const existingItem = {
+      id: itemId,
+      label: "Morning hydration",
+      kind: "habit",
+      status: "pending",
+      required: true,
+      source: { type: "habit", id: habitDefinitionId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([existingItem]),
+        updateChecklistState: async () =>
+          buildChecklistRow([{ ...existingItem, status: "completed" }]),
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+        upsertCompletion: async (
+          resolvedUserId: string,
+          resolvedHabitDefinitionId: string,
+          resolvedDate: string,
+          status: string,
+          sourceChecklistItemId: string,
+        ) => {
+          completionUpserted = true;
+          expect(resolvedUserId).toBe(userId);
+          expect(resolvedHabitDefinitionId).toBe(habitDefinitionId);
+          expect(resolvedDate).toBe(date);
+          expect(status).toBe("completed");
+          expect(sourceChecklistItemId).toBe(itemId);
+          return { id: "f6000006-0000-4000-8000-000000000006" };
+        },
+      },
+    );
+
+    const day = await service.updateItemStatus(auth, date, itemId, {
+      status: "completed",
+    });
+
+    expect(completionUpserted).toBe(true);
+    expect(day.items[0]?.status).toBe("completed");
+  });
+
+  it("preserves habit-linked items when merging accepted checklist proposals", async () => {
+    let upsertItems: { source: { type: string } }[] = [];
+    const habitItem = {
+      id: itemId,
+      label: "Morning hydration",
+      kind: "habit",
+      status: "pending",
+      required: true,
+      source: { type: "habit", id: habitDefinitionId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([habitItem]),
+        createChecklistFromProposal: async (
+          _resolvedUserId: string,
+          _payload: unknown,
+          items: { source: { type: string } }[],
+        ) => {
+          upsertItems = items;
+          return buildChecklistRow(items);
+        },
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+      },
+    );
+
+    await service.applyTodayChecklistProposal(userId, {
+      date,
+      items: [{ label: "Drink water", kind: "hydration", completed: false }],
+    });
+
+    expect(upsertItems.some((item) => item.source.type === "habit")).toBe(true);
+    expect(upsertItems.some((item) => item.source.type === "ai_proposal")).toBe(true);
+  });
+
+  it("materializes workout and habit items together when both are scheduled", async () => {
+    let persistedItems: { source: { type: string; id?: string } }[] = [];
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => null,
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: { source: { type: string; id?: string } }[],
+        ) => {
+          persistedItems = items;
+          return buildChecklistRow(items);
+        },
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [buildSessionRow(sessionId)],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(persistedItems).toHaveLength(2);
+    expect(persistedItems.some((item) => item.source.type === "workout_session")).toBe(true);
+    expect(persistedItems.some((item) => item.source.type === "habit")).toBe(true);
+    expect(day.items).toHaveLength(2);
+  });
+
+  it("excludes habits not scheduled for the requested date", async () => {
+    let persistedItems: { source: { type: string } }[] = [];
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => null,
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: { source: { type: string } }[],
+        ) => {
+          persistedItems = items;
+          return buildChecklistRow(items);
+        },
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Monday-only walk",
+              category: "movement",
+              status: "active",
+              schedule: { type: "selected_weekdays", daysOfWeek: [1] },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(persistedItems).toEqual([]);
+    expect(day.items).toEqual([]);
+  });
+
+  it("reconciles stale habit items when syncing an existing checklist", async () => {
+    let persistedItems: { source: { type: string; id?: string } }[] = [];
+    const staleHabitId = "f6000006-0000-4000-8000-000000000006";
+    const staleItem = {
+      id: itemId,
+      label: "Removed habit",
+      kind: "habit",
+      status: "pending",
+      required: true,
+      source: { type: "habit", id: staleHabitId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([staleItem]),
+        updateChecklistState: async (
+          _resolvedUserId: string,
+          _checklistId: string,
+          items: { source: { type: string; id?: string } }[],
+        ) => {
+          persistedItems = items;
+          return buildChecklistRow(items);
+        },
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(persistedItems).toHaveLength(1);
+    expect(persistedItems[0]?.source.id).toBe(habitDefinitionId);
+    expect(day.items.some((item) => item.source.id === staleHabitId)).toBe(false);
+  });
+
+  it("returns idempotently without upserting habit completion when status is unchanged", async () => {
+    let completionUpserted = false;
+    const existingItem = {
+      id: itemId,
+      label: "Morning hydration",
+      kind: "habit",
+      status: "completed",
+      required: true,
+      source: { type: "habit", id: habitDefinitionId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([existingItem]),
+        updateChecklistState: async () => {
+          throw new Error("Should not persist when habit status is unchanged.");
+        },
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+        upsertCompletion: async () => {
+          completionUpserted = true;
+          return { id: "f6000006-0000-4000-8000-000000000006" };
+        },
+      },
+    );
+
+    const day = await service.updateItemStatus(auth, date, itemId, {
+      status: "completed",
+    });
+
+    expect(completionUpserted).toBe(false);
+    expect(day.items[0]?.status).toBe("completed");
+  });
+
+  it("upserts skipped status when a habit-linked item is skipped", async () => {
+    let capturedStatus = "";
+    const existingItem = {
+      id: itemId,
+      label: "Morning hydration",
+      kind: "habit",
+      status: "pending",
+      required: true,
+      source: { type: "habit", id: habitDefinitionId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([existingItem]),
+        updateChecklistState: async () =>
+          buildChecklistRow([{ ...existingItem, status: "skipped" }]),
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+        upsertCompletion: async (
+          _userId: string,
+          _habitDefinitionId: string,
+          _date: string,
+          status: string,
+        ) => {
+          capturedStatus = status;
+          return { id: "f6000006-0000-4000-8000-000000000006" };
+        },
+      },
+    );
+
+    const day = await service.updateItemStatus(auth, date, itemId, {
+      status: "skipped",
+    });
+
+    expect(capturedStatus).toBe("skipped");
+    expect(day.items[0]?.status).toBe("skipped");
   });
 });

@@ -116,6 +116,11 @@ describe("proposal UI state", () => {
     expect(getProposalIntentLabel("adjust_nutrition_plan")).toBeNull();
   });
 
+  it("labels habit plan intents", () => {
+    expect(getProposalIntentLabel("create_habit_plan")).toContain("habit plan");
+    expect(getProposalIntentLabel("adapt_habit_plan")).toContain("Habit");
+  });
+
   it("maps lifecycle states to inline copy and badge tones", () => {
     expect(getProposalStatusLabel("accepted")).toBe("Accepted");
     expect(getProposalStatusLabel("rejected")).toBe("Declined");

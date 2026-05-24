@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   applyItemStatusUpdate,
   buildChecklistState,
+  createHabitChecklistItem,
   createWorkoutChecklistItem,
   filterWorkoutSessionsForChecklist,
+  findHabitDefinitionIdForItem,
   mapItemStatusToWorkoutStatus,
   mapWorkoutStatusToItemStatus,
+  mergeHabitDefinitionsIntoItems,
   mergeProposalItemsWithExisting,
   mergeWorkoutSessionsIntoItems,
   normalizeProposalItems,
+  syncTodayChecklistHabitItems,
   syncTodayChecklistWorkoutItems,
 } from "./today-items.js";
 
@@ -17,6 +21,25 @@ const staleSessionId = "78d40655-b4b5-47b3-b28e-470192e05f04";
 const planId = "3f98f3dd-806d-4386-8c5f-43499626c5d6";
 const revisionId = "880099c6-3b5f-4383-8246-97b72bf61818";
 const staleRevisionId = "a1000001-0000-4000-8000-000000000001";
+const habitDefinitionId = "c3000003-0000-4000-8000-000000000003";
+const staleHabitDefinitionId = "d4000004-0000-4000-8000-000000000004";
+
+function buildHabitDefinition(
+  id: string = habitDefinitionId,
+  title = "Morning hydration",
+  required = true,
+) {
+  return {
+    habitDefinitionId: id,
+    title,
+    category: "hydration" as const,
+    status: "active" as const,
+    schedule: { type: "daily" as const },
+    target: { type: "boolean" as const },
+    required,
+    displayOrder: 0,
+  };
+}
 
 function buildSessionSummary(
   id: string,
@@ -171,5 +194,106 @@ describe("today-items merge and reconciliation", () => {
 
     expect(synced).toHaveLength(1);
     expect(synced[0]?.source).toEqual({ type: "workout_session", id: sessionId });
+  });
+
+  it("creates habit-linked checklist items from scheduled definitions", () => {
+    const item = createHabitChecklistItem(buildHabitDefinition());
+
+    expect(item.source).toEqual({ type: "habit", id: habitDefinitionId });
+    expect(item.kind).toBe("habit");
+    expect(item.status).toBe("pending");
+    expect(item.required).toBe(true);
+  });
+
+  it("merges generated habit items without duplicating definition refs", () => {
+    const habit = buildHabitDefinition();
+    const merged = mergeHabitDefinitionsIntoItems([], [habit, habit]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.source).toEqual({ type: "habit", id: habitDefinitionId });
+  });
+
+  it("resolves habit definition ids only for habit-linked items", () => {
+    const habitItem = createHabitChecklistItem(buildHabitDefinition());
+    const workoutItem = createWorkoutChecklistItem(buildSessionSummary(sessionId));
+
+    expect(findHabitDefinitionIdForItem([habitItem], habitItem.id)).toBe(habitDefinitionId);
+    expect(findHabitDefinitionIdForItem([workoutItem], workoutItem.id)).toBeNull();
+    expect(findHabitDefinitionIdForItem([habitItem], "00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
+
+  it("includes required habit items in checklist adherence", () => {
+    const completedHabit = {
+      ...createHabitChecklistItem(buildHabitDefinition()),
+      status: "completed" as const,
+    };
+    const pendingHabit = createHabitChecklistItem(
+      buildHabitDefinition("d4000004-0000-4000-8000-000000000004", "Evening walk"),
+    );
+
+    const state = buildChecklistState([completedHabit, pendingHabit]);
+
+    expect(state.adherence.totalRequired).toBe(2);
+    expect(state.adherence.completedRequired).toBe(1);
+    expect(state.adherence.score).toBe(0.5);
+  });
+
+  it("preserves existing habit item status while syncing label and required", () => {
+    const existing = {
+      ...createHabitChecklistItem(buildHabitDefinition()),
+      status: "completed" as const,
+    };
+
+    const synced = mergeHabitDefinitionsIntoItems([existing], [
+      buildHabitDefinition(habitDefinitionId, "Updated hydration title", false),
+    ]);
+
+    expect(synced).toHaveLength(1);
+    expect(synced[0]?.label).toBe("Updated hydration title");
+    expect(synced[0]?.required).toBe(false);
+    expect(synced[0]?.status).toBe("completed");
+  });
+
+  it("removes stale habit checklist items when syncing scheduled definitions", () => {
+    const staleItem = createHabitChecklistItem(
+      buildHabitDefinition(staleHabitDefinitionId, "Old habit"),
+    );
+    const activeItem = createHabitChecklistItem(buildHabitDefinition());
+
+    const synced = syncTodayChecklistHabitItems([staleItem, activeItem], [
+      buildHabitDefinition(),
+    ]);
+
+    expect(synced).toHaveLength(1);
+    expect(synced[0]?.source).toEqual({ type: "habit", id: habitDefinitionId });
+  });
+
+  it("preserves habit items when merging accepted proposal items", () => {
+    const habitItem = createHabitChecklistItem(buildHabitDefinition());
+    const proposalItems = normalizeProposalItems([
+      { label: "Drink water", kind: "hydration" },
+    ]);
+
+    const merged = mergeProposalItemsWithExisting([habitItem], proposalItems);
+
+    expect(merged).toHaveLength(2);
+    expect(merged.some((item) => item.source.type === "habit")).toBe(true);
+    expect(merged.some((item) => item.source.type === "ai_proposal")).toBe(true);
+  });
+
+  it("leaves non-habit checklist items untouched during habit sync", () => {
+    const hydrationItem = normalizeProposalItems([
+      { label: "Drink water", kind: "hydration" },
+    ])[0]!;
+    const workoutItem = createWorkoutChecklistItem(buildSessionSummary(sessionId));
+
+    const synced = syncTodayChecklistHabitItems([hydrationItem, workoutItem], [
+      buildHabitDefinition(),
+    ]);
+
+    expect(synced).toHaveLength(3);
+    expect(synced.some((item) => item.source.type === "ai_proposal")).toBe(true);
+    expect(synced.some((item) => item.source.type === "workout_session")).toBe(true);
+    expect(synced.some((item) => item.source.type === "habit")).toBe(true);
   });
 });

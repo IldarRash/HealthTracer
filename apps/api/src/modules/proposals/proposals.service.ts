@@ -110,11 +110,17 @@ export class ProposalsService {
         proposal.intent,
         proposal.proposedChanges,
       );
+    const habitTemplateReferenceErrors =
+      await this.proposalValidationService.validateHabitTemplateReferences(
+        proposal.intent,
+        proposal.proposedChanges,
+      );
     const validationErrors = [
       ...safetyErrors,
       ...validation.errors,
       ...provenanceErrors,
       ...exerciseReferenceErrors,
+      ...habitTemplateReferenceErrors,
     ];
 
     if (validationErrors.length > 0) {

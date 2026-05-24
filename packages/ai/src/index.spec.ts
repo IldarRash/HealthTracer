@@ -1,6 +1,8 @@
 import {
+  getHabitPlanDomainErrors,
   getNutritionPlanDomainErrors,
   getWorkoutProposalDomainErrors,
+  habitPlanPayloadSchema,
   nutritionPlanPayloadSchema,
   recipeRecommendationProposalPayloadSchema,
   workoutPlanProposalChangesSchema,
@@ -245,5 +247,194 @@ describe("StubCoachAiProvider", () => {
         fitSummary: "Estimated macros align with your active plan.",
       },
     ]);
+  });
+
+  it("returns a create_habit_plan proposal for habit-related messages", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Can you suggest daily habits for my routine?",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const parsed = parseAiStructuredOutput(result);
+    expect(parsed.ok).toBe(true);
+
+    const proposals = result.proposals ?? [];
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.intent).toBe("create_habit_plan");
+    expect(proposals[0]?.targetDomain).toBe("general");
+
+    const payload = habitPlanPayloadSchema.parse(proposals[0]?.proposedChanges);
+    expect(payload.habits.length).toBeGreaterThanOrEqual(2);
+    expect(getHabitPlanDomainErrors(payload)).toEqual([]);
+  });
+
+  it("returns an adapt_habit_plan proposal for habit adjustment requests", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Please adjust my daily habits and make walking easier",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const proposals = result.proposals ?? [];
+    expect(proposals[0]?.intent).toBe("adapt_habit_plan");
+
+    const payload = habitPlanPayloadSchema.parse(proposals[0]?.proposedChanges);
+    const movementHabit = payload.habits.find((habit) => habit.category === "movement");
+    expect(movementHabit?.target).toEqual({ type: "duration_minutes", value: 15 });
+    expect(getHabitPlanDomainErrors(payload)).toEqual([]);
+  });
+
+  it("returns an adapt_habit_plan remove proposal for habit removal requests", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Remove the breathing habit from my daily routine",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const proposals = result.proposals ?? [];
+    expect(proposals[0]?.intent).toBe("adapt_habit_plan");
+
+    const payload = habitPlanPayloadSchema.parse(proposals[0]?.proposedChanges);
+    expect(payload.habits.some((habit) => habit.status === "removed")).toBe(true);
+    expect(getHabitPlanDomainErrors(payload)).toEqual([]);
+  });
+
+  it("returns an adapt_habit_plan pause proposal for habit pause requests", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Please pause the breathing habit in my daily routine",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    const proposals = result.proposals ?? [];
+    expect(proposals[0]?.intent).toBe("adapt_habit_plan");
+
+    const payload = habitPlanPayloadSchema.parse(proposals[0]?.proposedChanges);
+    expect(payload.habits.some((habit) => habit.status === "paused")).toBe(true);
+    expect(getHabitPlanDomainErrors(payload)).toEqual([]);
+  });
+
+  it("uses active habit plan context when adapting habits", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Adapt my habits and change my walk",
+      recentMessages: [],
+      coachingContext: {
+        activeHabitPlan: {
+          activeHabitCount: 1,
+          habits: [
+            {
+              habitDefinitionId: "d1000001-0000-4000-8000-000000000001",
+              title: "Short walk",
+              category: "movement",
+              status: "active",
+              scheduleType: "daily",
+              targetType: "duration_minutes",
+              targetValue: 30,
+              required: true,
+              displayOrder: 0,
+            },
+          ],
+        },
+      },
+    });
+
+    const payload = habitPlanPayloadSchema.parse(result.proposals?.[0]?.proposedChanges);
+    expect(payload.habits[0]?.habitDefinitionId).toBe(
+      "d1000001-0000-4000-8000-000000000001",
+    );
+    expect(payload.habits[0]?.target).toEqual({ type: "duration_minutes", value: 25 });
+    expect(getHabitPlanDomainErrors(payload)).toEqual([]);
+  });
+
+  it("rebuilds selected_weekdays schedules from active habit plan context", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Adjust my habits and make walking easier",
+      recentMessages: [],
+      coachingContext: {
+        activeHabitPlan: {
+          activeHabitCount: 1,
+          habits: [
+            {
+              habitDefinitionId: "d1000002-0000-4000-8000-000000000002",
+              title: "Weekday walk",
+              category: "movement",
+              status: "active",
+              scheduleType: "selected_weekdays",
+              daysOfWeek: [1, 3, 5],
+              targetType: "duration_minutes",
+              targetValue: 25,
+              required: true,
+              displayOrder: 0,
+            },
+          ],
+        },
+      },
+    });
+
+    const payload = habitPlanPayloadSchema.parse(result.proposals?.[0]?.proposedChanges);
+    expect(payload.habits[0]?.schedule).toEqual({
+      type: "selected_weekdays",
+      daysOfWeek: [1, 3, 5],
+    });
+    expect(payload.habits[0]?.target).toEqual({ type: "duration_minutes", value: 20 });
+    expect(getHabitPlanDomainErrors(payload)).toEqual([]);
+  });
+
+  it("returns a create_habit_plan proposal for streak-related messages", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Help me build a better streak with small habits",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    expect(result.proposals?.[0]?.intent).toBe("create_habit_plan");
+  });
+
+  it("returns a create_habit_plan proposal for daily routine requests", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Can you help me improve my daily routine?",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    expect(result.proposals?.[0]?.intent).toBe("create_habit_plan");
+    expect(result.proposals?.[0]?.targetDomain).toBe("general");
+  });
+
+  it("does not propose create_habit_plan when an active habit plan already exists", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "Can you suggest daily habits for my routine?",
+      recentMessages: [],
+      coachingContext: {
+        activeHabitPlan: {
+          activeHabitCount: 1,
+          habits: [
+            {
+              habitDefinitionId: "d1000001-0000-4000-8000-000000000001",
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              scheduleType: "daily",
+              targetType: "boolean",
+              required: true,
+              displayOrder: 0,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.proposals).toEqual([]);
+    expect(result.reply).toContain("already have an active habit plan");
   });
 });

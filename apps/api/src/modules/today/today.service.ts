@@ -6,7 +6,7 @@ import type {
   UpdateTodayItemStatusInput,
   WorkoutSession,
 } from "@health/types";
-import { isoDateSchema, workoutCompletionFeedbackSchema } from "@health/types";
+import { isoDateSchema, workoutCompletionFeedbackSchema, habitPlanPayloadSchema, filterScheduledHabitDefinitions } from "@health/types";
 import {
   BadRequestException,
   Injectable,
@@ -14,15 +14,18 @@ import {
 } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { UsersService } from "../users/users.service.js";
+import { HabitsRepository } from "../habits/habits.repository.js";
 import { WorkoutsService } from "../workouts/workouts.service.js";
 import { WorkoutsRepository } from "../workouts/workouts.repository.js";
 import {
   applyItemStatusUpdate,
   buildChecklistState,
   filterWorkoutSessionsForChecklist,
+  findHabitDefinitionIdForItem,
   findWorkoutSessionIdForItem,
   mergeProposalItemsWithExisting,
   normalizeProposalItems,
+  syncTodayChecklistHabitItems,
   syncTodayChecklistWorkoutItems,
 } from "./today-items.js";
 import {
@@ -39,6 +42,7 @@ export class TodayService {
     private readonly workoutsRepository: WorkoutsRepository,
     private readonly workoutsService: WorkoutsService,
     private readonly usersService: UsersService,
+    private readonly habitsRepository: HabitsRepository,
   ) {}
 
   async getOrGenerateDay(auth: ClerkAuthContext, dateInput: string): Promise<TodayDayResponse> {
@@ -46,11 +50,15 @@ export class TodayService {
     const user = await this.usersService.resolveFromAuth(auth);
     const workout = await this.workoutsService.ensureTodayWorkoutSession(auth, date);
     const sessions = await this.listChecklistWorkoutSessions(user.id, date);
+    const scheduledHabits = await this.listScheduledHabitDefinitions(user.id, date);
 
     const existing = await this.todayRepository.findByUserAndDate(user.id, date);
 
     if (!existing) {
-      const generatedItems = syncTodayChecklistWorkoutItems([], sessions);
+      const generatedItems = syncTodayChecklistHabitItems(
+        syncTodayChecklistWorkoutItems([], sessions),
+        scheduledHabits,
+      );
       const { items, adherence } = buildChecklistState(generatedItems);
       const checklist = await this.todayRepository.upsertChecklist(
         user.id,
@@ -63,9 +71,9 @@ export class TodayService {
       return this.buildDayResponse(checklist, workout);
     }
 
-    const syncedItems = syncTodayChecklistWorkoutItems(
-      toTodayChecklistRecord(existing).items,
-      sessions,
+    const syncedItems = syncTodayChecklistHabitItems(
+      syncTodayChecklistWorkoutItems(toTodayChecklistRecord(existing).items, sessions),
+      scheduledHabits,
     );
     const { items, adherence } = buildChecklistState(syncedItems);
     const serializedExisting = JSON.stringify(toTodayChecklistRecord(existing).items);
@@ -125,6 +133,18 @@ export class TodayService {
       }
     }
 
+    const habitDefinitionId = findHabitDefinitionIdForItem(updatedItems, itemId);
+
+    if (habitDefinitionId) {
+      await this.habitsRepository.upsertCompletion(
+        user.id,
+        habitDefinitionId,
+        date,
+        input.status,
+        itemId,
+      );
+    }
+
     const { items, adherence } = buildChecklistState(updatedItems);
     const updated = await this.todayRepository.updateChecklistState(
       user.id,
@@ -178,11 +198,13 @@ export class TodayService {
     const date = this.parseDate(payload.date);
     const existing = await this.todayRepository.findByUserAndDate(userId, date);
     const sessions = await this.listChecklistWorkoutSessions(userId, date);
+    const scheduledHabits = await this.listScheduledHabitDefinitions(userId, date);
     const proposalItems = normalizeProposalItems(payload.items);
     const existingItems = existing ? toTodayChecklistRecord(existing).items : [];
     const mergedItems = mergeProposalItemsWithExisting(existingItems, proposalItems);
     const withWorkouts = syncTodayChecklistWorkoutItems(mergedItems, sessions);
-    const { items, adherence } = buildChecklistState(withWorkouts);
+    const withHabits = syncTodayChecklistHabitItems(withWorkouts, scheduledHabits);
+    const { items, adherence } = buildChecklistState(withHabits);
 
     const checklist = await this.todayRepository.createChecklistFromProposal(
       userId,
@@ -210,6 +232,27 @@ export class TodayService {
       sessionRows.map(toWorkoutSessionChecklistSummary),
       activePlanContext,
     );
+  }
+
+  private async listScheduledHabitDefinitions(userId: string, date: string) {
+    const plan = await this.habitsRepository.findActivePlanByUserId(userId);
+
+    if (!plan?.activeRevisionId) {
+      return [];
+    }
+
+    const revision = await this.habitsRepository.findActiveRevisionByPlanId(
+      plan.id,
+      plan.activeRevisionId,
+    );
+
+    if (!revision) {
+      return [];
+    }
+
+    const payload = habitPlanPayloadSchema.parse(revision.payload);
+
+    return filterScheduledHabitDefinitions(payload.habits, date);
   }
 
   private buildDayResponse(

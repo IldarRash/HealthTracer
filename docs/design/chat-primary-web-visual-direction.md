@@ -7,8 +7,8 @@ Visual design specification for the web redesign. Implements the Visual Designer
 Transform the web app from a developer inspector shell into a focused wellness coaching product:
 
 1. **Chat is the visual anchor** — the header gives Chat the most prominent treatment, making coaching the first action from every route.
-2. **Navigation is simplified** — primary web nav is Chat, Today, Workouts, Nutrition, and Profile.
-3. **Structured state stays authoritative** — Workouts absorbs Progress; Profile absorbs Goals and Documents; Metrics remains a top-level structured state surface; Recipes are hidden from the UI while backend recommendation behavior continues.
+2. **Navigation is simplified** — primary web nav is Chat, Today, Longevity, and Profile.
+3. **Structured state stays authoritative** — Training and Nutrition remain secondary read-only plan views; Today shows today's execution; Longevity shows weekly overview; Profile absorbs Goals, Documents, Metrics settings, and consent.
 4. **Premium but safe** — WHOOP-like density and progress motifs plus ReplicaAI-inspired component polish, all reframed as wellness and fitness coaching only.
 
 ## Visual Language
@@ -16,7 +16,7 @@ Transform the web app from a developer inspector shell into a focused wellness c
 ### Tone
 
 - Calm, confident, modern wellness product — not clinical dashboard, not dev tooling.
-- High information density where structured data matters (Profile, Workouts); generous whitespace in Chat.
+- High information density where structured data matters (Today, Longevity, secondary plan views); generous whitespace in Chat.
 - Dark chrome + light content (default) echoes premium fitness apps without copying medical score UX.
 - ReplicaAI-inspired polish should appear as tactile rounded components, soft gradients, precise spacing, clean pill metadata, and low-friction action cards — not as playful mascots or diagnosis-like advice.
 
@@ -78,7 +78,7 @@ Accent is teal (coach/wellness), not clinical blue. Reserve blue tints only for 
 ┌─────────────────────────────────────────────────────────────┐
 │ AI Health Coach        [ Message your coach ] [avatar]      │
 │                         Chat is the dominant header action   │
-│ Today   Workouts   Nutrition   Metrics   Profile            │
+│ Chat   Today   Longevity   Profile                          │
 ├─────────────────────────────────────────────────────────────┤
 │ MAIN CONTENT AREA                                           │
 │ Chat: full-height transcript                                │
@@ -91,7 +91,8 @@ Accent is teal (coach/wellness), not clinical blue. Reserve blue tints only for 
 - Chat route: **no page title block** — conversation fills the main pane under the header.
 - Structured routes: compact page header (title + one-line subtitle), then content grid.
 - Remove developer/admin nav items from primary user nav. Keep dev routes reachable only by direct URL if needed.
-- Hide Recipes from primary UI and route discovery. Backend recommendation services may continue to exist and feed Nutrition or Chat surfaces when approved by product logic.
+- Keep Training and Nutrition out of primary navigation while preserving them as secondary read-only plan views linked from Today, Longevity, and proposal cards.
+- Hide Recipes, raw Metrics, Goals, Documents, proposal audit, and developer routes from primary UI and route discovery. Backend recommendation services may continue to exist and feed Nutrition or Chat surfaces when approved by product logic.
 
 ### Navigation States
 
@@ -106,7 +107,7 @@ Accent is teal (coach/wellness), not clinical blue. Reserve blue tints only for 
 ### Responsive
 
 - **≥1024px:** Sticky top header with Chat CTA prominent and simplified nav visible.
-- **<1024px:** Header compresses to brand + Chat CTA + account; nav becomes horizontally scrollable or bottom tab bar with 6 items: Chat, Today, Workouts, Nutrition, Metrics, Profile.
+- **<1024px:** Header compresses to brand + Chat CTA + account; nav becomes horizontally scrollable or bottom tab bar with 4 items: Chat, Today, Longevity, Profile.
 - Touch targets: minimum 44×44px on mobile tabs and proposal actions.
 
 ### Metadata
@@ -208,7 +209,7 @@ Cards sit **inside** the assistant message flow as structured decision points. T
 
 ## Structured Domain Screens
 
-Shared patterns across Today, Workouts, Nutrition, Profile:
+Shared patterns across Today, Longevity, Profile, and secondary Training/Nutrition plan views:
 
 - **Page header:** Title + subtitle; no phase eyebrows in user-facing copy.
 - **Content width:** `max-width: 72rem`, padding `1.5rem`–`2rem`.
@@ -223,25 +224,34 @@ Shared patterns across Today, Workouts, Nutrition, Profile:
 - Visual style should be calm and task-oriented: stacked cards, clear completion controls, and one understated progress summary.
 - Avoid making Today compete with Chat; the header Chat CTA remains the dominant global action.
 
-### Workouts + Progress
+### Training Weekly Plan
 
-- Combine Workouts and Progress into one primary destination. Route may remain `/training` initially, but user-facing nav label should be **Workouts**.
+- Keep `/training` routeable as a secondary read-only plan view, not a primary navigation item.
 - Hero: active plan name + revision badge + weekly consistency/adherence summary.
 - Grid: upcoming sessions (left), plan detail (right) on desktop; stack on mobile.
-- Add a Progress section below the workout plan: weekly completion strip, recent session outcomes, and simple trend cards.
+- Add lightweight progress context below the workout plan: weekly completion strip, recent session outcomes, and simple trend cards.
 - Session cards: retain status color coding; soften dev-heavy revision list into collapsible "History".
-- Hide the standalone Progress nav item. If `/progress` remains available during migration, route or link it into Workouts rather than presenting it as a primary destination.
+- Hide the standalone Progress nav item. If `/progress` remains available during migration, route or link it into Longevity or Training rather than presenting it as a primary destination.
+- User-facing plan structure is read-only; plan changes are requested through Chat proposals.
 
-### Nutrition
+### Nutrition Weekly Plan
 
-- Dedicated route `/nutrition`.
-- Mirror Workouts layout: active plan revision, daily/weekly consistency summary, meal structure cards.
+- Keep `/nutrition` routeable as a secondary read-only plan view, not a primary navigation item.
+- Mirror Training layout: active plan revision, daily/weekly consistency summary, meal structure cards.
 - Wellness framing: "nutrition plan", "meals", "consistency" — not macros-as-prescription language.
 - Recipes should not appear as a primary route or standalone catalog. If recipe recommendations are surfaced, they should appear as contextual recommendations inside Nutrition or Chat, with backend recommendations continuing behind the scenes.
+- User-facing plan structure is read-only; plan changes are requested through Chat proposals.
+
+### Longevity
+
+- Longevity is the weekly overview primary tab.
+- Show weekly consistency, Today adherence, workout and nutrition consistency, goals, recovery/wellbeing trends, consent-aware metric summaries, and static Chat prompts.
+- Do not expose clinical scores, diagnosis, treatment, biological age, or vendor readiness scores as product truth.
+- Link to secondary Training and Nutrition views for detail; link to Chat for changes.
 
 ### Profile
 
-- Profile becomes the home for stable coaching context: profile details, Goals, Documents, preferences, constraints, consent, and recent coach activity.
+- Profile becomes the home for stable coaching context: profile details, Goals, Documents, Metrics/settings consent, preferences, constraints, and recent coach activity.
 - Goals section: show active goals as compact cards with progress cues and "Update with coach" CTA.
 - Documents section: show consent-aware document summaries and upload/search entry points only when explicit consent is present.
 - Keep Documents out of the primary nav. Preserve safety copy around consent and avoid suggesting diagnosis or treatment from documents.
@@ -253,8 +263,8 @@ Shared patterns across Today, Workouts, Nutrition, Profile:
 | Warning | "Phase N" eyebrows and developer page titles undermine product feel. |
 | Warning | Primary nav is too broad; Goals, Documents, Recipes, Metrics, and Progress create unnecessary top-level complexity. |
 | Warning | Proposals audit page in primary nav is admin-oriented. |
-| Opportunity | Workouts can carry Progress naturally through weekly consistency, recent sessions, and trend strips. |
-| Opportunity | Profile can become the premium WHOOP-like overview while preserving wellness-only copy. |
+| Opportunity | Longevity can carry Progress naturally through weekly consistency, recent sessions, and trend strips. |
+| Opportunity | Profile can stay focused on account/context while Longevity owns the premium wellness overview. |
 
 ---
 
@@ -367,7 +377,7 @@ Use `--color-coach-*` for wellness primary actions; keep `--color-brand-*` for l
 
 ### Header shell (P1 — Frontend Implementer)
 
-Current `AppShellHeader` uses a horizontal sticky top bar with `.app-nav--coach` pill nav. Keep that direction, but simplify the nav to Chat, Today, Workouts, Nutrition, and Profile. Chat should remain the most prominent header element through a larger teal CTA, center-positioned composer affordance, or featured nav item. Do not migrate to a left sidebar for this approved web pass.
+Current `AppShellHeader` uses a horizontal sticky top bar with `.app-nav--coach` pill nav. Keep that direction, but simplify the nav to Chat, Today, Longevity, and Profile. Chat should remain the most prominent header element through a larger teal CTA, center-positioned composer affordance, or featured nav item. Do not migrate to a left sidebar for this approved web pass.
 
 ---
 
@@ -378,10 +388,11 @@ Current `AppShellHeader` uses a horizontal sticky top bar with `.app-nav--coach`
 | App shell | `AppShell` + header nav exist | Pages still use legacy `.shell`/`.card` | Migrate all routes to `AppShell` |
 | Chat | `ChatBubble`, `.chat-single` CSS | `ChatWorkspace` shows thread sidebar; page has phase copy | Hide threads; adopt `chat-single` |
 | Proposals inline | `ProposalConfirmation` | `ProposalCard` shows dev meta in compact mode | Wire confirmation component + domain pills |
-| Profile dashboard | `DashboardCard`, `.dashboard-hero` CSS | Profile needs to absorb Goals and Documents | Build profile dashboard layout |
-| Workouts + Progress | Training and Progress routes exist separately | Nav presents separate destinations | Combine Progress into Workouts UI |
+| Profile dashboard | `DashboardCard`, `.dashboard-hero` CSS | Profile needs to absorb Goals, Documents, Metrics/settings consent | Build profile context layout |
+| Longevity | No implemented primary tab | Weekly overview is scattered across Progress/Profile/Metrics | Add Longevity primary route |
+| Training/Nutrition | Routes exist as primary-style destinations | Plans are too prominent and may imply manual editing | Treat as secondary read-only plan views |
 | Recipes | Recipes route exists | Recipes are visible in primary nav today | Hide from UI nav while preserving backend recommendations |
-| Nav | Chat featured today | Too many top-level links | Simplify to Chat, Today, Workouts, Nutrition, Profile |
+| Nav | Chat featured today | Too many top-level links | Simplify to Chat, Today, Longevity, Profile |
 
 ---
 
@@ -390,7 +401,7 @@ Current `AppShellHeader` uses a horizontal sticky top bar with `.app-nav--coach`
 ### P0 — Shell, Nav & Chat (Frontend Implementer + UI Polish)
 
 1. Replace `.shell`/`.card` wrapper with `.app-shell` on all product routes.
-2. Simplify `AppNav` to Chat, Today, Workouts, Nutrition, Profile.
+2. Simplify `AppNav` to Chat, Today, Longevity, Profile.
 3. Make Chat the most prominent header action using the existing featured link pattern or a larger "Message your coach" CTA.
 4. Drop Progress, Goals, Documents, Recipes, Metrics, Inspector, and Proposals from primary nav.
 5. Refactor `ChatWorkspace` to hide thread UI; full-height `.chat-single` layout.
@@ -399,11 +410,12 @@ Current `AppShellHeader` uses a horizontal sticky top bar with `.app-nav--coach`
 
 ### P0 — Information Architecture (Frontend Implementer)
 
-1. Combine Progress content into Workouts as weekly consistency, recent outcomes, and trend strips.
-2. Move Goals content into Profile as a prominent section under the Profile overview.
-3. Move Documents content into Profile with explicit consent and wellness-only boundary copy.
-4. Hide Recipes from navigation and user-facing route discovery; backend recommendation flows continue.
-5. Keep any legacy routes stable during migration, but avoid advertising them in the primary UI.
+1. Add Longevity as the weekly overview for consistency, recent outcomes, cross-domain trends, and coach prompts.
+2. Keep Training and Nutrition routeable as secondary read-only weekly plan views.
+3. Move Goals content into Profile as stable coaching context.
+4. Move Documents and Metrics/settings consent into Profile with explicit consent and wellness-only boundary copy.
+5. Hide Recipes from navigation and user-facing route discovery; backend recommendation flows continue.
+6. Keep any legacy routes stable during migration, but avoid advertising them in the primary UI.
 
 ### P0 — Inline Proposals (Frontend Implementer + UI Polish)
 
@@ -412,18 +424,16 @@ Current `AppShellHeader` uses a horizontal sticky top bar with `.app-nav--coach`
 3. Hide validation badge in compact mode; keep inline validation notice.
 4. Add post-accept deep link component (visual only; href from `targetDomain`).
 
-### P1 — Profile Dashboard (Frontend Implementer)
+### P1 — Longevity and Profile (Frontend Implementer)
 
-1. New `/profile` route (or repurpose `/`) with dashboard grid.
-2. Hero weekly consistency card with ring + trend strip.
-3. Secondary cards: goals, documents, workouts, nutrition, recent proposals.
-4. Profile details, preferences, constraints, and consent sections at bottom.
-5. Use WHOOP-like dense metric hierarchy while avoiding "recovery score", diagnosis, treatment, or medical certainty.
+1. New `/longevity` route with dashboard grid, weekly consistency, Today adherence, workout/nutrition consistency, recovery/wellbeing trends, goals, and Chat prompts.
+2. Keep `/profile` focused on account identity, onboarding, goals, documents, Metrics/settings consent, preferences, constraints, and settings.
+3. Use WHOOP-like dense metric hierarchy on Longevity while avoiding "recovery score", diagnosis, treatment, or medical certainty.
 
 ### P1 — Domain Routes (Frontend Implementer)
 
-1. `/nutrition` remains a primary route with shared page header pattern.
-2. Rename Training nav label to Workouts; restyle with dashboard tokens and embedded Progress.
+1. `/training` remains a secondary read-only weekly workout plan route.
+2. `/nutrition` remains a secondary read-only weekly nutrition plan route.
 3. Treat `/goals`, `/documents`, `/metrics`, `/progress`, and `/recipes` as non-primary routes unless the planner explicitly reopens them.
 
 ### P2 — Design System (Design System Agent)
@@ -446,7 +456,7 @@ Current `AppShellHeader` uses a horizontal sticky top bar with `.app-nav--coach`
 
 | Role | Action |
 |------|--------|
-| **Frontend Implementer** | Shell layout, simplified nav, prominent header Chat CTA, chat single-thread UX, Workouts+Progress merge, Profile sections for Goals/Documents, hide Recipes from UI, apply CSS classes from this doc. |
+| **Frontend Implementer** | Shell layout, simplified nav, prominent header Chat CTA, chat single-thread UX, Longevity route, secondary read-only Training/Nutrition views, Profile sections for Goals/Documents/Metrics consent, hide Recipes from UI, apply CSS classes from this doc. |
 | **Design System Agent** | Promote tokens to shared primitives; define HeaderChatCTA, metric cards, metadata pills, proposal cards, shadcn component setup, icon set. |
 | **UI Polish Implementer** | P2 motion, empty states, micro-interactions after P0 structure lands. |
 | **Test Writer** | Snapshot/class tests for proposal compact mode labels; no medical terms in user-visible strings. |
@@ -455,7 +465,8 @@ Current `AppShellHeader` uses a horizontal sticky top bar with `.app-nav--coach`
 ### Open Design Decisions (recommend defaults)
 
 1. **Default thread behavior:** Resume most recent thread silently — recommend yes.
-2. **Profile route:** `/profile` as home dashboard; redirect `/` → `/chat` or `/profile` — recommend `/` → `/chat` (Chat primary) with Profile in nav.
+2. **Default route:** redirect `/` → `/chat` (Chat primary) with Today, Longevity, and Profile in nav.
 3. **Goals placement:** Goals live inside Profile, not as a primary nav item.
 4. **Documents placement:** Documents live inside Profile with explicit consent states and wellness-only safety copy.
 5. **Recipes visibility:** Hide route links and catalog UI; keep backend recommendations available to Nutrition/Chat proposal flows.
+6. **Training/Nutrition visibility:** keep route links available from Today, Longevity, and proposal cards, but not as primary nav items.

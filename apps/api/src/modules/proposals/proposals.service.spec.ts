@@ -94,6 +94,7 @@ function createValidationServiceMock(overrides: Record<string, unknown> = {}) {
     validateStoredProposal: () => ({ valid: true, errors: [] }),
     validateProvenanceOwnership: async () => [],
     validateExerciseReferences: async () => [],
+    validateHabitTemplateReferences: async () => [],
     ...overrides,
   };
 }

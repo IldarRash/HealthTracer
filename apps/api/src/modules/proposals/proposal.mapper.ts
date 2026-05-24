@@ -1,8 +1,8 @@
-import type { AiProposal } from "@health/types";
+import { aiProposalSchema, type AiProposal } from "@health/types";
 import type { AiProposalRow } from "../chat/chat.repository.js";
 
 export function toAiProposal(row: AiProposalRow): AiProposal {
-  return {
+  const mapped = {
     id: row.id,
     userId: row.userId,
     threadId: row.threadId,
@@ -20,6 +20,15 @@ export function toAiProposal(row: AiProposalRow): AiProposal {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+
+  const parsed = aiProposalSchema.safeParse(mapped);
+
+  // Preserve previously persisted invalid proposals for downstream error rendering.
+  if (!parsed.success) {
+    return mapped as AiProposal;
+  }
+
+  return parsed.data;
 }
 
 export type { AiProposalRow };

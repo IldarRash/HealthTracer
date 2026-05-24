@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
 import { ExercisesModule } from "../exercises/exercises.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
+import { HabitsModule } from "../habits/habits.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { ProfilesModule } from "../profiles/profiles.module.js";
 import { ProgressModule } from "../progress/progress.module.js";
@@ -25,6 +26,7 @@ import { ProposalsService } from "./proposals.service.js";
     GoalsModule,
     WorkoutsModule,
     NutritionModule,
+    HabitsModule,
     RecipesModule,
     TodayModule,
   ],

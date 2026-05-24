@@ -1,6 +1,6 @@
 ---
 name: product-analyst
-model: gpt-5.5[]
+model: gpt-5.3-codex[]
 is_background: true
 ---
 

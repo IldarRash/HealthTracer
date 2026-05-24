@@ -7,6 +7,9 @@ import {
   getAcceptedProposalRefreshQueryKeys,
   getActiveNutritionPlan,
   getActiveWorkoutPlan,
+  getActiveHabitPlan,
+  getHabitAdherence,
+  buildHabitAdherenceQueryString,
   getInspectorState,
   generateWeeklyProgressSummary,
   getCurrentWeeklyProgressSummary,
@@ -32,6 +35,7 @@ import {
   listRecipeRecommendations,
   listRecipes,
   listNutritionRevisions,
+  listHabitRevisions,
   listWorkoutRevisions,
   parseApiErrorBody,
   reviewDocumentSummary,
@@ -115,6 +119,21 @@ const sampleRecipeRecommendationChanges = {
 const sampleTodayChecklistChanges = {
   date: "2026-05-22",
   items: [{ label: "Drink water", kind: "hydration" as const }],
+};
+
+const sampleHabitProposalChanges = {
+  habits: [
+    {
+      habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+      title: "Morning hydration",
+      category: "hydration" as const,
+      status: "active" as const,
+      schedule: { type: "daily" as const },
+      target: { type: "boolean" as const },
+      required: true,
+      displayOrder: 0,
+    },
+  ],
 };
 
 afterEach(() => {
@@ -266,6 +285,29 @@ describe("web api helpers", () => {
     });
   });
 
+  it("parses active habit plan responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            plan: null,
+            activeRevision: null,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await getActiveHabitPlan(token);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data).toEqual({
+      plan: null,
+      activeRevision: null,
+    });
+  });
+
   it("rejects invalid workout completion payloads before calling the API", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -353,6 +395,130 @@ describe("web api helpers", () => {
     expect(result.data).toHaveLength(1);
     expect(result.data?.[0]?.revisionNumber).toBe(1);
     expect(result.data?.[0]?.payload.mealStructure).toHaveLength(1);
+  });
+
+  it("parses habit revision history responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            revisions: [
+              {
+                id: "880099c6-3b5f-4383-8246-97b72bf61818",
+                habitPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+                revisionNumber: 1,
+                reason: "Initial plan",
+                source: "ai_proposal",
+                payload: {
+                  habits: [
+                    {
+                      habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+                      title: "Morning hydration",
+                      category: "hydration",
+                      status: "active",
+                      schedule: { type: "daily" },
+                      target: { type: "boolean" },
+                      required: true,
+                      displayOrder: 0,
+                    },
+                  ],
+                },
+                createdAt: "2026-05-22T12:00:00.000Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await listHabitRevisions(token);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data).toHaveLength(1);
+    expect(result.data?.[0]?.revisionNumber).toBe(1);
+    expect(result.data?.[0]?.payload.habits).toHaveLength(1);
+  });
+
+  it("builds habit adherence query strings", () => {
+    expect(buildHabitAdherenceQueryString(7)).toBe("?window=7");
+    expect(buildHabitAdherenceQueryString(30)).toBe("?window=30");
+    expect(() => buildHabitAdherenceQueryString(14 as 7)).toThrow();
+  });
+
+  it("parses habit adherence responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        expect(String(input)).toContain("/habits/adherence?window=7");
+
+        return new Response(
+          JSON.stringify({
+            plan: {
+              window: 7,
+              windowStart: "2026-05-18",
+              windowEnd: "2026-05-24",
+              scheduled: 7,
+              completed: 5,
+              skipped: 1,
+              missed: 1,
+              requiredCompletionRate: 0.7143,
+            },
+            habits: [
+              {
+                habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+                title: "Morning hydration",
+                required: true,
+                scheduled: 7,
+                completed: 5,
+                skipped: 1,
+                missed: 1,
+                completionRate: 0.7143,
+                currentStreak: 3,
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+
+    const result = await getHabitAdherence(token, 7);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.plan.requiredCompletionRate).toBeCloseTo(0.7143);
+    expect(result.data?.habits).toHaveLength(1);
+    expect(result.data?.habits[0]?.currentStreak).toBe(3);
+  });
+
+  it("rejects invalid habit adherence payloads before returning data", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            plan: {
+              window: 7,
+              windowStart: "2026-05-18",
+              windowEnd: "2026-05-24",
+              scheduled: 7,
+              completed: 5,
+              skipped: 1,
+              missed: 1,
+              requiredCompletionRate: 1.5,
+            },
+            habits: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await getHabitAdherence(token, 7);
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toBe("/habits/adherence?window=7 could not be loaded");
   });
 
   it("parses today nutrition adherence responses", async () => {
@@ -635,6 +801,32 @@ describe("web api helpers", () => {
     ).toEqual([
       apiQueryKeys.dashboardState,
       apiQueryKeys.proposals,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
+    ]);
+    expect(
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("create_habit_plan", "general", sampleHabitProposalChanges),
+      ),
+    ).toEqual([
+      apiQueryKeys.dashboardState,
+      apiQueryKeys.proposals,
+      apiQueryKeys.habitActive,
+      apiQueryKeys.habitRevisions,
+      apiQueryKeys.habitAdherencePrefix,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
+    ]);
+    expect(
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("adapt_habit_plan", "general", sampleHabitProposalChanges),
+      ),
+    ).toEqual([
+      apiQueryKeys.dashboardState,
+      apiQueryKeys.proposals,
+      apiQueryKeys.habitActive,
+      apiQueryKeys.habitRevisions,
+      apiQueryKeys.habitAdherencePrefix,
       apiQueryKeys.todayDayPrefix,
       apiQueryKeys.todayHistoryPrefix,
     ]);
@@ -1393,6 +1585,7 @@ describe("web api helpers", () => {
     expect(getWorkoutExecutionRefreshQueryKeys()).toEqual(
       expect.arrayContaining([
         apiQueryKeys.todayDayPrefix,
+        apiQueryKeys.habitAdherencePrefix,
         apiQueryKeys.workoutActive,
         apiQueryKeys.progressWeeklyCurrent,
       ]),

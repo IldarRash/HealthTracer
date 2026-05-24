@@ -107,6 +107,9 @@ describe("ChatService", () => {
         {
           findInaccessibleExerciseIds: async () => [],
         } as never,
+        {
+          getHabitTemplateReferenceErrors: async () => [],
+        } as never,
       ),
     );
 

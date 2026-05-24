@@ -73,8 +73,11 @@ sequenceDiagram
 ## Client Rules
 
 - Chat may render explanations and pending proposals.
-- Training, Nutrition, Today, Recipes, Metrics, and Documents tabs read from structured state.
-- Tabs update after accepted proposals are validated and applied by backend services.
+- Primary tabs are Chat, Today, Longevity, and Profile.
+- Today, Longevity, Profile, and secondary Training/Nutrition views read from structured state.
+- Training and Nutrition are read-only weekly plan views for active workout and nutrition plan structure; users request changes through Chat proposals.
+- Recipes, Metrics, Documents, Goals, Progress, proposal audit, and developer tools are nested or hidden support surfaces, not primary tabs.
+- Surfaces update after accepted proposals are validated and applied by backend services.
 - Users can mark tasks complete from the relevant tab, but completion writes must still go through domain APIs.
 
 ## Testing Rules

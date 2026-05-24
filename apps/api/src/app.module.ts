@@ -8,6 +8,7 @@ import { DeviceConnectionsModule } from "./modules/device-connections/device-con
 import { DocumentsModule } from "./modules/documents/documents.module.js";
 import { ExercisesModule } from "./modules/exercises/exercises.module.js";
 import { GoalsModule } from "./modules/goals/goals.module.js";
+import { HabitsModule } from "./modules/habits/habits.module.js";
 import { HealthMetricsModule } from "./modules/health-metrics/health-metrics.module.js";
 import { NutritionModule } from "./modules/nutrition/nutrition.module.js";
 import { ProfilesModule } from "./modules/profiles/profiles.module.js";
@@ -24,6 +25,7 @@ import { WorkoutsModule } from "./modules/workouts/workouts.module.js";
     UsersModule,
     ProfilesModule,
     GoalsModule,
+    HabitsModule,
     WorkoutsModule,
     ExercisesModule,
     NutritionModule,

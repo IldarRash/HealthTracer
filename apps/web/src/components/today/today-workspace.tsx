@@ -47,6 +47,7 @@ import {
   sessionExerciseStatusLabel,
 } from "../../lib/training-ui-state";
 import { EmptyState, ErrorState, LoadingState } from "../ui";
+import { HabitAdherenceSummary } from "./habit-adherence-summary";
 
 const HISTORY_LIMIT = 7;
 
@@ -511,6 +512,8 @@ export function TodayWorkspace() {
               </p>
             ) : null}
           </div>
+
+          <HabitAdherenceSummary />
 
           {day?.workout ? (
             <TodayWorkoutPanel

@@ -2,12 +2,16 @@ import type {
   AiDocumentContextSummary,
   AiMetricsContextSummary,
   Goal,
+  HabitAdherenceCoachingSummary,
+  HabitPlanCoachingSummary,
   User,
   UserProfile,
   WeeklyProgressSummaryResponse,
   WorkoutPlanCoachingSummary,
 } from "@health/types";
 import {
+  habitPlanPayloadSchema,
+  summarizeHabitPlanForCoaching,
   summarizeWorkoutPlanForCoaching,
   workoutPlanPayloadSchema,
 } from "@health/types";
@@ -15,6 +19,8 @@ import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { DocumentsService } from "../documents/documents.service.js";
 import { GoalsService } from "../goals/goals.service.js";
+import { HabitsRepository } from "../habits/habits.repository.js";
+import { HabitsService } from "../habits/habits.service.js";
 import { MetricsAiContextService } from "../health-metrics/metrics-ai-context.service.js";
 import { NutritionRepository } from "../nutrition/nutrition.repository.js";
 import { ProgressService } from "../progress/progress.service.js";
@@ -29,6 +35,9 @@ export interface CoachingContextSnapshot {
   activeWorkoutRevisionId: string | null;
   activeWorkoutPlanSummary: WorkoutPlanCoachingSummary | null;
   activeNutritionRevisionId: string | null;
+  activeHabitRevisionId: string | null;
+  activeHabitPlanSummary: HabitPlanCoachingSummary | null;
+  recentHabitAdherenceSummary: HabitAdherenceCoachingSummary | null;
   weeklyProgressSummary: WeeklyProgressSummaryResponse | null;
   documentContext: AiDocumentContextSummary;
   metricsSummary: AiMetricsContextSummary;
@@ -42,6 +51,8 @@ export class CoachingContextService {
     private readonly goalsService: GoalsService,
     private readonly workoutsRepository: WorkoutsRepository,
     private readonly nutritionRepository: NutritionRepository,
+    private readonly habitsRepository: HabitsRepository,
+    private readonly habitsService: HabitsService,
     private readonly progressService: ProgressService,
     private readonly documentsService: DocumentsService,
     private readonly metricsAiContextService: MetricsAiContextService,
@@ -54,6 +65,7 @@ export class CoachingContextService {
       goals,
       workoutPlan,
       nutritionPlan,
+      habitPlan,
       weeklyProgressSummary,
       documentContext,
       metricsSummary,
@@ -62,6 +74,7 @@ export class CoachingContextService {
       this.goalsService.listCurrentGoals(auth),
       this.workoutsRepository.findActivePlanByUserId(user.id),
       this.nutritionRepository.findActivePlanByUserId(user.id),
+      this.habitsRepository.findActivePlanByUserId(user.id),
       this.progressService.getLatestSummarySnapshot(user.id),
       this.documentsService.buildDocumentContextSummary(user.id),
       this.metricsAiContextService.buildSummaryForUser(user.id),
@@ -81,6 +94,26 @@ export class CoachingContextService {
       }
     }
 
+    let activeHabitPlanSummary: HabitPlanCoachingSummary | null = null;
+    let recentHabitAdherenceSummary: HabitAdherenceCoachingSummary | null = null;
+
+    if (habitPlan?.activeRevisionId) {
+      const activeRevision = await this.habitsRepository.findActiveRevisionByPlanId(
+        habitPlan.id,
+        habitPlan.activeRevisionId,
+      );
+      const parsedPayload = habitPlanPayloadSchema.safeParse(activeRevision?.payload);
+
+      if (parsedPayload.success) {
+        activeHabitPlanSummary = summarizeHabitPlanForCoaching(parsedPayload.data);
+      }
+    }
+
+    recentHabitAdherenceSummary = await this.habitsService.getRecentAdherenceForCoaching(
+      user.id,
+      user.timezone,
+    );
+
     return {
       user,
       profile,
@@ -88,6 +121,9 @@ export class CoachingContextService {
       activeWorkoutRevisionId: workoutPlan?.activeRevisionId ?? null,
       activeWorkoutPlanSummary,
       activeNutritionRevisionId: nutritionPlan?.activeRevisionId ?? null,
+      activeHabitRevisionId: habitPlan?.activeRevisionId ?? null,
+      activeHabitPlanSummary,
+      recentHabitAdherenceSummary,
       weeklyProgressSummary,
       documentContext,
       metricsSummary,
@@ -119,6 +155,9 @@ export class CoachingContextService {
       activeWorkoutRevisionId: snapshot.activeWorkoutRevisionId,
       activeWorkoutPlan: snapshot.activeWorkoutPlanSummary,
       activeNutritionRevisionId: snapshot.activeNutritionRevisionId,
+      activeHabitRevisionId: snapshot.activeHabitRevisionId,
+      activeHabitPlan: snapshot.activeHabitPlanSummary,
+      recentHabitAdherenceSummary: snapshot.recentHabitAdherenceSummary,
       weeklyProgressSummary: snapshot.weeklyProgressSummary
         ? {
             weekStart: snapshot.weeklyProgressSummary.summary.weekStart,

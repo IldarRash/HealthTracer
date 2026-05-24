@@ -66,6 +66,8 @@ Immutable version of a workout plan.
 - structured plan payload
 - createdAt
 
+Workout plan revisions are rendered through Today workout cards and the secondary read-only Training weekly view. Users should not manually edit active workout plans from the UI; plan changes should flow through approved AI proposals.
+
 ### WorkoutSession
 
 Tracks execution of a planned or ad hoc workout.
@@ -94,6 +96,8 @@ Immutable nutrition target version.
 - hydration target
 - reason
 
+Nutrition plan revisions are rendered through Today nutrition cards and the secondary read-only Nutrition weekly view. Users should not manually edit active nutrition plans from the UI; plan changes should flow through approved AI proposals.
+
 ### DailyChecklist
 
 Daily execution loop.
@@ -103,6 +107,8 @@ Daily execution loop.
 - items
 - completion state
 - adherence score
+
+DailyChecklist powers the Today surface. It may reference workout sessions, nutrition-today items, wellbeing check-ins, recovery focus items, habit definitions, and goal or weekly-focus source refs, but it should not become the authoritative store for upstream workout or nutrition plan definitions.
 
 ### HealthMetric
 
@@ -207,12 +213,46 @@ erDiagram
   User ||--o{ AIProposal : receives
 ```
 
+## Product Surface Mapping
+
+The domain model is intentionally broader than the primary navigation. User-facing placement is:
+
+- Chat reads structured context and renders typed proposals.
+- Today reads `DailyChecklist`, current workout execution, nutrition-today data, wellbeing/recovery check-ins, and habit items.
+- Longevity reads weekly aggregates, trends, goals, adherence, recovery/wellbeing summaries, consented metrics, and document-context status.
+- Profile reads `User`, `UserProfile`, goal hierarchy, documents, device/data consent, and settings.
+- Training reads `WorkoutPlan`, `WorkoutPlanRevision`, and `WorkoutSession` as a secondary read-only weekly plan view.
+- Nutrition reads `NutritionPlan`, `NutritionPlanRevision`, adherence, and recipe-supported recommendations as a secondary read-only weekly plan view.
+
+Metrics, documents, recipes, proposal audit data, and developer diagnostics can exist as domain or support models without becoming primary product tabs.
+
 ## Modeling Rules
 
 - Do not store critical plan state only in chat messages.
 - Prefer explicit revision tables for mutable plans.
 - Keep free-form AI output out of core domain tables.
 - Use structured JSON only when the schema is owned and validated.
+- Keep workout and nutrition plan screens read-only for active plan structure; user-requested changes should create proposals and revisions.
+- Keep Today focused on daily execution, not full weekly planning.
+- Keep Longevity read-only and trend-oriented; it can link to Chat for proposed changes.
 - Treat medical documents as out of scope for MVP 1.
 - Treat diagnosis and treatment guidance as out of scope for every product phase.
 - Require explicit consent before syncing device data or using health documents as AI context.
+
+## Medical and Lab Data Boundaries
+
+Users may upload medical documents and laboratory studies. These records are sensitive context, not a diagnosis engine.
+
+Allowed uses with explicit consent:
+
+- structured extraction of wellness-relevant signals,
+- correlation analysis across physical, mental, behavioral, and plan data,
+- coaching explanations and typed proposals for workout, nutrition, recovery, and habit changes.
+
+Not allowed:
+
+- diagnosis, treatment plans, medication guidance, or medical certainty,
+- silent plan mutation from document or lab data,
+- using chat history as the authoritative store for extracted medical context.
+
+Extracted document signals, correlation insights, and proposal evidence should be stored as validated structured state with provenance and auditability.

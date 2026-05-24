@@ -56,6 +56,36 @@ describe("phase 5 today contracts", () => {
     expect(item.source.type).toBe("workout_session");
   });
 
+  it("validates habit-linked checklist items with stable source refs", () => {
+    const item = todayChecklistItemSchema.parse({
+      id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+      label: "Morning hydration",
+      kind: "habit",
+      status: "pending",
+      required: true,
+      source: {
+        type: "habit",
+        id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      },
+    });
+
+    expect(item.source.type).toBe("habit");
+    expect(item.source.id).toBe("5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81");
+  });
+
+  it("rejects habit-linked items with invalid source ids", () => {
+    expect(() =>
+      todayChecklistItemSchema.parse({
+        id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+        label: "Morning hydration",
+        kind: "habit",
+        status: "pending",
+        required: true,
+        source: { type: "habit", id: "not-a-uuid" },
+      }),
+    ).toThrow();
+  });
+
   it("calculates adherence from required item completion only", () => {
     const adherence = calculateTodayAdherence([
       { status: "completed", required: true },

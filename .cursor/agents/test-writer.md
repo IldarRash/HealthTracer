@@ -1,6 +1,6 @@
 ---
 name: test-writer
-model: inherit
+model: composer-2.5[]
 is_background: true
 ---
 

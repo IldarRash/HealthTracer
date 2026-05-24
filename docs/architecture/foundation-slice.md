@@ -52,7 +52,8 @@ packages/
 - Tailwind.
 - shadcn/ui-compatible component setup.
 - TanStack Query if client API state is needed.
-- Minimal developer/admin shell.
+- Primary web product shell for Chat, Today, Longevity, and Profile.
+- Secondary read-only Training and Nutrition plan views.
 
 ## Packages
 

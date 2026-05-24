@@ -34,6 +34,9 @@ function createService(
       userId: string,
     ) => Promise<string[]>;
   } = {},
+  habitsService: {
+    getHabitTemplateReferenceErrors?: (payload: unknown) => Promise<string[]>;
+  } = {},
 ) {
   return new ProposalValidationService(
     {
@@ -44,6 +47,10 @@ function createService(
     {
       findInaccessibleExerciseIds: async () => [],
       ...exercisesService,
+    } as never,
+    {
+      getHabitTemplateReferenceErrors: async () => [],
+      ...habitsService,
     } as never,
   );
 }
@@ -488,6 +495,138 @@ describe("ProposalValidationService", () => {
       });
 
       expect(result.valid).toBe(true);
+    });
+  });
+
+  describe("habit plan proposals", () => {
+    const habitDefinitionId = "a1000001-0000-4000-8000-000000000001";
+
+    const habitPayload = {
+      habits: [
+        {
+          habitDefinitionId,
+          title: "Morning hydration",
+          category: "hydration",
+          status: "active",
+          schedule: { type: "daily" },
+          target: { type: "boolean" },
+          required: true,
+          displayOrder: 0,
+        },
+      ],
+    };
+
+    it("validates create_habit_plan payloads", () => {
+      const result = service.validateStoredProposal("create_habit_plan", habitPayload);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("validates adapt_habit_plan payloads", () => {
+      const result = service.validateStoredProposal("adapt_habit_plan", habitPayload);
+
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects habit proposals with invalid proposedChanges shape", () => {
+      const result = service.validateStoredProposal("create_habit_plan", {
+        habits: [{ title: "Missing fields" }],
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it("rejects habit proposals with more than twelve active habits", () => {
+      const habits = Array.from({ length: 13 }, (_, index) => ({
+        habitDefinitionId: `a1000001-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}`,
+        title: `Habit ${index}`,
+        category: "other",
+        status: "active",
+        schedule: { type: "daily" },
+        target: { type: "boolean" },
+        required: true,
+        displayOrder: index,
+      }));
+
+      const result = service.validateStoredProposal("create_habit_plan", { habits });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain("habits: At most 12 active habits are allowed.");
+    });
+  });
+
+  describe("habit template references", () => {
+    const hydrationTemplateId = "d1000001-0000-4000-8000-000000000001";
+
+    const habitPayload = {
+      habits: [
+        {
+          habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+          title: "Morning hydration",
+          category: "hydration",
+          status: "active",
+          schedule: { type: "daily" },
+          target: { type: "boolean" },
+          required: true,
+          linkedSource: "nutrition_hydration_target",
+          templateId: hydrationTemplateId,
+          displayOrder: 0,
+        },
+      ],
+    };
+
+    it("accepts proposals when template references resolve in the catalog", async () => {
+      const templateService = createService({}, {}, {
+        getHabitTemplateReferenceErrors: async () => [],
+      });
+
+      const errors = await templateService.validateHabitTemplateReferences(
+        "create_habit_plan",
+        habitPayload,
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects proposals with unknown template ids", async () => {
+      const unknownTemplateId = "d1000001-0000-4000-8000-000000000099";
+      const templateService = createService({}, {}, {
+        getHabitTemplateReferenceErrors: async () => [
+          `habits: "Morning hydration" templateId "${unknownTemplateId}" was not found in the active habit template catalog.`,
+        ],
+      });
+
+      const errors = await templateService.validateHabitTemplateReferences(
+        "create_habit_plan",
+        {
+          habits: [
+            {
+              ...habitPayload.habits[0],
+              templateId: unknownTemplateId,
+            },
+          ],
+        },
+      );
+
+      expect(errors[0]).toMatch(/templateId/);
+      expect(errors[0]).toMatch(/not found in the active habit template catalog/);
+    });
+
+    it("skips template validation for non-habit intents", async () => {
+      const templateService = createService({}, {}, {
+        getHabitTemplateReferenceErrors: async () => {
+          throw new Error("Should not be called.");
+        },
+      });
+
+      const errors = await templateService.validateHabitTemplateReferences(
+        "create_workout_plan",
+        habitPayload,
+      );
+
+      expect(errors).toEqual([]);
     });
   });
 });

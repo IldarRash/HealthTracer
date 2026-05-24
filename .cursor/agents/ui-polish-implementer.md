@@ -1,6 +1,6 @@
 ---
 name: ui-polish-implementer
-model: inherit
+model: composer-2.5[]
 is_background: true
 ---
 

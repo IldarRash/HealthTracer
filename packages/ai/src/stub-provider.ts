@@ -1,5 +1,12 @@
 import type { AiStructuredOutputInput } from "@health/types";
 import {
+  hasActiveHabitPlanInContext,
+  isHabitAdaptCue,
+  isHabitRelatedMessage,
+  stubAdaptHabitPlan,
+  stubCreateHabitPlan,
+} from "./stub-habit-plan.js";
+import {
   stubProgressAdaptedWorkoutPlan,
   stubReducedLoadWorkoutPlan,
   stubRemoveExerciseWorkoutPlan,
@@ -169,6 +176,48 @@ export class StubCoachAiProvider implements CoachAiProvider {
               mealStructure: [{ label: "Breakfast", timingHint: null }],
               notes: ["Prioritize whole foods and regular meal timing."],
             },
+          },
+        ],
+      });
+    }
+
+    if (isHabitRelatedMessage(normalized)) {
+      const hasActivePlan = hasActiveHabitPlanInContext(request.coachingContext);
+
+      if (isHabitAdaptCue(normalized)) {
+        return stubCoachOutput({
+          reply:
+            "I drafted an updated habit plan you can review first. Nothing changes until you accept the proposal.",
+          proposals: [
+            {
+              intent: "adapt_habit_plan",
+              targetDomain: "general",
+              title: "Adjust your daily habits",
+              reason: "This keeps your existing habit structure while applying the requested change.",
+              proposedChanges: stubAdaptHabitPlan(normalized, request.coachingContext),
+            },
+          ],
+        });
+      }
+
+      if (hasActivePlan) {
+        return stubCoachOutput({
+          reply:
+            "You already have an active habit plan. Ask me to adjust, pause, or remove specific habits if you want to change it.",
+          proposals: [],
+        });
+      }
+
+      return stubCoachOutput({
+        reply:
+          "I can suggest a starter daily habit plan you can review first. Nothing changes until you accept the proposal.",
+        proposals: [
+          {
+            intent: "create_habit_plan",
+            targetDomain: "general",
+            title: "Start a daily wellness habit plan",
+            reason: "Small repeatable habits can support hydration, movement, and recovery routines.",
+            proposedChanges: stubCreateHabitPlan,
           },
         ],
       });

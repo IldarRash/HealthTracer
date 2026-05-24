@@ -26,6 +26,7 @@ export type TodayChecklistItemStatus = z.infer<typeof todayChecklistItemStatusSc
 
 export const todayChecklistItemSourceTypeSchema = z.enum([
   "workout_session",
+  "habit",
   "ai_proposal",
   "custom",
   "generated",

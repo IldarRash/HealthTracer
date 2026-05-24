@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { DocumentsModule } from "../documents/documents.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
 import { HealthMetricsModule } from "../health-metrics/health-metrics.module.js";
+import { HabitsModule } from "../habits/habits.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { ProgressModule } from "../progress/progress.module.js";
 import { ProfilesModule } from "../profiles/profiles.module.js";
@@ -16,6 +17,7 @@ import { CoachingContextService } from "./coaching-context.service.js";
     GoalsModule,
     WorkoutsModule,
     NutritionModule,
+    HabitsModule,
     ProgressModule,
     DocumentsModule,
     HealthMetricsModule,

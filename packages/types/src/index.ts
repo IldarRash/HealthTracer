@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
+import { habitPlanPayloadSchema } from "./habits.js";
 import { todayChecklistPayloadSchema } from "./today.js";
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
@@ -238,6 +239,8 @@ export const proposalIntentSchema = z.enum([
   "recommend_recipes",
   "create_today_checklist",
   "summarize_progress",
+  "create_habit_plan",
+  "adapt_habit_plan",
 ]);
 
 export type ProposalIntent = z.infer<typeof proposalIntentSchema>;
@@ -708,6 +711,9 @@ export function getProposedChangesSchemaForIntent(
       return recipeRecommendationProposalPayloadSchema;
     case "create_today_checklist":
       return todayChecklistPayloadSchema;
+    case "create_habit_plan":
+    case "adapt_habit_plan":
+      return habitPlanPayloadSchema;
     case "summarize_progress":
       return emptyProposalChangesSchema;
     default: {
@@ -742,6 +748,7 @@ export const proposalChangesSchema = z.union([
   nutritionPlanPayloadSchema,
   recipeRecommendationProposalPayloadSchema,
   todayChecklistPayloadSchema,
+  habitPlanPayloadSchema,
   createGoalProposalChangesSchema,
   updateGoalProposalChangesSchema,
   profileProposalChangesSchema,
@@ -817,6 +824,18 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
     proposedChanges: todayChecklistPayloadSchema,
   }),
   z.object({
+    intent: z.literal("create_habit_plan"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: habitPlanPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("adapt_habit_plan"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: habitPlanPayloadSchema,
+  }),
+  z.object({
     intent: z.literal("summarize_progress"),
     targetDomain: proposalTargetDomainSchema,
     ...proposalTitleReasonFields,
@@ -879,6 +898,82 @@ export const chatTurnResponseSchema = z.object({
 
 export type ChatTurnResponse = z.infer<typeof chatTurnResponseSchema>;
 
+export {
+  activeHabitPlanResponseSchema,
+  buildAdherenceWindowDates,
+  collectHabitTemplateReferences,
+  computeHabitAdherenceSummary,
+  createEmptyHabitAdherenceResponse,
+  filterScheduledHabitDefinitions,
+  formatIsoDateInTimezone,
+  getHabitPlanDomainErrors,
+  getHabitTemplateUsageErrors,
+  getTodayIsoDateInTimezone,
+  habitAdherenceCountsSchema,
+  habitAdherenceHabitSummarySchema,
+  habitAdherencePlanSummarySchema,
+  habitAdherenceQuerySchema,
+  habitAdherenceResponseSchema,
+  habitAdherenceWindowSchema,
+  habitHasTemplateReference,
+  habitScheduleMatchesDate,
+  resolveHabitAdherenceOutcome,
+  resolveIsoDateDayOfWeek,
+  shiftIsoDate,
+  summarizeHabitAdherenceForCoaching,
+  summarizeHabitPlanForCoaching,
+  habitBooleanTargetSchema,
+  habitCategorySchema,
+  habitCompletionSchema,
+  habitCompletionStatusSchema,
+  habitCountTargetSchema,
+  habitDefinitionSchema,
+  habitDefinitionStatusSchema,
+  habitDurationTargetSchema,
+  habitLinkedSourceSchema,
+  habitNumericTargetSchema,
+  habitPlanPayloadSchema,
+  habitPlanRevisionSchema,
+  habitPlanRevisionsResponseSchema,
+  habitPlanSchema,
+  habitPlanStatusSchema,
+  habitScheduleSchema,
+  habitTargetSchema,
+  habitTemplateListResponseSchema,
+  habitTemplateSchema,
+  habitTemplateStatusSchema,
+  habitTemplateTargetConstraintsSchema,
+  habitTimeOfDayHintSchema,
+  type ActiveHabitPlanResponse,
+  type HabitAdherenceCoachingSummary,
+  type HabitAdherenceCounts,
+  type HabitAdherenceHabitSummary,
+  type HabitAdherenceOutcome,
+  type HabitAdherencePlanSummary,
+  type HabitAdherenceQuery,
+  type HabitAdherenceResponse,
+  type HabitAdherenceWindow,
+  type HabitCategory,
+  type HabitCompletion,
+  type HabitCompletionStatus,
+  type HabitDefinition,
+  type HabitDefinitionStatus,
+  type HabitLinkedSource,
+  type HabitPlanCoachingHabitSummary,
+  type HabitPlanCoachingSummary,
+  type HabitPlan,
+  type HabitPlanPayload,
+  type HabitPlanRevision,
+  type HabitPlanRevisionsResponse,
+  type HabitPlanStatus,
+  type HabitSchedule,
+  type HabitTarget,
+  type HabitTemplate,
+  type HabitTemplateListResponse,
+  type HabitTemplateStatus,
+  type HabitTemplateTargetConstraints,
+  type HabitTimeOfDayHint,
+} from "./habits.js";
 export * from "./device-metrics.js";
 export * from "./documents.js";
 export * from "./exercises.js";

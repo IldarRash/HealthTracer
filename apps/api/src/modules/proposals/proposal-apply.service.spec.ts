@@ -53,6 +53,23 @@ const todayPayload = {
   items: [{ label: "Drink water", kind: "hydration" as const, completed: false }],
 };
 
+const habitDefinitionId = "a1000001-0000-4000-8000-000000000001";
+
+const habitPayload = {
+  habits: [
+    {
+      habitDefinitionId,
+      title: "Morning hydration",
+      category: "hydration" as const,
+      status: "active" as const,
+      schedule: { type: "daily" as const },
+      target: { type: "boolean" as const },
+      required: true,
+      displayOrder: 0,
+    },
+  ],
+};
+
 describe("ProposalApplyService", () => {
   it("routes accepted adapt_workout_plan proposals through the workouts service", async () => {
     let workoutsCalled = false;
@@ -73,6 +90,7 @@ describe("ProposalApplyService", () => {
           return "workout_revision:rev-adapt-1";
         },
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -107,6 +125,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -132,6 +151,7 @@ describe("ProposalApplyService", () => {
           return "workout_revision:rev-progress";
         },
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -168,6 +188,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -181,10 +202,87 @@ describe("ProposalApplyService", () => {
     expect(nutritionCalled).toBe(true);
   });
 
+  it("routes accepted create_habit_plan proposals through the habits service", async () => {
+    let habitsCalled = false;
+    let capturedIntent: string | undefined;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyHabitPlanProposal: async (
+          _userId: string,
+          _payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          habitsCalled = true;
+          capturedIntent = intent;
+          return "habit_revision:rev-create-1";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "create_habit_plan",
+      targetDomain: "general",
+      proposedChanges: habitPayload,
+    });
+
+    expect(reference).toBe("habit_revision:rev-create-1");
+    expect(habitsCalled).toBe(true);
+    expect(capturedIntent).toBe("create_habit_plan");
+  });
+
+  it("routes accepted adapt_habit_plan proposals through the habits service", async () => {
+    let habitsCalled = false;
+    let capturedIntent: string | undefined;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyHabitPlanProposal: async (
+          _userId: string,
+          _payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          habitsCalled = true;
+          capturedIntent = intent;
+          return "habit_revision:rev-adapt-1";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adapt_habit_plan",
+      targetDomain: "general",
+      proposedChanges: habitPayload,
+    });
+
+    expect(reference).toBe("habit_revision:rev-adapt-1");
+    expect(habitsCalled).toBe(true);
+    expect(capturedIntent).toBe("adapt_habit_plan");
+  });
+
   it("routes accepted recipe proposals through the recipes service", async () => {
     let recipesCalled = false;
 
     const service = new ProposalApplyService(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -227,6 +325,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       {
         applyTodayChecklistProposal: async () => {
           todayCalled = true;
@@ -253,6 +352,7 @@ describe("ProposalApplyService", () => {
     let capturedInput: { weekStart?: string; refresh: boolean } | undefined;
 
     const service = new ProposalApplyService(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -300,6 +400,7 @@ describe("ProposalApplyService", () => {
 
   it("throws for unsupported proposal intents", async () => {
     const service = new ProposalApplyService(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

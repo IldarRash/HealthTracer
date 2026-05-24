@@ -1,4 +1,5 @@
 import type {
+  HabitDefinition,
   TodayChecklistItem,
   TodayChecklistItemStatus,
   TodayChecklistProposalItem,
@@ -47,6 +48,24 @@ export function mapItemStatusToWorkoutStatus(
 
 export function isWorkoutLinkedItem(item: TodayChecklistItem): boolean {
   return item.source.type === "workout_session" && Boolean(item.source.id);
+}
+
+export function isHabitLinkedItem(item: TodayChecklistItem): boolean {
+  return item.source.type === "habit" && Boolean(item.source.id);
+}
+
+export function createHabitChecklistItem(habit: HabitDefinition): TodayChecklistItem {
+  return {
+    id: crypto.randomUUID(),
+    label: habit.title,
+    kind: "habit",
+    status: "pending",
+    required: habit.required,
+    source: {
+      type: "habit",
+      id: habit.habitDefinitionId,
+    },
+  };
 }
 
 export function createWorkoutChecklistItem(session: WorkoutSessionSummary): TodayChecklistItem {
@@ -118,6 +137,70 @@ export function syncTodayChecklistWorkoutItems(
   );
 }
 
+export function pruneStaleHabitChecklistItems(
+  items: TodayChecklistItem[],
+  retainedHabitDefinitionIds: ReadonlySet<string>,
+): TodayChecklistItem[] {
+  return items.filter((item) => {
+    if (item.source.type !== "habit" || !item.source.id) {
+      return true;
+    }
+
+    return retainedHabitDefinitionIds.has(item.source.id);
+  });
+}
+
+export function syncTodayChecklistHabitItems(
+  items: TodayChecklistItem[],
+  scheduledHabits: HabitDefinition[],
+): TodayChecklistItem[] {
+  const retainedHabitDefinitionIds = new Set(
+    scheduledHabits.map((habit) => habit.habitDefinitionId),
+  );
+
+  return mergeHabitDefinitionsIntoItems(
+    pruneStaleHabitChecklistItems(items, retainedHabitDefinitionIds),
+    scheduledHabits,
+  );
+}
+
+export function mergeHabitDefinitionsIntoItems(
+  items: TodayChecklistItem[],
+  scheduledHabits: HabitDefinition[],
+): TodayChecklistItem[] {
+  const merged = [...items];
+
+  for (const habit of scheduledHabits) {
+    const existingIndex = merged.findIndex(
+      (item) => item.source.type === "habit" && item.source.id === habit.habitDefinitionId,
+    );
+
+    if (existingIndex === -1) {
+      merged.push(createHabitChecklistItem(habit));
+      continue;
+    }
+
+    merged[existingIndex] = syncHabitLinkedItem(merged[existingIndex]!, habit);
+  }
+
+  return merged;
+}
+
+export function syncHabitLinkedItem(
+  item: TodayChecklistItem,
+  habit: HabitDefinition,
+): TodayChecklistItem {
+  if (!isHabitLinkedItem(item)) {
+    return item;
+  }
+
+  return {
+    ...item,
+    label: habit.title,
+    required: habit.required,
+  };
+}
+
 export function mergeWorkoutSessionsIntoItems(
   items: TodayChecklistItem[],
   sessions: WorkoutSessionSummary[],
@@ -161,7 +244,10 @@ export function mergeProposalItemsWithExisting(
   proposalItems: TodayChecklistItem[],
 ): TodayChecklistItem[] {
   const preservedItems = existingItems.filter(
-    (item) => item.source.type === "workout_session" || item.source.type === "generated",
+    (item) =>
+      item.source.type === "workout_session" ||
+      item.source.type === "generated" ||
+      item.source.type === "habit",
   );
 
   return [...preservedItems, ...proposalItems];
@@ -202,6 +288,19 @@ export function findWorkoutSessionIdForItem(
   const item = items.find((entry) => entry.id === itemId);
 
   if (!item || item.source.type !== "workout_session" || !item.source.id) {
+    return null;
+  }
+
+  return item.source.id;
+}
+
+export function findHabitDefinitionIdForItem(
+  items: TodayChecklistItem[],
+  itemId: string,
+): string | null {
+  const item = items.find((entry) => entry.id === itemId);
+
+  if (!item || item.source.type !== "habit" || !item.source.id) {
     return null;
   }
 

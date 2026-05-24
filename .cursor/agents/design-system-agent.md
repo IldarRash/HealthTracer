@@ -1,6 +1,6 @@
 ---
 name: design-system-agent
-model: inherit
+model: gpt-5.3-codex[]
 is_background: true
 ---
 

@@ -4,6 +4,7 @@ import {
   adaptWorkoutPlanFromProgressChangesSchema,
   createGoalProposalChangesSchema,
   generateWeeklyProgressSummarySchema,
+  habitPlanPayloadSchema,
   nutritionPlanPayloadSchema,
   profileProposalChangesSchema,
   recipeRecommendationProposalPayloadSchema,
@@ -13,6 +14,7 @@ import {
 } from "@health/types";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { GoalsService } from "../goals/goals.service.js";
+import { HabitsService } from "../habits/habits.service.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
 import { ProfilesService } from "../profiles/profiles.service.js";
 import { ProgressService } from "../progress/progress.service.js";
@@ -27,6 +29,7 @@ export class ProposalApplyService {
     private readonly goalsService: GoalsService,
     private readonly workoutsService: WorkoutsService,
     private readonly nutritionService: NutritionService,
+    private readonly habitsService: HabitsService,
     private readonly recipesService: RecipesService,
     private readonly todayService: TodayService,
     private readonly progressService: ProgressService,
@@ -88,6 +91,17 @@ export class ProposalApplyService {
         const payload = nutritionPlanPayloadSchema.parse(proposal.proposedChanges);
 
         return this.nutritionService.applyNutritionPlanProposal(
+          userId,
+          payload,
+          proposal.reason,
+          proposal.intent,
+        );
+      }
+      case "create_habit_plan":
+      case "adapt_habit_plan": {
+        const payload = habitPlanPayloadSchema.parse(proposal.proposedChanges);
+
+        return this.habitsService.applyHabitPlanProposal(
           userId,
           payload,
           proposal.reason,

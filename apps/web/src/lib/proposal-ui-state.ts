@@ -4,6 +4,10 @@ export function getProposalIntentLabel(intent: ProposalIntent): string | null {
   switch (intent) {
     case "adapt_workout_plan_from_progress":
       return "Progress-based workout adaptation";
+    case "create_habit_plan":
+      return "New daily habit plan";
+    case "adapt_habit_plan":
+      return "Habit plan adjustment";
     default:
       return null;
   }

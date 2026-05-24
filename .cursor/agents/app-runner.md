@@ -1,6 +1,6 @@
 ---
 name: app-runner
-model: inherit
+model: composer-2.5[]
 is_background: true
 ---
 

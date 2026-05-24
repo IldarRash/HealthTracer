@@ -30,6 +30,19 @@ flowchart TD
   database --> clients["Mobile and web clients"]
 ```
 
+## Product Surface Architecture
+
+The web product is the primary product surface for the current planning direction. It uses a small, user-facing information architecture:
+
+- `Chat` — dominant coaching conversation and proposal approval surface.
+- `Today` — daily execution surface for today's workout, nutrition, stress/recovery check-in, mental wellbeing checkpoints, habits, and feedback.
+- `Longevity` — weekly overview for consistency, cross-domain trends, goals, recovery/wellbeing context, and safe coach prompts.
+- `Profile` — account, onboarding, personal context, goal hierarchy, documents, consent, and settings.
+
+Training and Nutrition remain routeable secondary views, but they are read-only weekly plan views rather than primary tabs. Users change workout and nutrition plans through Chat proposals, user approval, backend validation, and revision-safe state updates.
+
+See `docs/architecture/product-surface-architecture.md` for the complete surface model.
+
 ## Backend
 
 - NestJS modular monolith.
@@ -56,6 +69,6 @@ flowchart TD
 
 ## Clients
 
-- Mobile is the primary user experience.
-- Web starts as a lightweight surface for debugging, admin, or future desktop flows.
+- Web is the primary product experience for the current build direction.
+- Mobile remains in the monorepo and should follow the same product surface hierarchy when brought to parity.
 - TanStack Query should be used for API state on both web and mobile.

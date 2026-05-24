@@ -1,0 +1,77 @@
+-- Curated starter habit templates for safe AI proposals and local verification.
+INSERT INTO habit_templates (
+  id,
+  slug,
+  title,
+  category,
+  default_target,
+  target_constraints,
+  default_schedule,
+  linked_source_hint,
+  default_required,
+  default_time_of_day_hint,
+  coaching_note_default,
+  source,
+  status
+) VALUES
+(
+  'd1000001-0000-4000-8000-000000000001',
+  'daily-hydration',
+  'Daily hydration',
+  'hydration',
+  '{"type":"boolean"}',
+  '{"allowedTargetTypes":["boolean"]}',
+  '{"type":"daily"}',
+  'nutrition_hydration_target',
+  true,
+  'morning',
+  'Start the day with a glass of water to build consistency.',
+  'health_tracer_seed',
+  'active'
+),
+(
+  'd1000001-0000-4000-8000-000000000002',
+  'daily-walk',
+  'Daily walk',
+  'movement',
+  '{"type":"duration_minutes","value":20}',
+  '{"allowedTargetTypes":["duration_minutes"],"durationMinutesMin":10,"durationMinutesMax":45}',
+  '{"type":"daily"}',
+  'workout_movement_context',
+  true,
+  'anytime',
+  'A short walk supports overall movement without replacing workouts.',
+  'health_tracer_seed',
+  'active'
+),
+(
+  'd1000001-0000-4000-8000-000000000003',
+  'mobility-break',
+  'Mobility break',
+  'mobility',
+  '{"type":"duration_minutes","value":10}',
+  '{"allowedTargetTypes":["duration_minutes"],"durationMinutesMin":5,"durationMinutesMax":20}',
+  '{"type":"daily"}',
+  NULL,
+  false,
+  'anytime',
+  'A brief mobility break can support recovery and daily comfort.',
+  'health_tracer_seed',
+  'active'
+),
+(
+  'd1000001-0000-4000-8000-000000000004',
+  'breathing-practice',
+  'Breathing practice',
+  'mindfulness',
+  '{"type":"duration_minutes","value":5}',
+  '{"allowedTargetTypes":["duration_minutes"],"durationMinutesMin":3,"durationMinutesMax":15}',
+  '{"type":"daily"}',
+  NULL,
+  false,
+  'evening',
+  'A brief breathing practice can support wind-down routines.',
+  'health_tracer_seed',
+  'active'
+)
+ON CONFLICT (id) DO NOTHING;

@@ -2,8 +2,10 @@ import {
   adaptWorkoutPlanFromProgressChangesSchema,
   collectWorkoutPlanExerciseIds,
   createGoalProposalChangesSchema,
+  getHabitPlanDomainErrors,
   getNutritionPlanDomainErrors,
   getWorkoutProposalDomainErrors,
+  habitPlanPayloadSchema,
   nutritionPlanPayloadSchema,
   profileProposalChangesSchema,
   rawAiProposalSchema,
@@ -13,6 +15,7 @@ import {
   updateGoalProposalChangesSchema,
   workoutPlanProposalChangesSchema,
   type AdaptWorkoutPlanFromProgressChanges,
+  type HabitPlanPayload,
   type NutritionPlanPayload,
   type ProposalIntent,
   type RawAiProposal,
@@ -21,6 +24,7 @@ import {
 import { Injectable } from "@nestjs/common";
 import type { z } from "zod";
 import { ExercisesService } from "../exercises/exercises.service.js";
+import { HabitsService } from "../habits/habits.service.js";
 import { ProgressRepository } from "../progress/progress.repository.js";
 
 export interface ProposalValidationResult {
@@ -33,6 +37,7 @@ export class ProposalValidationService {
   constructor(
     private readonly progressRepository: ProgressRepository,
     private readonly exercisesService: ExercisesService,
+    private readonly habitsService: HabitsService,
   ) {}
 
   validateRawProposal(proposal: RawAiProposal): ProposalValidationResult {
@@ -106,6 +111,14 @@ export class ProposalValidationService {
       }
     }
 
+    if (intent === "create_habit_plan" || intent === "adapt_habit_plan") {
+      const domainErrors = getHabitPlanDomainErrors(result.data as HabitPlanPayload);
+
+      if (domainErrors.length > 0) {
+        return { valid: false, errors: domainErrors };
+      }
+    }
+
     return { valid: true, errors: [] };
   }
 
@@ -149,6 +162,23 @@ export class ProposalValidationService {
       (exerciseId) =>
         `proposedChanges: exerciseId "${exerciseId}" was not found in the visible exercise catalog.`,
     );
+  }
+
+  async validateHabitTemplateReferences(
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "create_habit_plan" && intent !== "adapt_habit_plan") {
+      return [];
+    }
+
+    const parsed = habitPlanPayloadSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    return this.habitsService.getHabitTemplateReferenceErrors(parsed.data);
   }
 
   private async getProgressProvenanceErrors(
@@ -238,6 +268,9 @@ function getChangesSchemaForIntent(
       return recipeRecommendationProposalPayloadSchema;
     case "create_today_checklist":
       return todayChecklistPayloadSchema;
+    case "create_habit_plan":
+    case "adapt_habit_plan":
+      return habitPlanPayloadSchema;
     case "summarize_progress":
       return null;
     default:

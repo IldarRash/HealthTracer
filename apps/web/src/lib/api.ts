@@ -1,4 +1,5 @@
 import {
+  activeHabitPlanResponseSchema,
   activeNutritionPlanResponseSchema,
   activeWorkoutPlanResponseSchema,
   aiMetricsContextSummarySchema,
@@ -16,6 +17,9 @@ import {
   healthMetricSnapshotSchema,
   goalSchema,
   generateRecipeRecommendationsResponseSchema,
+  habitAdherenceQuerySchema,
+  habitAdherenceResponseSchema,
+  habitPlanRevisionsResponseSchema,
   nutritionAdherenceResponseSchema,
   nutritionPlanRevisionSchema,
   proposalDecisionSchema,
@@ -32,6 +36,7 @@ import {
   userRecipeRecommendationSchema,
   workoutPlanRevisionSchema,
   workoutSessionSchema,
+  type ActiveHabitPlanResponse,
   type ActiveNutritionPlanResponse,
   type ActiveWorkoutPlanResponse,
   type AiMetricsContextSummary,
@@ -46,6 +51,9 @@ import {
   type GenerateRecipeRecommendationsResponse,
   type GrantDeviceConsentInput,
   type Goal,
+  type HabitAdherenceResponse,
+  type HabitAdherenceWindow,
+  type HabitPlanRevision,
   type HealthMetricAggregate,
   type HealthMetricSnapshot,
   type ListHealthMetricAggregatesQuery,
@@ -125,6 +133,10 @@ export const apiQueryKeys = {
   workoutRevisions: ["workout-revisions"],
   nutritionActive: ["nutrition-active"],
   nutritionRevisions: ["nutrition-revisions"],
+  habitActive: ["habit-active"],
+  habitRevisions: ["habit-revisions"],
+  habitAdherence: (window: HabitAdherenceWindow = 7) => ["habit-adherence", window] as const,
+  habitAdherencePrefix: ["habit-adherence"] as const,
   nutritionAdherenceToday: ["nutrition-adherence-today"],
   nutritionAdherence: (date: string) => ["nutrition-adherence", date] as const,
   nutritionAdherencePrefix: ["nutrition-adherence"] as const,
@@ -293,13 +305,29 @@ export function getAcceptedProposalRefreshQueryKeys(
         apiQueryKeys.todayHistoryPrefix,
       ];
     case "general":
-      return proposal.intent === "summarize_progress"
-        ? [
-            ...commonKeys,
-            apiQueryKeys.progressWeeklyLatest,
-            apiQueryKeys.progressWeeklyCurrent,
-          ]
-        : commonKeys;
+      if (proposal.intent === "summarize_progress") {
+        return [
+          ...commonKeys,
+          apiQueryKeys.progressWeeklyLatest,
+          apiQueryKeys.progressWeeklyCurrent,
+        ];
+      }
+
+      if (
+        proposal.intent === "create_habit_plan" ||
+        proposal.intent === "adapt_habit_plan"
+      ) {
+        return [
+          ...commonKeys,
+          apiQueryKeys.habitActive,
+          apiQueryKeys.habitRevisions,
+          apiQueryKeys.habitAdherencePrefix,
+          apiQueryKeys.todayDayPrefix,
+          apiQueryKeys.todayHistoryPrefix,
+        ];
+      }
+
+      return commonKeys;
   }
 }
 
@@ -371,6 +399,7 @@ export function getWorkoutExecutionRefreshQueryKeys(): ReadonlyArray<readonly un
   return [
     apiQueryKeys.todayDayPrefix,
     apiQueryKeys.todayHistoryPrefix,
+    apiQueryKeys.habitAdherencePrefix,
     apiQueryKeys.workoutActive,
     apiQueryKeys.progressWeeklyLatest,
     apiQueryKeys.progressWeeklyCurrent,
@@ -387,6 +416,44 @@ export async function listNutritionRevisions(
   token: string,
 ): Promise<ApiResult<NutritionPlanRevision[]>> {
   return apiFetch("/nutrition/revisions", token, nutritionPlanRevisionSchema.array());
+}
+
+export async function getActiveHabitPlan(
+  token: string,
+): Promise<ApiResult<ActiveHabitPlanResponse>> {
+  return apiFetch("/habits/plan", token, activeHabitPlanResponseSchema);
+}
+
+export async function listHabitRevisions(
+  token: string,
+): Promise<ApiResult<HabitPlanRevision[]>> {
+  const result = await apiFetch(
+    "/habits/plan/revisions",
+    token,
+    habitPlanRevisionsResponseSchema,
+  );
+
+  if (result.error) {
+    return { error: result.error };
+  }
+
+  return { data: result.data?.revisions ?? [] };
+}
+
+export function buildHabitAdherenceQueryString(window: HabitAdherenceWindow): string {
+  const parsed = habitAdherenceQuerySchema.parse({ window });
+  return `?window=${parsed.window}`;
+}
+
+export async function getHabitAdherence(
+  token: string,
+  window: HabitAdherenceWindow = 7,
+): Promise<ApiResult<HabitAdherenceResponse>> {
+  return apiFetch(
+    `/habits/adherence${buildHabitAdherenceQueryString(window)}`,
+    token,
+    habitAdherenceResponseSchema,
+  );
 }
 
 export function buildRecipeListQueryString(query: RecipeListQuery = {}): string {
