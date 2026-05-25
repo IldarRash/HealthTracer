@@ -42,6 +42,64 @@ export const agentIntentSchema = z.enum([
 
 export type AgentIntent = z.infer<typeof agentIntentSchema>;
 
+export const MAX_CONTEXT_SLICES = 3 as const;
+
+export const RULE_ROUTE_CONFIDENCE_THRESHOLD = 0.75 as const;
+
+export const expectedResponseModeSchema = z.enum([
+  "advice_only",
+  "recommendation_with_optional_proposal",
+  "clarification_question",
+]);
+
+export type ExpectedResponseMode = z.infer<typeof expectedResponseModeSchema>;
+
+export const agentSafetyFlagSchema = z.enum([
+  "fatigue",
+  "pain",
+  "sleep_issue",
+  "stress",
+  "hunger",
+  "schedule_conflict",
+  "health_context",
+]);
+
+export type AgentSafetyFlag = z.infer<typeof agentSafetyFlagSchema>;
+
+export const contextSliceRequestSchema = z.object({
+  type: contextSlicePurposeSchema,
+  depth: contextDepthSchema.optional(),
+  timeRange: contextTimeRangeSchema.optional(),
+  includeDocuments: z.boolean().optional(),
+});
+
+export type ContextSliceRequest = z.infer<typeof contextSliceRequestSchema>;
+
+export const llmIntentRouterOutputSchema = z
+  .object({
+    intent: agentIntentSchema,
+    confidence: z.number().min(0).max(1),
+    routingMethod: z.literal("llm_router"),
+    requiredContextSlices: z.array(contextSliceRequestSchema).min(1).max(MAX_CONTEXT_SLICES),
+    safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
+    expectedResponseMode: expectedResponseModeSchema,
+  })
+  .strict();
+
+export type LlmIntentRouterOutput = z.infer<typeof llmIntentRouterOutputSchema>;
+export type LlmIntentRouterOutputInput = z.input<typeof llmIntentRouterOutputSchema>;
+
+export const agentRoutingMetadataSchema = z.object({
+  confidence: z.number().min(0).max(1),
+  routingMethod: z.enum(["rule_based", "llm_router"]),
+  llmRouterInvoked: z.boolean(),
+  safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
+  expectedResponseMode: expectedResponseModeSchema,
+  contextSliceCount: z.number().int().min(1).max(MAX_CONTEXT_SLICES),
+});
+
+export type AgentRoutingMetadata = z.infer<typeof agentRoutingMetadataSchema>;
+
 export const getUserContextSliceInputSchema = z.object({
   purpose: contextSlicePurposeSchema,
   depth: contextDepthSchema.optional(),
@@ -248,8 +306,11 @@ export const agentContextPacketSchema = z
     intent: agentIntentSchema,
     generatedAt: isoDateTimeSchema,
     slice: userContextSliceSchema,
+    supplementarySlices: z.array(userContextSliceSchema).max(MAX_CONTEXT_SLICES - 1).default([]),
+    missingContextNotes: z.array(z.string().min(1).max(240)).max(5).default([]),
     safetyConstraints: z.array(z.string().min(1).max(240)).max(15),
     sourceRefs: z.array(contextSourceRefSchema).max(20).default([]),
+    routing: agentRoutingMetadataSchema.optional(),
   })
   .superRefine((packet, ctx) => {
     if (packet.slice.purpose !== packet.purpose) {
@@ -265,11 +326,16 @@ export type AgentContextPacket = z.infer<typeof agentContextPacketSchema>;
 
 export const intentRouteResultSchema = z.object({
   intent: agentIntentSchema,
+  confidence: z.number().min(0).max(1),
+  isConfident: z.boolean(),
   purpose: contextSlicePurposeSchema,
   depth: contextDepthSchema,
   timeRange: contextTimeRangeSchema,
   includeDocuments: z.boolean(),
-  routingMethod: z.literal("rule_based"),
+  routingMethod: z.enum(["rule_based", "llm_router"]),
+  requiredContextSlices: z.array(contextSliceRequestSchema).min(1).max(MAX_CONTEXT_SLICES),
+  safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
+  expectedResponseMode: expectedResponseModeSchema,
 });
 
 export type IntentRouteResult = z.infer<typeof intentRouteResultSchema>;
@@ -354,6 +420,8 @@ export const agentTurnMetadataSchema = z.object({
   toolsInvoked: z.array(agentToolNameSchema).max(5).default([]),
   safety: agentSafetyMetadataSchema,
   citations: z.array(agentCitationSchema).max(10).default([]),
+  routing: agentRoutingMetadataSchema.optional(),
+  missingContextNotes: z.array(z.string().min(1).max(240)).max(5).default([]),
 });
 
 export type AgentTurnMetadata = z.infer<typeof agentTurnMetadataSchema>;
@@ -416,4 +484,128 @@ export function resolveDefaultTimeRangeForPurpose(
 
 export function shouldIncludeDocumentsForPurpose(purpose: ContextSlicePurpose): boolean {
   return purpose === "health_context";
+}
+
+export function resolveDefaultExpectedResponseMode(
+  intent: AgentIntent,
+): ExpectedResponseMode {
+  switch (intent) {
+    case "general":
+      return "advice_only";
+    case "ask_health_context":
+      return "recommendation_with_optional_proposal";
+    default:
+      return "recommendation_with_optional_proposal";
+  }
+}
+
+export function normalizeContextSlicePlan(
+  requests: ReadonlyArray<ContextSliceRequest>,
+): ContextSliceRequest[] {
+  const normalized: ContextSliceRequest[] = [];
+  const seen = new Set<ContextSlicePurpose>();
+
+  for (const request of requests) {
+    if (seen.has(request.type)) {
+      continue;
+    }
+
+    seen.add(request.type);
+    normalized.push({
+      type: request.type,
+      depth: request.depth ?? resolveDefaultDepthForPurpose(request.type),
+      timeRange: request.timeRange ?? resolveDefaultTimeRangeForPurpose(request.type),
+      includeDocuments:
+        request.includeDocuments ?? shouldIncludeDocumentsForPurpose(request.type),
+    });
+
+    if (normalized.length >= MAX_CONTEXT_SLICES) {
+      break;
+    }
+  }
+
+  if (normalized.length === 0) {
+    normalized.push({
+      type: "general_chat",
+      depth: resolveDefaultDepthForPurpose("general_chat"),
+      timeRange: resolveDefaultTimeRangeForPurpose("general_chat"),
+      includeDocuments: false,
+    });
+  }
+
+  return normalized;
+}
+
+export function buildContextSliceRequestForIntent(
+  intent: AgentIntent,
+  options?: {
+    depth?: ContextDepth;
+    timeRange?: ContextTimeRange;
+    includeDocuments?: boolean;
+  },
+): ContextSliceRequest {
+  const purpose = INTENT_TO_SLICE_PURPOSE[intent];
+
+  return {
+    type: purpose,
+    depth: options?.depth ?? resolveDefaultDepthForPurpose(purpose),
+    timeRange: options?.timeRange ?? resolveDefaultTimeRangeForPurpose(purpose),
+    includeDocuments: options?.includeDocuments ?? shouldIncludeDocumentsForPurpose(purpose),
+  };
+}
+
+export function mergeLlmRouterOutputIntoRoute(
+  route: IntentRouteResult,
+  llmOutput: LlmIntentRouterOutput,
+): IntentRouteResult {
+  const slicePlan = normalizeContextSlicePlan(llmOutput.requiredContextSlices);
+  const primary = slicePlan[0]!;
+
+  return {
+    intent: llmOutput.intent,
+    confidence: llmOutput.confidence,
+    isConfident: llmOutput.confidence >= RULE_ROUTE_CONFIDENCE_THRESHOLD,
+    purpose: primary.type,
+    depth: primary.depth ?? resolveDefaultDepthForPurpose(primary.type),
+    timeRange: primary.timeRange ?? resolveDefaultTimeRangeForPurpose(primary.type),
+    includeDocuments: primary.includeDocuments ?? shouldIncludeDocumentsForPurpose(primary.type),
+    routingMethod: "llm_router",
+    requiredContextSlices: slicePlan,
+    safetyFlags: llmOutput.safetyFlags,
+    expectedResponseMode: llmOutput.expectedResponseMode,
+  };
+}
+
+const LLM_ROUTER_FORBIDDEN_KEYS = [
+  "reply",
+  "advice",
+  "recommendation",
+  "answer",
+  "response",
+  "proposals",
+  "proposal",
+  "userMessage",
+  "coachingText",
+] as const;
+
+export function validateLlmRouterOutputShape(value: unknown): string[] {
+  if (!value || typeof value !== "object") {
+    return ["LLM router output must be an object."];
+  }
+
+  const errors: string[] = [];
+
+  for (const key of LLM_ROUTER_FORBIDDEN_KEYS) {
+    if (key in value) {
+      errors.push(`LLM router output must not include user-facing field "${key}".`);
+    }
+  }
+
+  const parsed = llmIntentRouterOutputSchema.safeParse(value);
+
+  if (!parsed.success) {
+    errors.push(...parsed.error.issues.map((issue) => issue.message));
+  }
+
+  return errors;
 }

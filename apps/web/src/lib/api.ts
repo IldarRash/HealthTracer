@@ -7,6 +7,7 @@ import {
   chatMessageSchema,
   chatThreadSchema,
   chatTurnResponseSchema,
+  sendChatMessageSchema,
   completeWorkoutSessionSchema,
   connectDeviceSchema,
   deviceConnectionSchema,
@@ -24,6 +25,7 @@ import {
   nutritionAdherenceResponseSchema,
   nutritionPlanRevisionSchema,
   proposalDecisionSchema,
+  proposalModifyResponseSchema,
   upsertNutritionAdherenceSchema,
   recipeListQuerySchema,
   recipeListResponseSchema,
@@ -43,8 +45,10 @@ import {
   type AiMetricsContextSummary,
   type AiProposal,
   type ChatMessage,
+  type ChatProposalRevision,
   type ChatThread,
   type ChatTurnResponse,
+  type SendChatMessageInput,
   type ConnectDeviceInput,
   type DeviceConnection,
   type DeviceConsent,
@@ -81,6 +85,7 @@ import {
   type WeeklyProgressSummaryResponse,
   type WeeklyReviewRequest,
   type WeeklyReviewResponse,
+  type ProposalModifyResponse,
   type WorkoutPlanRevision,
   type WorkoutSession,
   createHealthDocumentSchema,
@@ -296,14 +301,22 @@ export async function getChatThread(
   return apiFetch(`/chat/threads/${threadId}`, token, chatThreadDetailSchema);
 }
 
+export type SendChatMessageOptions = Pick<SendChatMessageInput, "proposalRevision">;
+
 export async function sendChatMessage(
   token: string,
   threadId: string,
   content: string,
+  options?: SendChatMessageOptions,
 ): Promise<ApiResult<ChatTurnResponse>> {
+  const body = sendChatMessageSchema.parse({
+    content,
+    ...(options?.proposalRevision ? { proposalRevision: options.proposalRevision } : {}),
+  });
+
   return apiFetch(`/chat/threads/${threadId}/messages`, token, chatTurnResponseSchema, {
     method: "POST",
-    body: { content },
+    body,
   });
 }
 
@@ -332,6 +345,26 @@ export async function decideProposal(
     method: "POST",
     body,
   });
+}
+
+export async function modifyProposal(
+  token: string,
+  proposalId: string,
+  modificationFeedback: string,
+): Promise<ApiResult<ProposalModifyResponse>> {
+  const body = proposalDecisionSchema.parse({
+    decision: "modify",
+    modificationFeedback,
+  });
+  return apiFetch(
+    `/proposals/${proposalId}/decision`,
+    token,
+    proposalModifyResponseSchema,
+    {
+      method: "POST",
+      body,
+    },
+  );
 }
 
 export function getHabitDependentRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {

@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vitest";
+import type { AgentSafetyFlag } from "./agent-context.js";
 import {
   agentContextPacketSchema,
   agentToolCallRequestSchema,
   agentToolCallResultSchema,
   agentTurnMetadataSchema,
   buildAgentContextRequestSchema,
+  buildContextSliceRequestForIntent,
   DEFAULT_AGENT_SAFETY_CONSTRAINTS,
   getUserContextSliceInputSchema,
   INTENT_TO_SLICE_PURPOSE,
+  llmIntentRouterOutputSchema,
+  MAX_CONTEXT_SLICES,
+  mergeLlmRouterOutputIntoRoute,
+  normalizeContextSlicePlan,
   resolveDefaultDepthForPurpose,
   resolveDefaultTimeRangeForPurpose,
   shouldIncludeDocumentsForPurpose,
   userContextSliceSchema,
+  validateLlmRouterOutputShape,
 } from "./agent-context.js";
 
 describe("agent context contracts", () => {
@@ -80,9 +87,106 @@ describe("agent context contracts", () => {
       safety: {
         status: "passed",
       },
+      routing: {
+        confidence: 0.42,
+        routingMethod: "llm_router",
+        llmRouterInvoked: true,
+        safetyFlags: ["fatigue"],
+        expectedResponseMode: "advice_only",
+        contextSliceCount: 1,
+      },
     });
 
     expect(metadata.toolsInvoked).toEqual([]);
+  });
+
+  it("normalizes router context slice plans to bounded defaults", () => {
+    const plan = normalizeContextSlicePlan([
+      { type: "workout_adaptation" },
+      { type: "daily_checkin", depth: "small", timeRange: "7d" },
+      { type: "workout_adaptation" },
+      { type: "weekly_review" },
+      { type: "nutrition_adaptation" },
+    ]);
+
+    expect(plan).toHaveLength(MAX_CONTEXT_SLICES);
+    expect(plan[0]?.type).toBe("workout_adaptation");
+    expect(plan[0]?.depth).toBe("medium");
+  });
+
+  it("validates llm router output and rejects user-facing advice fields", () => {
+    const valid = llmIntentRouterOutputSchema.parse({
+      intent: "adjust_workout",
+      confidence: 0.86,
+      routingMethod: "llm_router",
+      requiredContextSlices: [buildContextSliceRequestForIntent("adjust_workout")],
+      safetyFlags: ["fatigue"],
+      expectedResponseMode: "recommendation_with_optional_proposal",
+    });
+
+    expect(valid.routingMethod).toBe("llm_router");
+    expect(
+      validateLlmRouterOutputShape({
+        ...valid,
+        reply: "You should skip training today.",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/must not include user-facing field "reply"/),
+      ]),
+    );
+    expect(
+      validateLlmRouterOutputShape({
+        ...valid,
+        proposals: [{ intent: "adapt_workout_plan" }],
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/must not include user-facing field "proposals"/),
+      ]),
+    );
+    expect(
+      validateLlmRouterOutputShape({
+        ...valid,
+        advice: "Eat more protein tonight.",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/must not include user-facing field "advice"/),
+      ]),
+    );
+  });
+
+  it("merges llm router output into an uncertain rule route", () => {
+    const uncertainRoute = {
+      intent: "general" as const,
+      confidence: 0.4,
+      isConfident: false,
+      purpose: "general_chat" as const,
+      depth: "small" as const,
+      timeRange: "7d" as const,
+      includeDocuments: false,
+      routingMethod: "rule_based" as const,
+      requiredContextSlices: [buildContextSliceRequestForIntent("general")],
+      safetyFlags: [] as AgentSafetyFlag[],
+      expectedResponseMode: "advice_only" as const,
+    };
+
+    const merged = mergeLlmRouterOutputIntoRoute(uncertainRoute, {
+      intent: "adjust_nutrition",
+      confidence: 0.84,
+      routingMethod: "llm_router",
+      requiredContextSlices: [
+        buildContextSliceRequestForIntent("adjust_nutrition"),
+        { type: "weekly_review", depth: "medium", timeRange: "7d" },
+      ],
+      safetyFlags: ["hunger"],
+      expectedResponseMode: "recommendation_with_optional_proposal",
+    });
+
+    expect(merged.routingMethod).toBe("llm_router");
+    expect(merged.intent).toBe("adjust_nutrition");
+    expect(merged.requiredContextSlices).toHaveLength(2);
   });
 
   describe("invalid agent context payloads", () => {

@@ -152,12 +152,14 @@ describe("Chat polish copy and labels", () => {
     expect(inlineProposalSource).toContain("getProposalNavigationRoute");
   });
 
-  it("exposes accept and decline affordances with decision accessibility", () => {
-    expect(inlineProposalSource).toContain('"Accept change"');
-    expect(inlineProposalSource).toContain("Decline");
+  it("exposes Apply, Modify, and Reject affordances with decision accessibility", () => {
+    expect(inlineProposalSource).toContain('"Apply"');
+    expect(inlineProposalSource).toContain("\n              Modify\n");
+    expect(inlineProposalSource).toContain("\n              Reject\n");
     expect(inlineProposalSource).toContain('decisionMutation.mutate("accept")');
     expect(inlineProposalSource).toContain('decisionMutation.mutate("reject")');
-    expect(inlineProposalSource).toContain("aria-busy={decisionMutation.isPending");
+    expect(inlineProposalSource).toContain("modifyProposal");
+    expect(inlineProposalSource).toContain("aria-busy={isActionPending");
     expect(inlineProposalSource).toContain('aria-live="polite"');
     expect(inlineProposalSource).toContain("proposal-accept-hint-");
     expect(inlineProposalSource).toContain("canDecideProposal");

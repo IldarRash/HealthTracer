@@ -247,6 +247,7 @@ export type CreateChatThreadInput = z.infer<typeof createChatThreadSchema>;
 
 export const sendChatMessageSchema = z.object({
   content: z.string().min(1).max(4000),
+  proposalRevision: z.lazy(() => chatProposalRevisionSchema).optional(),
 });
 
 export type SendChatMessageInput = z.infer<typeof sendChatMessageSchema>;
@@ -1075,6 +1076,14 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
 
 export type RawAiProposal = z.infer<typeof rawAiProposalSchema>;
 
+export const chatProposalRevisionSchema = z.object({
+  supersededProposalId: z.string().uuid(),
+  originalProposal: rawAiProposalSchema,
+  modificationFeedback: z.string().min(1).max(2000),
+});
+
+export type ChatProposalRevision = z.infer<typeof chatProposalRevisionSchema>;
+
 const aiProposalCoreSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
@@ -1114,11 +1123,37 @@ export const aiStructuredOutputSchema = z.object({
 export type AiStructuredOutput = z.infer<typeof aiStructuredOutputSchema>;
 export type AiStructuredOutputInput = z.input<typeof aiStructuredOutputSchema>;
 
-export const proposalDecisionSchema = z.object({
-  decision: z.enum(["accept", "reject"]),
-});
+export const proposalDecisionSchema = z
+  .object({
+    decision: z.enum(["accept", "reject", "modify"]),
+    modificationFeedback: z.string().min(1).max(2000).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.decision === "modify" && !value.modificationFeedback?.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message: "modificationFeedback is required when decision is modify.",
+        path: ["modificationFeedback"],
+      });
+    }
+  });
 
 export type ProposalDecisionInput = z.infer<typeof proposalDecisionSchema>;
+
+export const proposalModifyResponseSchema = z.object({
+  proposal: aiProposalSchema,
+  revisionContext: z.object({
+    supersededProposalId: z.string().uuid(),
+    originalIntent: proposalIntentSchema,
+    originalTitle: z.string().min(1).max(160),
+    originalReason: z.string().min(1).max(1000),
+    modificationFeedback: z.string().min(1).max(2000),
+    nextAction: z.literal("send_chat_message"),
+    suggestedUserMessage: z.string().min(1).max(4000),
+  }),
+});
+
+export type ProposalModifyResponse = z.infer<typeof proposalModifyResponseSchema>;
 
 export const chatTurnResponseSchema = z.object({
   thread: chatThreadSchema,
@@ -1448,29 +1483,47 @@ export {
   agentTurnMetadataSchema,
   aiCoachProviderModeSchema,
   buildAgentContextRequestSchema,
+  buildContextSliceRequestForIntent,
   contextDepthSchema,
   contextSlicePurposeSchema,
+  contextSliceRequestSchema,
   contextSnapshotItemSchema,
   contextSnapshotTypeSchema,
   contextSourceRefSchema,
   contextTimeRangeSchema,
   DEFAULT_AGENT_SAFETY_CONSTRAINTS,
+  expectedResponseModeSchema,
   getUserContextSliceInputSchema,
   goalContextSummarySchema,
   habitPlanCoachingSummarySchema,
   INTENT_TO_SLICE_PURPOSE,
   intentRouteResultSchema,
+  llmIntentRouterOutputSchema,
+  MAX_CONTEXT_SLICES,
+  mergeLlmRouterOutputIntoRoute,
+  normalizeContextSlicePlan,
   nutritionPlanContextSummarySchema,
   ragContextResultSchema,
   resolveDefaultDepthForPurpose,
+  resolveDefaultExpectedResponseMode,
   resolveDefaultTimeRangeForPurpose,
+  RULE_ROUTE_CONFIDENCE_THRESHOLD,
   shouldIncludeDocumentsForPurpose,
   userContextSliceSchema,
   userMemoryCategorySchema,
   userMemoryItemSchema,
   userMemorySourceSchema,
+  validateLlmRouterOutputShape,
   weeklyProgressContextSummarySchema,
   workoutExecutionSummarySchema,
+  agentRoutingMetadataSchema,
+  agentSafetyFlagSchema,
+  type AgentRoutingMetadata,
+  type AgentSafetyFlag,
+  type ContextSliceRequest,
+  type ExpectedResponseMode,
+  type LlmIntentRouterOutput,
+  type LlmIntentRouterOutputInput,
   type AgentCitation,
   type AgentContextPacket,
   type AgentIntent,

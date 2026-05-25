@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const monorepoRoot = path.join(projectRoot, "../..");
 
 const stripJsImportExtensionsLoader = path.join(
   projectRoot,
@@ -10,6 +11,8 @@ const stripJsImportExtensionsLoader = path.join(
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
+  outputFileTracingRoot: monorepoRoot,
   transpilePackages: ["@health/types", "@health/ui"],
   turbopack: {
     // Turbopack has no extensionAlias; rewrite relative ".js" specifiers in TS

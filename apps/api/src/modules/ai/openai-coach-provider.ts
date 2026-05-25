@@ -1,6 +1,11 @@
-import type { CoachAiProvider, CoachAiRequest } from "@health/ai";
-import type { AiStructuredOutputInput } from "@health/types";
-import { aiStructuredOutputSchema } from "@health/types";
+import type { CoachAiProvider, CoachAiRequest, IntentRouterRequest } from "@health/ai";
+import type { AiStructuredOutputInput, LlmIntentRouterOutputInput } from "@health/types";
+import {
+  aiStructuredOutputSchema,
+  llmIntentRouterOutputSchema,
+  normalizeContextSlicePlan,
+  validateLlmRouterOutputShape,
+} from "@health/types";
 
 export class OpenAiCoachProviderMissingKeyError extends Error {
   constructor() {
@@ -34,8 +39,41 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     }
   }
 
+  async generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput> {
+    const systemPrompt = buildOpenAiIntentRouterPrompt(request);
+    const payload = await this.requestJsonCompletion(systemPrompt, request.userMessage, request.recentMessages);
+    const shapeErrors = validateLlmRouterOutputShape(payload);
+
+    if (shapeErrors.length > 0) {
+      throw new Error(
+        `OpenAI intent router returned invalid structured output: ${shapeErrors.join(" ")}`,
+      );
+    }
+
+    const validated = llmIntentRouterOutputSchema.parse(payload);
+
+    return {
+      ...validated,
+      requiredContextSlices: normalizeContextSlicePlan(validated.requiredContextSlices),
+    };
+  }
+
   async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput> {
     const systemPrompt = buildOpenAiSystemPrompt(request);
+    const payload = await this.requestJsonCompletion(
+      systemPrompt,
+      request.userMessage,
+      request.recentMessages,
+    );
+
+    return coerceOpenAiStructuredOutput(payload);
+  }
+
+  private async requestJsonCompletion(
+    systemPrompt: string,
+    userMessage: string,
+    recentMessages: IntentRouterRequest["recentMessages"],
+  ): Promise<unknown> {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -44,15 +82,15 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       },
       body: JSON.stringify({
         model: this.options.model,
-        temperature: 0.4,
+        temperature: 0.2,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
-          ...request.recentMessages.map((message) => ({
+          ...recentMessages.map((message) => ({
             role: message.role,
             content: message.content,
           })),
-          { role: "user", content: request.userMessage },
+          { role: "user", content: userMessage },
         ],
       }),
     });
@@ -72,16 +110,26 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       throw new Error("OpenAI coach provider returned an empty response.");
     }
 
-    let parsedJson: unknown;
-
     try {
-      parsedJson = JSON.parse(content);
+      return JSON.parse(content) as unknown;
     } catch {
       throw new Error("OpenAI coach provider returned non-JSON content.");
     }
-
-    return coerceOpenAiStructuredOutput(parsedJson);
   }
+}
+
+function buildOpenAiIntentRouterPrompt(request: IntentRouterRequest): string {
+  return [
+    "You are an internal intent router for a wellness coaching product.",
+    "Return JSON only. Do not answer the user. Do not provide advice, proposals, or coaching text.",
+    "Allowed JSON shape:",
+    '{"intent":"general|ask_about_today|adjust_workout|adjust_nutrition|review_progress|longevity_overview|ask_health_context","confidence":0.0-1.0,"routingMethod":"llm_router","requiredContextSlices":[{"type":"general_chat|daily_checkin|workout_adaptation|nutrition_adaptation|weekly_review|longevity_overview|health_context","depth":"small|medium|large","timeRange":"7d|14d|30d|90d|1y","includeDocuments":false}],"safetyFlags":["fatigue|pain|sleep_issue|stress|hunger|schedule_conflict|health_context"],"expectedResponseMode":"advice_only|recommendation_with_optional_proposal|clarification_question"}',
+    "Use at most 3 context slices. Prefer medium depth. Disable documents unless health context is explicit.",
+    "Never include reply, advice, answer, response, proposals, or user-facing text fields.",
+    request.ruleRouteHint
+      ? `Rule-router hint: ${JSON.stringify(request.ruleRouteHint)}`
+      : "Rule-router hint: none",
+  ].join("\n");
 }
 
 function coerceOpenAiStructuredOutput(value: unknown): AiStructuredOutputInput {
@@ -128,6 +176,13 @@ function buildOpenAiSystemPrompt(request: CoachAiRequest): string {
     "Never mutate structured state directly. Suggest plan changes only through proposals.",
     `Task purpose: ${metadata?.purpose ?? "general_chat"}`,
     `Task intent: ${metadata?.intent ?? "general"}`,
+    `Expected response mode: ${metadata?.expectedResponseMode ?? "recommendation_with_optional_proposal"}`,
+    metadata?.safetyFlags?.length
+      ? `Safety flags: ${metadata.safetyFlags.join(", ")}`
+      : "Safety flags: none",
+    metadata?.missingContextNotes?.length
+      ? `Missing context notes: ${metadata.missingContextNotes.join(" | ")}`
+      : "Missing context notes: none",
     "Safety constraints:",
     `- ${constraints}`,
     "Structured coaching context:",

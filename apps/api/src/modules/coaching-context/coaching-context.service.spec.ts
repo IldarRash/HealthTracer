@@ -102,7 +102,7 @@ function createCoachingContextService(overrides: {
     {
       listCurrentGoals: async () => [
         {
-          id: "goal-q1",
+          id: "a1000001-0000-4000-8000-000000000001",
           userId,
           type: "general_wellness",
           status: "active",
@@ -118,7 +118,7 @@ function createCoachingContextService(overrides: {
           updatedAt: new Date().toISOString(),
         },
         {
-          id: "goal-w1",
+          id: "a1000002-0000-4000-8000-000000000002",
           userId,
           type: "general_wellness",
           status: "active",
@@ -126,7 +126,7 @@ function createCoachingContextService(overrides: {
           title: "Keep training friction low",
           target: {},
           horizon: "weekly",
-          parentGoalId: "goal-q1",
+          parentGoalId: "a1000001-0000-4000-8000-000000000001",
           weekStart: currentWeekStart,
           startDate: currentWeekStart,
           targetDate: null,
@@ -508,5 +508,49 @@ describe("CoachingContextService", () => {
     expect(snapshot.recentHabitAdherenceSummary).toBeNull();
     expect(promptContext.recentHabitAdherenceSummary).toBeNull();
     expect(snapshot.activeHabitPlanSummary).not.toBeNull();
+  });
+
+  it("builds bounded multi-slice context from llm router output", async () => {
+    const service = createCoachingContextService();
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "I feel tired and hungry all the time.",
+        intent: "adjust_nutrition",
+        purpose: "nutrition_adaptation",
+        depth: "medium",
+        timeRange: "14d",
+        includeDocuments: false,
+      },
+      {
+        intent: "adjust_nutrition",
+        confidence: 0.84,
+        isConfident: true,
+        purpose: "nutrition_adaptation",
+        depth: "medium",
+        timeRange: "14d",
+        includeDocuments: false,
+        routingMethod: "llm_router",
+        requiredContextSlices: [
+          { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
+          { type: "daily_checkin", depth: "small", timeRange: "7d" },
+          { type: "general_chat", depth: "small", timeRange: "7d" },
+        ],
+        safetyFlags: ["hunger", "fatigue"],
+        expectedResponseMode: "recommendation_with_optional_proposal",
+      },
+    );
+
+    expect(packet.supplementarySlices).toHaveLength(2);
+    expect(packet.routing).toMatchObject({
+      routingMethod: "llm_router",
+      llmRouterInvoked: true,
+      contextSliceCount: 3,
+      safetyFlags: ["hunger", "fatigue"],
+    });
+    expect(packet.missingContextNotes).toContain(
+      "No active nutrition plan is available for nutrition adaptation.",
+    );
   });
 });

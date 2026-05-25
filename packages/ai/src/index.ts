@@ -12,4 +12,5 @@ export {
   StubCoachAiProvider,
   type CoachAiProvider,
   type CoachAiRequest,
+  type IntentRouterRequest,
 } from "./stub-provider.js";

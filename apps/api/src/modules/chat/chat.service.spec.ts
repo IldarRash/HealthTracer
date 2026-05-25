@@ -129,6 +129,190 @@ describe("ChatService", () => {
     expect(assistantMetadata.replySafetyErrors).toEqual([]);
   });
 
+  it("passes proposalRevision metadata to AiService for revision turns", async () => {
+    let capturedInput: Record<string, unknown> | undefined;
+    const proposalRevision = {
+      supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+      modificationFeedback: "Keep one strength exercise.",
+      originalProposal: {
+        intent: "adapt_workout_plan" as const,
+        targetDomain: "workout" as const,
+        title: "Adjust today's workout",
+        reason: "Recovery signals are low.",
+        proposedChanges: {
+          title: "Strength base",
+          summary: "Lighter session today.",
+          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        },
+      },
+    };
+
+    const service = createChatService({
+      chatRepository: {
+        findThreadById: async () => thread,
+        listMessagesByThreadId: async () => [],
+        createMessage: async (
+          _threadId: string,
+          role: "user" | "assistant" | "system",
+          content: string,
+          metadata: Record<string, unknown> = {},
+        ) => ({
+          id: role === "user" ? "user-message-id" : "assistant-message-id",
+          threadId: thread.id,
+          role,
+          content,
+          metadata,
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        }),
+        createProposal: async () => {
+          throw new Error("createProposal should not be called");
+        },
+        touchThread: async () => undefined,
+      },
+      usersService: {
+        resolveFromAuth: async () => user,
+      },
+      aiService: {
+        generateCoachResponse: async (input: Record<string, unknown>) => {
+          capturedInput = input;
+          return {
+            output: {
+              reply: "Here is a revised proposal to review.",
+              proposals: [],
+            },
+            parseErrors: [],
+            replySafetyErrors: [],
+            agentMetadata: {
+              provider: "stub" as const,
+              intent: "adjust_workout" as const,
+              purpose: "workout_adaptation" as const,
+              depth: "medium" as const,
+              timeRange: "14d" as const,
+              toolsInvoked: [],
+              safety: {
+                status: "passed" as const,
+                blockedReasons: [],
+                constraintsApplied: [],
+              },
+              citations: [],
+            },
+          };
+        },
+      },
+      proposalValidationService: {
+        validateRawProposal: () => ({ valid: true, errors: [] }),
+        validateCorrelationEvidenceOwnership: async () => [],
+        validateProvenanceOwnership: async () => [],
+        validateProgressLinkedProvenanceRequired: () => [],
+        validateGoalProposalHierarchy: async () => [],
+        validateTodayChecklistGoalSourceRefs: async () => [],
+        validateRecoveryAwareWorkoutAdaptation: async () => [],
+        validateHabitProposalContext: async () => [],
+      },
+    });
+
+    await service.sendMessage(auth, thread.id, {
+      content: "Please revise the proposal with these changes: keep one strength exercise.",
+      proposalRevision,
+    });
+
+    expect(capturedInput?.proposalRevision).toEqual(proposalRevision);
+  });
+
+  it("persists llm routing metadata on assistant messages", async () => {
+    let assistantMetadata: Record<string, unknown> = {};
+    const agentMetadata = {
+      provider: "stub" as const,
+      intent: "adjust_nutrition" as const,
+      purpose: "nutrition_adaptation" as const,
+      depth: "medium" as const,
+      timeRange: "14d" as const,
+      toolsInvoked: [] as const,
+      safety: {
+        status: "passed" as const,
+        blockedReasons: [],
+        constraintsApplied: ["Plan changes must be proposals requiring user approval."],
+      },
+      citations: [],
+      routing: {
+        confidence: 0.84,
+        routingMethod: "llm_router" as const,
+        llmRouterInvoked: true,
+        safetyFlags: ["hunger", "fatigue"] as const,
+        expectedResponseMode: "recommendation_with_optional_proposal" as const,
+        contextSliceCount: 2,
+      },
+    };
+
+    const service = createChatService({
+      chatRepository: {
+        findThreadById: async () => thread,
+        listMessagesByThreadId: async () => [],
+        createMessage: async (
+          _threadId: string,
+          role: "user" | "assistant" | "system",
+          content: string,
+          metadata: Record<string, unknown> = {},
+        ) => {
+          if (role === "assistant") {
+            assistantMetadata = metadata;
+          }
+
+          return {
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          };
+        },
+        createProposal: async () => {
+          throw new Error("createProposal should not be called");
+        },
+        touchThread: async () => undefined,
+      },
+      usersService: {
+        resolveFromAuth: async () => user,
+      },
+      aiService: {
+        generateCoachResponse: async () => ({
+          output: {
+            reply: "Here is a coaching reply.",
+            proposals: [],
+          },
+          parseErrors: [],
+          replySafetyErrors: [],
+          agentMetadata,
+        }),
+      },
+      proposalValidationService: {
+        validateRawProposal: () => ({ valid: true, errors: [] }),
+        validateCorrelationEvidenceOwnership: async () => [],
+        validateProvenanceOwnership: async () => [],
+        validateProgressLinkedProvenanceRequired: () => [],
+        validateGoalProposalHierarchy: async () => [],
+        validateTodayChecklistGoalSourceRefs: async () => [],
+        validateRecoveryAwareWorkoutAdaptation: async () => [],
+        validateHabitProposalContext: async () => [],
+      },
+    });
+
+    await service.sendMessage(auth, thread.id, {
+      content: "I feel tired and hungry all the time.",
+    });
+
+    expect(assistantMetadata.agent).toEqual(
+      expect.objectContaining({
+        routing: expect.objectContaining({
+          llmRouterInvoked: true,
+          routingMethod: "llm_router",
+          contextSliceCount: 2,
+        }),
+      }),
+    );
+  });
+
   it("persists invalid proposals with validation errors instead of dropping them", async () => {
     const captured: Array<{
       validationStatus: string;

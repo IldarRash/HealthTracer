@@ -10,6 +10,10 @@ describe("routeAgentIntent", () => {
     expect(route.purpose).toBe("workout_adaptation");
     expect(route.includeDocuments).toBe(false);
     expect(route.routingMethod).toBe("rule_based");
+    expect(route.isConfident).toBe(true);
+    expect(route.confidence).toBeGreaterThanOrEqual(0.75);
+    expect(route.requiredContextSlices).toHaveLength(1);
+    expect(route.requiredContextSlices[0]?.type).toBe("workout_adaptation");
   });
 
   it("routes nutrition messages to nutrition adaptation", () => {
@@ -34,12 +38,30 @@ describe("routeAgentIntent", () => {
     expect(route.purpose).toBe("weekly_review");
   });
 
-  it("defaults unknown messages to general chat", () => {
+  it("defaults unknown messages to general chat without confident routing", () => {
     const route = routeAgentIntent("Thanks for the encouragement!");
 
     expect(route.intent).toBe("general");
     expect(route.purpose).toBe("general_chat");
     expect(route.depth).toBe("small");
+    expect(route.isConfident).toBe(false);
+    expect(route.confidence).toBeLessThan(0.75);
+    expect(route.expectedResponseMode).toBe("advice_only");
+  });
+
+  it("marks ambiguous multi-domain messages as uncertain", () => {
+    const route = routeAgentIntent("I feel tired and hungry all the time. What should I do?");
+
+    expect(route.isConfident).toBe(false);
+    expect(route.safetyFlags).toEqual(
+      expect.arrayContaining(["fatigue", "hunger"]),
+    );
+  });
+
+  it("marks vague off-day messages as uncertain even when partially matched", () => {
+    const route = routeAgentIntent("I feel completely off today. What should I do?");
+
+    expect(route.isConfident).toBe(false);
   });
 
   it("routes today check-in cues separately from workout adaptation", () => {

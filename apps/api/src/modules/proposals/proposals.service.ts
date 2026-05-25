@@ -1,5 +1,10 @@
 import { validateProposalSafety } from "@health/ai";
-import type { AiProposal, CorrelationEvidenceRef, ProposalDecisionInput } from "@health/types";
+import type {
+  AiProposal,
+  CorrelationEvidenceRef,
+  ProposalDecisionInput,
+  ProposalModifyResponse,
+} from "@health/types";
 import {
   BadRequestException,
   Injectable,
@@ -47,6 +52,11 @@ export class ProposalsService {
     proposalId: string,
     input: ProposalDecisionInput,
   ): Promise<AiProposal> {
+    if (input.decision === "modify") {
+      throw new BadRequestException(
+        "Modify decisions must use the proposal modification flow.",
+      );
+    }
     const user = await this.usersService.resolveFromAuth(auth);
     const proposal = await this.proposalsRepository.findById(user.id, proposalId);
 
@@ -190,4 +200,57 @@ export class ProposalsService {
 
     return toAiProposal(acceptedProposal);
   }
+
+  /**
+   * Marks a pending proposal as superseded and returns revision context for a follow-up chat turn.
+   * Does not apply structured state changes.
+   */
+  async requestProposalModification(
+    auth: ClerkAuthContext,
+    proposalId: string,
+    modificationFeedback: string,
+  ): Promise<ProposalModifyResponse> {
+    const user = await this.usersService.resolveFromAuth(auth);
+    const proposal = await this.proposalsRepository.findById(user.id, proposalId);
+
+    if (!proposal) {
+      throw new NotFoundException("Proposal not found.");
+    }
+
+    if (proposal.status !== "pending") {
+      throw new BadRequestException("Only pending proposals can be modified.");
+    }
+
+    const superseded = await this.proposalsRepository.supersedePendingForModify(
+      proposalId,
+      user.id,
+    );
+
+    if (!superseded) {
+      throw new BadRequestException("Only pending proposals can be modified.");
+    }
+
+    const trimmedFeedback = modificationFeedback.trim();
+    const mappedProposal = toAiProposal(superseded);
+
+    return {
+      proposal: mappedProposal,
+      revisionContext: {
+        supersededProposalId: mappedProposal.id,
+        originalIntent: mappedProposal.intent,
+        originalTitle: mappedProposal.title,
+        originalReason: mappedProposal.reason,
+        modificationFeedback: trimmedFeedback,
+        nextAction: "send_chat_message",
+        suggestedUserMessage: buildProposalModificationUserMessage(
+          mappedProposal.title,
+          trimmedFeedback,
+        ),
+      },
+    };
+  }
+}
+
+function buildProposalModificationUserMessage(title: string, modificationFeedback: string): string {
+  return `Please revise the proposal "${title}" with these changes: ${modificationFeedback}`;
 }

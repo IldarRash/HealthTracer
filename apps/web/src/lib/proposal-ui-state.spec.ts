@@ -14,8 +14,10 @@ import {
   getProposalIntentRoute,
   getProposalNavigationRoute,
   getProposalIntentLabel,
+  getProposalRejectedMessage,
   getProposalStatusBadgeTone,
   getProposalStatusLabel,
+  getProposalSupersededMessage,
   INLINE_PROPOSAL_VALIDATION_HEADING,
   isHabitPlanProposalIntent,
   mergeProposalsById,
@@ -64,7 +66,7 @@ describe("proposal UI state", () => {
     expect(merged.find((proposal) => proposal.id === "c")?.title).toBe("Local C");
   });
 
-  it("explains why invalid pending proposals cannot be accepted", () => {
+  it("explains why invalid pending proposals cannot be applied", () => {
     expect(
       getAcceptDisabledReason({
         status: "pending",
@@ -73,6 +75,15 @@ describe("proposal UI state", () => {
         intent: "adjust_nutrition_plan",
       }),
     ).toContain("validation issues");
+
+    expect(
+      getAcceptDisabledReason({
+        status: "pending",
+        validationStatus: "invalid",
+        validationErrors: ["Calories must be within a safe range."],
+        intent: "adjust_nutrition_plan",
+      }),
+    ).toContain("Modify");
 
     expect(
       getAcceptDisabledReason({
@@ -105,6 +116,38 @@ describe("proposal UI state", () => {
         validationStatus: "valid",
       }),
     ).toBe(false);
+
+    expect(
+      canAcceptProposal({
+        status: "superseded",
+        validationStatus: "valid",
+      }),
+    ).toBe(false);
+  });
+
+  it("hides decision actions for rejected and superseded proposals", () => {
+    expect(
+      canDecideProposal({
+        status: "rejected",
+        validationStatus: "valid",
+      }),
+    ).toBe(false);
+
+    expect(
+      canDecideProposal({
+        status: "superseded",
+        validationStatus: "valid",
+      }),
+    ).toBe(false);
+
+    expect(
+      getAcceptDisabledReason({
+        status: "superseded",
+        validationStatus: "valid",
+        validationErrors: [],
+        intent: "adapt_workout_plan",
+      }),
+    ).toBeNull();
   });
 
   it("maps proposal domains to user-facing labels and routes", () => {
@@ -226,7 +269,7 @@ describe("proposal UI state", () => {
     ).toHaveLength(2);
   });
 
-  it("uses habit-specific accept disabled guidance", () => {
+  it("uses habit-specific apply disabled guidance", () => {
     expect(
       getAcceptDisabledReason({
         status: "pending",
@@ -238,14 +281,32 @@ describe("proposal UI state", () => {
   });
 
   it("maps lifecycle states to inline copy and badge tones", () => {
-    expect(getProposalStatusLabel("accepted")).toBe("Accepted");
-    expect(getProposalStatusLabel("rejected")).toBe("Declined");
-    expect(getProposalStatusLabel("superseded")).toBe("Superseded");
+    expect(getProposalStatusLabel("accepted")).toBe("Applied");
+    expect(getProposalStatusLabel("rejected")).toBe("Rejected");
+    expect(getProposalStatusLabel("superseded")).toBe("Revised");
 
     expect(getProposalStatusBadgeTone("pending")).toBe("pending");
     expect(getProposalStatusBadgeTone("accepted")).toBe("success");
     expect(getProposalStatusBadgeTone("rejected")).toBe("error");
     expect(getProposalStatusBadgeTone("superseded")).toBe("neutral");
+  });
+
+  it("explains rejected proposals without implying plan changes", () => {
+    expect(
+      getProposalRejectedMessage({
+        targetDomain: "workout",
+        intent: "adapt_workout_plan",
+      }),
+    ).toContain("No changes were made");
+
+    expect(
+      getProposalRejectedMessage({
+        targetDomain: "general",
+        intent: "create_habit_plan",
+      }),
+    ).toContain("habit plan stays as is");
+
+    expect(getProposalSupersededMessage()).toContain("updated proposal");
   });
 
   it("uses user-facing inline proposal validation heading and intent visibility", () => {

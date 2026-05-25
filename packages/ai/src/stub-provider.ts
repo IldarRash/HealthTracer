@@ -1,5 +1,12 @@
-import type { AiStructuredOutputInput } from "@health/types";
-import { isWeeklyReviewChatMessage } from "@health/types";
+import type {
+  AiStructuredOutputInput,
+  LlmIntentRouterOutputInput,
+} from "@health/types";
+import {
+  buildContextSliceRequestForIntent,
+  isWeeklyReviewChatMessage,
+  normalizeContextSlicePlan,
+} from "@health/types";
 import {
   hasActiveHabitPlanInContext,
   isHabitAdaptCue,
@@ -14,12 +21,28 @@ import {
 } from "./stub-wellbeing.js";
 import { buildStubWeeklyReviewCoachOutput } from "./stub-weekly-review.js";
 import {
+  buildStubProposalRevisionOutput,
+  parseStubProposalRevisionContext,
+} from "./stub-proposal-revision.js";
+import {
   stubProgressAdaptedWorkoutPlan,
   stubReducedLoadWorkoutPlan,
   stubRemoveExerciseWorkoutPlan,
   stubStructuredWorkoutPlan,
   stubSwapExerciseWorkoutPlan,
 } from "./stub-workout-plan.js";
+
+export interface IntentRouterRequest {
+  readonly userMessage: string;
+  readonly recentMessages: ReadonlyArray<{
+    readonly role: "user" | "assistant" | "system";
+    readonly content: string;
+  }>;
+  readonly ruleRouteHint?: {
+    readonly intent: string;
+    readonly safetyFlags: readonly string[];
+  };
+}
 
 export interface CoachAiRequest {
   readonly userMessage: string;
@@ -34,10 +57,14 @@ export interface CoachAiRequest {
     readonly depth: string;
     readonly timeRange: string;
     readonly safetyConstraints: readonly string[];
+    readonly expectedResponseMode?: string;
+    readonly safetyFlags?: readonly string[];
+    readonly missingContextNotes?: readonly string[];
   };
 }
 
 export interface CoachAiProvider {
+  generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput>;
   generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput>;
 }
 
@@ -52,7 +79,63 @@ function stubCoachOutput(value: unknown): AiStructuredOutputInput {
 }
 
 export class StubCoachAiProvider implements CoachAiProvider {
+  async generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput> {
+    const normalized = request.userMessage.toLowerCase();
+
+    if (
+      normalized.includes("not losing weight") ||
+      normalized.includes("not seeing results") ||
+      (normalized.includes("hungry") && normalized.includes("tired"))
+    ) {
+      return {
+        intent: "adjust_nutrition",
+        confidence: 0.84,
+        routingMethod: "llm_router",
+        requiredContextSlices: normalizeContextSlicePlan([
+          buildContextSliceRequestForIntent("adjust_nutrition"),
+          { type: "weekly_review", depth: "medium", timeRange: "7d" },
+        ]),
+        safetyFlags: ["hunger", "fatigue"],
+        expectedResponseMode: "recommendation_with_optional_proposal",
+      };
+    }
+
+    if (
+      normalized.includes("feel off") ||
+      normalized.includes("completely off") ||
+      normalized.includes("routine is not")
+    ) {
+      return {
+        intent: "adjust_workout",
+        confidence: 0.82,
+        routingMethod: "llm_router",
+        requiredContextSlices: normalizeContextSlicePlan([
+          buildContextSliceRequestForIntent("adjust_workout"),
+          { type: "daily_checkin", depth: "small", timeRange: "7d" },
+        ]),
+        safetyFlags: ["fatigue", "stress"],
+        expectedResponseMode: "recommendation_with_optional_proposal",
+      };
+    }
+
+    return {
+      intent: "general",
+      confidence: 0.78,
+      routingMethod: "llm_router",
+      requiredContextSlices: [buildContextSliceRequestForIntent("general")],
+      safetyFlags: [],
+      expectedResponseMode: "advice_only",
+    };
+  }
+
   async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput> {
+    const revision = parseStubProposalRevisionContext(request.coachingContext);
+    if (revision) {
+      return stubCoachOutput(
+        buildStubProposalRevisionOutput(revision, request.coachingContext),
+      );
+    }
+
     const normalized = request.userMessage.toLowerCase();
 
     if (isWeeklyReviewChatMessage(request.userMessage)) {

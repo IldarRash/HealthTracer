@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { AiProposal } from "@health/types";
+import type { AiProposal, ProposalModifyResponse } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
@@ -27,6 +27,13 @@ import {
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
 import { WeeklyReviewChatSummary } from "./weekly-review-chat-summary";
 import { mergeProposalsById } from "../../lib/proposal-ui-state";
+import {
+  buildProposalRevisionChatSend,
+  isProposalRevisionChatSend,
+  PROPOSAL_REVISION_CHAT_SEND_FAILED_MESSAGE,
+  shouldShowProposalRevisionSendRetry,
+  type ProposalRevisionChatSend,
+} from "../../lib/proposal-revision";
 import { InlineProposalCard } from "../proposals/inline-proposal-card";
 import {
   Button,
@@ -49,6 +56,8 @@ export function ChatWorkspace() {
   const [optimisticMessage, setOptimisticMessage] = useState<OptimisticChatMessage | null>(
     null,
   );
+  const [pendingRevisionSend, setPendingRevisionSend] =
+    useState<ProposalRevisionChatSend | null>(null);
 
   const threadsQuery = useQuery({
     queryKey: ["chat-threads"],
@@ -146,32 +155,42 @@ export function ChatWorkspace() {
   useEffect(() => {
     setLocalProposals([]);
     setOptimisticMessage(null);
+    setPendingRevisionSend(null);
   }, [primaryThreadId]);
 
   const sendMessageMutation = useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async (input: string | ProposalRevisionChatSend) => {
       const token = await getToken();
       if (!token || !primaryThreadId) {
         throw new Error("Your coaching conversation is not ready yet.");
       }
 
-      const result = await sendChatMessage(token, primaryThreadId, content);
+      const content = isProposalRevisionChatSend(input) ? input.message : input;
+      const proposalRevision = isProposalRevisionChatSend(input)
+        ? input.proposalRevision
+        : undefined;
+
+      const result = await sendChatMessage(token, primaryThreadId, content, {
+        proposalRevision,
+      });
       if (result.error || !result.data) {
         throw new Error(result.error ?? "Message could not be sent.");
       }
 
       return result.data;
     },
-    onMutate: (content) => {
+    onMutate: (input) => {
       if (!primaryThreadId) {
         return;
       }
 
+      const content = isProposalRevisionChatSend(input) ? input.message : input;
       setOptimisticMessage(createOptimisticUserMessage(primaryThreadId, content));
     },
     onSuccess: (turn) => {
       setDraft("");
       setOptimisticMessage(null);
+      setPendingRevisionSend(null);
       setLocalProposals(turn.proposals);
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
       void queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
@@ -222,6 +241,24 @@ export function ChatWorkspace() {
   const handleProposalDecision = (updated: AiProposal) => {
     setLocalProposals((proposals) => mergeProposalsById(proposals, [updated]));
   };
+
+  const handleProposalModifyRequest = (response: ProposalModifyResponse) => {
+    setLocalProposals((proposals) =>
+      mergeProposalsById(proposals, [response.proposal]),
+    );
+
+    const revisionSend = buildProposalRevisionChatSend(response);
+    if (revisionSend.message.trim() && primaryThreadId && !sendMessageMutation.isPending) {
+      setPendingRevisionSend(revisionSend);
+      sendMessageMutation.mutate(revisionSend);
+    }
+  };
+
+  const showRevisionSendRetry = shouldShowProposalRevisionSendRetry({
+    pendingRevisionSend,
+    isSendError: sendMessageMutation.isError,
+    isSendPending: sendMessageMutation.isPending,
+  });
 
   const isBootstrapping =
     threadsQuery.isLoading ||
@@ -337,6 +374,7 @@ export function ChatWorkspace() {
                           key={proposal.id}
                           proposal={proposal}
                           onDecision={handleProposalDecision}
+                          onModifyRequest={handleProposalModifyRequest}
                         />
                       ))}
                     </div>
@@ -356,6 +394,27 @@ export function ChatWorkspace() {
 
           <ChatComposer onSubmit={handleSubmit}>
             <div className="chat-composer-inner">
+              {showRevisionSendRetry ? (
+                <div className="notice notice-inline" role="alert">
+                  <p className="proposal-meta">
+                    {PROPOSAL_REVISION_CHAT_SEND_FAILED_MESSAGE}
+                  </p>
+                  <div className="action-row">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={sendMessageMutation.isPending}
+                      onClick={() => {
+                        if (pendingRevisionSend) {
+                          sendMessageMutation.mutate(pendingRevisionSend);
+                        }
+                      }}
+                    >
+                      {sendMessageMutation.isPending ? "Retrying…" : "Retry revision message"}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               <label className="sr-only" htmlFor="chat-message">
                 Message your coach
               </label>
@@ -377,7 +436,7 @@ export function ChatWorkspace() {
                   {sendMessageMutation.isPending ? "Sending…" : "Send"}
                 </Button>
               </div>
-              {sendMessageMutation.isError ? (
+              {sendMessageMutation.isError && !showRevisionSendRetry ? (
                 <p className="form-error" role="alert">
                   {sendMessageMutation.error instanceof Error
                     ? sendMessageMutation.error.message

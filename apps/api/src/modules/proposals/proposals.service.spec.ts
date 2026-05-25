@@ -85,6 +85,11 @@ function createRepositoryMock(overrides: Record<string, unknown> = {}) {
     }),
     revertAcceptedClaim: async () => pendingProposal,
     markValidation: async () => pendingProposal,
+    supersedePendingForModify: async () => ({
+      ...pendingProposal,
+      status: "superseded" as const,
+      userDecisionAt: new Date(),
+    }),
     ...overrides,
   };
 }
@@ -129,6 +134,58 @@ describe("ProposalsService", () => {
 
     expect(result.status).toBe("rejected");
     expect(applyCalled).toBe(false);
+  });
+
+  it("supersedes a pending proposal for modify without applying domain changes", async () => {
+    let applyCalled = false;
+
+    const service = new ProposalsService(
+      createRepositoryMock() as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock() as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "summary:applied";
+        },
+      } as never,
+    );
+
+    const result = await service.requestProposalModification(
+      auth,
+      pendingProposal.id,
+      "Keep one strength exercise but remove jumps.",
+    );
+
+    expect(applyCalled).toBe(false);
+    expect(result).toMatchObject({
+      proposal: expect.objectContaining({ status: "superseded" }),
+      revisionContext: expect.objectContaining({
+        nextAction: "send_chat_message",
+        modificationFeedback: "Keep one strength exercise but remove jumps.",
+        supersededProposalId: pendingProposal.id,
+      }),
+    });
+  });
+
+  it("blocks modify requests for non-pending proposals", async () => {
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => ({ ...pendingProposal, status: "rejected" as const }),
+        supersedePendingForModify: async () => null,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock() as never,
+      {} as never,
+    );
+
+    await expect(
+      service.requestProposalModification(auth, pendingProposal.id, "Make it shorter."),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("accepts a valid proposal through the apply service", async () => {

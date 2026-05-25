@@ -60,6 +60,26 @@ export class ProposalsRepository {
     return proposal ?? null;
   }
 
+  async supersedePendingForModify(proposalId: string, userId: string) {
+    const [proposal] = await this.db
+      .update(aiProposals)
+      .set({
+        status: "superseded",
+        userDecisionAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(aiProposals.id, proposalId),
+          eq(aiProposals.userId, userId),
+          eq(aiProposals.status, "pending"),
+        ),
+      )
+      .returning();
+
+    return proposal ?? null;
+  }
+
   async acceptPendingProposal(
     proposalId: string,
     userId: string,

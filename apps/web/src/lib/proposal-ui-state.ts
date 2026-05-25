@@ -177,12 +177,36 @@ export function getProposalStatusLabel(
     case "pending":
       return "Pending review";
     case "accepted":
-      return "Accepted";
+      return "Applied";
     case "rejected":
-      return "Declined";
+      return "Rejected";
     case "superseded":
-      return "Superseded";
+      return "Revised";
   }
+}
+
+export function getProposalRejectedMessage(
+  proposal: Pick<AiProposal, "targetDomain" | "intent">,
+): string {
+  const domainLabel = getProposalDomainLabel(proposal.targetDomain).toLowerCase();
+
+  if (isHabitPlanProposalIntent(proposal.intent)) {
+    return "No changes were made. Your current habit plan stays as is.";
+  }
+
+  if (proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition") {
+    return `No changes were made. Your ${domainLabel} plan stays as is.`;
+  }
+
+  if (proposal.targetDomain === "today") {
+    return "No changes were made. Today's checklist stays as is.";
+  }
+
+  return "No changes were made. Your plan stays as is.";
+}
+
+export function getProposalSupersededMessage(): string {
+  return "You asked to revise this suggestion. Look for the updated proposal in the chat.";
 }
 
 export function getProposalStatusBadgeTone(
@@ -238,15 +262,15 @@ export function getAcceptDisabledReason(
 
   if (proposal.validationErrors.length > 0) {
     if (isHabitPlanProposalIntent(proposal.intent)) {
-      return "This habit proposal has validation issues and cannot be accepted. Review the details below or ask the coach to revise it. You can still decline it.";
+      return "This habit proposal has validation issues and cannot be applied. Review the details below or use Modify to ask for a revision. You can still reject it.";
     }
 
-    return "This proposal has validation issues and cannot be accepted. You can still reject it.";
+    return "This proposal has validation issues and cannot be applied. You can still reject it or use Modify to ask for a revision.";
   }
 
   if (proposal.validationStatus === "invalid") {
-    return "This proposal did not pass validation and cannot be accepted. You can still reject it.";
+    return "This proposal did not pass validation and cannot be applied. You can still reject it or use Modify to ask for a revision.";
   }
 
-  return "Accept is unavailable for this proposal. You can still reject it.";
+  return "Apply is unavailable for this proposal. You can still reject it or use Modify to ask for a revision.";
 }

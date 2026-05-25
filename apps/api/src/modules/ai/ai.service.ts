@@ -1,7 +1,10 @@
 import type { AiStructuredOutput, AgentTurnMetadata } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
-import { AgentOrchestratorService } from "./agent-orchestrator.service.js";
+import {
+  AgentOrchestratorService,
+  type ProposalRevisionContext,
+} from "./agent-orchestrator.service.js";
 
 const SAFE_FALLBACK_REPLY =
   "I could not safely process that response. Please try again with a wellness-focused question.";
@@ -13,6 +16,7 @@ export interface GenerateCoachResponseInput {
     role: "user" | "assistant" | "system";
     content: string;
   }>;
+  proposalRevision?: ProposalRevisionContext;
 }
 
 export interface GeneratedCoachResponse {

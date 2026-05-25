@@ -33,6 +33,8 @@ function createPacket(
     generatedAt: new Date().toISOString(),
     safetyConstraints: ["Do not diagnose medical conditions."],
     sourceRefs: [],
+    supplementarySlices: [],
+    missingContextNotes: [],
     slice: { ...baseSlice, ...(sliceOverrides ?? {}) },
     ...packetOverrides,
   };

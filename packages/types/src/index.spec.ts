@@ -176,6 +176,86 @@ describe("phase 3 contracts", () => {
     expect(() => sendChatMessageSchema.parse({ content: "" })).toThrow();
   });
 
+  it("accepts normal chat messages without proposalRevision", () => {
+    const parsed = sendChatMessageSchema.parse({
+      content: "Can you adapt my workout this week?",
+    });
+
+    expect(parsed.content).toBe("Can you adapt my workout this week?");
+    expect(parsed.proposalRevision).toBeUndefined();
+  });
+
+  it("accepts optional proposalRevision metadata on chat send", () => {
+    const parsed = sendChatMessageSchema.parse({
+      content: 'Please revise the proposal "Adjust hydration" with these changes: keep weekdays only.',
+      proposalRevision: {
+        supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+        modificationFeedback: "keep weekdays only",
+        originalProposal: {
+          intent: "adapt_habit_plan",
+          targetDomain: "general",
+          title: "Adjust hydration",
+          reason: "Make the hydration target easier.",
+          proposedChanges: {
+            habits: [
+              {
+                habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+                title: "Morning hydration",
+                category: "hydration",
+                status: "active",
+                schedule: { type: "daily" },
+                target: { type: "boolean" },
+                required: true,
+                displayOrder: 0,
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(parsed.proposalRevision?.supersededProposalId).toBe(
+      "14a08176-64a7-4a2d-8a44-581807368394",
+    );
+    expect(parsed.proposalRevision?.originalProposal.intent).toBe("adapt_habit_plan");
+  });
+
+  it("rejects chat send payloads with invalid proposalRevision metadata", () => {
+    expect(() =>
+      sendChatMessageSchema.parse({
+        content: "Please revise the proposal.",
+        proposalRevision: {
+          supersededProposalId: "not-a-uuid",
+          modificationFeedback: "Keep weekdays only",
+          originalProposal: {
+            intent: "adapt_habit_plan",
+            targetDomain: "general",
+            title: "Adjust hydration",
+            reason: "Make the hydration target easier.",
+            proposedChanges: {},
+          },
+        },
+      }),
+    ).toThrow();
+
+    expect(() =>
+      sendChatMessageSchema.parse({
+        content: "Please revise the proposal.",
+        proposalRevision: {
+          supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+          modificationFeedback: "",
+          originalProposal: {
+            intent: "adapt_habit_plan",
+            targetDomain: "general",
+            title: "Adjust hydration",
+            reason: "Make the hydration target easier.",
+            proposedChanges: {},
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
   it("rejects unsupported proposal intents", () => {
     expect(() =>
       rawAiProposalSchema.parse({
@@ -209,7 +289,18 @@ describe("phase 3 contracts", () => {
     expect(proposalDecisionSchema.parse({ decision: "accept" }).decision).toBe(
       "accept",
     );
+    expect(
+      proposalDecisionSchema.parse({
+        decision: "modify",
+        modificationFeedback: "Keep one strength exercise.",
+      }).decision,
+    ).toBe("modify");
     expect(() => proposalDecisionSchema.parse({ decision: "maybe" })).toThrow();
+    expect(() =>
+      proposalDecisionSchema.parse({
+        decision: "modify",
+      }),
+    ).toThrow();
   });
 
   it("validates nutrition plan payloads", () => {

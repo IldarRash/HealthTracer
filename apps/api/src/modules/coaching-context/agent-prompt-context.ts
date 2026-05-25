@@ -36,18 +36,41 @@ export function buildAgentPromptContextFromPacket(
       timeRange: packet.timeRange,
       intent: packet.intent,
       safetyConstraints: packet.safetyConstraints,
+      routing: packet.routing,
+      missingContextNotes: packet.missingContextNotes,
     },
   };
 
-  for (const [key, value] of Object.entries(packet.slice)) {
+  appendSliceFields(context, packet.slice);
+
+  if (packet.supplementarySlices.length > 0) {
+    context.supplementaryContextSlices = packet.supplementarySlices.map((slice) => {
+      const section: Record<string, unknown> = {
+        purpose: slice.purpose,
+        depth: slice.depth,
+        timeRange: slice.timeRange,
+      };
+
+      appendSliceFields(section, slice);
+
+      return section;
+    });
+  }
+
+  return context;
+}
+
+function appendSliceFields(
+  target: Record<string, unknown>,
+  slice: AgentContextPacket["slice"],
+) {
+  for (const [key, value] of Object.entries(slice)) {
     if (SLICE_ENVELOPE_KEYS.has(key) || value === undefined) {
       continue;
     }
 
-    context[key] = value;
+    target[key] = value;
   }
-
-  return context;
 }
 
 export function mapContextSourceRefsToAgentCitations(

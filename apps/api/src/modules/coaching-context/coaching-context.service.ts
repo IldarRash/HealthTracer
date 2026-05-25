@@ -12,6 +12,7 @@ import type {
   Goal,
   HabitAdherenceCoachingSummary,
   HabitPlanCoachingSummary,
+  IntentRouteResult,
   NutritionPlanPayload,
   PersonalContextSummary,
   User,
@@ -29,6 +30,7 @@ import {
   getWeekStartIsoDate,
   habitPlanPayloadSchema,
   INTENT_TO_SLICE_PURPOSE,
+  normalizeContextSlicePlan,
   nutritionPlanPayloadSchema,
   summarizeHabitPlanForCoaching,
   summarizePersonalContext,
@@ -296,39 +298,164 @@ export class CoachingContextService {
   async buildAgentContext(
     auth: ClerkAuthContext,
     request: BuildAgentContextRequest,
+    route?: IntentRouteResult,
   ): Promise<AgentContextPacket> {
-    const intent = request.intent ?? "general";
-    const purpose = request.purpose ?? INTENT_TO_SLICE_PURPOSE[intent];
+    const intent = route?.intent ?? request.intent ?? "general";
+    const slicePlan = normalizeContextSlicePlan(
+      route?.requiredContextSlices ?? [
+        {
+          type: request.purpose ?? INTENT_TO_SLICE_PURPOSE[intent],
+          depth: request.depth,
+          timeRange: request.timeRange,
+          includeDocuments: request.includeDocuments,
+        },
+      ],
+    );
+    const [primaryRequest, ...supplementaryRequests] = slicePlan;
+
+    if (!primaryRequest) {
+      throw new Error("Context slice plan must include at least one slice.");
+    }
+
+    const snapshot = await this.buildSnapshot(auth);
+    const activeNutritionPlan =
+      slicePlan.some((slice) => slice.type === "nutrition_adaptation")
+        ? await this.getActiveNutritionPlanPayload(auth)
+        : null;
+
+    const primarySlice = await this.buildSliceFromRequest(
+      snapshot,
+      primaryRequest,
+      activeNutritionPlan,
+    );
+    const supplementarySlices = await Promise.all(
+      supplementaryRequests.map((sliceRequest) =>
+        this.buildSliceFromRequest(snapshot, sliceRequest, activeNutritionPlan),
+      ),
+    );
+    const missingContextNotes = collectMissingContextNotes(
+      [primarySlice, ...supplementarySlices],
+      slicePlan,
+    );
+    const sourceRefs = mergeSourceRefs(primarySlice, supplementarySlices);
+
+    return agentContextPacketSchema.parse({
+      purpose: primaryRequest.type,
+      depth: primarySlice.depth,
+      timeRange: primarySlice.timeRange,
+      intent,
+      generatedAt: new Date().toISOString(),
+      slice: primarySlice,
+      supplementarySlices,
+      missingContextNotes,
+      safetyConstraints: [...DEFAULT_AGENT_SAFETY_CONSTRAINTS],
+      sourceRefs,
+      routing: route
+        ? {
+            confidence: route.confidence,
+            routingMethod: route.routingMethod,
+            llmRouterInvoked: route.routingMethod === "llm_router",
+            safetyFlags: route.safetyFlags,
+            expectedResponseMode: route.expectedResponseMode,
+            contextSliceCount: slicePlan.length,
+          }
+        : undefined,
+    });
+  }
+
+  private async buildSliceFromRequest(
+    snapshot: CoachingContextSnapshot,
+    sliceRequest: ReturnType<typeof normalizeContextSlicePlan>[number],
+    activeNutritionPlan: NutritionPlanPayload | null,
+  ): Promise<UserContextSlice> {
     const resolved = resolveSliceOptions(
       getUserContextSliceInputSchema.parse({
-        purpose,
-        depth: request.depth,
-        timeRange: request.timeRange,
-        includeDocuments: request.includeDocuments,
+        purpose: sliceRequest.type,
+        depth: sliceRequest.depth,
+        timeRange: sliceRequest.timeRange,
+        includeDocuments: sliceRequest.includeDocuments,
       }),
     );
 
-    const slice = await this.getUserContextSlice(auth, {
-      purpose,
-      depth: resolved.depth,
-      timeRange: resolved.timeRange,
-      includeDocuments: resolved.includeDocuments,
-      includeRawData: false,
-    });
-
-    return agentContextPacketSchema.parse({
-      purpose,
-      depth: resolved.depth,
-      timeRange: resolved.timeRange,
-      intent,
-      generatedAt: new Date().toISOString(),
-      slice,
-      safetyConstraints: [...DEFAULT_AGENT_SAFETY_CONSTRAINTS],
-      sourceRefs: slice.sourceRefs,
-    });
+    return buildUserContextSliceFromSnapshot(
+      snapshot,
+      {
+        purpose: sliceRequest.type,
+        depth: resolved.depth,
+        timeRange: resolved.timeRange,
+        includeDocuments: resolved.includeDocuments,
+        includeRawData: false,
+      },
+      {
+        activeNutritionPlan,
+        curatedMemories: [],
+      },
+    );
   }
 
   toAgentPromptContext(packet: AgentContextPacket): Record<string, unknown> {
     return buildAgentPromptContextFromPacket(packet);
   }
+}
+
+function collectMissingContextNotes(
+  slices: ReadonlyArray<UserContextSlice>,
+  requests: ReturnType<typeof normalizeContextSlicePlan>,
+): string[] {
+  const notes: string[] = [];
+
+  for (let index = 0; index < slices.length; index += 1) {
+    const slice = slices[index];
+    const request = requests[index];
+
+    if (!slice || !request) {
+      continue;
+    }
+
+    if (request.type === "workout_adaptation" && slice.activeWorkoutPlan == null) {
+      notes.push("No active workout plan is available for workout adaptation.");
+    }
+
+    if (request.type === "nutrition_adaptation" && slice.activeNutritionPlan == null) {
+      notes.push("No active nutrition plan is available for nutrition adaptation.");
+    }
+
+    if (request.type === "weekly_review" && slice.weeklyProgress == null) {
+      notes.push("Weekly progress data is insufficient for a full review.");
+    }
+
+    if (
+      request.type === "health_context" &&
+      request.includeDocuments &&
+      (slice.documentContext?.items.length ?? 0) === 0
+    ) {
+      notes.push("No approved health documents are available.");
+    }
+  }
+
+  return [...new Set(notes)];
+}
+
+function mergeSourceRefs(
+  primarySlice: UserContextSlice,
+  supplementarySlices: ReadonlyArray<UserContextSlice>,
+) {
+  const merged = [...primarySlice.sourceRefs];
+
+  for (const slice of supplementarySlices) {
+    for (const ref of slice.sourceRefs) {
+      if (
+        !merged.some(
+          (existing) =>
+            existing.domain === ref.domain &&
+            existing.label === ref.label &&
+            existing.referenceId === ref.referenceId,
+        )
+      ) {
+        merged.push(ref);
+      }
+    }
+  }
+
+  return merged;
 }

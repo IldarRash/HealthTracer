@@ -59,6 +59,9 @@ Role templates live in `.cursor/agents`.
 4. Keep business logic out of UI components and controllers.
 5. Add or update focused tests for domain logic, schemas, UI states, and AI output handling.
 6. Run the narrowest useful validation command before summarizing.
+7. For Railway deployments, if a pushed change includes Drizzle migrations under `packages/db/drizzle`, do not consider deployment complete until the migration has been applied manually through Railway CLI, for example:
+   `railway.cmd run --service health-api powershell -NoProfile -Command '$env:DATABASE_URL=$env:MIGRATION_DATABASE_URL; pnpm --dir packages/db db:migrate'`.
+   Keep API runtime `DATABASE_URL` pointed at Railway private networking; use the public migration URL only for the explicit migration command.
 
 ## Safety
 

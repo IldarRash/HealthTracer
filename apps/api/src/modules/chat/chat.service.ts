@@ -129,6 +129,7 @@ export class ChatService {
           role: message.role,
           content: message.content,
         })),
+      ...(input.proposalRevision ? { proposalRevision: input.proposalRevision } : {}),
     });
 
     let proposalsToPersist: RawAiProposal[] = generated.output.proposals;

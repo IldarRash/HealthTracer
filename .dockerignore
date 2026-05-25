@@ -1,0 +1,45 @@
+# Dependencies and build artifacts
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+coverage
+**/coverage
+.turbo
+**/.turbo
+
+# Git and local tooling
+.git
+.gitignore
+.cursor
+.idea
+.vscode
+
+# Secrets and local env (keep .env.example for reference in repo, not needed in image)
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local runtime data
+.data
+**/.data
+*.log
+
+# Test and CI artifacts
+**/test-results
+**/__snapshots__
+
+# Docker build context noise
+**/*.md
+!docs/deployment/railway.md
+Dockerfile*
+docker-compose*.yml
+docker-compose*.yaml
+
+# Agent/plan artifacts
+**/*.plan.md
+agent-transcripts

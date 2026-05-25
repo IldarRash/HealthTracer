@@ -41,10 +41,16 @@ export class ProposalsController {
     @Param("proposalId") proposalId: string,
     @Body() body: unknown,
   ) {
-    return this.proposalsService.decideProposal(
-      auth,
-      proposalId,
-      parseBody(proposalDecisionSchema, body),
-    );
+    const input = parseBody(proposalDecisionSchema, body);
+
+    if (input.decision === "modify") {
+      return this.proposalsService.requestProposalModification(
+        auth,
+        proposalId,
+        input.modificationFeedback!,
+      );
+    }
+
+    return this.proposalsService.decideProposal(auth, proposalId, input);
   }
 }

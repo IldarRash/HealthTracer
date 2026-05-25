@@ -38,6 +38,8 @@ function createSlicePacket(
     intent,
     generatedAt: new Date().toISOString(),
     safetyConstraints: ["Do not diagnose medical conditions."],
+    supplementarySlices: [],
+    missingContextNotes: [],
     sourceRefs:
       purpose === "health_context"
         ? [
@@ -72,6 +74,17 @@ function createOrchestratorWithCapturedProvider(contextPacket: AgentContextPacke
     reply: "Here is a wellness-focused response you can review.",
     proposals: [],
   });
+  const generateIntentRoute = vi.fn().mockResolvedValue({
+    intent: "adjust_workout",
+    confidence: 0.84,
+    routingMethod: "llm_router",
+    requiredContextSlices: [
+      { type: "workout_adaptation", depth: "medium", timeRange: "14d" },
+      { type: "daily_checkin", depth: "small", timeRange: "7d" },
+    ],
+    safetyFlags: ["fatigue"],
+    expectedResponseMode: "recommendation_with_optional_proposal",
+  });
 
   const coachingContextService = {
     buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -89,9 +102,16 @@ function createOrchestratorWithCapturedProvider(contextPacket: AgentContextPacke
     agentToolRegistryService as never,
   );
 
-  Object.assign(service, { provider: { generateCoachResponse } });
+  Object.assign(service, {
+    provider: { generateCoachResponse, generateIntentRoute },
+  });
 
-  return { service, generateCoachResponse, coachingContextService };
+  return {
+    service,
+    generateCoachResponse,
+    generateIntentRoute,
+    coachingContextService,
+  };
 }
 
 function expectProviderContextExcludesLegacyFields(context: Record<string, unknown>) {
@@ -232,8 +252,315 @@ describe("AgentOrchestratorService provider context minimization", () => {
   });
 });
 
+describe("AgentOrchestratorService routing", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("bypasses the llm router for confident workout adaptation routes", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const { service, generateIntentRoute, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "I feel tired today. Should I train?",
+      recentMessages: [],
+    });
+
+    expect(generateIntentRoute).not.toHaveBeenCalled();
+    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ intent: "adjust_workout" }),
+      expect.objectContaining({
+        isConfident: true,
+        routingMethod: "rule_based",
+      }),
+    );
+  });
+
+  it("invokes the llm router once for ambiguous messages", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const { service, generateIntentRoute, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "I feel completely off today. What should I do?",
+      recentMessages: [],
+    });
+
+    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
+    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        routingMethod: "llm_router",
+        requiredContextSlices: expect.arrayContaining([
+          expect.objectContaining({ type: "workout_adaptation" }),
+        ]),
+      }),
+    );
+    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(true);
+  });
+
+  it("bypasses the llm router for confident nutrition adaptation routes", async () => {
+    const contextPacket = createSlicePacket("nutrition_adaptation", "adjust_nutrition", {
+      activeNutritionPlan: {
+        title: "Macros",
+        summary: "Higher protein focus.",
+        caloriesPerDay: 2200,
+        proteinGrams: 160,
+        carbsGrams: 200,
+        fatGrams: 70,
+        hydrationLiters: 2.5,
+        preferences: [],
+        restrictions: [],
+      },
+    });
+    const { service, generateIntentRoute, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "What should I eat for dinner tonight?",
+      recentMessages: [],
+    });
+
+    expect(generateIntentRoute).not.toHaveBeenCalled();
+    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ intent: "adjust_nutrition" }),
+      expect.objectContaining({
+        isConfident: true,
+        routingMethod: "rule_based",
+      }),
+    );
+  });
+
+  it("uses final coach output for user-facing replies instead of router output", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const coachReply = "Final coach reply with a reviewable proposal draft.";
+    const { service, generateCoachResponse, generateIntentRoute } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    generateCoachResponse.mockResolvedValue({
+      reply: coachReply,
+      proposals: [
+        {
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Reduce today's load",
+          reason: "Recovery signals are low.",
+          proposedChanges: {
+            title: "Strength base",
+            summary: "Lighter session today.",
+            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          },
+        },
+      ],
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "I feel completely off today. What should I do?",
+      recentMessages: [],
+    });
+
+    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
+    expect(generateCoachResponse).toHaveBeenCalledTimes(1);
+    expect(result.output.reply).toBe(coachReply);
+    expect(result.output.proposals).toHaveLength(1);
+    expect(result.output.proposals[0]?.intent).toBe("adapt_workout_plan");
+  });
+
+  it("falls back to the uncertain rule route when llm router output is invalid", async () => {
+    const contextPacket = createSlicePacket("general_chat", "general");
+    const { service, generateIntentRoute, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    generateIntentRoute.mockResolvedValue({
+      intent: "adjust_workout",
+      confidence: 0.86,
+      routingMethod: "llm_router",
+      requiredContextSlices: [
+        { type: "workout_adaptation", depth: "medium", timeRange: "14d" },
+      ],
+      safetyFlags: ["fatigue"],
+      expectedResponseMode: "recommendation_with_optional_proposal",
+      reply: "Skip training today.",
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "I feel completely off today. What should I do?",
+      recentMessages: [],
+    });
+
+    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
+    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        routingMethod: "llm_router",
+        isConfident: false,
+        confidence: 0.5,
+      }),
+    );
+    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(true);
+  });
+
+  it("bypasses the llm router for proposal revision turns and passes revision context", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const { service, generateIntentRoute, generateCoachResponse } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Please revise the proposal with these changes: keep one strength exercise.",
+      recentMessages: [],
+      proposalRevision: {
+        supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+        modificationFeedback: "Keep one strength exercise.",
+        originalProposal: {
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Adjust today's workout",
+          reason: "Recovery signals are low.",
+          proposedChanges: {
+            title: "Strength base",
+            summary: "Lighter session today.",
+            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          },
+        },
+      },
+    });
+
+    expect(generateIntentRoute).not.toHaveBeenCalled();
+    const providerRequest = generateCoachResponse.mock.calls[0]?.[0] as {
+      coachingContext: Record<string, unknown>;
+    };
+    expect(providerRequest.coachingContext.proposalRevision).toMatchObject({
+      supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+      modificationFeedback: "Keep one strength exercise.",
+    });
+  });
+
+  it("routes habit proposal revisions through longevity_overview context", async () => {
+    const contextPacket = createSlicePacket("longevity_overview", "longevity_overview");
+    const { service, generateIntentRoute, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Please revise the proposal with these changes: keep weekdays only.",
+      recentMessages: [],
+      proposalRevision: {
+        supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+        modificationFeedback: "keep weekdays only",
+        originalProposal: {
+          intent: "adapt_habit_plan",
+          targetDomain: "general",
+          title: "Adjust hydration habit",
+          reason: "Make the hydration target easier.",
+          proposedChanges: {
+            habits: [
+              {
+                habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+                title: "Morning hydration",
+                category: "hydration",
+                status: "active",
+                schedule: { type: "daily" },
+                target: { type: "boolean" },
+                required: true,
+                displayOrder: 0,
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(generateIntentRoute).not.toHaveBeenCalled();
+    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ intent: "longevity_overview", purpose: "longevity_overview" }),
+      expect.objectContaining({
+        intent: "longevity_overview",
+        purpose: "longevity_overview",
+        routingMethod: "rule_based",
+        isConfident: true,
+      }),
+    );
+  });
+
+  it("falls back to the uncertain rule route when llm router provider throws", async () => {
+    const contextPacket = createSlicePacket("general_chat", "general");
+    const { service, generateIntentRoute, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    generateIntentRoute.mockRejectedValue(new Error("OpenAI intent router request failed."));
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "I feel completely off today. What should I do?",
+      recentMessages: [],
+    });
+
+    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
+    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        routingMethod: "llm_router",
+        isConfident: false,
+        confidence: 0.5,
+      }),
+    );
+    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(true);
+  });
+});
+
 describe("AgentOrchestratorService", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("orchestrates a stub coach turn with typed agent metadata", async () => {
+    vi.spyOn(coachProviderFactory, "resolveAiCoachProviderMode").mockReturnValue("stub");
+
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const { service } = createOrchestratorWithCapturedProvider(contextPacket);
 

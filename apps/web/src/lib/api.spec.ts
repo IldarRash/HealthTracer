@@ -4,6 +4,7 @@ import {
   completeWorkoutSession,
   completeOnboarding,
   decideProposal,
+  sendChatMessage,
   apiQueryKeys,
   getAcceptedProposalRefreshQueryKeys,
   getProposalDecisionRefreshQueryKeys,
@@ -196,6 +197,150 @@ describe("web api helpers", () => {
     expect(state.errors).toEqual(
       expect.arrayContaining(["/users/me could not be loaded", "upstream failed"]),
     );
+  });
+
+  it("sends chat messages with optional proposalRevision metadata", async () => {
+    const threadId = "24b19287-75b8-4a3e-9c10-691908479405";
+    const requestBodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "POST" && path.includes(`/chat/threads/${threadId}/messages`)) {
+        requestBodies.push(JSON.parse(String(init?.body)));
+
+        return new Response(
+          JSON.stringify({
+            thread: {
+              id: threadId,
+              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+              title: "Coaching",
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-22T12:00:00.000Z",
+            },
+            userMessage: {
+              id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              threadId,
+              role: "user",
+              content:
+                'Please revise the proposal "Adjust hydration" with these changes: keep weekdays only.',
+              metadata: {},
+              createdAt: "2026-05-22T12:00:00.000Z",
+            },
+            assistantMessage: {
+              id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              threadId,
+              role: "assistant",
+              content: "I'll draft a revised hydration suggestion.",
+              metadata: {},
+              createdAt: "2026-05-22T12:00:01.000Z",
+            },
+            proposals: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await sendChatMessage(
+      token,
+      threadId,
+      'Please revise the proposal "Adjust hydration" with these changes: keep weekdays only.',
+      {
+        proposalRevision: {
+          supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+          modificationFeedback: "keep weekdays only",
+          originalProposal: {
+            intent: "adapt_habit_plan",
+            targetDomain: "general",
+            title: "Adjust hydration",
+            reason: "Make the hydration target easier.",
+            evidenceRefs: [],
+            proposedChanges: sampleHabitProposalChanges,
+          },
+        },
+      },
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.assistantMessage.content).toContain("revised hydration");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBodies[0]).toEqual({
+      content:
+        'Please revise the proposal "Adjust hydration" with these changes: keep weekdays only.',
+      proposalRevision: {
+        supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+        modificationFeedback: "keep weekdays only",
+        originalProposal: {
+          intent: "adapt_habit_plan",
+          targetDomain: "general",
+          title: "Adjust hydration",
+          reason: "Make the hydration target easier.",
+          evidenceRefs: [],
+          proposedChanges: sampleHabitProposalChanges,
+        },
+      },
+    });
+  });
+
+  it("omits proposalRevision from chat send body when not provided", async () => {
+    const threadId = "24b19287-75b8-4a3e-9c10-691908479405";
+    const requestBodies: unknown[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "POST" && path.includes(`/chat/threads/${threadId}/messages`)) {
+          requestBodies.push(JSON.parse(String(init?.body)));
+
+          return new Response(
+            JSON.stringify({
+              thread: {
+                id: threadId,
+                userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+                title: "Coaching",
+                createdAt: "2026-05-22T12:00:00.000Z",
+                updatedAt: "2026-05-22T12:00:00.000Z",
+              },
+              userMessage: {
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                threadId,
+                role: "user",
+                content: "Can you adapt my workout this week?",
+                metadata: {},
+                createdAt: "2026-05-22T12:00:00.000Z",
+              },
+              assistantMessage: {
+                id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                threadId,
+                role: "assistant",
+                content: "Sure, let's review your plan.",
+                metadata: {},
+                createdAt: "2026-05-22T12:00:01.000Z",
+              },
+              proposals: [],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    const result = await sendChatMessage(token, threadId, "Can you adapt my workout this week?");
+
+    expect(result.error).toBeUndefined();
+    expect(requestBodies[0]).toEqual({
+      content: "Can you adapt my workout this week?",
+    });
+    expect(requestBodies[0]).not.toHaveProperty("proposalRevision");
   });
 
   it("returns API errors for non-OK proposal decisions", async () => {
