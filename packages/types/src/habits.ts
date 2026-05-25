@@ -144,6 +144,8 @@ export const habitPlanPayloadSchema = z.object({
 
 export type HabitPlanPayload = z.infer<typeof habitPlanPayloadSchema>;
 
+export type HabitPlanProposalIntent = "create_habit_plan" | "adapt_habit_plan";
+
 const UNSAFE_HABIT_MEDICAL_PATTERNS = [
   /\bdiagnos(e|is|ed|ing)\b/i,
   /\bprescri(be|ption|bed|bing)\b/i,
@@ -192,6 +194,49 @@ export function getHabitPlanDomainErrors(payload: HabitPlanPayload): string[] {
     if (UNSAFE_HABIT_MEDICAL_PATTERNS.some((pattern) => pattern.test(unsafeText))) {
       errors.push(
         `habits: "${habit.title}" copy must stay in wellness coaching language without medical claims.`,
+      );
+    }
+  }
+
+  return errors;
+}
+
+export function getHabitPlanIntentStateErrors(
+  intent: HabitPlanProposalIntent,
+  hasActivePlan: boolean,
+): string[] {
+  if (intent === "create_habit_plan" && hasActivePlan) {
+    return [
+      "proposedChanges: create_habit_plan requires no active habit plan; use adapt_habit_plan to revise the current plan.",
+    ];
+  }
+
+  if (intent === "adapt_habit_plan" && !hasActivePlan) {
+    return [
+      "proposedChanges: adapt_habit_plan requires an active habit plan; use create_habit_plan to start one.",
+    ];
+  }
+
+  return [];
+}
+
+export function getHabitPlanAdaptationContinuityErrors(
+  currentPayload: HabitPlanPayload,
+  proposedPayload: HabitPlanPayload,
+): string[] {
+  const errors: string[] = [];
+  const proposedById = new Map(
+    proposedPayload.habits.map((habit) => [habit.habitDefinitionId, habit]),
+  );
+
+  for (const habit of currentPayload.habits) {
+    if (habit.status === "removed") {
+      continue;
+    }
+
+    if (!proposedById.has(habit.habitDefinitionId)) {
+      errors.push(
+        `habits: adaptation must include habitDefinitionId "${habit.habitDefinitionId}" ("${habit.title}") or mark it removed to preserve continuity.`,
       );
     }
   }
@@ -422,6 +467,49 @@ export type HabitPlanRevisionsResponse = z.infer<typeof habitPlanRevisionsRespon
 export const habitCompletionStatusSchema = z.enum(["completed", "skipped", "pending"]);
 
 export type HabitCompletionStatus = z.infer<typeof habitCompletionStatusSchema>;
+
+const HABIT_COMPLETION_STATUS_PRECEDENCE: Record<HabitCompletionStatus, number> = {
+  completed: 3,
+  skipped: 2,
+  pending: 1,
+};
+
+function mergeHabitCompletionStatus(
+  existing: HabitCompletionStatus | undefined,
+  incoming: HabitCompletionStatus,
+): HabitCompletionStatus {
+  if (!existing) {
+    return incoming;
+  }
+
+  return HABIT_COMPLETION_STATUS_PRECEDENCE[incoming] >=
+    HABIT_COMPLETION_STATUS_PRECEDENCE[existing]
+    ? incoming
+    : existing;
+}
+
+export function dedupeHabitCompletionRows<
+  T extends { habitDefinitionId: string; date: string; status: HabitCompletionStatus },
+>(completionRows: readonly T[]): T[] {
+  const byHabitAndDate = new Map<string, T>();
+
+  for (const row of completionRows) {
+    const key = `${row.habitDefinitionId}:${row.date}`;
+    const existing = byHabitAndDate.get(key);
+
+    if (!existing) {
+      byHabitAndDate.set(key, row);
+      continue;
+    }
+
+    byHabitAndDate.set(key, {
+      ...existing,
+      status: mergeHabitCompletionStatus(existing.status, row.status),
+    });
+  }
+
+  return [...byHabitAndDate.values()];
+}
 
 export const habitCompletionSchema = z.object({
   id: z.string().uuid(),
@@ -780,7 +868,7 @@ export function computeHabitAdherenceSummary(input: {
 
   const completionByHabitAndDate = new Map<string, Map<string, HabitCompletionStatus>>();
 
-  for (const row of input.completionRows) {
+  for (const row of dedupeHabitCompletionRows(input.completionRows)) {
     const byDate =
       completionByHabitAndDate.get(row.habitDefinitionId) ?? new Map<string, HabitCompletionStatus>();
     byDate.set(row.date, row.status);

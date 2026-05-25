@@ -11,7 +11,10 @@ import {
   collectHabitTemplateReferences,
   computeHabitAdherenceSummary,
   createEmptyHabitAdherenceResponse,
+  dedupeHabitCompletionRows,
+  getHabitPlanAdaptationContinuityErrors,
   getHabitPlanDomainErrors,
+  getHabitPlanIntentStateErrors,
   getHabitTemplateUsageErrors,
   getTodayIsoDateInTimezone,
   habitPlanPayloadSchema,
@@ -161,11 +164,13 @@ export class HabitsService {
       habits: parsedPayload.data.habits,
       window,
       windowEnd,
-      completionRows: completionRows.map((row) => ({
-        habitDefinitionId: row.habitDefinitionId,
-        date: row.date,
-        status: row.status as "completed" | "skipped" | "pending",
-      })),
+      completionRows: dedupeHabitCompletionRows(
+        completionRows.map((row) => ({
+          habitDefinitionId: row.habitDefinitionId,
+          date: row.date,
+          status: row.status as "completed" | "skipped" | "pending",
+        })),
+      ),
     });
   }
 
@@ -173,7 +178,7 @@ export class HabitsService {
     userId: string,
     payload: HabitPlanPayload,
     reason: string,
-    _intent: "create_habit_plan" | "adapt_habit_plan",
+    intent: "create_habit_plan" | "adapt_habit_plan",
   ): Promise<string> {
     const parsedPayload = habitPlanPayloadSchema.parse(payload);
     const domainErrors = getHabitPlanDomainErrors(parsedPayload);
@@ -186,8 +191,16 @@ export class HabitsService {
     }
 
     const existingPlan = await this.habitsRepository.findActivePlanByUserId(userId);
+    const intentErrors = getHabitPlanIntentStateErrors(intent, Boolean(existingPlan));
 
-    if (!existingPlan) {
+    if (intentErrors.length > 0) {
+      throw new BadRequestException({
+        message: "Habit plan proposal intent does not match current plan state.",
+        validationErrors: intentErrors,
+      });
+    }
+
+    if (intent === "create_habit_plan") {
       const { revision } = await this.habitsRepository.createPlanWithRevision(
         userId,
         parsedPayload,
@@ -196,6 +209,42 @@ export class HabitsService {
       );
 
       return `habit_revision:${revision.id}`;
+    }
+
+    if (!existingPlan?.activeRevisionId) {
+      throw new BadRequestException({
+        message: "Active habit plan revision is missing.",
+        validationErrors: [
+          "proposedChanges: adapt_habit_plan requires an active habit plan revision.",
+        ],
+      });
+    }
+
+    const activeRevision = await this.habitsRepository.findActiveRevisionByPlanId(
+      existingPlan.id,
+      existingPlan.activeRevisionId,
+    );
+
+    if (!activeRevision) {
+      throw new BadRequestException({
+        message: "Active habit plan revision is missing.",
+        validationErrors: [
+          "proposedChanges: adapt_habit_plan requires an active habit plan revision.",
+        ],
+      });
+    }
+
+    const currentPayload = habitPlanPayloadSchema.parse(activeRevision.payload);
+    const continuityErrors = getHabitPlanAdaptationContinuityErrors(
+      currentPayload,
+      parsedPayload,
+    );
+
+    if (continuityErrors.length > 0) {
+      throw new BadRequestException({
+        message: "Habit plan adaptation failed continuity validation.",
+        validationErrors: continuityErrors,
+      });
     }
 
     const revision = await this.habitsRepository.appendRevision(

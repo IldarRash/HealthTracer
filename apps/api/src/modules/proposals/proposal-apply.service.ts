@@ -2,9 +2,12 @@ import type { AiProposalRow } from "../chat/chat.repository.js";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
+  adjustNutritionPlanFromProgressChangesSchema,
   createGoalProposalChangesSchema,
+  extractHabitPlanPayload,
+  extractNutritionPlanPayload,
   generateWeeklyProgressSummarySchema,
-  habitPlanPayloadSchema,
+  habitPlanProposalChangesSchema,
   mergeRecoveryMetadataIntoWorkoutPlanProposal,
   nutritionPlanPayloadSchema,
   profileProposalChangesSchema,
@@ -93,7 +96,11 @@ export class ProposalApplyService {
       }
       case "create_nutrition_plan":
       case "adjust_nutrition_plan": {
-        const payload = nutritionPlanPayloadSchema.parse(proposal.proposedChanges);
+        const payload = extractNutritionPlanPayload(
+          nutritionPlanPayloadSchema.or(adjustNutritionPlanFromProgressChangesSchema).parse(
+            proposal.proposedChanges,
+          ),
+        );
 
         return this.nutritionService.applyNutritionPlanProposal(
           userId,
@@ -104,7 +111,9 @@ export class ProposalApplyService {
       }
       case "create_habit_plan":
       case "adapt_habit_plan": {
-        const payload = habitPlanPayloadSchema.parse(proposal.proposedChanges);
+        const payload = extractHabitPlanPayload(
+          habitPlanProposalChangesSchema.parse(proposal.proposedChanges),
+        );
 
         return this.habitsService.applyHabitPlanProposal(
           userId,

@@ -2,6 +2,7 @@ import type {
   GenerateWeeklyProgressSummaryInput,
   WeeklyProgressSummaryResponse,
 } from "@health/types";
+import { getTodayIsoDateInTimezone, getWeekStartIsoDate, shiftIsoDate } from "@health/types";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { UsersService } from "../users/users.service.js";
@@ -12,12 +13,14 @@ import {
   aggregateWorkoutSessions,
   buildDeferredDomains,
   buildSummaryUserMessage,
+  detectCrossDomainTrends,
   detectWorkoutTrends,
   isWellnessSafeProgressMessage,
   resolvePriorWeekRange,
   resolveProgressDataStatus,
   resolveWeekRange,
 } from "./progress-aggregate.service.js";
+import { ProgressCrossDomainDataService } from "./progress-cross-domain-data.service.js";
 import { toTrendObservation, toWeeklyProgressSummary } from "./progress.mapper.js";
 import { ProgressRepository } from "./progress.repository.js";
 
@@ -27,6 +30,7 @@ export class ProgressService {
     private readonly progressRepository: ProgressRepository,
     private readonly workoutsRepository: WorkoutsRepository,
     private readonly recoveryContextService: RecoveryContextService,
+    private readonly crossDomainDataService: ProgressCrossDomainDataService,
     private readonly usersService: UsersService,
   ) {}
 
@@ -48,10 +52,11 @@ export class ProgressService {
 
   async getCurrentWeekSummary(auth: ClerkAuthContext): Promise<WeeklyProgressSummaryResponse> {
     const user = await this.usersService.resolveFromAuth(auth);
-    const { weekStart } = resolveWeekRange(new Date(), undefined);
+    const weekRange = this.resolveUserWeekRange(user.timezone);
+
     const summaryRow = await this.progressRepository.findActiveByUserIdAndWeekStart(
       user.id,
-      weekStart,
+      weekRange.weekStart,
     );
 
     if (!summaryRow) {
@@ -71,7 +76,9 @@ export class ProgressService {
     input: GenerateWeeklyProgressSummaryInput,
   ): Promise<WeeklyProgressSummaryResponse> {
     const user = await this.usersService.resolveFromAuth(auth);
-    const weekRange = resolveWeekRange(new Date(), input.weekStart);
+    const weekRange = input.weekStart
+      ? resolveWeekRange(new Date(), input.weekStart)
+      : this.resolveUserWeekRange(user.timezone);
     const priorWeekRange = resolvePriorWeekRange(weekRange.weekStart);
 
     const existingSummary = await this.progressRepository.findActiveByUserIdAndWeekStart(
@@ -88,11 +95,47 @@ export class ProgressService {
       };
     }
 
-    const sessionRows = await this.workoutsRepository.listSessionsByUserIdInDateRange(
-      user.id,
-      priorWeekRange.weekStart,
-      weekRange.weekEnd,
-    );
+    const [
+      sessionRows,
+      recoveryAggregate,
+      todayAggregate,
+      nutritionAggregate,
+      habitsAggregate,
+      recipesAggregate,
+    ] = await Promise.all([
+      this.workoutsRepository.listSessionsByUserIdInDateRange(
+        user.id,
+        priorWeekRange.weekStart,
+        weekRange.weekEnd,
+      ),
+      this.recoveryContextService.buildWeeklyRecoveryAggregate(
+        user.id,
+        weekRange.weekStart,
+        weekRange.weekEnd,
+      ),
+      this.crossDomainDataService.buildTodayAggregate(
+        user.id,
+        weekRange.weekStart,
+        weekRange.weekEnd,
+      ),
+      this.crossDomainDataService.buildNutritionAggregate(
+        user.id,
+        weekRange.weekStart,
+        weekRange.weekEnd,
+      ),
+      this.crossDomainDataService.buildHabitsAggregate(
+        user.id,
+        user.timezone,
+        weekRange.weekStart,
+        weekRange.weekEnd,
+      ),
+      this.crossDomainDataService.buildRecipesAggregate(
+        user.id,
+        weekRange.weekStart,
+        weekRange.weekEnd,
+      ),
+    ]);
+
     const sessions = sessionRows.map(toWorkoutSession);
 
     const currentWorkoutAggregate = aggregateWorkoutSessions(
@@ -105,28 +148,39 @@ export class ProgressService {
       priorWeekRange.weekStart,
       priorWeekRange.weekEnd,
     );
-    const recoveryAggregate = await this.recoveryContextService.buildWeeklyRecoveryAggregate(
-      user.id,
-      weekRange.weekStart,
-      weekRange.weekEnd,
-    );
 
     const sourceAggregates = {
       workout: currentWorkoutAggregate.plannedCount > 0 ? currentWorkoutAggregate : null,
+      today: todayAggregate.daysWithChecklist > 0 ? todayAggregate : null,
+      nutrition:
+        nutritionAggregate.hasActivePlan || nutritionAggregate.daysWithAdherenceLogged > 0
+          ? nutritionAggregate
+          : null,
+      habits:
+        habitsAggregate.activeHabitCount > 0 || habitsAggregate.completedCount > 0
+          ? habitsAggregate
+          : null,
+      recipes:
+        recipesAggregate.recommendationCount > 0 || recipesAggregate.savedCount > 0
+          ? recipesAggregate
+          : null,
       recovery:
         recoveryAggregate.daysWithContext > 0 || recoveryAggregate.checkInCount > 0
           ? recoveryAggregate
           : null,
     };
-    const deferredDomains = buildDeferredDomains(sourceAggregates.recovery);
+    const deferredDomains = buildDeferredDomains(sourceAggregates);
     const dataStatus = resolveProgressDataStatus(sourceAggregates);
     const userMessage = buildSummaryUserMessage(sourceAggregates, dataStatus);
-    const trendDrafts = detectWorkoutTrends(
-      currentWorkoutAggregate,
-      priorWorkoutAggregate.plannedCount > 0 ? priorWorkoutAggregate : null,
-      weekRange.weekStart,
-      weekRange.weekEnd,
-    );
+    const trendDrafts = [
+      ...detectWorkoutTrends(
+        currentWorkoutAggregate,
+        priorWorkoutAggregate.plannedCount > 0 ? priorWorkoutAggregate : null,
+        weekRange.weekStart,
+        weekRange.weekEnd,
+      ),
+      ...detectCrossDomainTrends(sourceAggregates, weekRange.weekStart, weekRange.weekEnd),
+    ];
 
     for (const trend of trendDrafts) {
       if (!isWellnessSafeProgressMessage(trend.message)) {
@@ -168,6 +222,16 @@ export class ProgressService {
     return {
       summary: toWeeklyProgressSummary(summaryRow),
       trends: trends.map(toTrendObservation),
+    };
+  }
+
+  private resolveUserWeekRange(timezone: string) {
+    const anchorDate = getTodayIsoDateInTimezone(timezone);
+    const weekStart = getWeekStartIsoDate(anchorDate);
+
+    return {
+      weekStart,
+      weekEnd: shiftIsoDate(weekStart, 6),
     };
   }
 }

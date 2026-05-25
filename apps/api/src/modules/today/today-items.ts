@@ -7,6 +7,7 @@ import type {
 } from "@health/types";
 import {
   calculateTodayAdherence,
+  filterChecklistItemsConflictingWithHabitItems,
   resolveProposalItemSource,
   resolveProposalItemStatus,
 } from "@health/types";
@@ -248,8 +249,12 @@ export function mergeProposalItemsWithExisting(
       item.source.type === "generated" ||
       item.source.type === "habit",
   );
+  const dedupedProposalItems = filterChecklistItemsConflictingWithHabitItems(
+    preservedItems,
+    proposalItems,
+  );
 
-  return [...preservedItems, ...proposalItems];
+  return [...preservedItems, ...dedupedProposalItems];
 }
 
 export function buildChecklistState(items: TodayChecklistItem[]) {

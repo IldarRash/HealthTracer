@@ -64,6 +64,47 @@ export function canUpdateTodayItem(
   return item.status === "pending";
 }
 
+export function isTodayHabitItem(
+  item: Pick<
+    { kind: TodayChecklistItemKind; source: { type: string; id?: string } },
+    "kind" | "source"
+  >,
+): boolean {
+  return item.kind === "habit" || item.source.type === "habit";
+}
+
+export function formatTodayHabitItemSourceLabel(): string {
+  return "From your habit plan · one completion per day";
+}
+
+export function todayHabitItemClosedMessage(status: TodayChecklistItemStatus): string {
+  switch (status) {
+    case "completed":
+      return "Habit logged as complete for this day.";
+    case "skipped":
+      return "Habit marked skipped for this day.";
+    default:
+      return "This habit is closed for the day.";
+  }
+}
+
+export function todayItemClosedMessage(
+  item: Pick<
+    {
+      kind: TodayChecklistItemKind;
+      source: { type: string; id?: string };
+      status: TodayChecklistItemStatus;
+    },
+    "kind" | "source" | "status"
+  >,
+): string {
+  if (isTodayHabitItem(item)) {
+    return todayHabitItemClosedMessage(item.status);
+  }
+
+  return "This task is closed for the day.";
+}
+
 export function formatAdherenceScore(
   adherence: Pick<TodayAdherenceSummary, "score">,
 ): string {

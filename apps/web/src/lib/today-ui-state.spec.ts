@@ -9,9 +9,13 @@ import {
   formatAdherenceSummary,
   formatDisplayDate,
   formatLocalIsoDate,
+  formatTodayHabitItemSourceLabel,
   hasTodayWorkoutExecutionStarted,
   historyEntrySummaryLabel,
+  isTodayHabitItem,
   mergeTodayHistoryWithCurrentDay,
+  todayHabitItemClosedMessage,
+  todayItemClosedMessage,
   todayItemKindLabel,
   todayItemStatusBadgeClass,
   todayItemStatusLabel,
@@ -50,7 +54,29 @@ describe("today UI state", () => {
     expect(todayItemStatusLabel("pending")).toBe("Pending");
     expect(todayItemStatusLabel("completed")).toBe("Completed");
     expect(todayItemKindLabel("workout")).toBe("Workout");
+    expect(todayItemKindLabel("habit")).toBe("Habit");
     expect(todayItemStatusBadgeClass("skipped")).toBe("badge badge-session-skipped");
+  });
+
+  it("identifies habit checklist items and formats one-per-day execution copy", () => {
+    const habitItem = {
+      kind: "habit" as const,
+      source: { type: "habit" as const, id: "a1000001-0000-4000-8000-000000000001" },
+      status: "completed" as const,
+    };
+
+    expect(isTodayHabitItem(habitItem)).toBe(true);
+    expect(formatTodayHabitItemSourceLabel()).toContain("one completion per day");
+    expect(todayHabitItemClosedMessage("completed")).toContain("logged as complete");
+    expect(todayHabitItemClosedMessage("skipped")).toContain("marked skipped");
+    expect(todayItemClosedMessage(habitItem)).toBe(todayHabitItemClosedMessage("completed"));
+    expect(
+      todayItemClosedMessage({
+        kind: "workout",
+        source: { type: "workout_session", id: "78d40655-b4b5-47b3-b28e-470192e05f04" },
+        status: "completed",
+      }),
+    ).toBe("This task is closed for the day.");
   });
 
   it("allows updates only for pending items", () => {

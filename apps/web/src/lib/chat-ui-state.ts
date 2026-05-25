@@ -7,6 +7,11 @@ import {
   WELLBEING_CRISIS_SUPPORT_COPY,
   wellbeingCrisisEvaluationSchema,
 } from "@health/types";
+import {
+  buildChatWeeklyReviewPackView,
+  parseChatWeeklyReviewMetadata,
+  type ChatWeeklyReviewPackView,
+} from "./weekly-review-ui-state";
 
 export type OptimisticChatMessage = {
   id: string;
@@ -21,6 +26,7 @@ export type OptimisticChatMessage = {
 export type DisplayChatMessage = ChatMessage | OptimisticChatMessage;
 
 export const SUGGESTED_CHAT_PROMPTS = [
+  "Review my cross-domain weekly summary and suggest typed adaptations I can approve individually.",
   "Review my workout week",
   "Help me adjust my goals",
   "What's in my nutrition plan?",
@@ -90,4 +96,19 @@ export function resolveChatMessageCrisisSupport(
   }
 
   return WELLBEING_CRISIS_SUPPORT_COPY;
+}
+
+export function resolveChatMessageWeeklyReview(
+  message: Pick<ChatMessage, "role" | "metadata">,
+): ChatWeeklyReviewPackView | null {
+  if (message.role !== "assistant") {
+    return null;
+  }
+
+  const metadata = parseChatWeeklyReviewMetadata(message.metadata);
+  if (!metadata) {
+    return null;
+  }
+
+  return buildChatWeeklyReviewPackView(metadata);
 }

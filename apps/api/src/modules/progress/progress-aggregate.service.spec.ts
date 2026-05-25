@@ -122,7 +122,7 @@ describe("ProgressAggregateService", () => {
     const message = buildSummaryUserMessage(aggregates, status);
 
     expect(status).toBe("insufficient");
-    expect(message).toContain("not enough workout or recovery history");
+    expect(message).toContain("not enough structured history");
     expect(isWellnessSafeProgressMessage(message)).toBe(true);
   });
 
@@ -134,7 +134,13 @@ describe("ProgressAggregateService", () => {
     );
     const aggregates = { workout: aggregate };
     const status = resolveProgressDataStatus(aggregates);
-    const deferredDomains = buildDeferredDomains();
+    const deferredDomains = buildDeferredDomains({
+      today: null,
+      nutrition: null,
+      habits: null,
+      recipes: null,
+      recovery: null,
+    });
 
     expect(status).toBe("partial");
     expect(deferredDomains.map((domain) => domain.domain)).toEqual([
@@ -147,17 +153,23 @@ describe("ProgressAggregateService", () => {
 
   it("removes recovery from deferred domains when recovery aggregate exists", () => {
     const deferredDomains = buildDeferredDomains({
-      daysWithContext: 3,
-      checkInCount: 2,
-      bandCounts: {
-        well_supported: 1,
-        moderate_load: 2,
-        prioritize_recovery: 0,
-        insufficient_data: 4,
+      today: null,
+      nutrition: null,
+      habits: null,
+      recipes: null,
+      recovery: {
+        daysWithContext: 3,
+        checkInCount: 2,
+        bandCounts: {
+          well_supported: 1,
+          moderate_load: 2,
+          prioritize_recovery: 0,
+          insufficient_data: 4,
+        },
+        dominantBand: "moderate_load",
+        dataSufficiency: "partial",
+        message: "This week shows a mixed recovery pattern based on the entries available.",
       },
-      dominantBand: "moderate_load",
-      dataSufficiency: "partial",
-      message: "This week shows a mixed recovery pattern based on the entries available.",
     });
 
     expect(deferredDomains.map((domain) => domain.domain)).not.toContain("recovery");

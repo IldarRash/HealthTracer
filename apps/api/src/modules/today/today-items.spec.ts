@@ -314,4 +314,70 @@ describe("today-items merge and reconciliation", () => {
     expect(synced.some((item) => item.source.type === "workout_session")).toBe(true);
     expect(synced.some((item) => item.source.type === "habit")).toBe(true);
   });
+
+  it("syncs habit items idempotently when called repeatedly", () => {
+    const habit = buildHabitDefinition();
+    const initial = createHabitChecklistItem(habit);
+    const firstSync = syncTodayChecklistHabitItems([initial], [habit]);
+    const secondSync = syncTodayChecklistHabitItems(firstSync, [habit]);
+
+    expect(firstSync).toHaveLength(1);
+    expect(secondSync).toHaveLength(1);
+    expect(secondSync[0]?.id).toBe(initial.id);
+    expect(secondSync[0]?.source).toEqual({ type: "habit", id: habitDefinitionId });
+  });
+
+  it("preserves workout, recovery, and hydration items during habit sync", () => {
+    const hydrationItem = normalizeProposalItems([
+      { label: "Drink water", kind: "hydration" },
+    ])[0]!;
+    const recoveryItem = normalizeProposalItems([
+      { label: "Stretch", kind: "recovery" },
+    ])[0]!;
+    const workoutItem = createWorkoutChecklistItem(buildSessionSummary(sessionId));
+
+    const synced = syncTodayChecklistHabitItems([hydrationItem, recoveryItem, workoutItem], [
+      buildHabitDefinition(),
+    ]);
+
+    expect(synced).toHaveLength(4);
+    expect(synced.some((item) => item.kind === "hydration")).toBe(true);
+    expect(synced.some((item) => item.kind === "recovery")).toBe(true);
+    expect(synced.some((item) => item.source.type === "workout_session")).toBe(true);
+    expect(synced.some((item) => item.source.type === "habit")).toBe(true);
+  });
+
+  it("drops duplicate habit-kind proposal items when habit-linked items exist", () => {
+    const habitItem = createHabitChecklistItem(buildHabitDefinition());
+    const proposalItems = normalizeProposalItems([
+      { label: "Evening walk", kind: "habit" },
+      { label: "Stretch", kind: "recovery" },
+    ]);
+
+    const merged = mergeProposalItemsWithExisting([habitItem], proposalItems);
+
+    expect(merged).toHaveLength(2);
+    expect(merged.some((item) => item.kind === "habit" && item.source.type === "ai_proposal")).toBe(
+      false,
+    );
+    expect(merged.some((item) => item.label === "Stretch")).toBe(true);
+  });
+
+  it("drops proposal items whose labels match existing habit-linked items", () => {
+    const habitItem = createHabitChecklistItem(buildHabitDefinition());
+    const proposalItems = normalizeProposalItems([
+      { label: "Morning hydration", kind: "hydration" },
+      { label: "Stretch", kind: "recovery" },
+    ]);
+
+    const merged = mergeProposalItemsWithExisting([habitItem], proposalItems);
+
+    expect(merged.filter((item) => item.label === "Morning hydration")).toHaveLength(1);
+    expect(
+      merged.some(
+        (item) => item.source.type === "ai_proposal" && item.label === "Morning hydration",
+      ),
+    ).toBe(false);
+    expect(merged.some((item) => item.label === "Stretch")).toBe(true);
+  });
 });

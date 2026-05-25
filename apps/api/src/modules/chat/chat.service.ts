@@ -4,15 +4,18 @@ import type {
   ChatThread,
   ChatTurnResponse,
   CreateChatThreadInput,
+  RawAiProposal,
   SendChatMessageInput,
 } from "@health/types";
 import {
   evaluateWellbeingCrisisFromText,
   formatWellbeingCrisisSupportReply,
+  isWeeklyReviewChatMessage,
 } from "@health/types";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiService } from "../ai/ai.service.js";
+import { ProgressWeeklyReviewService } from "../progress/progress-weekly-review.service.js";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
 import { UsersService } from "../users/users.service.js";
 import { toChatMessage, toChatThread } from "./chat.mapper.js";
@@ -28,6 +31,7 @@ export class ChatService {
     private readonly usersService: UsersService,
     private readonly aiService: AiService,
     private readonly proposalValidationService: ProposalValidationService,
+    private readonly progressWeeklyReviewService: ProgressWeeklyReviewService,
   ) {}
 
   async listThreads(auth: ClerkAuthContext): Promise<ChatThread[]> {
@@ -114,6 +118,8 @@ export class ChatService {
       };
     }
 
+    const isWeeklyReviewTurn = isWeeklyReviewChatMessage(input.content);
+
     const generated = await this.aiService.generateCoachResponse({
       auth,
       userMessage: input.content,
@@ -125,6 +131,25 @@ export class ChatService {
         })),
     });
 
+    let proposalsToPersist: RawAiProposal[] = generated.output.proposals;
+    let weeklyReviewMetadata: Record<string, unknown> | undefined;
+
+    if (isWeeklyReviewTurn) {
+      const packed = await this.progressWeeklyReviewService.packChatWeeklyReviewProposals(
+        auth,
+        generated.output.proposals,
+      );
+
+      proposalsToPersist = packed.proposalsToPersist;
+      weeklyReviewMetadata = {
+        weeklyReview: {
+          summaryId: packed.summary.summary.id,
+          laneOutcomes: packed.laneOutcomes,
+          packMeta: packed.packMeta,
+        },
+      };
+    }
+
     const assistantMessage = await this.chatRepository.createMessage(
       threadId,
       "assistant",
@@ -132,18 +157,30 @@ export class ChatService {
       {
         parseErrors: generated.parseErrors,
         replySafetyErrors: generated.replySafetyErrors,
+        ...(weeklyReviewMetadata ?? {}),
       },
     );
 
     const createdProposals = [];
 
-    for (const rawProposal of generated.output.proposals) {
+    for (const rawProposal of proposalsToPersist) {
       const safetyErrors = validateProposalSafety(rawProposal);
       const validation = this.proposalValidationService.validateRawProposal(rawProposal);
       const ownershipErrors =
         await this.proposalValidationService.validateCorrelationEvidenceOwnership(
           user.id,
           rawProposal.evidenceRefs,
+        );
+      const provenanceErrors =
+        await this.proposalValidationService.validateProvenanceOwnership(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
+      const progressLinkedProvenanceErrors =
+        this.proposalValidationService.validateProgressLinkedProvenanceRequired(
+          rawProposal.intent,
+          rawProposal.proposedChanges,
         );
       const goalHierarchyErrors =
         await this.proposalValidationService.validateGoalProposalHierarchy(
@@ -163,13 +200,22 @@ export class ChatService {
           rawProposal.intent,
           rawProposal.proposedChanges,
         );
+      const habitProposalContextErrors =
+        await this.proposalValidationService.validateHabitProposalContext(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
       const validationErrors = [
         ...safetyErrors,
         ...validation.errors,
         ...ownershipErrors,
+        ...provenanceErrors,
+        ...progressLinkedProvenanceErrors,
         ...goalHierarchyErrors,
         ...todaySourceRefErrors,
         ...recoveryAdaptationErrors,
+        ...habitProposalContextErrors,
       ];
       const validationStatus = validationErrors.length === 0 ? "valid" : "invalid";
 

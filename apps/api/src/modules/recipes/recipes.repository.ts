@@ -162,6 +162,26 @@ export class RecipesRepository {
       .orderBy(desc(userRecipeRecommendations.shownAt));
   }
 
+  async countWeeklyActivityByUserId(userId: string, weekStart: string, weekEnd: string) {
+    const rows = await this.db
+      .select({
+        status: userRecipeRecommendations.status,
+      })
+      .from(userRecipeRecommendations)
+      .where(
+        and(
+          eq(userRecipeRecommendations.userId, userId),
+          gte(userRecipeRecommendations.shownAt, new Date(`${weekStart}T00:00:00.000Z`)),
+          lte(userRecipeRecommendations.shownAt, new Date(`${weekEnd}T23:59:59.999Z`)),
+        ),
+      );
+
+    return {
+      recommendationCount: rows.length,
+      savedCount: rows.filter((row) => row.status === "accepted" || row.status === "completed").length,
+    };
+  }
+
   async findRecommendationById(userId: string, recommendationId: string) {
     const [row] = await this.db
       .select({

@@ -6,6 +6,8 @@ import {
   PROGRESS_PLAN_CHANGE_NOTICE,
   progressDataStatusLabel,
   progressDomainLabel,
+  SAFE_WELLNESS_DISPLAY_FALLBACK,
+  sanitizeWellnessDisplayText,
   shouldShowLatestSummarySection,
   sortTrendObservations,
   summarizeDeferredDomains,
@@ -24,6 +26,7 @@ describe("progress UI state", () => {
 
   it("labels partial and insufficient data states", () => {
     expect(progressDataStatusLabel("partial")).toContain("Partial");
+    expect(progressDataStatusLabel("partial")).toContain("cross-domain");
     expect(progressDataStatusLabel("insufficient")).toContain("Not enough");
   });
 
@@ -71,8 +74,8 @@ describe("progress UI state", () => {
   });
 
   it("marks deferred domains as unavailable rather than hidden", () => {
-    expect(deferredDomainAvailabilityLabel("recipes")).toContain("Not available");
-    expect(deferredDomainAvailabilityLabel("nutrition")).toContain("Not included");
+    expect(deferredDomainAvailabilityLabel("recipes")).toContain("Deferred");
+    expect(deferredDomainAvailabilityLabel("nutrition")).toContain("Deferred");
     expect(progressDomainLabel("recovery")).toBe("Recovery");
   });
 
@@ -153,5 +156,14 @@ describe("progress UI state", () => {
         },
       ]),
     ).toContain("Nutrition adherence");
+  });
+
+  it("replaces forbidden wellness display terms with safe fallback copy", () => {
+    expect(sanitizeWellnessDisplayText("Your readiness score dropped this week.")).toBe(
+      SAFE_WELLNESS_DISPLAY_FALLBACK,
+    );
+    expect(sanitizeWellnessDisplayText("Workout consistency improved this week.")).toBe(
+      "Workout consistency improved this week.",
+    );
   });
 });

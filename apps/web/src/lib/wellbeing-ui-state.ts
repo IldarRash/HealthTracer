@@ -50,6 +50,16 @@ export function wellbeingScoreFillPercent(score: WellbeingScore | null): number 
   return Math.round(((score - 1) / 4) * 100);
 }
 
+export function formatWellbeingAggregatesError(
+  error: string | null | undefined,
+): string | null {
+  if (!error) {
+    return null;
+  }
+
+  return "Wellbeing check-in history could not be loaded right now. Other wellness sections are still shown.";
+}
+
 export function buildWellbeingCheckInPayload(input: {
   moodScore: WellbeingScore;
   stressScore: WellbeingScore;

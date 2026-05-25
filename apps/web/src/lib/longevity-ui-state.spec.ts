@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   DeviceConnection,
   Goal,
+  HabitAdherenceResponse,
   HealthDocument,
   HealthMetricAggregate,
   NutritionAdherenceRecord,
@@ -17,20 +18,78 @@ import {
   buildDocumentsContextView,
   buildGoalsSectionView,
   buildLongevityCoachPrompts,
+  buildLongevityHeroTrendStripView,
   buildLongevityTrendsView,
   buildLongevityWeeklyHero,
   buildNutritionConsistencyCardView,
+  buildSevenDayTrendAriaLabel,
   buildTodayAdherenceCardView,
   buildWellnessSignalsPanelView,
+  buildWorkoutConsistencyCardView,
+  goalsCardHint,
+  goalsCardValue,
+  hasMeaningfulHabitAdherence,
   hasSparseLongevityData,
   isOptionalProgressNotFound,
+  LONGEVITY_CTA_ROUTES,
   mergeTodayHistoryIntoTrend,
   sanitizeLongevityBackendText,
   summarizeActiveGoals,
+  summarizeHabitConsistencyHint,
 } from "./longevity-ui-state.js";
 
 const userId = "22222222-2222-4222-8222-222222222222";
 const now = new Date("2026-05-22T15:00:00.000Z");
+
+function sampleActiveGoal(): Goal {
+  return {
+    id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    userId,
+    type: "general_wellness",
+    status: "active",
+    priority: "primary",
+    title: "Move daily",
+    target: {},
+    horizon: null,
+    parentGoalId: null,
+    weekStart: null,
+    startDate: null,
+    targetDate: null,
+    createdAt: "2026-05-22T12:00:00.000Z",
+    updatedAt: "2026-05-22T12:00:00.000Z",
+  };
+}
+
+function sampleHabitAdherence(
+  overrides: Partial<HabitAdherenceResponse> = {},
+): HabitAdherenceResponse {
+  return {
+    plan: {
+      window: 7,
+      windowStart: "2026-05-16",
+      windowEnd: "2026-05-22",
+      scheduled: 7,
+      completed: 5,
+      skipped: 1,
+      missed: 1,
+      requiredCompletionRate: 0.7143,
+      ...overrides.plan,
+    },
+    habits: overrides.habits ?? [
+      {
+        habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+        title: "Morning hydration",
+        required: true,
+        scheduled: 7,
+        completed: 5,
+        skipped: 1,
+        missed: 1,
+        completionRate: 0.7143,
+        currentStreak: 3,
+      },
+    ],
+  };
+}
 
 const baseConnection = {
   userId,
@@ -136,11 +195,10 @@ function assertNoForbiddenTerms(...values: unknown[]): void {
 
 describe("longevity UI state", () => {
   describe("weekly hero and sparse detection", () => {
-    it("marks sparse data when no workouts, goals, or today signals exist", () => {
+    it("marks sparse data when no workouts, today signals, or habit completions exist", () => {
       expect(
         hasSparseLongevityData({
           sessions: [],
-          goals: [],
           todayHistory: [],
           todayDay: null,
           now,
@@ -158,6 +216,112 @@ describe("longevity UI state", () => {
       expect(hero.sparse).toBe(true);
       expect(hero.emptyMessage).toBe("Not enough data yet");
       expect(hero.subtitle).toContain("Not enough data yet");
+      assertNoForbiddenTerms(hero);
+    });
+
+    it("marks goal-only users as sparse without inflated weekly percent", () => {
+      const hero = buildLongevityWeeklyHero({
+        sessions: [],
+        goals: [sampleActiveGoal()],
+        todayHistory: [],
+        todayDay: null,
+        now,
+      });
+
+      expect(
+        hasSparseLongevityData({
+          sessions: [],
+          goals: [sampleActiveGoal()],
+          todayHistory: [],
+          todayDay: null,
+          now,
+        }),
+      ).toBe(true);
+      expect(hero.sparse).toBe(true);
+      expect(hero.emptyMessage).toBe("Not enough data yet");
+      expect(hero.percent).toBe(0);
+      assertNoForbiddenTerms(hero);
+    });
+
+    it("returns populated hero when habit completion data exists without workouts or today", () => {
+      const habitAdherence = sampleHabitAdherence();
+
+      expect(hasMeaningfulHabitAdherence(habitAdherence)).toBe(true);
+      expect(
+        hasSparseLongevityData({
+          sessions: [],
+          todayHistory: [],
+          todayDay: null,
+          habitAdherence,
+          now,
+        }),
+      ).toBe(false);
+
+      const hero = buildLongevityWeeklyHero({
+        sessions: [],
+        goals: [],
+        todayHistory: [],
+        todayDay: null,
+        habitAdherence,
+        now,
+      });
+
+      expect(hero.sparse).toBe(false);
+      expect(hero.emptyMessage).toBeNull();
+      expect(hero.percent).toBe(71);
+      assertNoForbiddenTerms(hero);
+    });
+
+    it("keeps hero sparse when habits are scheduled but have zero completions", () => {
+      const habitAdherence = sampleHabitAdherence({
+        plan: {
+          window: 7,
+          windowStart: "2026-05-16",
+          windowEnd: "2026-05-22",
+          scheduled: 7,
+          completed: 0,
+          skipped: 0,
+          missed: 7,
+          requiredCompletionRate: 0,
+        },
+        habits: [
+          {
+            habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+            title: "Morning hydration",
+            required: true,
+            scheduled: 7,
+            completed: 0,
+            skipped: 0,
+            missed: 7,
+            completionRate: 0,
+            currentStreak: 0,
+          },
+        ],
+      });
+
+      expect(hasMeaningfulHabitAdherence(habitAdherence)).toBe(false);
+      expect(
+        hasSparseLongevityData({
+          sessions: [],
+          todayHistory: [],
+          todayDay: null,
+          habitAdherence,
+          now,
+        }),
+      ).toBe(true);
+
+      const hero = buildLongevityWeeklyHero({
+        sessions: [],
+        goals: [],
+        todayHistory: [],
+        todayDay: null,
+        habitAdherence,
+        now,
+      });
+
+      expect(hero.sparse).toBe(true);
+      expect(hero.emptyMessage).toBe("Not enough data yet");
+      expect(hero.percent).toBe(0);
       assertNoForbiddenTerms(hero);
     });
 
@@ -213,6 +377,31 @@ describe("longevity UI state", () => {
       const merged = mergeTodayHistoryIntoTrend([0, 0, 0, 0, 0, 0, 0], history, now);
 
       expect(merged[4]).toBe(80);
+    });
+
+    it("builds sparse and populated seven-day trend aria labels with weekday names", () => {
+      expect(buildSevenDayTrendAriaLabel([0, 0, 0, 0, 0, 0, 0], true)).toBe(
+        "Seven day activity trend unavailable. Not enough data yet.",
+      );
+
+      expect(
+        buildSevenDayTrendAriaLabel([10, 20, 0, 40, 80, 0, 0], false),
+      ).toBe(
+        "Seven day activity trend. Mon: 10%, Tue: 20%, Wed: 0%, Thu: 40%, Fri: 80%, Sat: 0%, Sun: 0%.",
+      );
+    });
+
+    it("builds sparse trend strip view without implying zero activity bars", () => {
+      const sparseTrend = buildLongevityHeroTrendStripView([0, 0, 0, 0, 0, 0, 0], true);
+
+      expect(sparseTrend.sparse).toBe(true);
+      expect(sparseTrend.className).toContain("trend-strip--sparse");
+      expect(sparseTrend.ariaLabel).toContain("unavailable");
+
+      const populatedTrend = buildLongevityHeroTrendStripView([10, 0, 40, 0, 80, 0, 0], false);
+
+      expect(populatedTrend.sparse).toBe(false);
+      expect(populatedTrend.className).toBe("trend-strip");
     });
   });
 
@@ -276,7 +465,7 @@ describe("longevity UI state", () => {
       assertNoForbiddenTerms(view);
     });
 
-    it("maps nutrition card empty, plan-only, and ready states", () => {
+    it("maps nutrition card empty, plan-only, ready, and load-error states", () => {
       expect(buildNutritionConsistencyCardView({
         planTitle: null,
         planSummary: null,
@@ -284,6 +473,17 @@ describe("longevity UI state", () => {
       })).toEqual({
         status: "empty",
         message: "No active nutrition plan yet. Accept a nutrition proposal in Chat to begin.",
+      });
+
+      expect(
+        buildNutritionConsistencyCardView({
+          planTitle: null,
+          planSummary: null,
+          adherence: null,
+          fetchFailed: true,
+        }),
+      ).toMatchObject({
+        status: "load_error",
       });
 
       expect(buildNutritionConsistencyCardView({
@@ -324,6 +524,51 @@ describe("longevity UI state", () => {
       expect(ready.status).toBe("ready");
       if (ready.status === "ready") {
         expect(ready.detail).toBe("1 of 2 planned meals logged today");
+      }
+      assertNoForbiddenTerms(ready);
+    });
+
+    it("maps workout card empty, ready, and load-error states", () => {
+      expect(
+        buildWorkoutConsistencyCardView({
+          sessions: [],
+          fetchFailed: true,
+        }),
+      ).toMatchObject({
+        status: "load_error",
+      });
+
+      expect(
+        buildWorkoutConsistencyCardView({
+          sessions: [],
+        }),
+      ).toMatchObject({
+        status: "empty",
+      });
+
+      const ready = buildWorkoutConsistencyCardView({
+        sessions: [
+          {
+            id: "77777777-7777-4777-8777-777777777777",
+            userId,
+            workoutPlanId: "88888888-8888-4888-8888-888888888888",
+            workoutPlanRevisionId: "99999999-9999-4999-8999-999999999999",
+            title: "Strength day",
+            exercises: [],
+            feedback: {},
+            plannedDate: "2026-05-20",
+            status: "completed",
+            completedAt: "2026-05-20T12:00:00.000Z",
+            createdAt: "2026-05-20T12:00:00.000Z",
+            updatedAt: "2026-05-20T12:00:00.000Z",
+          },
+        ],
+        now,
+      });
+
+      expect(ready.status).toBe("ready");
+      if (ready.status === "ready") {
+        expect(ready.value).toBe("1 of 1 sessions completed");
       }
       assertNoForbiddenTerms(ready);
     });
@@ -546,6 +791,22 @@ describe("longevity UI state", () => {
       expect(serialized).not.toContain("extractedConstraints");
       assertNoForbiddenTerms(view);
     });
+
+    it("labels documents without coach context consent", () => {
+      const view = buildDocumentsContextView([
+        sampleDocument({
+          id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          title: "Private note",
+          consentScopes: ["upload_storage"],
+        }),
+      ]);
+
+      expect(view.status).toBe("ready");
+      if (view.status === "ready") {
+        expect(view.items[0]?.consentLabel).toBe("Coach context not shared");
+      }
+      assertNoForbiddenTerms(view);
+    });
   });
 
   describe("trends, goals, and coach prompts", () => {
@@ -584,6 +845,15 @@ describe("longevity UI state", () => {
               exerciseCompletionPercent: null,
               partialSessionCount: 0,
             },
+            today: {
+              daysWithChecklist: 3,
+              averageAdherencePercent: 70,
+              completedRequiredItems: 9,
+              totalRequiredItems: 12,
+              habitItemCompletionPercent: 65,
+              dataSufficiency: "partial",
+              message: "Today checklists were logged on three days.",
+            },
           },
           deferredDomains: [
             {
@@ -618,9 +888,11 @@ describe("longevity UI state", () => {
 
       expect(view.status).toBe("ready");
       if (view.status === "ready") {
-        expect(view.headline).toBe("1 of 2 sessions completed");
+        expect(view.headline).toContain("Cross-domain review");
+        expect(view.aggregates.length).toBeGreaterThan(0);
         expect(view.trends[0]?.title).toContain("Workout");
         expect(view.deferredDomains[0]?.domain).toBe("Nutrition");
+        expect(view.weeklyReviewChatPrompt).toContain("approve individually");
       }
       assertNoForbiddenTerms(view);
     });
@@ -702,20 +974,28 @@ describe("longevity UI state", () => {
       expect(sanitizeLongevityBackendText("Workout consistency improved this week.")).toBe(
         "Workout consistency improved this week.",
       );
+
+      for (const term of FORBIDDEN_LONGEVITY_TERMS) {
+        expect(sanitizeLongevityBackendText(`Weekly update mentions ${term}.`)).toBe(
+          SAFE_BACKEND_MESSAGE_FALLBACK,
+        );
+      }
     });
 
     it("maps goals load errors to a partial fallback section view", () => {
-      expect(
-        buildGoalsSectionView({
-          goals: [],
-          fetchFailed: true,
-        }),
-      ).toEqual({
+      const loadError = buildGoalsSectionView({
+        goals: [],
+        fetchFailed: true,
+      });
+
+      expect(loadError).toEqual({
         status: "load_error",
         title: "Goals unavailable",
         description:
           "Your goals could not be loaded right now. Other wellness data is still shown below.",
       });
+      expect(goalsCardValue(loadError)).toBe("Unavailable");
+      expect(goalsCardHint(loadError)).toContain("could not be loaded");
 
       expect(
         buildGoalsSectionView({
@@ -725,6 +1005,51 @@ describe("longevity UI state", () => {
       ).toMatchObject({
         status: "empty",
         title: "No active goals yet",
+      });
+    });
+
+    it("keeps cached goals visible when refresh fails", () => {
+      const cachedGoals: Goal[] = [
+        {
+          id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+          userId,
+          type: "general_wellness",
+          status: "active",
+          priority: "primary",
+          title: "Move daily",
+          target: {},
+          horizon: null,
+          parentGoalId: null,
+          weekStart: null,
+          startDate: null,
+          targetDate: null,
+          createdAt: "2026-05-22T12:00:00.000Z",
+          updatedAt: "2026-05-22T12:00:00.000Z",
+        },
+      ];
+
+      const section = buildGoalsSectionView({
+        goals: cachedGoals,
+        fetchFailed: true,
+      });
+
+      expect(section.status).toBe("ready");
+      if (section.status === "ready") {
+        expect(section.count).toBe(1);
+        expect(section.items[0]?.title).toBe("Move daily");
+      }
+    });
+
+    it("exposes approved longevity CTA routes for card navigation", () => {
+      expect(LONGEVITY_CTA_ROUTES).toEqual({
+        chat: "/chat",
+        today: "/today",
+        training: "/training",
+        nutrition: "/nutrition",
+        profile: "/profile",
+        profileGoals: "/profile#goals",
+        profileDocuments: "/profile#documents",
+        profileConsent: "/profile",
       });
     });
 
@@ -791,6 +1116,52 @@ describe("longevity UI state", () => {
     it("treats missing weekly progress as optional when not found", () => {
       expect(isOptionalProgressNotFound("Weekly progress summary not found.")).toBe(true);
       expect(isOptionalProgressNotFound("upstream failed")).toBe(false);
+    });
+
+    it("summarizes habit consistency hints and degrades when no plan exists", () => {
+      expect(summarizeHabitConsistencyHint(null)).toBeNull();
+      expect(
+        summarizeHabitConsistencyHint({
+          plan: {
+            window: 7,
+            windowStart: "2026-05-18",
+            windowEnd: "2026-05-24",
+            scheduled: 7,
+            completed: 5,
+            skipped: 1,
+            missed: 1,
+            requiredCompletionRate: 0.7143,
+          },
+          habits: [],
+        }),
+      ).toBeNull();
+      expect(
+        summarizeHabitConsistencyHint({
+          plan: {
+            window: 7,
+            windowStart: "2026-05-18",
+            windowEnd: "2026-05-24",
+            scheduled: 7,
+            completed: 5,
+            skipped: 1,
+            missed: 1,
+            requiredCompletionRate: 0.7143,
+          },
+          habits: [
+            {
+              habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+              title: "Morning hydration",
+              required: true,
+              scheduled: 7,
+              completed: 5,
+              skipped: 1,
+              missed: 1,
+              completionRate: 0.7143,
+              currentStreak: 3,
+            },
+          ],
+        }),
+      ).toBe("71% required completion (7 days) · Morning hydration · 3-day streak");
     });
   });
 });

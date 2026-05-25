@@ -93,8 +93,9 @@ function createValidationServiceMock(overrides: Record<string, unknown> = {}) {
   return {
     validateStoredProposal: () => ({ valid: true, errors: [] }),
     validateProvenanceOwnership: async () => [],
+    validateProgressLinkedProvenanceRequired: () => [],
     validateExerciseReferences: async () => [],
-    validateHabitTemplateReferences: async () => [],
+    validateHabitProposalContext: async () => [],
     validateCorrelationEvidenceRefs: () => [],
     validateCorrelationEvidenceOwnership: async () => [],
     validateGoalProposalHierarchy: async () => [],
@@ -509,6 +510,75 @@ describe("ProposalsService", () => {
     expect(markedValidation).toEqual({
       status: "invalid",
       errors: [evidenceError],
+    });
+    expect(applyCalled).toBe(false);
+    expect(acceptCalled).toBe(false);
+  });
+
+  it("blocks acceptance when habit proposal context validation fails", async () => {
+    let applyCalled = false;
+    let acceptCalled = false;
+    let markedValidation: { status: string; errors: string[] } | null = null;
+    const habitContextError =
+      "proposedChanges: create_habit_plan requires no active habit plan.";
+    const habitProposal = {
+      ...pendingProposal,
+      intent: "create_habit_plan" as const,
+      targetDomain: "habits" as const,
+      title: "Start hydration habit",
+      reason: "Build a daily hydration routine.",
+      proposedChanges: {
+        habits: [
+          {
+            habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+            title: "Morning hydration",
+            category: "hydration",
+            status: "active",
+            schedule: { type: "daily" },
+            target: { type: "boolean" },
+            required: true,
+            displayOrder: 0,
+          },
+        ],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => habitProposal,
+        acceptPendingProposal: async () => {
+          acceptCalled = true;
+          return habitProposal;
+        },
+        markValidation: async (
+          _proposalId: string,
+          status: "invalid" | "valid" | "pending_validation",
+          errors: string[],
+        ) => {
+          markedValidation = { status, errors };
+          return habitProposal;
+        },
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateHabitProposalContext: async () => [habitContextError],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "habit_revision:880099c6-3b5f-4383-8246-97b72bf61818";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, habitProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(markedValidation).toEqual({
+      status: "invalid",
+      errors: [habitContextError],
     });
     expect(applyCalled).toBe(false);
     expect(acceptCalled).toBe(false);
@@ -949,6 +1019,54 @@ describe("ProposalsService", () => {
 
     await expect(
       service.decideProposal(auth, progressWorkoutProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+  });
+
+  it("blocks acceptance when progress-linked proposals omit required sourceSummaryId", async () => {
+    let applyCalled = false;
+    const missingProvenanceError =
+      "proposedChanges.sourceSummaryId: Progress-linked proposals require a weekly progress summary reference.";
+    const progressNutritionProposal = {
+      ...pendingProposal,
+      intent: "adjust_nutrition_plan" as const,
+      targetDomain: "nutrition" as const,
+      title: "Adjust nutrition targets",
+      reason: "Weekly adherence suggests a modest adjustment.",
+      proposedChanges: {
+        plan: {
+          title: "Balanced week",
+          summary: "Adjusted targets based on weekly adherence patterns.",
+          caloriesPerDay: 2200,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          hydrationLiters: null,
+          mealStructure: [{ label: "Breakfast" }],
+        },
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => progressNutritionProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateProgressLinkedProvenanceRequired: () => [missingProvenanceError],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "nutrition_revision:rev-progress";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, progressNutritionProposal.id, { decision: "accept" }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(applyCalled).toBe(false);
   });

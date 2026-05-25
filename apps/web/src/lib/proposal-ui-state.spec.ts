@@ -3,13 +3,20 @@ import type { AiProposal } from "@health/types";
 import {
   canAcceptProposal,
   canDecideProposal,
+  formatHabitProposalValidationError,
+  formatHabitProposalValidationErrors,
+  formatProposalValidationErrors,
   getAcceptDisabledReason,
+  getHabitProposalAppliedMessage,
   getProposalDomainLabel,
   getProposalDomainPillClass,
   getProposalDomainRoute,
+  getProposalIntentRoute,
+  getProposalNavigationRoute,
   getProposalIntentLabel,
   getProposalStatusBadgeTone,
   getProposalStatusLabel,
+  isHabitPlanProposalIntent,
   mergeProposalsById,
 } from "./proposal-ui-state.js";
 
@@ -61,6 +68,7 @@ describe("proposal UI state", () => {
         status: "pending",
         validationStatus: "invalid",
         validationErrors: ["Calories must be within a safe range."],
+        intent: "adjust_nutrition_plan",
       }),
     ).toContain("validation issues");
 
@@ -69,6 +77,7 @@ describe("proposal UI state", () => {
         status: "pending",
         validationStatus: "valid",
         validationErrors: [],
+        intent: "adjust_nutrition_plan",
       }),
     ).toBeNull();
   });
@@ -103,6 +112,7 @@ describe("proposal UI state", () => {
     expect(getProposalDomainRoute("goal")).toBe("/profile#goals");
     expect(getProposalDomainRoute("nutrition")).toBe("/nutrition");
     expect(getProposalDomainRoute("recipe")).toBe("/nutrition");
+    expect(getProposalDomainRoute("today")).toBe("/today");
     expect(getProposalDomainRoute("general")).toBeNull();
     expect(getProposalStatusLabel("pending")).toBe("Pending review");
     expect(getProposalDomainPillClass("profile")).toBe("proposal-domain-pill--profile");
@@ -113,12 +123,97 @@ describe("proposal UI state", () => {
     expect(getProposalIntentLabel("adapt_workout_plan_from_progress")).toContain(
       "Progress-based",
     );
-    expect(getProposalIntentLabel("adjust_nutrition_plan")).toBeNull();
+    expect(
+      getProposalIntentLabel("adjust_nutrition_plan", {
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        plan: {
+          title: "Balanced week",
+          summary: "Adjusted targets based on weekly adherence patterns.",
+          caloriesPerDay: 2200,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          hydrationLiters: null,
+          mealStructure: [{ label: "Breakfast" }],
+        },
+      }),
+    ).toContain("Progress-based nutrition");
   });
 
   it("labels habit plan intents", () => {
     expect(getProposalIntentLabel("create_habit_plan")).toContain("habit plan");
     expect(getProposalIntentLabel("adapt_habit_plan")).toContain("Habit");
+    expect(isHabitPlanProposalIntent("create_habit_plan")).toBe(true);
+    expect(isHabitPlanProposalIntent("adapt_habit_plan")).toBe(true);
+    expect(isHabitPlanProposalIntent("create_goal")).toBe(false);
+  });
+
+  it("routes habit proposals to Today and formats create-vs-adapt validation copy", () => {
+    expect(getProposalIntentRoute("create_habit_plan")).toBe("/today");
+    expect(getProposalIntentRoute("adapt_habit_plan")).toBe("/today");
+    expect(
+      getProposalNavigationRoute({
+        intent: "adapt_habit_plan",
+        targetDomain: "general",
+      }),
+    ).toBe("/today");
+
+    expect(
+      formatHabitProposalValidationError(
+        "proposedChanges: create_habit_plan requires no active habit plan; use adapt_habit_plan to revise the current plan.",
+      ),
+    ).toContain("already have an active habit plan");
+
+    expect(
+      formatHabitProposalValidationError(
+        "proposedChanges: adapt_habit_plan requires an active habit plan; use create_habit_plan to start one.",
+      ),
+    ).toContain("no habit plan to adjust");
+
+    expect(
+      formatHabitProposalValidationError(
+        'habits: adaptation must include habitDefinitionId "a1000001-0000-4000-8000-000000000001" ("Morning hydration") or mark it removed to preserve continuity.',
+      ),
+    ).toContain("Morning hydration");
+
+    expect(
+      formatHabitProposalValidationError(
+        "proposedChanges: adapt_habit_plan requires an active habit plan revision.",
+      ),
+    ).toContain("could not be read");
+
+    expect(getHabitProposalAppliedMessage("create_habit_plan")).toContain("Today");
+    expect(getHabitProposalAppliedMessage("adapt_habit_plan")).toContain("history");
+
+    expect(
+      formatProposalValidationErrors({
+        intent: "create_habit_plan",
+        validationErrors: [
+          "proposedChanges: create_habit_plan requires no active habit plan; use adapt_habit_plan to revise the current plan.",
+        ],
+      }),
+    ).toEqual([
+      "You already have an active habit plan. Ask the coach to adjust your current plan instead of proposing a new one.",
+    ]);
+
+    expect(
+      formatHabitProposalValidationErrors([
+        "proposedChanges: create_habit_plan requires no active habit plan; use adapt_habit_plan to revise the current plan.",
+        "proposedChanges: adapt_habit_plan requires an active habit plan; use create_habit_plan to start one.",
+      ]),
+    ).toHaveLength(2);
+  });
+
+  it("uses habit-specific accept disabled guidance", () => {
+    expect(
+      getAcceptDisabledReason({
+        status: "pending",
+        validationStatus: "invalid",
+        validationErrors: ["proposedChanges: adapt_habit_plan requires an active habit plan; use create_habit_plan to start one."],
+        intent: "adapt_habit_plan",
+      }),
+    ).toContain("habit proposal");
   });
 
   it("maps lifecycle states to inline copy and badge tones", () => {

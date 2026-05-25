@@ -212,6 +212,10 @@ export class CoachingContextService {
             dataStatus: snapshot.weeklyProgressSummary.summary.dataStatus,
             userMessage: snapshot.weeklyProgressSummary.summary.userMessage,
             workout: snapshot.weeklyProgressSummary.summary.sourceAggregates.workout,
+            today: snapshot.weeklyProgressSummary.summary.sourceAggregates.today,
+            nutrition: snapshot.weeklyProgressSummary.summary.sourceAggregates.nutrition,
+            habits: snapshot.weeklyProgressSummary.summary.sourceAggregates.habits,
+            recovery: snapshot.weeklyProgressSummary.summary.sourceAggregates.recovery,
             deferredDomains: snapshot.weeklyProgressSummary.summary.deferredDomains.map(
               (domain) => ({
                 domain: domain.domain,

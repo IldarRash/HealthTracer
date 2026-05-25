@@ -9,7 +9,7 @@ import {
   apiQueryKeys,
   getTodayDay,
   getTodayHistory,
-  getWorkoutExecutionRefreshQueryKeys,
+  getTodayItemStatusRefreshQueryKeys,
   startTodayWorkout,
   updateTodayFeedback,
   updateTodayItemStatus,
@@ -24,13 +24,16 @@ import {
   formatAdherenceScore,
   formatAdherenceSummary,
   formatTodayHierarchySourceRef,
+  formatTodayHabitItemSourceLabel,
   formatDisplayDate,
   formatLocalIsoDate,
   hasTodayWorkoutExecutionStarted,
   historyEntrySummaryLabel,
+  isTodayHabitItem,
   mergeTodayHistoryWithCurrentDay,
   sessionStatusLabel,
   todayItemCardClass,
+  todayItemClosedMessage,
   todayItemKindLabel,
   todayItemStatusBadgeClass,
   todayItemStatusLabel,
@@ -367,7 +370,7 @@ export function TodayWorkspace() {
   }, [dayQuery.data?.feedback, selectedDate]);
 
   const invalidateTodayQueries = () => {
-    for (const queryKey of getWorkoutExecutionRefreshQueryKeys()) {
+    for (const queryKey of getTodayItemStatusRefreshQueryKeys()) {
       void queryClient.invalidateQueries({ queryKey });
     }
   };
@@ -548,7 +551,7 @@ export function TodayWorkspace() {
           {items.length === 0 ? (
             <EmptyState
               title="No tasks for this day"
-              description="Schedule a workout or accept a Today checklist proposal in Chat to build your daily plan."
+              description="Schedule a workout, accept a habit plan in Chat, or accept a Today checklist proposal to build your daily plan."
               action={
                 <div className="action-row proposal-actions">
                   <Link href="/training" className="confirmation-card__link">
@@ -564,6 +567,7 @@ export function TodayWorkspace() {
             <ul className="training-session-list today-item-list">
               {items.map((item) => {
                 const hierarchySourceLabel = formatTodayHierarchySourceRef(item.source);
+                const isHabitItem = isTodayHabitItem(item);
 
                 return (
                 <li key={item.id} className={todayItemCardClass(item.status)}>
@@ -580,11 +584,15 @@ export function TodayWorkspace() {
                     </span>
                   </div>
 
-                  {hierarchySourceLabel ? (
+                  {isHabitItem ? (
+                    <p className="muted-text today-item-source">{formatTodayHabitItemSourceLabel()}</p>
+                  ) : null}
+
+                  {!isHabitItem && hierarchySourceLabel ? (
                     <p className="muted-text today-item-source">{hierarchySourceLabel}</p>
                   ) : null}
 
-                  {item.source.type === "workout_session" ? (
+                  {!isHabitItem && item.source.type === "workout_session" ? (
                     <p className="muted-text today-item-source">
                       Linked to a scheduled workout session.
                     </p>
@@ -600,7 +608,9 @@ export function TodayWorkspace() {
                       >
                         {updatingItemId === item.id && updateItemMutation.isPending
                           ? "Saving…"
-                          : "Mark complete"}
+                          : isHabitItem
+                            ? "Mark habit complete"
+                            : "Mark complete"}
                       </button>
                       <button
                         type="button"
@@ -608,11 +618,11 @@ export function TodayWorkspace() {
                         disabled={updateItemMutation.isPending}
                         onClick={() => handleItemStatus(item.id, "skipped")}
                       >
-                        Skip for now
+                        {isHabitItem ? "Skip habit today" : "Skip for now"}
                       </button>
                     </div>
                   ) : (
-                    <p className="muted-text">This task is closed for the day.</p>
+                    <p className="muted-text">{todayItemClosedMessage(item)}</p>
                   )}
                 </li>
                 );

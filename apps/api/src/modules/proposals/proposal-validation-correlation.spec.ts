@@ -21,6 +21,10 @@ describe("ProposalValidationService correlation evidence", () => {
         findRevisionById: async () => null,
       } as never,
       { findByUserId: async () => ({ timezone: "UTC" }) } as never,
+      {
+        findActivePlanByUserId: async () => null,
+        findActiveRevisionByPlanId: async () => null,
+      } as never,
     );
 
     const result = service.validateRawProposal({

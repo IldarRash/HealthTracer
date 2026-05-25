@@ -3,11 +3,14 @@
 import { useAuth } from "@clerk/nextjs";
 import type { AiProposal } from "@health/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { decideProposal, apiQueryKeys, getAcceptedProposalRefreshQueryKeys } from "../../lib/api";
+import { decideProposal, apiQueryKeys, getProposalDecisionRefreshQueryKeys } from "../../lib/api";
 import {
   canAcceptProposal,
   canDecideProposal,
+  formatProposalValidationErrors,
   getAcceptDisabledReason,
+  getProposalDomainLabel,
+  getProposalIntentLabel,
 } from "../../lib/proposal-ui-state";
 
 type ProposalCardProps = {
@@ -37,7 +40,7 @@ export function ProposalCard({ proposal, compact = false, onDecision }: Proposal
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", proposal.threadId] });
-      for (const queryKey of getAcceptedProposalRefreshQueryKeys(updated)) {
+      for (const queryKey of getProposalDecisionRefreshQueryKeys(updated)) {
         void queryClient.invalidateQueries({ queryKey });
       }
       onDecision?.(updated);
@@ -48,8 +51,9 @@ export function ProposalCard({ proposal, compact = false, onDecision }: Proposal
   const canAccept = canAcceptProposal(proposal);
   const canDecide = canDecideProposal(proposal);
   const acceptDisabledReason = getAcceptDisabledReason(proposal);
+  const validationErrors = formatProposalValidationErrors(proposal);
   const showCompactValidation =
-    compact && isPending && (!canAccept || proposal.validationErrors.length > 0);
+    compact && isPending && (!canAccept || validationErrors.length > 0);
 
   return (
     <article className={`proposal-card status-${proposal.status}`}>
@@ -57,7 +61,7 @@ export function ProposalCard({ proposal, compact = false, onDecision }: Proposal
         <div>
           <strong>{proposal.title}</strong>
           <p className="proposal-meta">
-            {proposal.intent} / {proposal.targetDomain}
+            {getProposalIntentLabel(proposal.intent, proposal.proposedChanges) ?? proposal.intent.replaceAll("_", " ")} · {getProposalDomainLabel(proposal.targetDomain)}
           </p>
         </div>
         <div className="badge-group">
@@ -94,11 +98,11 @@ export function ProposalCard({ proposal, compact = false, onDecision }: Proposal
           {acceptDisabledReason ? (
             <p className="proposal-meta">{acceptDisabledReason}</p>
           ) : null}
-          {proposal.validationErrors.length > 0 ? (
+          {validationErrors.length > 0 ? (
             <>
-              <strong>Validation errors</strong>
+              <strong>Validation issues</strong>
               <ul>
-                {proposal.validationErrors.map((error) => (
+                {validationErrors.map((error) => (
                   <li key={error}>{error}</li>
                 ))}
               </ul>
@@ -107,11 +111,11 @@ export function ProposalCard({ proposal, compact = false, onDecision }: Proposal
         </div>
       ) : null}
 
-      {!compact && proposal.validationErrors.length > 0 ? (
+      {!compact && validationErrors.length > 0 ? (
         <div className="notice notice-inline">
-          <strong>Validation errors</strong>
+          <strong>Validation issues</strong>
           <ul>
-            {proposal.validationErrors.map((error) => (
+            {validationErrors.map((error) => (
               <li key={error}>{error}</li>
             ))}
           </ul>
@@ -143,7 +147,7 @@ export function ProposalCard({ proposal, compact = false, onDecision }: Proposal
             disabled={decisionMutation.isPending}
             onClick={() => decisionMutation.mutate("reject")}
           >
-            Reject
+            Decline
           </button>
         </div>
       ) : null}

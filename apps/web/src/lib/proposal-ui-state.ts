@@ -1,6 +1,25 @@
 import type { AiProposal, ProposalIntent, ProposalTargetDomain } from "@health/types";
+import { getProgressLinkedProposalIntentLabel } from "./weekly-review-ui-state";
 
-export function getProposalIntentLabel(intent: ProposalIntent): string | null {
+export function isHabitPlanProposalIntent(
+  intent: ProposalIntent,
+): intent is "create_habit_plan" | "adapt_habit_plan" {
+  return intent === "create_habit_plan" || intent === "adapt_habit_plan";
+}
+
+export function getProposalIntentLabel(
+  intent: ProposalIntent,
+  proposedChanges?: unknown,
+): string | null {
+  const progressLabel =
+    proposedChanges !== undefined
+      ? getProgressLinkedProposalIntentLabel(intent, proposedChanges)
+      : null;
+
+  if (progressLabel) {
+    return progressLabel;
+  }
+
   switch (intent) {
     case "adapt_workout_plan_from_progress":
       return "Progress-based workout adaptation";
@@ -45,9 +64,83 @@ export function getProposalDomainRoute(domain: ProposalTargetDomain): string | n
     case "profile":
       return "/profile";
     case "today":
+      return "/today";
     case "general":
       return null;
   }
+}
+
+export function getProposalIntentRoute(intent: ProposalIntent): string | null {
+  if (isHabitPlanProposalIntent(intent)) {
+    return "/today";
+  }
+
+  return null;
+}
+
+export function getProposalNavigationRoute(
+  proposal: Pick<AiProposal, "intent" | "targetDomain">,
+): string | null {
+  return getProposalIntentRoute(proposal.intent) ?? getProposalDomainRoute(proposal.targetDomain);
+}
+
+export function getHabitProposalAppliedMessage(intent: ProposalIntent): string {
+  switch (intent) {
+    case "create_habit_plan":
+      return "Daily habit plan saved. Scheduled habits will appear on Today.";
+    case "adapt_habit_plan":
+      return "Habit plan updated. Today will reflect your revised habits while keeping your history.";
+    default:
+      return "Change recorded in your coaching history.";
+  }
+}
+
+export function formatHabitProposalValidationError(error: string): string {
+  if (/create_habit_plan requires no active habit plan/i.test(error)) {
+    return "You already have an active habit plan. Ask the coach to adjust your current plan instead of proposing a new one.";
+  }
+
+  if (/adapt_habit_plan requires an active habit plan; use create_habit_plan/i.test(error)) {
+    return "There is no habit plan to adjust yet. Ask the coach to propose a new daily habit plan first.";
+  }
+
+  if (/adapt_habit_plan requires an active habit plan revision/i.test(error)) {
+    return "Your habit plan could not be read for this adjustment. Try refreshing or ask the coach to try again.";
+  }
+
+  if (/requires a readable active habit plan revision/i.test(error)) {
+    return "Your current habit plan could not be loaded for this adjustment.";
+  }
+
+  const continuityMatch = error.match(
+    /adaptation must include habitDefinitionId "[^"]+" \("([^"]+)"\)/i,
+  );
+  if (continuityMatch) {
+    return `"${continuityMatch[1]}" must stay in the adjustment or be explicitly removed so your completion history stays connected.`;
+  }
+
+  if (/adaptation must include habitDefinitionId/i.test(error)) {
+    return "This adjustment would break continuity with an existing habit. Keep the same habit identity or mark removed habits explicitly.";
+  }
+
+  return error
+    .replace(/^proposedChanges:\s*/i, "")
+    .replace(/^habits:\s*/i, "")
+    .trim();
+}
+
+export function formatHabitProposalValidationErrors(errors: readonly string[]): string[] {
+  return errors.map(formatHabitProposalValidationError);
+}
+
+export function formatProposalValidationErrors(
+  proposal: Pick<AiProposal, "intent" | "validationErrors">,
+): string[] {
+  if (isHabitPlanProposalIntent(proposal.intent)) {
+    return formatHabitProposalValidationErrors(proposal.validationErrors);
+  }
+
+  return [...proposal.validationErrors];
 }
 
 export function getProposalDomainPillClass(domain: ProposalTargetDomain): string {
@@ -128,13 +221,17 @@ export function canAcceptProposal(
 }
 
 export function getAcceptDisabledReason(
-  proposal: Pick<AiProposal, "status" | "validationStatus" | "validationErrors">,
+  proposal: Pick<AiProposal, "status" | "validationStatus" | "validationErrors" | "intent">,
 ): string | null {
   if (proposal.status !== "pending" || canAcceptProposal(proposal)) {
     return null;
   }
 
   if (proposal.validationErrors.length > 0) {
+    if (isHabitPlanProposalIntent(proposal.intent)) {
+      return "This habit proposal has validation issues and cannot be accepted. Review the details below or ask the coach to revise it. You can still decline it.";
+    }
+
     return "This proposal has validation issues and cannot be accepted. You can still reject it.";
   }
 

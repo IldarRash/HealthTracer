@@ -1,14 +1,15 @@
 import type {
   DeferredProgressDomain,
   ProgressDataStatus,
+  ProgressDomain,
   ProgressSourceAggregates,
-  RecoveryProgressAggregate,
   TrendDataSufficiency,
   TrendDirection,
   TrendType,
   WorkoutProgressAggregate,
   WorkoutSession,
 } from "@health/types";
+import { countSufficientDomains } from "@health/types";
 import {
   countStructuredWorkoutSessionExerciseProgress,
   isStructuredWorkoutSessionExercise,
@@ -20,7 +21,7 @@ export interface WeekRange {
 }
 
 export interface TrendDraft {
-  domain: "workout";
+  domain: ProgressDomain;
   trendType: TrendType;
   direction: TrendDirection;
   dataSufficiency: TrendDataSufficiency;
@@ -182,34 +183,59 @@ export function aggregateWorkoutSessions(
 }
 
 export function buildDeferredDomains(
-  recoveryAggregate?: RecoveryProgressAggregate | null,
+  aggregates: Pick<
+    ProgressSourceAggregates,
+    "today" | "nutrition" | "habits" | "recipes" | "recovery"
+  >,
 ): DeferredProgressDomain[] {
-  const deferredDomains: DeferredProgressDomain[] = [
-    {
-      domain: "today",
-      reason: "adherence_not_included",
-      message:
-        "Daily checklist completion is not included in this weekly summary yet.",
-    },
-    {
-      domain: "nutrition",
-      reason: "adherence_not_included",
-      message:
-        "Nutrition adherence is not included in this weekly summary yet.",
-    },
-    {
-      domain: "recipes",
-      reason: "domain_not_available",
-      message: "Recipe insights are not available in this weekly summary yet.",
-    },
-  ];
+  const deferredDomains: DeferredProgressDomain[] = [];
 
-  if (!recoveryAggregate || recoveryAggregate.daysWithContext === 0) {
+  const today = aggregates.today;
+  const habits = aggregates.habits;
+  if (!today || today.dataSufficiency === "deferred") {
+    const habitsSuffix =
+      habits?.dataSufficiency === "deferred" && habits.message
+        ? ` ${habits.message}`
+        : "";
+
+    deferredDomains.push({
+      domain: "today",
+      reason: today ? "insufficient_data" : "adherence_not_included",
+      message:
+        (today?.message ??
+          "Daily checklist completion was not available for this weekly summary.") + habitsSuffix,
+    });
+  }
+
+  const nutrition = aggregates.nutrition;
+  if (!nutrition || nutrition.dataSufficiency === "deferred") {
+    deferredDomains.push({
+      domain: "nutrition",
+      reason: nutrition ? "insufficient_data" : "adherence_not_included",
+      message:
+        nutrition?.message ??
+        "Nutrition adherence was not available for this weekly summary.",
+    });
+  }
+
+  const recipes = aggregates.recipes;
+  if (!recipes || recipes.dataSufficiency === "deferred") {
+    deferredDomains.push({
+      domain: "recipes",
+      reason: recipes ? "insufficient_data" : "domain_not_available",
+      message:
+        recipes?.message ?? "Recipe insights were not available in this weekly summary.",
+    });
+  }
+
+  const recovery = aggregates.recovery;
+  if (!recovery || recovery.daysWithContext === 0) {
     deferredDomains.push({
       domain: "recovery",
       reason: "metrics_not_available",
       message:
-        "Recovery and synced wellness metrics are not included in this weekly summary yet.",
+        recovery?.message ??
+        "Recovery and synced wellness metrics were not included in this weekly summary yet.",
     });
   }
 
@@ -219,55 +245,86 @@ export function buildDeferredDomains(
 export function resolveProgressDataStatus(
   aggregates: ProgressSourceAggregates,
 ): ProgressDataStatus {
-  const workout = aggregates.workout;
-  const recovery = aggregates.recovery;
+  const sufficientDomains = countSufficientDomains({
+    workout: aggregates.workout,
+    today: aggregates.today ?? null,
+    nutrition: aggregates.nutrition ?? null,
+    habits: aggregates.habits ?? null,
+    recovery: aggregates.recovery ?? null,
+  });
 
-  if ((!workout || workout.plannedCount === 0) && (!recovery || recovery.daysWithContext === 0)) {
-    return "insufficient";
+  const partialSignals = [
+    aggregates.workout && aggregates.workout.plannedCount > 0,
+    aggregates.today && aggregates.today.dataSufficiency !== "deferred",
+    aggregates.nutrition && aggregates.nutrition.dataSufficiency !== "deferred",
+    aggregates.habits && aggregates.habits.dataSufficiency !== "deferred",
+    aggregates.recovery && aggregates.recovery.daysWithContext > 0,
+  ].filter(Boolean).length;
+
+  if (sufficientDomains >= 2) {
+    return "sufficient";
   }
 
-  if (workout && workout.plannedCount > 0) {
-    return recovery && recovery.daysWithContext > 0 ? "sufficient" : "partial";
+  if (partialSignals >= 1) {
+    return "partial";
   }
 
-  return recovery && recovery.daysWithContext >= 2 ? "partial" : "insufficient";
+  return "insufficient";
 }
 
 export function buildSummaryUserMessage(
   aggregates: ProgressSourceAggregates,
   dataStatus: ProgressDataStatus,
 ): string {
+  const segments: string[] = [];
   const workout = aggregates.workout;
+  const today = aggregates.today;
+  const nutrition = aggregates.nutrition;
+  const habits = aggregates.habits;
   const recovery = aggregates.recovery;
 
   if (dataStatus === "insufficient") {
-    if (!workout || workout.plannedCount === 0) {
-      if (recovery && recovery.daysWithContext > 0) {
-        return recovery.message;
-      }
+    return "There is not enough structured history across workouts, Today, nutrition, habits, or recovery for a full cross-domain weekly review yet. Log a few entries in the domains you care about to build a clearer picture.";
+  }
 
-      return "There is not enough workout or recovery history for a full weekly review yet. Log a few sessions or daily recovery check-ins to build a clearer picture.";
+  if (workout && workout.plannedCount > 0) {
+    if (workout.completedCount === 0) {
+      segments.push(
+        `You had ${workout.plannedCount} planned workout session${workout.plannedCount === 1 ? "" : "s"} this week, but none were marked completed yet.`,
+      );
+    } else {
+      segments.push(
+        `Workouts: you completed ${workout.completedCount} of ${workout.plannedCount} planned sessions (${workout.adherencePercent ?? 0}% completion) based on the entries available.`,
+      );
     }
   }
 
-  if (!workout || workout.plannedCount === 0) {
-    if (recovery && recovery.daysWithContext > 0) {
-      return recovery.message;
-    }
-
-    return "There is not enough workout history for a full weekly review yet. Log a few planned sessions to build a clearer picture.";
+  if (today && today.dataSufficiency !== "deferred") {
+    segments.push(`Today: ${today.message}`);
   }
 
-  if (workout.completedCount === 0) {
-    return `You had ${workout.plannedCount} planned workout session${workout.plannedCount === 1 ? "" : "s"} this week, but none were marked completed yet. Small consistent steps can help build momentum.`;
+  if (nutrition && nutrition.dataSufficiency !== "deferred") {
+    segments.push(`Nutrition: ${nutrition.message}`);
   }
 
-  const recoveryNote =
-    recovery && recovery.daysWithContext > 0
-      ? ` Recovery patterns: ${recovery.message}`
-      : " Other domains such as nutrition and recovery are not included yet.";
+  if (habits && habits.dataSufficiency !== "deferred") {
+    segments.push(`Habits: ${habits.message}`);
+  }
 
-  return `Based on the workout entries available, you completed ${workout.completedCount} of ${workout.plannedCount} planned sessions this week (${workout.adherencePercent ?? 0}% completion).${recoveryNote}`;
+  if (recovery && recovery.daysWithContext > 0) {
+    segments.push(`Recovery: ${recovery.message}`);
+  }
+
+  if (segments.length === 0) {
+    return "This weekly review reflects the structured entries available so far. Some domains may still be partial or deferred.";
+  }
+
+  const observationPrefix =
+    dataStatus === "partial"
+      ? "This is a partial cross-domain weekly review based on the structured entries available. "
+      : "This cross-domain weekly review reflects your structured entries this week. ";
+
+  return `${observationPrefix}${segments.join(" ")} These are observations only; any plan changes still require your approval.`;
 }
 
 export function detectWorkoutTrends(
@@ -332,6 +389,176 @@ export function detectWorkoutTrends(
       },
       message:
         "Not enough planned workout sessions this week to describe a skip pattern.",
+    });
+  }
+
+  return trends;
+}
+
+export function detectCrossDomainTrends(
+  aggregates: ProgressSourceAggregates,
+  weekStart: string,
+  weekEnd: string,
+): TrendDraft[] {
+  const trends: TrendDraft[] = [];
+  const sufficientDomains = countSufficientDomains({
+    workout: aggregates.workout,
+    today: aggregates.today ?? null,
+    nutrition: aggregates.nutrition ?? null,
+    habits: aggregates.habits ?? null,
+    recovery: aggregates.recovery ?? null,
+  });
+
+  if (sufficientDomains < 2) {
+    trends.push({
+      domain: "today",
+      trendType: "cross_domain_execution",
+      direction: "unknown",
+      dataSufficiency: "insufficient",
+      supportingAggregate: {
+        weekStart,
+        weekEnd,
+        sufficientDomains,
+        minimumSufficientDomains: 2,
+      },
+      message:
+        "Not enough cross-domain data this week to describe a combined execution pattern yet.",
+    });
+  } else {
+    const executionNotes: string[] = [];
+
+    if (aggregates.workout && aggregates.workout.plannedCount > 0) {
+      executionNotes.push("workout");
+    }
+
+    if (aggregates.today && aggregates.today.dataSufficiency !== "deferred") {
+      executionNotes.push("Today");
+    }
+
+    if (aggregates.nutrition && aggregates.nutrition.dataSufficiency !== "deferred") {
+      executionNotes.push("nutrition");
+    }
+
+    if (aggregates.habits && aggregates.habits.dataSufficiency !== "deferred") {
+      executionNotes.push("habits");
+    }
+
+    trends.push({
+      domain: "today",
+      trendType: "cross_domain_execution",
+      direction: "stable",
+      dataSufficiency: sufficientDomains >= 3 ? "sufficient" : "partial",
+      supportingAggregate: {
+        weekStart,
+        weekEnd,
+        sufficientDomains,
+        domainsIncluded: executionNotes,
+      },
+      message: `This week includes structured signals across ${executionNotes.join(", ")} based on the entries available, which may suggest a broader weekly execution pattern rather than a single-domain snapshot.`,
+    });
+  }
+
+  const habits = aggregates.habits;
+  if (!habits || habits.dataSufficiency === "deferred" || habits.activeHabitCount === 0) {
+    trends.push({
+      domain: "today",
+      trendType: "habit_consistency",
+      direction: "unknown",
+      dataSufficiency: "insufficient",
+      supportingAggregate: {
+        weekStart,
+        weekEnd,
+        activeHabitCount: habits?.activeHabitCount ?? 0,
+      },
+      message:
+        "Not enough habit completion entries this week to describe a habit consistency pattern.",
+    });
+  } else {
+    const direction: TrendDirection =
+      (habits.adherencePercent ?? 0) >= 70
+        ? "up"
+        : (habits.adherencePercent ?? 0) >= 40
+          ? "stable"
+          : "down";
+
+    trends.push({
+      domain: "today",
+      trendType: "habit_consistency",
+      direction,
+      dataSufficiency: habits.dataSufficiency === "sufficient" ? "sufficient" : "partial",
+      supportingAggregate: {
+        weekStart,
+        weekEnd,
+        adherencePercent: habits.adherencePercent,
+        completedCount: habits.completedCount,
+        missedCount: habits.missedCount,
+      },
+      message:
+        habits.adherencePercent != null
+          ? `Habit completions were marked on roughly ${habits.adherencePercent}% of tracked habit opportunities this week based on the entries available.`
+          : "Habit completion entries were limited this week based on the data available.",
+    });
+  }
+
+  const workout = aggregates.workout;
+  const recovery = aggregates.recovery;
+  if (
+    !workout ||
+    workout.plannedCount < 2 ||
+    !recovery ||
+    recovery.daysWithContext < 2
+  ) {
+    trends.push({
+      domain: "recovery",
+      trendType: "recovery_load_balance",
+      direction: "unknown",
+      dataSufficiency: "insufficient",
+      supportingAggregate: {
+        weekStart,
+        weekEnd,
+        workoutPlannedCount: workout?.plannedCount ?? 0,
+        recoveryDaysWithContext: recovery?.daysWithContext ?? 0,
+      },
+      message:
+        "Not enough combined workout and recovery entries this week to describe load-balance patterns.",
+    });
+  } else {
+    const highSkipRate =
+      workout.plannedCount > 0 &&
+      workout.skippedCount / workout.plannedCount >= 0.34;
+    const recoveryHeavy =
+      recovery.dominantBand === "prioritize_recovery" ||
+      recovery.bandCounts.prioritize_recovery >= 2;
+    let direction: TrendDirection = "stable";
+    let message =
+      "Workout and recovery entries look broadly aligned this week based on the data available.";
+
+    if (highSkipRate && recoveryHeavy) {
+      direction = "down";
+      message =
+        "Skipped workouts and recovery-focused signals appeared in the same week, which could suggest room to simplify load or recovery balance.";
+    } else if (!highSkipRate && recovery.dominantBand === "well_supported") {
+      direction = "up";
+      message =
+        "Workout completion and recovery signals look relatively supported together this week based on the entries available.";
+    }
+
+    trends.push({
+      domain: "recovery",
+      trendType: "recovery_load_balance",
+      direction,
+      dataSufficiency:
+        workout.plannedCount >= 3 && recovery.daysWithContext >= 3 ? "sufficient" : "partial",
+      supportingAggregate: {
+        weekStart,
+        weekEnd,
+        skipRate:
+          workout.plannedCount > 0
+            ? Math.round((workout.skippedCount / workout.plannedCount) * 100)
+            : 0,
+        dominantRecoveryBand: recovery.dominantBand,
+      },
+      message,
     });
   }
 

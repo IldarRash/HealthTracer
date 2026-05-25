@@ -323,6 +323,100 @@ describe("ProposalApplyService", () => {
     expect(capturedIntent).toBe("adapt_habit_plan");
   });
 
+  it("routes accepted adjust_nutrition_plan proposals with progress provenance through the nutrition service", async () => {
+    let nutritionCalled = false;
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          nutritionCalled = true;
+          capturedPayload = payload;
+          capturedIntent = intent;
+          return "nutrition_revision:rev-progress";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adjust_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: {
+        plan: nutritionPayload,
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: ["24b19287-75b8-4a3e-9c10-691908479405"],
+      },
+    });
+
+    expect(reference).toBe("nutrition_revision:rev-progress");
+    expect(nutritionCalled).toBe(true);
+    expect(capturedIntent).toBe("adjust_nutrition_plan");
+    expect(capturedPayload).toMatchObject({
+      title: nutritionPayload.title,
+      caloriesPerDay: nutritionPayload.caloriesPerDay,
+    });
+  });
+
+  it("routes accepted adapt_habit_plan proposals with progress provenance through the habits service", async () => {
+    let habitsCalled = false;
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyHabitPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          habitsCalled = true;
+          capturedPayload = payload;
+          capturedIntent = intent;
+          return "habit_revision:rev-progress";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adapt_habit_plan",
+      targetDomain: "general",
+      proposedChanges: {
+        plan: habitPayload,
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+      },
+    });
+
+    expect(reference).toBe("habit_revision:rev-progress");
+    expect(habitsCalled).toBe(true);
+    expect(capturedIntent).toBe("adapt_habit_plan");
+    expect(capturedPayload).toEqual(habitPayload);
+    expect(capturedPayload).not.toEqual({ habits: [] });
+  });
+
   it("routes accepted recipe proposals through the recipes service", async () => {
     let recipesCalled = false;
 

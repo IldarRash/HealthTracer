@@ -17,11 +17,13 @@ import {
   formatChatTimestamp,
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
+  resolveChatMessageWeeklyReview,
   resolvePrimaryThreadId,
   SUGGESTED_CHAT_PROMPTS,
   type OptimisticChatMessage,
 } from "../../lib/chat-ui-state";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
+import { WeeklyReviewChatSummary } from "./weekly-review-chat-summary";
 import { mergeProposalsById } from "../../lib/proposal-ui-state";
 import { InlineProposalCard } from "../proposals/inline-proposal-card";
 import {
@@ -291,6 +293,9 @@ export function ChatWorkspace() {
               const crisisSupportCopy = isUser
                 ? null
                 : resolveChatMessageCrisisSupport(message);
+              const weeklyReviewPack = isUser
+                ? null
+                : resolveChatMessageWeeklyReview(message);
 
               return (
                 <li key={message.id}>
@@ -318,6 +323,13 @@ export function ChatWorkspace() {
                       message.content
                     )}
                   </ChatBubble>
+
+                  {weeklyReviewPack ? (
+                    <WeeklyReviewChatSummary
+                      pack={weeklyReviewPack}
+                      titleId={`chat-weekly-review-${message.id}`}
+                    />
+                  ) : null}
 
                   {linkedProposals.length > 0 ? (
                     <div className="message-proposals">

@@ -2,7 +2,10 @@
 
 import type { WellbeingCheckInAggregatesResponse } from "@health/types";
 import Link from "next/link";
-import { buildWellbeingHistoryPanelView } from "../../lib/wellbeing-ui-state";
+import {
+  buildWellbeingHistoryPanelView,
+  formatWellbeingAggregatesError,
+} from "../../lib/wellbeing-ui-state";
 import { EmptyState } from "../ui";
 
 type WellbeingHistoryPanelProps = {
@@ -29,7 +32,7 @@ export function WellbeingHistoryPanel({
   if (errorMessage) {
     return (
       <p className="form-error" role="alert">
-        {errorMessage}
+        {formatWellbeingAggregatesError(errorMessage) ?? errorMessage}
       </p>
     );
   }

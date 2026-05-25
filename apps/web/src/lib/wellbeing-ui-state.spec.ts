@@ -10,6 +10,7 @@ import {
   buildWellbeingHistoryPanelView,
   canSubmitWellbeingCheckIn,
   checkInMatchesForm,
+  formatWellbeingAggregatesError,
   moodScoreLabel,
   resolveWellbeingCrisisDisplay,
   resolveWellbeingCrisisPreview,
@@ -34,6 +35,15 @@ const sampleCheckIn = {
 };
 
 describe("wellbeing UI state", () => {
+  it("maps raw wellbeing aggregate fetch errors to friendly copy", () => {
+    expect(formatWellbeingAggregatesError(null)).toBeNull();
+    expect(formatWellbeingAggregatesError(undefined)).toBeNull();
+    expect(formatWellbeingAggregatesError("")).toBeNull();
+    expect(formatWellbeingAggregatesError("/wellbeing-check-ins/aggregates could not be loaded")).toBe(
+      "Wellbeing check-in history could not be loaded right now. Other wellness sections are still shown.",
+    );
+  });
+
   it("maps mood and stress score labels", () => {
     expect(moodScoreLabel(1)).toBe("Very low");
     expect(moodScoreLabel(5)).toBe("Great");

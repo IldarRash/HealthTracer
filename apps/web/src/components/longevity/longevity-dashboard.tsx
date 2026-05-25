@@ -24,15 +24,21 @@ import {
   buildGoalsSectionView,
   buildLongevityCoachPrompts,
   buildLongevityTrendsView,
+  buildLongevityHeroTrendStripView,
   buildLongevityWeeklyHero,
   buildNutritionConsistencyCardView,
   buildTodayAdherenceCardView,
   buildWellnessSignalsPanelView,
+  buildWorkoutConsistencyCardView,
+  goalsCardHint,
+  goalsCardValue,
   isOptionalProgressNotFound,
+  LONGEVITY_CTA_ROUTES,
   summarizeHabitConsistencyHint,
   todayIsoDate,
+  WEEKDAY_TREND_LABELS,
 } from "../../lib/longevity-ui-state";
-import { summarizeWorkoutAdherence } from "../../lib/dashboard-ui-state";
+import { WEEKLY_REVIEW_READ_ONLY_NOTICE } from "../../lib/weekly-review-ui-state";
 import type { WeeklyProgressSummaryResponse } from "@health/types";
 import { Badge, DashboardCard, DashboardGrid, EmptyState, ErrorState, LoadingState } from "../ui";
 import { WellbeingHistoryPanel } from "./wellbeing-history-panel";
@@ -127,6 +133,8 @@ export function LongevityDashboard() {
         wellbeingAggregates: wellbeingAggregatesResult.data ?? null,
         wellbeingAggregatesError: wellbeingAggregatesResult.error,
         goalsFetchFailed: Boolean(goalsResult.error && !goalsResult.data),
+        workoutFetchFailed: Boolean(workoutResult.error && !workoutResult.data),
+        nutritionFetchFailed: Boolean(nutritionResult.error && !nutritionResult.data),
         partialErrors,
       };
     },
@@ -159,14 +167,19 @@ export function LongevityDashboard() {
     goals: data.goals,
     todayHistory: data.todayHistory,
     todayDay: data.todayDay,
+    habitAdherence: data.habitAdherence,
   });
   const todayCard = buildTodayAdherenceCardView(data.todayDay);
-  const workoutAdherence = summarizeWorkoutAdherence(data.workout.sessions);
+  const workoutCard = buildWorkoutConsistencyCardView({
+    sessions: data.workout.sessions,
+    fetchFailed: data.workoutFetchFailed,
+  });
   const nutritionRevision = data.nutrition.activeRevision;
   const nutritionCard = buildNutritionConsistencyCardView({
     planTitle: nutritionRevision?.payload.title ?? null,
     planSummary: nutritionRevision?.payload.summary ?? null,
     adherence: data.nutritionAdherence,
+    fetchFailed: data.nutritionFetchFailed,
   });
   const goalsSection = buildGoalsSectionView({
     goals: data.goals,
@@ -186,9 +199,11 @@ export function LongevityDashboard() {
     wellnessStatus: wellnessPanel.status,
     activeGoalCount: goalsSection.status === "ready" ? goalsSection.count : 0,
     goalsFetchFailed: goalsSection.status === "load_error",
+    hasWeeklyProgress: trendsView.status === "ready",
   });
 
   const heroValue = hero.sparse ? hero.emptyMessage : `${hero.percent}%`;
+  const heroTrend = buildLongevityHeroTrendStripView(hero.trend, hero.sparse);
 
   return (
     <div className="page-content longevity-dashboard">
@@ -201,7 +216,7 @@ export function LongevityDashboard() {
       ) : null}
 
       <DashboardGrid className="dashboard-grid--profile">
-        <section className="dashboard-hero">
+        <section className="dashboard-hero dashboard-hero--full">
           <div>
             <p className="dashboard-hero__label">Weekly consistency</p>
             <p className="dashboard-hero__value">{heroValue}</p>
@@ -219,10 +234,17 @@ export function LongevityDashboard() {
               <span className="sr-only">{hero.percent}% weekly consistency</span>
             </div>
           ) : null}
-          <div className="trend-strip" aria-label="Seven day activity trend">
-            {hero.trend.map((value, index) => (
-              <div key={index} className="trend-strip__bar">
-                <span className="trend-strip__fill" style={{ width: `${value}%` }} />
+          <div className={heroTrend.className} role="img" aria-label={heroTrend.ariaLabel}>
+            {heroTrend.trend.map((value, index) => (
+              <div key={WEEKDAY_TREND_LABELS[index]} className="trend-strip__day">
+                <p className="trend-strip__label" aria-hidden="true">
+                  {WEEKDAY_TREND_LABELS[index]}
+                </p>
+                <div className="trend-strip__bar">
+                  {!heroTrend.sparse ? (
+                    <span className="trend-strip__fill" style={{ width: `${value}%` }} />
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>
@@ -239,7 +261,7 @@ export function LongevityDashboard() {
               : todayCard.message
           }
           footer={
-            <Link href="/today" className="confirmation-card__link">
+            <Link href={LONGEVITY_CTA_ROUTES.today} className="confirmation-card__link">
               Open Today →
             </Link>
           }
@@ -250,13 +272,17 @@ export function LongevityDashboard() {
           label="Workouts"
           title="Workout consistency"
           value={
-            workoutAdherence.planned > 0
-              ? workoutAdherence.label
-              : "No sessions scheduled this week"
+            workoutCard.status === "ready"
+              ? workoutCard.value
+              : workoutCard.status === "load_error"
+                ? "Unavailable"
+                : "Not enough data yet"
           }
-          hint="Based on your logged workout sessions this week."
+          hint={
+            workoutCard.status === "ready" ? workoutCard.hint : workoutCard.message
+          }
           footer={
-            <Link href="/training" className="confirmation-card__link">
+            <Link href={LONGEVITY_CTA_ROUTES.training} className="confirmation-card__link">
               View training plan →
             </Link>
           }
@@ -267,40 +293,34 @@ export function LongevityDashboard() {
           label="Nutrition"
           title="Nutrition consistency"
           value={
-            nutritionCard.status === "empty"
-              ? "Not enough data yet"
+            nutritionCard.status === "empty" || nutritionCard.status === "load_error"
+              ? nutritionCard.status === "load_error"
+                ? "Unavailable"
+                : "Not enough data yet"
               : nutritionCard.status === "ready"
                 ? nutritionCard.detail
                 : nutritionCard.title
           }
           hint={
-            nutritionCard.status === "empty"
-              ? nutritionCard.message
-              : nutritionCard.status === "ready"
-                ? nutritionCard.summary
-                : nutritionCard.summary
+            nutritionCard.status === "ready" || nutritionCard.status === "plan_only"
+              ? nutritionCard.summary
+              : nutritionCard.message
           }
           footer={
-            <Link href="/nutrition" className="confirmation-card__link">
+            <Link href={LONGEVITY_CTA_ROUTES.nutrition} className="confirmation-card__link">
               View nutrition plan →
             </Link>
           }
         />
 
         <DashboardCard
-          className="dashboard-card--span-5"
+          className="dashboard-card--span-6"
           label="Goals"
           title="Active goals"
-          value={
-            goalsSection.status === "ready"
-              ? `${goalsSection.count} in progress`
-              : goalsSection.status === "load_error"
-                ? "Unavailable"
-                : "None yet"
-          }
-          hint="Goals your coach helps you refine over time."
+          value={goalsCardValue(goalsSection)}
+          hint={goalsCardHint(goalsSection)}
           footer={
-            <Link href="/profile#goals" className="confirmation-card__link">
+            <Link href={LONGEVITY_CTA_ROUTES.profileGoals} className="confirmation-card__link">
               Manage goals →
             </Link>
           }
@@ -320,7 +340,7 @@ export function LongevityDashboard() {
               description={goalsSection.description}
               action={
                 goalsSection.status === "empty" ? (
-                  <Link href="/chat" className="confirmation-card__link">
+                  <Link href={LONGEVITY_CTA_ROUTES.chat} className="confirmation-card__link">
                     Open Chat →
                   </Link>
                 ) : undefined
@@ -330,12 +350,12 @@ export function LongevityDashboard() {
         </DashboardCard>
 
         <DashboardCard
-          className="dashboard-card--span-5"
+          className="dashboard-card--span-6"
           label="Wellbeing"
           title="7-day mood & stress"
           hint="Daily check-ins from Today — wellness context only, not a clinical assessment."
           footer={
-            <Link href="/today" className="confirmation-card__link">
+            <Link href={LONGEVITY_CTA_ROUTES.today} className="confirmation-card__link">
               Log today&apos;s check-in →
             </Link>
           }
@@ -348,7 +368,7 @@ export function LongevityDashboard() {
         </DashboardCard>
 
         <DashboardCard
-          className="dashboard-card--span-5"
+          className="dashboard-card--span-6"
           label="Wellness"
           title="Logged wellness signals"
           hint="Consent-gated trends from synced data and self-check-ins on Today."
@@ -373,7 +393,7 @@ export function LongevityDashboard() {
               }
               description={wellnessPanel.message}
               action={
-                <Link href="/profile" className="confirmation-card__link">
+                <Link href={LONGEVITY_CTA_ROUTES.profileConsent} className="confirmation-card__link">
                   Manage consent in Profile →
                 </Link>
               }
@@ -382,56 +402,92 @@ export function LongevityDashboard() {
         </DashboardCard>
 
         <DashboardCard
-          className="dashboard-card--span-5"
+          className="dashboard-card--span-6"
           label="Trends"
-          title="Weekly progress"
+          title="Cross-domain weekly review"
           value={trendsView.status === "ready" ? trendsView.headline : "Not enough data yet"}
           hint={
             trendsView.status === "ready"
               ? trendsView.detail
               : trendsView.message
           }
+          footer={
+            trendsView.status === "ready" ? (
+              <Link href={LONGEVITY_CTA_ROUTES.chat} className="confirmation-card__link">
+                Open Chat to review adaptation proposals →
+              </Link>
+            ) : undefined
+          }
         >
           {trendsView.status === "ready" ? (
             <>
+              {trendsView.aggregates.length > 0 ? (
+                <>
+                  <h4 className="section-label" style={{ marginTop: "var(--space-2)", marginBottom: "var(--space-2)", display: "block" }}>
+                    Included Domains
+                  </h4>
+                  <ul className="goals">
+                    {trendsView.aggregates.map((aggregate) => (
+                      <li key={aggregate.id}>
+                        <strong>{aggregate.domain}</strong>
+                        <span>{aggregate.sufficiency}</span>
+                        <p className="dashboard-card__hint">
+                          {aggregate.headline} · {aggregate.detail}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
               {trendsView.trends.length > 0 ? (
-                <ul className="goals">
-                  {trendsView.trends.map((trend) => (
-                    <li key={trend.id}>
-                      <strong>{trend.title}</strong>
-                      <span>{trend.meta}</span>
-                      <p className="dashboard-card__hint">{trend.message}</p>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <h4 className="section-label" style={{ marginTop: "var(--space-4)", marginBottom: "var(--space-2)", display: "block" }}>
+                    Detected Patterns
+                  </h4>
+                  <ul className="goals">
+                    {trendsView.trends.map((trend) => (
+                      <li key={trend.id}>
+                        <strong>{trend.title}</strong>
+                        <span>{trend.meta}</span>
+                        <p className="dashboard-card__hint">{trend.message}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </>
               ) : (
-                <p className="dashboard-card__hint">
-                  Workout trends will appear after more sessions are logged.
+                <p className="dashboard-card__hint" style={{ marginTop: "var(--space-4)" }}>
+                  Cross-domain trends will appear after more structured entries are logged.
                 </p>
               )}
               {trendsView.deferredDomains.length > 0 ? (
-                <ul className="goals">
-                  {trendsView.deferredDomains.map((entry) => (
-                    <li key={`${entry.domain}-${entry.detail}`}>
-                      <strong>{entry.domain}</strong>
-                      <span>{entry.detail}</span>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <h4 className="section-label" style={{ marginTop: "var(--space-4)", marginBottom: "var(--space-2)", display: "block" }}>
+                    Deferred Domains
+                  </h4>
+                  <ul className="goals" style={{ opacity: 0.75 }}>
+                    {trendsView.deferredDomains.map((entry) => (
+                      <li key={`${entry.domain}-${entry.detail}`}>
+                        <strong>{entry.domain}</strong>
+                        <span>{entry.detail}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
               ) : (
-                <p className="dashboard-card__hint">{trendsView.deferredSummary}</p>
+                <p className="dashboard-card__hint" style={{ marginTop: "var(--space-4)" }}>{trendsView.deferredSummary}</p>
               )}
+              <p className="dashboard-card__hint" style={{ marginTop: "var(--space-4)" }}>{WEEKLY_REVIEW_READ_ONLY_NOTICE}</p>
             </>
           ) : null}
         </DashboardCard>
 
         <DashboardCard
-          className="dashboard-card--span-4"
+          className="dashboard-card--span-6"
           label="Documents"
           title="Document context"
           hint="Metadata only — no clinical interpretation on this screen."
           footer={
-            <Link href="/profile#documents" className="confirmation-card__link">
+            <Link href={LONGEVITY_CTA_ROUTES.profileDocuments} className="confirmation-card__link">
               Open documents →
             </Link>
           }
@@ -453,7 +509,7 @@ export function LongevityDashboard() {
               title="No documents yet"
               description={documentsView.message}
               action={
-                <Link href="/profile#documents" className="confirmation-card__link">
+                <Link href={LONGEVITY_CTA_ROUTES.profileDocuments} className="confirmation-card__link">
                   Upload from Profile →
                 </Link>
               }
@@ -462,23 +518,24 @@ export function LongevityDashboard() {
         </DashboardCard>
 
         <DashboardCard
-          className="dashboard-card--span-5 dashboard-card--coach"
+          className="dashboard-card--span-6 dashboard-card--coach"
           label="Coach"
           title="Discuss this week with your coach"
           hint="Static prompts based on what is visible here — open Chat to continue the conversation."
           footer={
-            <Link href="/chat" className="button button-coach button-sm">
+            <Link href={LONGEVITY_CTA_ROUTES.chat} className="button button-coach button-sm">
               Message your coach about this week
             </Link>
           }
         >
-          <div className="chat-prompt-chips" role="list">
+          <div className="chat-prompt-chips" role="list" aria-label="Suggested prompts for chat">
             {coachPrompts.map((prompt) => (
               <Link
                 key={prompt}
-                href="/chat"
+                href={LONGEVITY_CTA_ROUTES.chat}
                 role="listitem"
                 className="chat-prompt-chip"
+                aria-label={`Open Chat and discuss: ${prompt}`}
               >
                 {prompt}
               </Link>

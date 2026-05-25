@@ -9,7 +9,16 @@ import {
 } from "./goal-hierarchy.js";
 import { proposalCorrelationEvidenceRefsSchema } from "./document-signals.js";
 import { habitPlanPayloadSchema } from "./habits.js";
-import { recoveryProgressAggregateSchema } from "./recovery.js";
+import {
+  habitsProgressAggregateSchema,
+  nutritionProgressAggregateSchema,
+  recipesProgressAggregateSchema,
+  todayProgressAggregateSchema,
+  weeklyReviewCandidateProposalSchema,
+  weeklyReviewLaneOutcomeSchema,
+  weeklyReviewPackMetaSchema,
+} from "./progress-cross-domain.js";
+import { recoveryContextSourceRefSchema, recoveryProgressAggregateSchema } from "./recovery.js";
 import { todayChecklistPayloadSchema } from "./today.js";
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
@@ -410,6 +419,154 @@ export const nutritionPlanPayloadSchema = z.object({
 
 export type NutritionPlanPayload = z.infer<typeof nutritionPlanPayloadSchema>;
 
+export const adjustNutritionPlanFromProgressChangesSchema = z.object({
+  plan: nutritionPlanPayloadSchema,
+  sourceSummaryId: z.string().uuid().optional(),
+  sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
+});
+
+export type AdjustNutritionPlanFromProgressChanges = z.infer<
+  typeof adjustNutritionPlanFromProgressChangesSchema
+>;
+
+export const nutritionPlanProposalChangesSchema = z.union([
+  nutritionPlanPayloadSchema,
+  adjustNutritionPlanFromProgressChangesSchema,
+]);
+
+export type NutritionPlanProposalChanges = z.infer<
+  typeof nutritionPlanProposalChangesSchema
+>;
+
+export const adaptHabitPlanFromProgressChangesSchema = z.object({
+  plan: habitPlanPayloadSchema,
+  sourceSummaryId: z.string().uuid().optional(),
+  sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
+  recoverySourceRefs: z.array(recoveryContextSourceRefSchema).max(5).optional(),
+});
+
+export type AdaptHabitPlanFromProgressChanges = z.infer<
+  typeof adaptHabitPlanFromProgressChangesSchema
+>;
+
+export const habitPlanProposalChangesSchema = z.union([
+  adaptHabitPlanFromProgressChangesSchema,
+  habitPlanPayloadSchema,
+]);
+
+export type HabitPlanProposalChanges = z.infer<typeof habitPlanProposalChangesSchema>;
+
+export function extractNutritionPlanPayload(
+  proposedChanges: NutritionPlanProposalChanges,
+): NutritionPlanPayload {
+  if ("plan" in proposedChanges && proposedChanges.plan) {
+    return proposedChanges.plan;
+  }
+
+  return proposedChanges as NutritionPlanPayload;
+}
+
+export function extractHabitPlanPayload(
+  proposedChanges: HabitPlanProposalChanges,
+): z.infer<typeof habitPlanPayloadSchema> {
+  const wrapped = adaptHabitPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+  if (wrapped.success) {
+    return wrapped.data.plan;
+  }
+
+  return habitPlanPayloadSchema.parse(proposedChanges);
+}
+
+export function parseHabitPlanProposalChanges(
+  proposedChanges: unknown,
+): HabitPlanProposalChanges {
+  const wrapped = adaptHabitPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+  if (wrapped.success) {
+    return wrapped.data;
+  }
+
+  return habitPlanPayloadSchema.parse(proposedChanges);
+}
+
+export function getProgressProvenanceFromProposal(
+  intent: ProposalIntent,
+  proposedChanges: unknown,
+): {
+  sourceSummaryId?: string;
+  sourceTrendObservationIds: string[];
+} | null {
+  if (intent === "adapt_workout_plan_from_progress") {
+    const parsed = adaptWorkoutPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+    return parsed.success
+      ? {
+          sourceSummaryId: parsed.data.sourceSummaryId,
+          sourceTrendObservationIds: parsed.data.sourceTrendObservationIds,
+        }
+      : null;
+  }
+
+  if (intent === "adjust_nutrition_plan") {
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+    return parsed.success
+      ? {
+          sourceSummaryId: parsed.data.sourceSummaryId,
+          sourceTrendObservationIds: parsed.data.sourceTrendObservationIds,
+        }
+      : null;
+  }
+
+  if (intent === "adapt_habit_plan") {
+    const parsed = adaptHabitPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+    return parsed.success
+      ? {
+          sourceSummaryId: parsed.data.sourceSummaryId,
+          sourceTrendObservationIds: parsed.data.sourceTrendObservationIds,
+        }
+      : null;
+  }
+
+  return null;
+}
+
+export function usesProgressLinkedProposalShape(
+  intent: ProposalIntent,
+  proposedChanges: unknown,
+): boolean {
+  if (intent === "adjust_nutrition_plan") {
+    return adjustNutritionPlanFromProgressChangesSchema.safeParse(proposedChanges).success;
+  }
+
+  if (intent === "adapt_habit_plan") {
+    return adaptHabitPlanFromProgressChangesSchema.safeParse(proposedChanges).success;
+  }
+
+  return false;
+}
+
+export function getProgressLinkedProvenanceRequiredErrors(
+  intent: ProposalIntent,
+  proposedChanges: unknown,
+): string[] {
+  if (!usesProgressLinkedProposalShape(intent, proposedChanges)) {
+    return [];
+  }
+
+  const provenance = getProgressProvenanceFromProposal(intent, proposedChanges);
+
+  if (provenance?.sourceSummaryId) {
+    return [];
+  }
+
+  return [
+    "proposedChanges.sourceSummaryId: Progress-linked proposals require a weekly progress summary reference.",
+  ];
+}
+
 export function getNutritionPlanDomainErrors(payload: NutritionPlanPayload): string[] {
   const errors: string[] = [];
 
@@ -699,6 +856,9 @@ export type RecipeRecommendationProposalPayload = z.infer<
 
 export {
   calculateTodayAdherence,
+  filterChecklistItemsConflictingWithHabitItems,
+  filterProposalItemsConflictingWithHabitItems,
+  normalizeChecklistLabelForComparison,
   resolveProposalItemSource,
   resolveProposalItemStatus,
   todayAdherenceSummarySchema,
@@ -772,15 +932,17 @@ export function getProposedChangesSchemaForIntent(
     case "adapt_workout_plan_from_progress":
       return adaptWorkoutPlanFromProgressChangesSchema;
     case "create_nutrition_plan":
-    case "adjust_nutrition_plan":
       return nutritionPlanPayloadSchema;
+    case "adjust_nutrition_plan":
+      return nutritionPlanProposalChangesSchema;
     case "recommend_recipes":
       return recipeRecommendationProposalPayloadSchema;
     case "create_today_checklist":
       return todayChecklistPayloadSchema;
     case "create_habit_plan":
-    case "adapt_habit_plan":
       return habitPlanPayloadSchema;
+    case "adapt_habit_plan":
+      return habitPlanProposalChangesSchema;
     case "summarize_progress":
       return emptyProposalChangesSchema;
     default: {
@@ -877,7 +1039,7 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
     intent: z.literal("adjust_nutrition_plan"),
     targetDomain: proposalTargetDomainSchema,
     ...proposalTitleReasonFields,
-    proposedChanges: nutritionPlanPayloadSchema,
+    proposedChanges: nutritionPlanProposalChangesSchema,
   }),
   z.object({
     intent: z.literal("recommend_recipes"),
@@ -901,7 +1063,7 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
     intent: z.literal("adapt_habit_plan"),
     targetDomain: proposalTargetDomainSchema,
     ...proposalTitleReasonFields,
-    proposedChanges: habitPlanPayloadSchema,
+    proposedChanges: habitPlanProposalChangesSchema,
   }),
   z.object({
     intent: z.literal("summarize_progress"),
@@ -973,9 +1135,12 @@ export {
   collectHabitTemplateReferences,
   computeHabitAdherenceSummary,
   createEmptyHabitAdherenceResponse,
+  dedupeHabitCompletionRows,
   filterScheduledHabitDefinitions,
   formatIsoDateInTimezone,
+  getHabitPlanAdaptationContinuityErrors,
   getHabitPlanDomainErrors,
+  getHabitPlanIntentStateErrors,
   getHabitTemplateUsageErrors,
   getTodayIsoDateInTimezone,
   habitAdherenceCountsSchema,
@@ -1032,6 +1197,7 @@ export {
   type HabitPlanCoachingSummary,
   type HabitPlan,
   type HabitPlanPayload,
+  type HabitPlanProposalIntent,
   type HabitPlanRevision,
   type HabitPlanRevisionsResponse,
   type HabitPlanStatus,
@@ -1118,6 +1284,9 @@ export const trendTypeSchema = z.enum([
   "consistency",
   "skip_rate",
   "fatigue_pattern",
+  "cross_domain_execution",
+  "habit_consistency",
+  "recovery_load_balance",
 ]);
 
 export type TrendType = z.infer<typeof trendTypeSchema>;
@@ -1150,6 +1319,10 @@ export type WorkoutProgressAggregate = z.infer<typeof workoutProgressAggregateSc
 
 export const progressSourceAggregatesSchema = z.object({
   workout: workoutProgressAggregateSchema.nullable(),
+  today: todayProgressAggregateSchema.nullable().optional(),
+  nutrition: nutritionProgressAggregateSchema.nullable().optional(),
+  habits: habitsProgressAggregateSchema.nullable().optional(),
+  recipes: recipesProgressAggregateSchema.nullable().optional(),
   recovery: recoveryProgressAggregateSchema.nullable().optional(),
 });
 
@@ -1205,3 +1378,57 @@ export const generateWeeklyProgressSummarySchema = z.object({
 export type GenerateWeeklyProgressSummaryInput = z.infer<
   typeof generateWeeklyProgressSummarySchema
 >;
+
+export {
+  aggregateHabitsProgressWeek,
+  aggregateNutritionAdherenceWeek,
+  aggregateRecipesActivityWeek,
+  aggregateTodayChecklists,
+  countSufficientDomains,
+  detectCrossDomainProposalConflict,
+  domainSufficiencyLevelSchema,
+  evaluateWeeklyReviewLaneEligibility,
+  habitsProgressAggregateSchema,
+  nutritionProgressAggregateSchema,
+  packWeeklyReviewProposals,
+  recipesProgressAggregateSchema,
+  todayProgressAggregateSchema,
+  weeklyReviewCandidateProposalSchema,
+  weeklyReviewLaneOutcomeSchema,
+  weeklyReviewLaneSchema,
+  weeklyReviewPackMetaSchema,
+  WEEKLY_REVIEW_CHAT_PROMPT,
+  WEEKLY_REVIEW_MAX_PROPOSALS,
+  WEEKLY_REVIEW_TARGET_PROPOSALS,
+  isWeeklyReviewChatMessage,
+  markExplanationOnlyLanes,
+  type DailyChecklistSnapshot,
+  type DomainSufficiencyLevel,
+  type HabitsProgressAggregate,
+  type HabitCompletionSnapshot,
+  type NutritionAdherenceSnapshot,
+  type NutritionProgressAggregate,
+  type RecipesProgressAggregate,
+  type TodayProgressAggregate,
+  type WeeklyReviewCandidateProposal,
+  type WeeklyReviewLane,
+  type WeeklyReviewLaneOutcome,
+  type WeeklyReviewPackMeta,
+} from "./progress-cross-domain.js";
+
+export const weeklyReviewResponseSchema = z.object({
+  summary: weeklyProgressSummaryResponseSchema,
+  laneOutcomes: z.array(weeklyReviewLaneOutcomeSchema),
+  packMeta: weeklyReviewPackMetaSchema,
+  candidateProposals: z.array(weeklyReviewCandidateProposalSchema),
+});
+
+export type WeeklyReviewResponse = z.infer<typeof weeklyReviewResponseSchema>;
+
+export const weeklyReviewRequestSchema = z.object({
+  weekStart: isoDateSchema.optional(),
+  refresh: z.boolean().default(false),
+  candidates: z.array(weeklyReviewCandidateProposalSchema).max(3).default([]),
+});
+
+export type WeeklyReviewRequest = z.infer<typeof weeklyReviewRequestSchema>;

@@ -104,14 +104,20 @@ export class ProposalsService {
         proposal.intent,
         proposal.proposedChanges,
       );
+    const progressLinkedProvenanceErrors =
+      this.proposalValidationService.validateProgressLinkedProvenanceRequired(
+        proposal.intent,
+        proposal.proposedChanges,
+      );
     const exerciseReferenceErrors =
       await this.proposalValidationService.validateExerciseReferences(
         user.id,
         proposal.intent,
         proposal.proposedChanges,
       );
-    const habitTemplateReferenceErrors =
-      await this.proposalValidationService.validateHabitTemplateReferences(
+    const habitProposalContextErrors =
+      await this.proposalValidationService.validateHabitProposalContext(
+        user.id,
         proposal.intent,
         proposal.proposedChanges,
       );
@@ -146,8 +152,9 @@ export class ProposalsService {
       ...safetyErrors,
       ...validation.errors,
       ...provenanceErrors,
+      ...progressLinkedProvenanceErrors,
       ...exerciseReferenceErrors,
-      ...habitTemplateReferenceErrors,
+      ...habitProposalContextErrors,
       ...goalHierarchyErrors,
       ...todaySourceRefErrors,
       ...recoveryAdaptationErrors,

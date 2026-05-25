@@ -5,8 +5,12 @@ import {
   isOptimisticMessage,
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
+  resolveChatMessageWeeklyReview,
   resolvePrimaryThreadId,
 } from "./chat-ui-state.js";
+import { WEEKLY_REVIEW_CHAT_ACTION_NOTICE } from "./weekly-review-ui-state.js";
+
+const summaryId = "14a08176-64a7-4a2d-8a44-581807368394";
 
 describe("chat UI state", () => {
   it("selects the most recently updated thread as primary", () => {
@@ -123,5 +127,70 @@ describe("chat UI state", () => {
 
     expect(merged).toEqual(serverMessages);
     expect(merged).not.toBe(serverMessages);
+  });
+
+  it("returns weekly review pack view for assistant messages with weeklyReview metadata", () => {
+    const metadata = {
+      weeklyReview: {
+        summaryId,
+        laneOutcomes: [
+          {
+            lane: "workout",
+            eligible: true,
+            blockedReason: null,
+            confidence: 0.8,
+            explanationOnly: false,
+          },
+          {
+            lane: "nutrition",
+            eligible: true,
+            blockedReason: null,
+            confidence: 0.7,
+            explanationOnly: true,
+          },
+        ],
+        packMeta: {
+          selectedLanes: ["workout"],
+          droppedLanes: [{ lane: "nutrition", reason: "conflict_downgraded" }],
+          adaptationMessage:
+            "This weekly review includes up to 1 typed adaptation suggestion you can approve individually.",
+        },
+      },
+    };
+
+    expect(
+      resolveChatMessageWeeklyReview({
+        role: "user",
+        metadata,
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveChatMessageWeeklyReview({
+        role: "assistant",
+        metadata: {},
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveChatMessageWeeklyReview({
+        role: "assistant",
+        metadata: { weeklyReview: { summaryId: "not-a-uuid" } },
+      }),
+    ).toBeNull();
+
+    const pack = resolveChatMessageWeeklyReview({
+      role: "assistant",
+      metadata,
+    });
+
+    expect(pack?.summaryId).toBe(summaryId);
+    expect(pack?.lanes.map((lane) => lane.statusLabel)).toEqual([
+      "Eligible for adaptation",
+      "Explanation only",
+    ]);
+    expect(pack?.droppedLanes[0]?.reason).toContain("conflict");
+    expect(WEEKLY_REVIEW_CHAT_ACTION_NOTICE).toContain("proposal cards");
+    expect(WEEKLY_REVIEW_CHAT_ACTION_NOTICE.toLowerCase()).not.toContain("automatically");
   });
 });

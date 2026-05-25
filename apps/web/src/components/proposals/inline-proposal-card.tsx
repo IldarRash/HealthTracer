@@ -4,17 +4,20 @@ import { useAuth } from "@clerk/nextjs";
 import type { AiProposal } from "@health/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { decideProposal, apiQueryKeys, getAcceptedProposalRefreshQueryKeys } from "../../lib/api";
+import { decideProposal, apiQueryKeys, getProposalDecisionRefreshQueryKeys } from "../../lib/api";
 import {
   canAcceptProposal,
   canDecideProposal,
+  formatProposalValidationErrors,
   getAcceptDisabledReason,
+  getHabitProposalAppliedMessage,
   getProposalDomainLabel,
   getProposalDomainPillClass,
-  getProposalDomainRoute,
+  getProposalNavigationRoute,
   getProposalIntentLabel,
   getProposalStatusBadgeTone,
   getProposalStatusLabel,
+  isHabitPlanProposalIntent,
 } from "../../lib/proposal-ui-state";
 import { summarizeNutritionProposalChanges } from "../../lib/nutrition-ui-state";
 import { ProposalEvidenceList } from "./proposal-evidence-list";
@@ -46,7 +49,7 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", proposal.threadId] });
-      for (const queryKey of getAcceptedProposalRefreshQueryKeys(updated)) {
+      for (const queryKey of getProposalDecisionRefreshQueryKeys(updated)) {
         void queryClient.invalidateQueries({ queryKey });
       }
       onDecision?.(updated);
@@ -57,21 +60,30 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
   const canAccept = canAcceptProposal(proposal);
   const canDecide = canDecideProposal(proposal);
   const acceptDisabledReason = getAcceptDisabledReason(proposal);
-  const domainRoute = getProposalDomainRoute(proposal.targetDomain);
+  const domainRoute = getProposalNavigationRoute(proposal);
   const domainLabel = getProposalDomainLabel(proposal.targetDomain);
-  const intentLabel = getProposalIntentLabel(proposal.intent);
+  const intentLabel = getProposalIntentLabel(proposal.intent, proposal.proposedChanges);
+  const validationErrors = formatProposalValidationErrors(proposal);
   const appliedMessage =
     proposal.targetDomain === "recipe"
       ? "Recipe recommendations saved. Your nutrition targets are unchanged."
-      : proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition"
-      ? `Change applied to your ${domainLabel.toLowerCase()} plan.`
-      : proposal.targetDomain === "goal"
-        ? "Change applied to your goals."
-        : proposal.targetDomain === "profile"
-          ? "Change applied to your profile."
-          : "Change recorded in your coaching history.";
+      : isHabitPlanProposalIntent(proposal.intent)
+        ? getHabitProposalAppliedMessage(proposal.intent)
+        : proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition"
+          ? `Change applied to your ${domainLabel.toLowerCase()} plan.`
+          : proposal.targetDomain === "goal"
+            ? "Change applied to your goals."
+            : proposal.targetDomain === "profile"
+              ? "Change applied to your profile."
+              : proposal.targetDomain === "today"
+                ? "Today checklist updated."
+                : "Change recorded in your coaching history.";
   const showValidationNotice =
-    isPending && (!canAccept || proposal.validationErrors.length > 0);
+    isPending && (!canAccept || validationErrors.length > 0);
+  const intentAcceptanceCopy =
+    proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition"
+      ? "accept only if you want this plan revision applied."
+      : "accept only if you want this structured change applied.";
 
   const nutritionSummary =
     proposal.targetDomain === "nutrition"
@@ -94,7 +106,7 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
           </span>
           {intentLabel ? (
             <span className="confirmation-card__meta">
-              {intentLabel} — accept only if you want this plan revision applied.
+              {intentLabel} — {intentAcceptanceCopy}
             </span>
           ) : null}
           <span className="confirmation-card__meta">{proposal.reason}</span>
@@ -137,7 +149,9 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
             </Button>
             {domainRoute ? (
               <Link href={domainRoute} className="confirmation-card__link">
-                View on {domainLabel} →
+                {isHabitPlanProposalIntent(proposal.intent)
+                  ? "View on Today →"
+                  : `View on ${domainLabel} →`}
               </Link>
             ) : null}
           </>
@@ -159,12 +173,15 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
       {showValidationNotice ? (
         <div className="notice notice-inline">
           {acceptDisabledReason ? <p className="proposal-meta">{acceptDisabledReason}</p> : null}
-          {proposal.validationErrors.length > 0 ? (
-            <ul>
-              {proposal.validationErrors.map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
+          {validationErrors.length > 0 ? (
+            <>
+              <strong>Validation issues</strong>
+              <ul>
+                {validationErrors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            </>
           ) : null}
         </div>
       ) : null}
@@ -176,7 +193,9 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
             <>
               {" "}
               <Link href={domainRoute} className="confirmation-card__link">
-                View updated plan →
+                {isHabitPlanProposalIntent(proposal.intent)
+                  ? "Open Today →"
+                  : "View updated plan →"}
               </Link>
             </>
           ) : null}

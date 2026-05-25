@@ -1,7 +1,7 @@
 import { nutritionAdherence, nutritionPlanRevisions, nutritionPlans } from "@health/db";
 import type { NutritionPlanPayload, UpsertNutritionAdherenceInput } from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
@@ -81,6 +81,20 @@ export class NutritionRepository {
       .limit(1);
 
     return row ?? null;
+  }
+
+  async listAdherenceByUserAndDateRange(userId: string, startDate: string, endDate: string) {
+    return this.db
+      .select()
+      .from(nutritionAdherence)
+      .where(
+        and(
+          eq(nutritionAdherence.userId, userId),
+          gte(nutritionAdherence.date, startDate),
+          lte(nutritionAdherence.date, endDate),
+        ),
+      )
+      .orderBy(nutritionAdherence.date);
   }
 
   async upsertAdherenceByUserIdAndDate(

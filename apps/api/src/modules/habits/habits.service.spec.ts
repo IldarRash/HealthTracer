@@ -190,7 +190,14 @@ describe("HabitsService", () => {
 
     const service = new HabitsService(
       createRepositoryMock({
-        findActivePlanByUserId: async () => ({ id: planId }),
+        findActivePlanByUserId: async () => ({
+          id: planId,
+          activeRevisionId: revisionId,
+        }),
+        findActiveRevisionByPlanId: async () => ({
+          id: revisionId,
+          payload: revisionPayload,
+        }),
         createPlanWithRevision: async () => {
           createCalled = true;
           return { revision: { id: "rev-create-2" } };
@@ -209,6 +216,107 @@ describe("HabitsService", () => {
 
     expect(reference).toBe("habit_revision:rev-append-2");
     expect(createCalled).toBe(false);
+  });
+
+  it("rejects create_habit_plan when an active plan already exists", async () => {
+    const service = new HabitsService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({ id: planId, activeRevisionId: revisionId }),
+      }) as never,
+      usersService as never,
+    );
+
+    await expect(
+      service.applyHabitPlanProposal(
+        userId,
+        revisionPayload,
+        "Starting another plan.",
+        "create_habit_plan",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects adapt_habit_plan when no active plan exists", async () => {
+    const service = new HabitsService(createRepositoryMock() as never, usersService as never);
+
+    await expect(
+      service.applyHabitPlanProposal(
+        userId,
+        revisionPayload,
+        "Adjusting the current habit plan.",
+        "adapt_habit_plan",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("appends an adaptation revision when stable habitDefinitionId values are preserved", async () => {
+    const adaptedPayload = {
+      habits: [
+        {
+          ...revisionPayload.habits[0]!,
+          title: "Longer evening walk",
+          target: { type: "duration_minutes" as const, value: 30 },
+        },
+      ],
+    };
+
+    const service = new HabitsService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: planId,
+          activeRevisionId: revisionId,
+        }),
+        findActiveRevisionByPlanId: async () => ({
+          id: revisionId,
+          payload: revisionPayload,
+        }),
+        appendRevision: async () => ({ id: "rev-adapt-stable-1" }),
+      }) as never,
+      usersService as never,
+    );
+
+    const reference = await service.applyHabitPlanProposal(
+      userId,
+      adaptedPayload,
+      "Increasing walk duration.",
+      "adapt_habit_plan",
+    );
+
+    expect(reference).toBe("habit_revision:rev-adapt-stable-1");
+  });
+
+  it("rejects adapt_habit_plan when continuity ids are dropped", async () => {
+    const service = new HabitsService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: planId,
+          activeRevisionId: revisionId,
+        }),
+        findActiveRevisionByPlanId: async () => ({
+          id: revisionId,
+          payload: revisionPayload,
+        }),
+      }) as never,
+      usersService as never,
+    );
+
+    const adaptedPayload = {
+      habits: [
+        {
+          ...revisionPayload.habits[0]!,
+          habitDefinitionId: "b2000002-0000-4000-8000-000000000002",
+        },
+      ],
+    };
+
+    await expect(
+      service.applyHabitPlanProposal(
+        userId,
+        adaptedPayload,
+        "Replacing habit ids.",
+        "adapt_habit_plan",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("rejects habit proposals that fail domain validation", async () => {
@@ -243,6 +351,47 @@ describe("HabitsService", () => {
       missed: 0,
       requiredCompletionRate: null,
     });
+  });
+
+  it("dedupes duplicate completion rows before computing adherence", async () => {
+    const service = new HabitsService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: planId,
+          activeRevisionId: revisionId,
+        }),
+        findActiveRevisionByPlanId: async () => ({
+          payload: revisionPayload,
+        }),
+        listCompletionsInDateRange: async () => [
+          {
+            habitDefinitionId,
+            date: "2026-05-22",
+            status: "skipped",
+          },
+          {
+            habitDefinitionId,
+            date: "2026-05-22",
+            status: "completed",
+          },
+        ],
+      }) as never,
+      usersService as never,
+    );
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T12:00:00.000Z"));
+
+    try {
+      const result = await service.getAdherenceForUser(userId, "UTC", 7);
+
+      expect(result.habits[0]).toMatchObject({
+        completed: 1,
+        skipped: 0,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("computes adherence from active revision and completion rows", async () => {

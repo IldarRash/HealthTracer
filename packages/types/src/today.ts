@@ -196,6 +196,66 @@ export const todayHistoryQuerySchema = z.object({
 
 export type TodayHistoryQuery = z.infer<typeof todayHistoryQuerySchema>;
 
+export function normalizeChecklistLabelForComparison(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+export function filterProposalItemsConflictingWithHabitItems<
+  T extends Pick<TodayChecklistProposalItem, "label" | "kind">,
+>(
+  existingItems: Pick<TodayChecklistItem, "label" | "source">[],
+  proposalItems: T[],
+): T[] {
+  const habitLinkedLabels = new Set<string>();
+  let hasHabitLinkedItems = false;
+
+  for (const item of existingItems) {
+    if (item.source.type === "habit" && item.source.id) {
+      hasHabitLinkedItems = true;
+      habitLinkedLabels.add(normalizeChecklistLabelForComparison(item.label));
+    }
+  }
+
+  if (!hasHabitLinkedItems) {
+    return proposalItems;
+  }
+
+  return proposalItems.filter((item) => {
+    if (item.kind === "habit") {
+      return false;
+    }
+
+    return !habitLinkedLabels.has(normalizeChecklistLabelForComparison(item.label));
+  });
+}
+
+export function filterChecklistItemsConflictingWithHabitItems(
+  existingItems: TodayChecklistItem[],
+  incomingItems: TodayChecklistItem[],
+): TodayChecklistItem[] {
+  const habitLinkedLabels = new Set<string>();
+  let hasHabitLinkedItems = false;
+
+  for (const item of existingItems) {
+    if (item.source.type === "habit" && item.source.id) {
+      hasHabitLinkedItems = true;
+      habitLinkedLabels.add(normalizeChecklistLabelForComparison(item.label));
+    }
+  }
+
+  if (!hasHabitLinkedItems) {
+    return incomingItems;
+  }
+
+  return incomingItems.filter((item) => {
+    if (item.kind === "habit") {
+      return false;
+    }
+
+    return !habitLinkedLabels.has(normalizeChecklistLabelForComparison(item.label));
+  });
+}
+
 export function resolveProposalItemSource(
   item: TodayChecklistProposalItem,
 ): TodayChecklistItemSourceRef {

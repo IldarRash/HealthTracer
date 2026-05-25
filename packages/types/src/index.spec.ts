@@ -27,7 +27,13 @@ import {
   recipeSchema,
   updateRecipeRecommendationStatusSchema,
   adaptWorkoutPlanFromProgressChangesSchema,
+  adjustNutritionPlanFromProgressChangesSchema,
+  adaptHabitPlanFromProgressChangesSchema,
+  extractHabitPlanPayload,
+  habitPlanProposalChangesSchema,
   generateWeeklyProgressSummarySchema,
+  getProgressProvenanceFromProposal,
+  getProgressLinkedProvenanceRequiredErrors,
   weeklyProgressSummaryResponseSchema,
 } from "./index.js";
 
@@ -807,6 +813,24 @@ describe("phase 10A progress contracts", () => {
     expect(payload.sourceTrendObservationIds).toEqual([]);
   });
 
+  it("accepts progress-derived nutrition adaptation proposal payloads", () => {
+    const payload = adjustNutritionPlanFromProgressChangesSchema.parse({
+      plan: {
+        title: "Balanced week",
+        summary: "Adjusted targets based on weekly adherence patterns.",
+        caloriesPerDay: 2200,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        hydrationLiters: null,
+        mealStructure: [{ label: "Breakfast" }],
+      },
+      sourceSummaryId: summaryId,
+    });
+
+    expect(payload.sourceTrendObservationIds).toEqual([]);
+  });
+
   it("defaults weekly summary generation refresh to false", () => {
     expect(generateWeeklyProgressSummarySchema.parse({}).refresh).toBe(false);
   });
@@ -835,5 +859,166 @@ describe("phase 10A progress contracts", () => {
         sourceSummaryId: "not-a-uuid",
       }),
     ).toThrow();
+  });
+
+  it("extracts progress provenance from workout, nutrition, and habit proposals", () => {
+    const summaryId = "14a08176-64a7-4a2d-8a44-581807368394";
+    const trendId = "24b19287-75b8-4a3e-9c10-691908479405";
+    const nutritionPlan = {
+      title: "Balanced week",
+      summary: "Adjusted targets based on weekly adherence patterns.",
+      caloriesPerDay: 2200,
+      proteinGrams: null,
+      carbsGrams: null,
+      fatGrams: null,
+      hydrationLiters: null,
+      mealStructure: [{ label: "Breakfast" }],
+    };
+    const habitPlan = {
+      habits: [
+        {
+          habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+          title: "Morning hydration",
+          category: "hydration",
+          status: "active",
+          schedule: { type: "daily" },
+          target: { type: "boolean" },
+          required: true,
+          displayOrder: 0,
+        },
+      ],
+    };
+
+    expect(
+      getProgressProvenanceFromProposal("adapt_workout_plan_from_progress", {
+        plan: {
+          title: "Strength base",
+          summary: "Adjusted volume.",
+          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        },
+        sourceSummaryId: summaryId,
+        sourceTrendObservationIds: [trendId],
+      }),
+    ).toEqual({
+      sourceSummaryId: summaryId,
+      sourceTrendObservationIds: [trendId],
+    });
+
+    expect(
+      getProgressProvenanceFromProposal("adjust_nutrition_plan", {
+        plan: nutritionPlan,
+        sourceSummaryId: summaryId,
+      }),
+    ).toEqual({
+      sourceSummaryId: summaryId,
+      sourceTrendObservationIds: [],
+    });
+
+    expect(
+      getProgressProvenanceFromProposal("adapt_habit_plan", {
+        plan: habitPlan,
+        sourceSummaryId: summaryId,
+        sourceTrendObservationIds: [trendId],
+      }),
+    ).toEqual({
+      sourceSummaryId: summaryId,
+      sourceTrendObservationIds: [trendId],
+    });
+
+    expect(
+      getProgressProvenanceFromProposal("create_nutrition_plan", nutritionPlan),
+    ).toBeNull();
+  });
+
+  it("requires sourceSummaryId for progress-linked nutrition and habit proposal shapes", () => {
+    const nutritionPlanPayload = {
+      title: "Balanced week",
+      summary: "Adjusted targets.",
+      caloriesPerDay: 2200,
+      proteinGrams: null,
+      carbsGrams: null,
+      fatGrams: null,
+      hydrationLiters: null,
+      mealStructure: [{ label: "Breakfast", timingHint: null }],
+      preferences: [],
+      restrictions: [],
+      allergies: [],
+      notes: [],
+    };
+
+    expect(
+      getProgressLinkedProvenanceRequiredErrors("adjust_nutrition_plan", {
+        plan: nutritionPlanPayload,
+      }),
+    ).toEqual([
+      "proposedChanges.sourceSummaryId: Progress-linked proposals require a weekly progress summary reference.",
+    ]);
+
+    expect(
+      getProgressLinkedProvenanceRequiredErrors("adjust_nutrition_plan", nutritionPlanPayload),
+    ).toEqual([]);
+
+    expect(
+      getProgressLinkedProvenanceRequiredErrors("adjust_nutrition_plan", {
+        plan: nutritionPlanPayload,
+        sourceSummaryId: summaryId,
+      }),
+    ).toEqual([]);
+  });
+
+  it("accepts progress-derived habit adaptation proposal payloads", () => {
+    const payload = adaptHabitPlanFromProgressChangesSchema.parse({
+      plan: {
+        habits: [
+          {
+            habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+            title: "Evening wind-down",
+            category: "sleep_routine",
+            status: "active",
+            schedule: { type: "daily" },
+            target: { type: "boolean" },
+            required: true,
+            displayOrder: 0,
+          },
+        ],
+      },
+      sourceSummaryId: summaryId,
+    });
+
+    expect(payload.sourceTrendObservationIds).toEqual([]);
+  });
+
+  it("extracts habit plan content from progress-wrapped adaptation payloads", () => {
+    const summaryId = "14a08176-64a7-4a2d-8a44-581807368394";
+    const trendId = "24b19287-75b8-4a3e-9c10-691908479405";
+    const wrappedPayload = {
+      plan: {
+        habits: [
+          {
+            habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+            title: "Evening wind-down",
+            category: "sleep_routine",
+            status: "active",
+            schedule: { type: "daily" },
+            target: { type: "boolean" },
+            required: true,
+            displayOrder: 0,
+          },
+        ],
+      },
+      sourceSummaryId: summaryId,
+      sourceTrendObservationIds: [trendId],
+    };
+
+    const parsed = habitPlanProposalChangesSchema.parse(wrappedPayload);
+    const extracted = extractHabitPlanPayload(parsed);
+
+    expect(extracted.habits).toHaveLength(1);
+    expect(extracted.habits[0]?.title).toBe("Evening wind-down");
+    expect(extracted).not.toEqual({ habits: [] });
+    expect(getProgressProvenanceFromProposal("adapt_habit_plan", wrappedPayload)).toEqual({
+      sourceSummaryId: summaryId,
+      sourceTrendObservationIds: [trendId],
+    });
   });
 });

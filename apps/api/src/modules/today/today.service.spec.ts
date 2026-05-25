@@ -680,6 +680,199 @@ describe("TodayService", () => {
     expect(upsertItems.some((item) => item.source.type === "ai_proposal")).toBe(true);
   });
 
+  it("returns idempotently when reloading an already synced habit checklist", async () => {
+    let updateCalled = false;
+    const existingItem = {
+      id: itemId,
+      label: "Morning hydration",
+      kind: "habit",
+      status: "pending",
+      required: true,
+      source: { type: "habit", id: habitDefinitionId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([existingItem]),
+        updateChecklistState: async () => {
+          updateCalled = true;
+          throw new Error("Should not persist when checklist is already synced.");
+        },
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(updateCalled).toBe(false);
+    expect(day.items).toHaveLength(1);
+    expect(day.items[0]?.source).toEqual({ type: "habit", id: habitDefinitionId });
+  });
+
+  it("drops duplicate habit-kind checklist proposals when habit-linked items exist", async () => {
+    let upsertItems: { label: string; kind: string; source: { type: string } }[] = [];
+    const habitItem = {
+      id: itemId,
+      label: "Morning hydration",
+      kind: "habit",
+      status: "pending",
+      required: true,
+      source: { type: "habit", id: habitDefinitionId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([habitItem]),
+        createChecklistFromProposal: async (
+          _resolvedUserId: string,
+          _payload: unknown,
+          items: { label: string; kind: string; source: { type: string } }[],
+        ) => {
+          upsertItems = items;
+          return buildChecklistRow(items);
+        },
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+      },
+    );
+
+    await service.applyTodayChecklistProposal(userId, {
+      date,
+      items: [
+        { label: "Evening walk", kind: "habit", completed: false },
+        { label: "Morning hydration", kind: "hydration", completed: false },
+        { label: "Stretch", kind: "recovery", completed: false },
+      ],
+    });
+
+    expect(upsertItems.some((item) => item.kind === "habit" && item.source.type === "ai_proposal")).toBe(
+      false,
+    );
+    expect(upsertItems.some((item) => item.label === "Morning hydration" && item.source.type === "ai_proposal")).toBe(
+      false,
+    );
+    expect(upsertItems.some((item) => item.label === "Stretch")).toBe(true);
+    expect(upsertItems.some((item) => item.source.type === "habit")).toBe(true);
+  });
+
+  it("preserves nutrition detail when habit sync runs on an existing checklist", async () => {
+    const nutritionPlanId = "a1000001-0000-4000-8000-000000000001";
+    const nutritionRevisionId = "b2000002-0000-4000-8000-000000000002";
+    const existingItem = {
+      id: itemId,
+      label: "Morning hydration",
+      kind: "habit",
+      status: "pending",
+      required: true,
+      source: { type: "habit", id: habitDefinitionId },
+    };
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => buildChecklistRow([existingItem]),
+        updateChecklistState: async (
+          _resolvedUserId: string,
+          _checklistId: string,
+          items: Record<string, unknown>[],
+        ) => buildChecklistRow(items),
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {
+        findActivePlanByUserId: async () => ({
+          id: habitPlanId,
+          activeRevisionId: habitRevisionId,
+        }),
+        findActiveRevisionByPlanId: async () =>
+          buildActiveHabitRevision([
+            {
+              habitDefinitionId,
+              title: "Morning hydration",
+              category: "hydration",
+              status: "active",
+              schedule: { type: "daily" },
+              target: { type: "boolean" },
+              required: true,
+              displayOrder: 0,
+            },
+          ]),
+      },
+      {
+        getNutritionDayDetail: async (_auth: unknown, resolvedDate: string) => ({
+          date: resolvedDate,
+          plan: {
+            id: nutritionPlanId,
+            userId,
+            activeRevisionId: nutritionRevisionId,
+            status: "active",
+            createdAt: timestamp.toISOString(),
+            updatedAt: timestamp.toISOString(),
+          },
+          activeRevision: {
+            id: nutritionRevisionId,
+            nutritionPlanId,
+            revisionNumber: 1,
+            reason: "Initial plan",
+            source: "ai_proposal",
+            payload: nutritionPlanPayload,
+            createdAt: timestamp.toISOString(),
+          },
+          adherence: null,
+        }),
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(day.nutrition?.plan?.id).toBe(nutritionPlanId);
+    expect(day.items.some((item) => item.source.type === "habit")).toBe(true);
+  });
+
   it("materializes workout and habit items together when both are scheduled", async () => {
     let persistedItems: { source: { type: string; id?: string } }[] = [];
 

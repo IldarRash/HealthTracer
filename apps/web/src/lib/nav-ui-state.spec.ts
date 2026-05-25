@@ -1,16 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { isActivePath, isNavLinkActive, PRIMARY_NAV_LINKS } from "./nav-ui-state.js";
+import {
+  findSecondaryRoute,
+  isActivePath,
+  isNavLinkActive,
+  isSecondaryRoute,
+  PRIMARY_NAV_LINKS,
+  SECONDARY_ROUTE_LINKS,
+} from "./nav-ui-state.js";
 
 describe("nav UI state", () => {
-  it("exposes the approved primary nav labels only", () => {
+  it("exposes the four approved primary nav tabs only", () => {
     expect(PRIMARY_NAV_LINKS.map((link) => link.label)).toEqual([
       "Chat",
       "Today",
       "Longevity",
-      "Workouts",
-      "Nutrition",
       "Profile",
     ]);
+    expect(PRIMARY_NAV_LINKS.map((link) => link.href)).toEqual([
+      "/chat",
+      "/today",
+      "/longevity",
+      "/profile",
+    ]);
+  });
+
+  it("keeps Training and Nutrition as secondary routes outside primary nav", () => {
+    expect(SECONDARY_ROUTE_LINKS.map((link) => link.label)).toEqual([
+      "Workouts",
+      "Nutrition",
+    ]);
+    expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/training")).toBe(false);
+    expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/nutrition")).toBe(false);
   });
 
   it("marks the exact route and nested paths as active", () => {
@@ -19,9 +39,9 @@ describe("nav UI state", () => {
     expect(isActivePath("/today", "/longevity")).toBe(false);
   });
 
-  it("treats legacy aliases as active for destination tabs", () => {
-    const workouts = PRIMARY_NAV_LINKS.find((link) => link.href === "/training");
-    const nutrition = PRIMARY_NAV_LINKS.find((link) => link.href === "/nutrition");
+  it("treats legacy aliases as active for secondary and profile routes", () => {
+    const workouts = SECONDARY_ROUTE_LINKS.find((link) => link.href === "/training");
+    const nutrition = SECONDARY_ROUTE_LINKS.find((link) => link.href === "/nutrition");
     const profile = PRIMARY_NAV_LINKS.find((link) => link.href === "/profile");
 
     expect(workouts).toBeDefined();
@@ -36,15 +56,14 @@ describe("nav UI state", () => {
     expect(isNavLinkActive("/metrics", profile!)).toBe(true);
   });
 
-  it("resolves active state from primary nav link config", () => {
-    const workouts = PRIMARY_NAV_LINKS.find((link) => link.href === "/training");
-    const profile = PRIMARY_NAV_LINKS.find((link) => link.href === "/profile");
+  it("resolves secondary routes without highlighting primary tabs", () => {
+    expect(isSecondaryRoute("/training")).toBe(true);
+    expect(isSecondaryRoute("/progress")).toBe(true);
+    expect(isSecondaryRoute("/nutrition")).toBe(true);
+    expect(isSecondaryRoute("/longevity")).toBe(false);
 
-    expect(workouts).toBeDefined();
-    expect(profile).toBeDefined();
-    expect(isNavLinkActive("/training", workouts!)).toBe(true);
-    expect(isNavLinkActive("/documents", profile!)).toBe(true);
-    expect(isNavLinkActive("/chat", profile!)).toBe(false);
+    const training = findSecondaryRoute("/training");
+    expect(training?.label).toBe("Workouts");
   });
 
   it("highlights Longevity only for its route and nested paths", () => {

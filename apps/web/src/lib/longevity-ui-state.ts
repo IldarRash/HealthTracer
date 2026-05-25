@@ -34,13 +34,18 @@ import {
   deferredDomainAvailabilityLabel,
   isProgressSummaryNotFoundError,
   progressDomainLabel,
+  sanitizeWellnessDisplayText,
   sortTrendObservations,
   summarizeDeferredDomains,
-  summarizeWorkoutAggregate,
   trendDataSufficiencyLabel,
   trendDirectionLabel,
   trendTypeLabel,
 } from "./progress-ui-state";
+import {
+  buildCrossDomainAggregateViews,
+  buildLongevityCrossDomainHeadline,
+  WEEKLY_REVIEW_CHAT_PROMPT,
+} from "./weekly-review-ui-state";
 import { formatAdherenceScore, formatAdherenceSummary } from "./today-ui-state";
 import { formatLocalIsoDate } from "./training-ui-state";
 
@@ -74,6 +79,154 @@ export const LONGEVITY_COACH_PROMPTS = [
   "Review my logged recovery pattern",
   "What should I focus on in Today?",
 ] as const;
+
+/** Approved in-dashboard CTA destinations for Longevity cards. */
+export const LONGEVITY_CTA_ROUTES = {
+  chat: "/chat",
+  today: "/today",
+  training: "/training",
+  nutrition: "/nutrition",
+  profile: "/profile",
+  profileGoals: "/profile#goals",
+  profileDocuments: "/profile#documents",
+  profileConsent: "/profile",
+} as const;
+
+/** Monday-start labels aligned with weekly trend bar indices. */
+export const WEEKDAY_TREND_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+export function buildSevenDayTrendAriaLabel(
+  trend: readonly number[],
+  sparse: boolean,
+): string {
+  if (sparse) {
+    return "Seven day activity trend unavailable. Not enough data yet.";
+  }
+
+  return `Seven day activity trend. ${trend
+    .map((value, index) => `${WEEKDAY_TREND_LABELS[index]}: ${value}%`)
+    .join(", ")}.`;
+}
+
+export type LongevityHeroTrendStripView = {
+  sparse: boolean;
+  trend: readonly number[];
+  ariaLabel: string;
+  className: string;
+};
+
+export function buildLongevityHeroTrendStripView(
+  trend: readonly number[],
+  sparse: boolean,
+): LongevityHeroTrendStripView {
+  return {
+    sparse,
+    trend,
+    ariaLabel: buildSevenDayTrendAriaLabel(trend, sparse),
+    className: sparse ? "trend-strip trend-strip--sparse" : "trend-strip",
+  };
+}
+
+export function hasMeaningfulHabitAdherence(
+  habitAdherence: HabitAdherenceResponse | null | undefined,
+): boolean {
+  if (!habitAdherence) {
+    return false;
+  }
+
+  if (habitAdherence.plan.completed > 0) {
+    return true;
+  }
+
+  return habitAdherence.habits.some((habit) => habit.completed > 0);
+}
+
+function hasLongevityExecutionSignals(input: {
+  sessions: readonly WorkoutSession[];
+  todayHistory: readonly TodayHistoryEntry[];
+  todayDay: TodayDayResponse | null;
+  habitAdherence: HabitAdherenceResponse | null;
+  now?: Date;
+}): boolean {
+  const workoutAdherence = summarizeWorkoutAdherence(input.sessions, input.now);
+
+  if (workoutAdherence.planned > 0 || workoutAdherence.completed > 0) {
+    return true;
+  }
+
+  const historyHasSignals = input.todayHistory.some(
+    (entry) =>
+      entry.adherence.totalRequired > 0 ||
+      entry.adherence.score != null ||
+      entry.hasFeedback,
+  );
+  const todayHasSignals =
+    input.todayDay != null &&
+    (input.todayDay.adherence.totalRequired > 0 ||
+      input.todayDay.adherence.score != null ||
+      (input.todayDay.feedback != null &&
+        Object.keys(input.todayDay.feedback).length > 0));
+
+  if (historyHasSignals || todayHasSignals) {
+    return true;
+  }
+
+  return hasMeaningfulHabitAdherence(input.habitAdherence);
+}
+
+function computeLongevityHeroPercent(input: {
+  sessions: readonly WorkoutSession[];
+  todayHistory: readonly TodayHistoryEntry[];
+  todayDay: TodayDayResponse | null;
+  habitAdherence: HabitAdherenceResponse | null;
+  trend: readonly number[];
+  now?: Date;
+}): number {
+  const percents: number[] = [];
+  const workoutAdherence = summarizeWorkoutAdherence(input.sessions, input.now);
+
+  if (workoutAdherence.planned > 0) {
+    percents.push(
+      Math.round((workoutAdherence.completed / workoutAdherence.planned) * 100),
+    );
+  }
+
+  const todayScores = input.todayHistory
+    .filter((entry) => entry.adherence.score != null)
+    .map((entry) => Math.round(entry.adherence.score! * 100));
+
+  if (input.todayDay?.adherence.score != null) {
+    todayScores.push(Math.round(input.todayDay.adherence.score * 100));
+  }
+
+  if (todayScores.length > 0) {
+    percents.push(
+      Math.round(todayScores.reduce((total, score) => total + score, 0) / todayScores.length),
+    );
+  }
+
+  const habitRate = input.habitAdherence?.plan.requiredCompletionRate;
+  if (habitRate != null && hasMeaningfulHabitAdherence(input.habitAdherence)) {
+    percents.push(Math.round(habitRate * 100));
+  }
+
+  if (percents.length > 0) {
+    return Math.min(
+      100,
+      Math.round(percents.reduce((total, value) => total + value, 0) / percents.length),
+    );
+  }
+
+  const activeTrend = input.trend.filter((value) => value > 0);
+  if (activeTrend.length > 0) {
+    return Math.min(
+      100,
+      Math.round(activeTrend.reduce((total, value) => total + value, 0) / activeTrend.length),
+    );
+  }
+
+  return 0;
+}
 
 function startOfWeek(date: Date): Date {
   const copy = new Date(date);
@@ -112,32 +265,19 @@ export function mergeTodayHistoryIntoTrend(
 
 export function hasSparseLongevityData(input: {
   sessions: readonly WorkoutSession[];
-  goals: readonly Goal[];
+  goals?: readonly Goal[];
   todayHistory: readonly TodayHistoryEntry[];
   todayDay: TodayDayResponse | null;
+  habitAdherence?: HabitAdherenceResponse | null;
   now?: Date;
 }): boolean {
-  const workoutAdherence = summarizeWorkoutAdherence(input.sessions, input.now);
-  const activeGoals = input.goals.filter((goal) => goal.status === "active").length;
-  const historyHasSignals = input.todayHistory.some(
-    (entry) =>
-      entry.adherence.totalRequired > 0 ||
-      entry.adherence.score != null ||
-      entry.hasFeedback,
-  );
-  const todayHasSignals =
-    input.todayDay != null &&
-    (input.todayDay.adherence.totalRequired > 0 ||
-      input.todayDay.adherence.score != null ||
-      (input.todayDay.feedback != null &&
-        Object.keys(input.todayDay.feedback).length > 0));
-
-  return (
-    workoutAdherence.planned === 0 &&
-    activeGoals === 0 &&
-    !historyHasSignals &&
-    !todayHasSignals
-  );
+  return !hasLongevityExecutionSignals({
+    sessions: input.sessions,
+    todayHistory: input.todayHistory,
+    todayDay: input.todayDay,
+    habitAdherence: input.habitAdherence ?? null,
+    now: input.now,
+  });
 }
 
 export function buildLongevityWeeklyHero(input: {
@@ -145,20 +285,32 @@ export function buildLongevityWeeklyHero(input: {
   goals: readonly Goal[];
   todayHistory: readonly TodayHistoryEntry[];
   todayDay: TodayDayResponse | null;
+  habitAdherence?: HabitAdherenceResponse | null;
   now?: Date;
 }): WeeklyConsistency & { sparse: boolean; emptyMessage: string | null } {
-  const base = computeWeeklyConsistency(input.sessions, input.goals, input.now);
+  const base = computeWeeklyConsistency(input.sessions, [], input.now);
   const trend = mergeTodayHistoryIntoTrend(base.trend, input.todayHistory, input.now);
   const activeDays = trend.filter((value) => value > 0).length;
   const sparse = hasSparseLongevityData(input);
+  const percent = sparse
+    ? 0
+    : computeLongevityHeroPercent({
+        sessions: input.sessions,
+        todayHistory: input.todayHistory,
+        todayDay: input.todayDay,
+        habitAdherence: input.habitAdherence ?? null,
+        trend,
+        now: input.now,
+      });
 
   return {
     ...base,
+    percent,
     trend,
     activeDaysLabel: `${activeDays} of 7 days with logged activity`,
     subtitle: sparse
       ? "Not enough data yet — log tasks on Today or complete a workout to start seeing patterns."
-      : "Based on your logged workouts, Today adherence, and active goals this week.",
+      : "Based on your logged workouts, Today adherence, and habits this week.",
     sparse,
     emptyMessage: sparse ? "Not enough data yet" : null,
   };
@@ -200,6 +352,7 @@ export function buildTodayAdherenceCardView(
 }
 
 export type NutritionConsistencyCardView =
+  | { status: "load_error"; message: string }
   | { status: "empty"; message: string }
   | { status: "plan_only"; title: string; summary: string }
   | { status: "ready"; title: string; summary: string; detail: string };
@@ -208,7 +361,16 @@ export function buildNutritionConsistencyCardView(input: {
   planTitle: string | null;
   planSummary: string | null;
   adherence: NutritionAdherenceRecord | null;
+  fetchFailed?: boolean;
 }): NutritionConsistencyCardView {
+  if (input.fetchFailed && !input.planTitle) {
+    return {
+      status: "load_error",
+      message:
+        "Nutrition plan data could not be loaded right now. Other wellness sections are still shown.",
+    };
+  }
+
   if (!input.planTitle) {
     return {
       status: "empty",
@@ -232,6 +394,41 @@ export function buildNutritionConsistencyCardView(input: {
     title: input.planTitle,
     summary: input.planSummary ?? "Based on your logged meals today.",
     detail: `${completedMeals} of ${totalMeals} planned meals logged today`,
+  };
+}
+
+export type WorkoutConsistencyCardView =
+  | { status: "load_error"; message: string }
+  | { status: "empty"; message: string }
+  | { status: "ready"; value: string; hint: string };
+
+export function buildWorkoutConsistencyCardView(input: {
+  sessions: readonly WorkoutSession[];
+  fetchFailed?: boolean;
+  now?: Date;
+}): WorkoutConsistencyCardView {
+  if (input.fetchFailed) {
+    return {
+      status: "load_error",
+      message:
+        "Workout data could not be loaded right now. Other wellness sections are still shown.",
+    };
+  }
+
+  const adherence = summarizeWorkoutAdherence(input.sessions, input.now);
+
+  if (adherence.planned === 0) {
+    return {
+      status: "empty",
+      message:
+        "No sessions scheduled this week. Review your plan in Training or ask your coach in Chat.",
+    };
+  }
+
+  return {
+    status: "ready",
+    value: adherence.label,
+    hint: "Based on your logged workout sessions this week.",
   };
 }
 
@@ -283,15 +480,7 @@ function collectTodaySelfCheckInSignals(
 }
 
 export function sanitizeLongevityBackendText(text: string): string {
-  const lower = text.toLowerCase();
-
-  for (const term of FORBIDDEN_LONGEVITY_TERMS) {
-    if (lower.includes(term)) {
-      return SAFE_BACKEND_MESSAGE_FALLBACK;
-    }
-  }
-
-  return text;
+  return sanitizeWellnessDisplayText(text);
 }
 
 export function buildWellnessSignalsPanelView(input: {
@@ -459,9 +648,19 @@ export type LongevityTrendsView =
       status: "ready";
       headline: string;
       detail: string;
+      dataStatusLabel: string;
+      userMessage: string;
+      aggregates: Array<{
+        id: string;
+        domain: string;
+        sufficiency: string;
+        headline: string;
+        detail: string;
+      }>;
       trends: Array<{ id: string; title: string; meta: string; message: string }>;
       deferredSummary: string;
       deferredDomains: Array<{ domain: string; detail: string }>;
+      weeklyReviewChatPrompt: string;
     };
 
 export function buildLongevityTrendsView(
@@ -471,17 +670,20 @@ export function buildLongevityTrendsView(
     return {
       status: "empty",
       message:
-        "Not enough data yet for a weekly trends summary. Complete workouts and check back, or open Training for plan details.",
+        "Not enough data yet for a cross-domain weekly review. Log on Today, complete workouts, or open Training for plan details.",
     };
   }
 
-  const workoutSummary = summarizeWorkoutAggregate(progress.summary.sourceAggregates.workout);
+  const crossDomainHeadline = buildLongevityCrossDomainHeadline(progress);
   const sortedTrends = sortTrendObservations(progress.trends);
 
   return {
     status: "ready",
-    headline: workoutSummary.headline,
-    detail: workoutSummary.detail,
+    headline: crossDomainHeadline.headline,
+    detail: crossDomainHeadline.detail,
+    dataStatusLabel: crossDomainHeadline.dataStatusLabel,
+    userMessage: sanitizeLongevityBackendText(progress.summary.userMessage),
+    aggregates: buildCrossDomainAggregateViews(progress.summary.sourceAggregates),
     trends: sortedTrends.map((trend) => ({
       id: trend.id,
       title: `${trendTypeLabel(trend.trendType)} · ${progressDomainLabel(trend.domain)}`,
@@ -495,6 +697,7 @@ export function buildLongevityTrendsView(
       domain: progressDomainLabel(entry.domain),
       detail: `${deferredDomainAvailabilityLabel(entry.domain)} · ${sanitizeLongevityBackendText(entry.message)}`,
     })),
+    weeklyReviewChatPrompt: WEEKLY_REVIEW_CHAT_PROMPT,
   };
 }
 
@@ -503,8 +706,13 @@ export function buildLongevityCoachPrompts(input: {
   wellnessStatus: WellnessSignalsPanelView["status"];
   activeGoalCount: number;
   goalsFetchFailed?: boolean;
+  hasWeeklyProgress?: boolean;
 }): readonly string[] {
   const prompts = new Set<string>(LONGEVITY_COACH_PROMPTS);
+
+  if (input.hasWeeklyProgress) {
+    prompts.add(WEEKLY_REVIEW_CHAT_PROMPT);
+  }
 
   if (input.sparseHero) {
     prompts.add("Help me build a simple weekly routine");
@@ -576,6 +784,26 @@ export function buildGoalsSectionView(input: {
   };
 }
 
+export function goalsCardHint(section: GoalsSectionView): string {
+  if (section.status === "ready") {
+    return "Goals your coach helps you refine over time.";
+  }
+
+  return section.description;
+}
+
+export function goalsCardValue(section: GoalsSectionView): string {
+  if (section.status === "ready") {
+    return `${section.count} in progress`;
+  }
+
+  if (section.status === "load_error") {
+    return "Unavailable";
+  }
+
+  return "None yet";
+}
+
 export function summarizeHabitConsistencyHint(
   habitAdherence: HabitAdherenceResponse | null,
 ): string | null {
@@ -584,7 +812,7 @@ export function summarizeHabitConsistencyHint(
     return null;
   }
 
-  return `${view.requiredCompletionRate} required habit completion · ${view.streakTitle}`;
+  return `${view.requiredCompletionRate} required completion (7 days) · ${view.streakTitle} · ${view.streakDetail}`;
 }
 
 export function isOptionalProgressNotFound(error: string | undefined): boolean {

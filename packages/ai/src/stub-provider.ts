@@ -1,4 +1,5 @@
 import type { AiStructuredOutputInput } from "@health/types";
+import { isWeeklyReviewChatMessage } from "@health/types";
 import {
   hasActiveHabitPlanInContext,
   isHabitAdaptCue,
@@ -11,6 +12,7 @@ import {
   isWellbeingRelatedMessage,
   parseWellbeingSummaryFromContext,
 } from "./stub-wellbeing.js";
+import { buildStubWeeklyReviewCoachOutput } from "./stub-weekly-review.js";
 import {
   stubProgressAdaptedWorkoutPlan,
   stubReducedLoadWorkoutPlan,
@@ -45,6 +47,10 @@ function stubCoachOutput(value: unknown): AiStructuredOutputInput {
 export class StubCoachAiProvider implements CoachAiProvider {
   async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput> {
     const normalized = request.userMessage.toLowerCase();
+
+    if (isWeeklyReviewChatMessage(request.userMessage)) {
+      return stubCoachOutput(buildStubWeeklyReviewCoachOutput(request.coachingContext));
+    }
 
     if (normalized.includes("workout") || normalized.includes("training")) {
       if (

@@ -1,10 +1,18 @@
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
+  adjustNutritionPlanFromProgressChangesSchema,
+  habitPlanProposalChangesSchema,
   collectWorkoutPlanExerciseIds,
   createGoalProposalChangesSchema,
+  extractHabitPlanPayload,
+  extractNutritionPlanPayload,
   getGoalHierarchyValidationErrors,
   getHabitPlanDomainErrors,
+  getHabitPlanAdaptationContinuityErrors,
+  getHabitPlanIntentStateErrors,
   getNutritionPlanDomainErrors,
+  getProgressProvenanceFromProposal,
+  getProgressLinkedProvenanceRequiredErrors,
   getRecoveryWorkoutAdaptationVolumeErrors,
   getTodayIsoDateInTimezone,
   getWorkoutProposalDomainErrors,
@@ -24,7 +32,6 @@ import {
   type CreateGoalInput,
   type Goal,
   type HabitPlanPayload,
-  type NutritionPlanPayload,
   type ProposalIntent,
   type RawAiProposal,
   type RecoveryContextSourceRef,
@@ -38,11 +45,12 @@ import {
 } from "@health/types";
 import { containsUnsafeWellnessInsightLanguage } from "@health/types";
 import { Injectable } from "@nestjs/common";
-import type { z } from "zod";
+import { z } from "zod";
 import { DocumentSignalsRepository } from "../documents/document-signals.repository.js";
 import { ExercisesService } from "../exercises/exercises.service.js";
 import { GoalsRepository } from "../goals/goals.repository.js";
 import { toGoal } from "../goals/goal.mapper.js";
+import { HabitsRepository } from "../habits/habits.repository.js";
 import { HabitsService } from "../habits/habits.service.js";
 import { MetricsAiContextService } from "../health-metrics/metrics-ai-context.service.js";
 import { ProgressRepository } from "../progress/progress.repository.js";
@@ -67,6 +75,7 @@ export class ProposalValidationService {
     private readonly recoveryContextService: RecoveryContextService,
     private readonly workoutsRepository: WorkoutsRepository,
     private readonly usersRepository: UsersRepository,
+    private readonly habitsRepository: HabitsRepository,
   ) {}
 
   validateRawProposal(proposal: RawAiProposal): ProposalValidationResult {
@@ -220,9 +229,10 @@ export class ProposalValidationService {
       intent === "create_nutrition_plan" ||
       intent === "adjust_nutrition_plan"
     ) {
-      const domainErrors = getNutritionPlanDomainErrors(
-        result.data as NutritionPlanPayload,
+      const payload = extractNutritionPlanPayload(
+        result.data as Parameters<typeof extractNutritionPlanPayload>[0],
       );
+      const domainErrors = getNutritionPlanDomainErrors(payload);
 
       if (domainErrors.length > 0) {
         return { valid: false, errors: domainErrors };
@@ -252,7 +262,10 @@ export class ProposalValidationService {
     }
 
     if (intent === "create_habit_plan" || intent === "adapt_habit_plan") {
-      const domainErrors = getHabitPlanDomainErrors(result.data as HabitPlanPayload);
+      const payload = extractHabitPlanPayload(
+        result.data as Parameters<typeof extractHabitPlanPayload>[0],
+      );
+      const domainErrors = getHabitPlanDomainErrors(payload);
 
       if (domainErrors.length > 0) {
         return { valid: false, errors: domainErrors };
@@ -388,17 +401,30 @@ export class ProposalValidationService {
     intent: ProposalIntent,
     proposedChanges: unknown,
   ): Promise<string[]> {
-    if (intent !== "adapt_workout_plan_from_progress") {
+    if (intent === "adapt_workout_plan_from_progress") {
+      const parsed = adaptWorkoutPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+      if (!parsed.success) {
+        return [];
+      }
+
+      return this.getProgressProvenanceErrors(userId, parsed.data);
+    }
+
+    const provenance = getProgressProvenanceFromProposal(intent, proposedChanges);
+
+    if (!provenance || (!provenance.sourceSummaryId && provenance.sourceTrendObservationIds.length === 0)) {
       return [];
     }
 
-    const parsed = adaptWorkoutPlanFromProgressChangesSchema.safeParse(proposedChanges);
+    return this.getProgressProvenanceErrors(userId, provenance);
+  }
 
-    if (!parsed.success) {
-      return [];
-    }
-
-    return this.getProgressProvenanceErrors(userId, parsed.data);
+  validateProgressLinkedProvenanceRequired(
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): string[] {
+    return getProgressLinkedProvenanceRequiredErrors(intent, proposedChanges);
   }
 
   async validateExerciseReferences(
@@ -433,13 +459,80 @@ export class ProposalValidationService {
       return [];
     }
 
-    const parsed = habitPlanPayloadSchema.safeParse(proposedChanges);
+    const payload = parseHabitPlanProposalChanges(proposedChanges);
 
-    if (!parsed.success) {
+    if (!payload) {
       return [];
     }
 
-    return this.habitsService.getHabitTemplateReferenceErrors(parsed.data);
+    return this.habitsService.getHabitTemplateReferenceErrors(payload);
+  }
+
+  async validateHabitPlanProposalState(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "create_habit_plan" && intent !== "adapt_habit_plan") {
+      return [];
+    }
+
+    const payload = parseHabitPlanProposalChanges(proposedChanges);
+
+    if (!payload) {
+      return [];
+    }
+
+    const existingPlan = await this.habitsRepository.findActivePlanByUserId(userId);
+    const errors = getHabitPlanIntentStateErrors(intent, Boolean(existingPlan));
+
+    if (intent !== "adapt_habit_plan" || errors.length > 0 || !existingPlan?.activeRevisionId) {
+      return errors;
+    }
+
+    const activeRevision = await this.habitsRepository.findActiveRevisionByPlanId(
+      existingPlan.id,
+      existingPlan.activeRevisionId,
+    );
+
+    if (!activeRevision) {
+      return [
+        ...errors,
+        "proposedChanges: adapt_habit_plan requires an active habit plan revision.",
+      ];
+    }
+
+    const currentPayload = habitPlanPayloadSchema.safeParse(activeRevision.payload);
+
+    if (!currentPayload.success) {
+      return [
+        ...errors,
+        "proposedChanges: adapt_habit_plan requires a readable active habit plan revision.",
+      ];
+    }
+
+    return [
+      ...errors,
+      ...getHabitPlanAdaptationContinuityErrors(currentPayload.data, payload),
+    ];
+  }
+
+  async validateHabitProposalContext(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    const templateReferenceErrors = await this.validateHabitTemplateReferences(
+      intent,
+      proposedChanges,
+    );
+    const planStateErrors = await this.validateHabitPlanProposalState(
+      userId,
+      intent,
+      proposedChanges,
+    );
+
+    return [...templateReferenceErrors, ...planStateErrors];
   }
 
   async validateRecoveryAwareWorkoutAdaptation(
@@ -535,7 +628,10 @@ export class ProposalValidationService {
 
   private async getProgressProvenanceErrors(
     userId: string,
-    payload: AdaptWorkoutPlanFromProgressChanges,
+    payload: {
+      sourceSummaryId?: string;
+      sourceTrendObservationIds?: readonly string[];
+    },
   ): Promise<string[]> {
     const errors: string[] = [];
 
@@ -552,7 +648,7 @@ export class ProposalValidationService {
       }
     }
 
-    const trendIds = payload.sourceTrendObservationIds;
+    const trendIds = payload.sourceTrendObservationIds ?? [];
 
     if (trendIds.length > 0) {
       const ownedTrends = await this.progressRepository.findTrendsOwnedByUser(
@@ -706,6 +802,16 @@ function extractWorkoutProposalChanges(
   return null;
 }
 
+function parseHabitPlanProposalChanges(proposedChanges: unknown): HabitPlanPayload | null {
+  const wrapped = habitPlanProposalChangesSchema.safeParse(proposedChanges);
+
+  if (!wrapped.success) {
+    return null;
+  }
+
+  return extractHabitPlanPayload(wrapped.data);
+}
+
 function getChangesSchemaForIntent(
   intent: ProposalIntent,
 ): z.ZodType | null {
@@ -722,15 +828,20 @@ function getChangesSchemaForIntent(
     case "adapt_workout_plan_from_progress":
       return adaptWorkoutPlanFromProgressChangesSchema;
     case "create_nutrition_plan":
-    case "adjust_nutrition_plan":
       return nutritionPlanPayloadSchema;
+    case "adjust_nutrition_plan":
+      return z.union([
+        nutritionPlanPayloadSchema,
+        adjustNutritionPlanFromProgressChangesSchema,
+      ]);
     case "recommend_recipes":
       return recipeRecommendationProposalPayloadSchema;
     case "create_today_checklist":
       return todayChecklistPayloadSchema;
     case "create_habit_plan":
-    case "adapt_habit_plan":
       return habitPlanPayloadSchema;
+    case "adapt_habit_plan":
+      return habitPlanProposalChangesSchema;
     case "summarize_progress":
       return null;
     default:

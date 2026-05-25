@@ -529,4 +529,21 @@ describe("StubCoachAiProvider", () => {
     expect(result.reply).toContain("do not have recent wellbeing check-in data");
     expect(result.proposals).toEqual([]);
   });
+
+  it("returns multi-lane weekly review candidates for the canonical chat prompt", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage:
+        "Review my cross-domain weekly summary and suggest typed adaptations I can approve individually. Nothing should change until I accept a proposal.",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    expect(result.reply.toLowerCase()).toContain("approve individually");
+    expect(result.proposals?.map((proposal) => proposal.intent)).toEqual([
+      "adapt_workout_plan_from_progress",
+      "adjust_nutrition_plan",
+      "adapt_habit_plan",
+    ]);
+  });
 });

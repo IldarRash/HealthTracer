@@ -4,13 +4,17 @@ import {
   collectHabitTemplateReferences,
   computeHabitAdherenceSummary,
   createEmptyHabitAdherenceResponse,
+  dedupeHabitCompletionRows,
   filterScheduledHabitDefinitions,
+  getHabitPlanAdaptationContinuityErrors,
   getHabitPlanDomainErrors,
+  getHabitPlanIntentStateErrors,
   getHabitTemplateUsageErrors,
   getProposedChangesSchemaForIntent,
   getTodayIsoDateInTimezone,
   habitAdherenceQuerySchema,
   habitPlanPayloadSchema,
+  habitPlanProposalChangesSchema,
   habitScheduleMatchesDate,
   habitTemplateSchema,
   proposalIntentSchema,
@@ -235,6 +239,95 @@ describe("habit plan schemas", () => {
     const scheduled = filterScheduledHabitDefinitions(payload.habits, "2026-05-22");
 
     expect(scheduled.map((habit) => habit.title)).toEqual(["First", "Second"]);
+  });
+});
+
+describe("habit plan intent and continuity", () => {
+  it("rejects create_habit_plan when an active plan already exists", () => {
+    expect(getHabitPlanIntentStateErrors("create_habit_plan", true)).toContain(
+      "proposedChanges: create_habit_plan requires no active habit plan; use adapt_habit_plan to revise the current plan.",
+    );
+  });
+
+  it("rejects adapt_habit_plan when no active plan exists", () => {
+    expect(getHabitPlanIntentStateErrors("adapt_habit_plan", false)).toContain(
+      "proposedChanges: adapt_habit_plan requires an active habit plan; use create_habit_plan to start one.",
+    );
+  });
+
+  it("requires stable habitDefinitionId continuity during adaptation", () => {
+    const currentPayload = habitPlanPayloadSchema.parse({
+      habits: [
+        baseHabit,
+        {
+          ...baseHabit,
+          habitDefinitionId: "b2000002-0000-4000-8000-000000000002",
+          title: "Evening walk",
+          displayOrder: 1,
+        },
+      ],
+    });
+    const proposedPayload = habitPlanPayloadSchema.parse({
+      habits: [
+        {
+          ...baseHabit,
+          habitDefinitionId: "c3000003-0000-4000-8000-000000000003",
+        },
+      ],
+    });
+
+    expect(getHabitPlanAdaptationContinuityErrors(currentPayload, proposedPayload)[0]).toMatch(
+      /must include habitDefinitionId/,
+    );
+  });
+
+  it("allows removed habits to be omitted from adaptation payloads", () => {
+    const currentPayload = habitPlanPayloadSchema.parse({
+      habits: [
+        baseHabit,
+        {
+          ...baseHabit,
+          habitDefinitionId: "b2000002-0000-4000-8000-000000000002",
+          title: "Evening walk",
+          status: "removed",
+          displayOrder: 1,
+        },
+      ],
+    });
+    const proposedPayload = habitPlanPayloadSchema.parse({ habits: [baseHabit] });
+
+    expect(getHabitPlanAdaptationContinuityErrors(currentPayload, proposedPayload)).toEqual([]);
+  });
+
+  it("dedupes duplicate completion rows by preferring completed over skipped", () => {
+    const deduped = dedupeHabitCompletionRows([
+      { habitDefinitionId, date: "2026-05-24", status: "skipped" },
+      { habitDefinitionId, date: "2026-05-24", status: "completed" },
+    ]);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]?.status).toBe("completed");
+  });
+
+  it("dedupes duplicate completion rows by preferring skipped over pending", () => {
+    const deduped = dedupeHabitCompletionRows([
+      { habitDefinitionId, date: "2026-05-24", status: "pending" },
+      { habitDefinitionId, date: "2026-05-24", status: "skipped" },
+    ]);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]?.status).toBe("skipped");
+  });
+
+  it("keeps one completion row per habitDefinitionId and date", () => {
+    const deduped = dedupeHabitCompletionRows([
+      { habitDefinitionId, date: "2026-05-24", status: "completed" },
+      { habitDefinitionId, date: "2026-05-24", status: "pending" },
+      { habitDefinitionId, date: "2026-05-23", status: "completed" },
+    ]);
+
+    expect(deduped).toHaveLength(2);
+    expect(deduped.find((row) => row.date === "2026-05-24")?.status).toBe("completed");
   });
 });
 
@@ -713,10 +806,11 @@ describe("habit proposal intent plumbing", () => {
     expect(proposal.intent).toBe("adapt_habit_plan");
   });
 
-  it("routes habit intents to habitPlanPayloadSchema", () => {
-    for (const intent of ["create_habit_plan", "adapt_habit_plan"] as const) {
-      expect(getProposedChangesSchemaForIntent(intent)).toBe(habitPlanPayloadSchema);
-    }
+  it("routes habit intents to habit plan proposal schemas", () => {
+    expect(getProposedChangesSchemaForIntent("create_habit_plan")).toBe(habitPlanPayloadSchema);
+    expect(getProposedChangesSchemaForIntent("adapt_habit_plan")).toBe(
+      habitPlanProposalChangesSchema,
+    );
   });
 
   it("rejects persisted habit proposals with invalid proposedChanges shape", () => {

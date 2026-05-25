@@ -7,7 +7,7 @@ import type {
   UpdateTodayItemStatusInput,
   WorkoutSession,
 } from "@health/types";
-import { isoDateSchema, workoutCompletionFeedbackSchema, habitPlanPayloadSchema, filterScheduledHabitDefinitions } from "@health/types";
+import { isoDateSchema, workoutCompletionFeedbackSchema, habitPlanPayloadSchema, filterScheduledHabitDefinitions, filterProposalItemsConflictingWithHabitItems } from "@health/types";
 import {
   BadRequestException,
   Injectable,
@@ -208,8 +208,12 @@ export class TodayService {
     const existing = await this.todayRepository.findByUserAndDate(userId, date);
     const sessions = await this.listChecklistWorkoutSessions(userId, date);
     const scheduledHabits = await this.listScheduledHabitDefinitions(userId, date);
-    const proposalItems = normalizeProposalItems(payload.items);
     const existingItems = existing ? toTodayChecklistRecord(existing).items : [];
+    const filteredProposalItems = filterProposalItemsConflictingWithHabitItems(
+      existingItems,
+      payload.items,
+    );
+    const proposalItems = normalizeProposalItems(filteredProposalItems);
     const mergedItems = mergeProposalItemsWithExisting(existingItems, proposalItems);
     const withWorkouts = syncTodayChecklistWorkoutItems(mergedItems, sessions);
     const withHabits = syncTodayChecklistHabitItems(withWorkouts, scheduledHabits);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateTodayAdherence,
+  filterChecklistItemsConflictingWithHabitItems,
+  filterProposalItemsConflictingWithHabitItems,
   resolveProposalItemSource,
   resolveProposalItemStatus,
   todayChecklistItemSchema,
@@ -285,6 +287,89 @@ describe("phase 5 today contracts", () => {
       "completed",
     );
     expect(() => updateTodayItemStatusSchema.parse({ status: "pending" })).toThrow();
+  });
+
+  it("drops habit-kind proposal items when habit-linked checklist items already exist", () => {
+    const existingItems = [
+      {
+        label: "Morning hydration",
+        source: { type: "habit" as const, id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81" },
+      },
+    ];
+    const proposalItems = [
+      { label: "Evening walk", kind: "habit" as const },
+      { label: "Stretch", kind: "recovery" as const },
+    ];
+
+    expect(
+      filterProposalItemsConflictingWithHabitItems(existingItems, proposalItems),
+    ).toEqual([{ label: "Stretch", kind: "recovery" }]);
+  });
+
+  it("drops proposal items whose labels match existing habit-linked items", () => {
+    const existingItems = [
+      {
+        label: " Morning Hydration ",
+        source: { type: "habit" as const, id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81" },
+      },
+    ];
+    const proposalItems = [
+      { label: "morning hydration", kind: "hydration" as const },
+      { label: "Stretch", kind: "recovery" as const },
+    ];
+
+    expect(
+      filterProposalItemsConflictingWithHabitItems(existingItems, proposalItems),
+    ).toEqual([{ label: "Stretch", kind: "recovery" }]);
+  });
+
+  it("passes proposal items through when no habit-linked checklist items exist", () => {
+    const existingItems = [
+      {
+        label: "Strength day",
+        source: { type: "workout_session" as const, id: "78d40655-b4b5-47b3-b28e-470192e05f04" },
+      },
+    ];
+    const proposalItems = [{ label: "Evening walk", kind: "habit" as const }];
+
+    expect(
+      filterProposalItemsConflictingWithHabitItems(existingItems, proposalItems),
+    ).toEqual(proposalItems);
+  });
+
+  it("dedupes normalized proposal items against habit-linked checklist items", () => {
+    const existingItems = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        label: "Morning hydration",
+        kind: "habit" as const,
+        status: "pending" as const,
+        required: true,
+        source: { type: "habit" as const, id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81" },
+      },
+    ];
+    const incomingItems = [
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        label: "Evening walk",
+        kind: "habit" as const,
+        status: "pending" as const,
+        required: false,
+        source: { type: "ai_proposal" as const },
+      },
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        label: "Stretch",
+        kind: "recovery" as const,
+        status: "pending" as const,
+        required: true,
+        source: { type: "ai_proposal" as const },
+      },
+    ];
+
+    expect(
+      filterChecklistItemsConflictingWithHabitItems(existingItems, incomingItems),
+    ).toEqual([incomingItems[1]]);
   });
 
   it("parses day and history response shapes", () => {

@@ -15,6 +15,7 @@ import {
   grantDeviceConsentSchema,
   healthMetricAggregateSchema,
   healthMetricSnapshotSchema,
+  getProgressProvenanceFromProposal,
   goalSchema,
   generateRecipeRecommendationsResponseSchema,
   habitAdherenceQuerySchema,
@@ -78,6 +79,8 @@ import {
   type UpdateTodayItemStatusInput,
   type UpdateWorkoutSessionExerciseInput,
   type WeeklyProgressSummaryResponse,
+  type WeeklyReviewRequest,
+  type WeeklyReviewResponse,
   type WorkoutPlanRevision,
   type WorkoutSession,
   createHealthDocumentSchema,
@@ -106,6 +109,8 @@ import {
   userProfileSchema,
   userSchema,
   weeklyProgressSummaryResponseSchema,
+  weeklyReviewRequestSchema,
+  weeklyReviewResponseSchema,
   wellbeingCheckInAggregatesResponseSchema,
   wellbeingCheckInHistoryResponseSchema,
   wellbeingCheckInResponseSchema,
@@ -178,6 +183,7 @@ export const apiQueryKeys = {
   todayHistoryPrefix: ["today-history"] as const,
   progressWeeklyLatest: ["progress-weekly-latest"],
   progressWeeklyCurrent: ["progress-weekly-current"],
+  progressWeeklyReview: ["progress-weekly-review"],
   recipesCatalog: ["recipes-catalog"],
   recipeRecommendations: ["recipe-recommendations"],
   deviceConnections: ["device-connections"],
@@ -328,6 +334,24 @@ export async function decideProposal(
   });
 }
 
+export function getHabitDependentRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    apiQueryKeys.habitActive,
+    apiQueryKeys.habitRevisions,
+    apiQueryKeys.habitAdherencePrefix,
+    apiQueryKeys.todayDayPrefix,
+    apiQueryKeys.todayHistoryPrefix,
+  ];
+}
+
+export function getHabitExecutionRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    ...getHabitDependentRefreshQueryKeys(),
+    apiQueryKeys.longevityState,
+    apiQueryKeys.dashboardState,
+  ];
+}
+
 export function getAcceptedProposalRefreshQueryKeys(
   proposal: AiProposal,
 ): ReadonlyArray<readonly unknown[]> {
@@ -341,6 +365,17 @@ export function getAcceptedProposalRefreshQueryKeys(
     apiQueryKeys.proposals,
   ];
 
+  if (
+    proposal.intent === "create_habit_plan" ||
+    proposal.intent === "adapt_habit_plan"
+  ) {
+    return [
+      ...commonKeys,
+      ...getHabitDependentRefreshQueryKeys(),
+      ...getProgressLinkedProposalRefreshQueryKeys(proposal),
+    ];
+  }
+
   switch (proposal.targetDomain) {
     case "profile":
       return [...commonKeys, apiQueryKeys.profile];
@@ -353,6 +388,7 @@ export function getAcceptedProposalRefreshQueryKeys(
         apiQueryKeys.workoutRevisions,
         apiQueryKeys.progressWeeklyLatest,
         apiQueryKeys.progressWeeklyCurrent,
+        apiQueryKeys.progressWeeklyReview,
         apiQueryKeys.todayDayPrefix,
         apiQueryKeys.todayHistoryPrefix,
       ];
@@ -365,6 +401,7 @@ export function getAcceptedProposalRefreshQueryKeys(
         apiQueryKeys.nutritionAdherencePrefix,
         apiQueryKeys.todayDayPrefix,
         apiQueryKeys.todayHistoryPrefix,
+        ...getProgressLinkedProposalRefreshQueryKeys(proposal),
       ];
     case "recipe":
       return [
@@ -377,6 +414,7 @@ export function getAcceptedProposalRefreshQueryKeys(
         ...commonKeys,
         apiQueryKeys.todayDayPrefix,
         apiQueryKeys.todayHistoryPrefix,
+        ...getProgressLinkedProposalRefreshQueryKeys(proposal),
       ];
     case "general":
       if (proposal.intent === "summarize_progress") {
@@ -384,25 +422,51 @@ export function getAcceptedProposalRefreshQueryKeys(
           ...commonKeys,
           apiQueryKeys.progressWeeklyLatest,
           apiQueryKeys.progressWeeklyCurrent,
-        ];
-      }
-
-      if (
-        proposal.intent === "create_habit_plan" ||
-        proposal.intent === "adapt_habit_plan"
-      ) {
-        return [
-          ...commonKeys,
-          apiQueryKeys.habitActive,
-          apiQueryKeys.habitRevisions,
-          apiQueryKeys.habitAdherencePrefix,
-          apiQueryKeys.todayDayPrefix,
-          apiQueryKeys.todayHistoryPrefix,
+          apiQueryKeys.progressWeeklyReview,
         ];
       }
 
       return commonKeys;
   }
+}
+
+function getProgressLinkedProposalRefreshQueryKeys(
+  proposal: Pick<AiProposal, "intent" | "proposedChanges" | "status">,
+): ReadonlyArray<readonly unknown[]> {
+  if (!getProgressProvenanceFromProposal(proposal.intent, proposal.proposedChanges)) {
+    return [];
+  }
+
+  return [
+    apiQueryKeys.progressWeeklyLatest,
+    apiQueryKeys.progressWeeklyCurrent,
+    apiQueryKeys.progressWeeklyReview,
+    apiQueryKeys.longevityState,
+  ];
+}
+
+export function getProposalDecisionRefreshQueryKeys(
+  proposal: AiProposal,
+): ReadonlyArray<readonly unknown[]> {
+  const keys = new Map<string, readonly unknown[]>();
+
+  const addKey = (queryKey: readonly unknown[]) => {
+    keys.set(JSON.stringify(queryKey), queryKey);
+  };
+
+  addKey(apiQueryKeys.proposals);
+
+  if (proposal.status === "accepted") {
+    for (const queryKey of getAcceptedProposalRefreshQueryKeys(proposal)) {
+      addKey(queryKey);
+    }
+  } else {
+    for (const queryKey of getProgressLinkedProposalRefreshQueryKeys(proposal)) {
+      addKey(queryKey);
+    }
+  }
+
+  return [...keys.values()];
 }
 
 export async function getActiveWorkoutPlan(
@@ -482,6 +546,10 @@ export function getWorkoutExecutionRefreshQueryKeys(): ReadonlyArray<readonly un
     apiQueryKeys.wellbeingHistoryPrefix,
     apiQueryKeys.wellbeingAggregatesPrefix,
   ];
+}
+
+export function getTodayItemStatusRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return getWorkoutExecutionRefreshQueryKeys();
 }
 
 export function getWellbeingRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
@@ -825,8 +893,23 @@ export async function generateWeeklyProgressSummary(
   });
 }
 
+export async function postWeeklyReview(
+  token: string,
+  input: { weekStart?: string; refresh?: boolean; candidates?: WeeklyReviewRequest["candidates"] } = {},
+): Promise<ApiResult<WeeklyReviewResponse>> {
+  const body = weeklyReviewRequestSchema.parse(input);
+  return apiFetch("/progress/weekly/review", token, weeklyReviewResponseSchema, {
+    method: "POST",
+    body,
+  });
+}
+
 export function getProgressSummaryRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
-  return [apiQueryKeys.dashboardState, apiQueryKeys.longevityState];
+  return [
+    apiQueryKeys.dashboardState,
+    apiQueryKeys.longevityState,
+    apiQueryKeys.progressWeeklyReview,
+  ];
 }
 
 export async function getTodayDay(

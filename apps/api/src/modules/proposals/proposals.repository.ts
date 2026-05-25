@@ -288,4 +288,13 @@ export class ProposalsRepository {
 
     return proposal ?? null;
   }
+
+  async findPendingIntentsByUserId(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ intent: aiProposals.intent })
+      .from(aiProposals)
+      .where(and(eq(aiProposals.userId, userId), eq(aiProposals.status, "pending")));
+
+    return rows.map((row) => row.intent);
+  }
 }

@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
 import { DocumentsModule } from "../documents/documents.module.js";
 import { ExercisesModule } from "../exercises/exercises.module.js";
@@ -27,7 +27,7 @@ import { ProposalsService } from "./proposals.service.js";
     UsersModule,
     ExercisesModule,
     ProfilesModule,
-    ProgressModule,
+    forwardRef(() => ProgressModule),
     RecoveryModule,
     GoalsModule,
     WorkoutsModule,
@@ -43,6 +43,6 @@ import { ProposalsService } from "./proposals.service.js";
     ProposalValidationService,
     ProposalApplyService,
   ],
-  exports: [ProposalsService, ProposalValidationService],
+  exports: [ProposalsService, ProposalValidationService, ProposalsRepository],
 })
 export class ProposalsModule {}

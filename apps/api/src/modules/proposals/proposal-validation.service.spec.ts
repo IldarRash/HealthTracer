@@ -63,6 +63,15 @@ function createService(
   usersRepository: {
     findByUserId?: (userId: string) => Promise<{ timezone: string } | null>;
   } = {},
+  habitsRepository: {
+    findActivePlanByUserId?: (
+      userId: string,
+    ) => Promise<{ id: string; activeRevisionId: string | null } | null>;
+    findActiveRevisionByPlanId?: (
+      habitPlanId: string,
+      activeRevisionId: string,
+    ) => Promise<{ payload: unknown } | null>;
+  } = {},
 ) {
   return new ProposalValidationService(
     {
@@ -106,6 +115,11 @@ function createService(
     {
       findByUserId: async () => ({ timezone: "UTC" }),
       ...usersRepository,
+    } as never,
+    {
+      findActivePlanByUserId: async () => null,
+      findActiveRevisionByPlanId: async () => null,
+      ...habitsRepository,
     } as never,
   );
 }
@@ -706,6 +720,96 @@ describe("ProposalValidationService", () => {
 
       expect(errors).toEqual([]);
     });
+
+    it("accepts owned progress provenance for nutrition adjustments", async () => {
+      const nutritionPlan = {
+        title: "Balanced week",
+        summary: "Adjusted targets based on weekly adherence patterns.",
+        caloriesPerDay: 2200,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        hydrationLiters: null,
+        mealStructure: [{ label: "Breakfast" }],
+      };
+      const provenanceService = createService({
+        summaryExistsForUser: async () => true,
+        findTrendsOwnedByUser: async () => [{ id: trendId, summaryId }],
+      });
+
+      const errors = await provenanceService.validateProvenanceOwnership(
+        userId,
+        "adjust_nutrition_plan",
+        {
+          plan: nutritionPlan,
+          sourceSummaryId: summaryId,
+          sourceTrendObservationIds: [trendId],
+        },
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects nutrition adjustments with missing progress summary references", async () => {
+      const nutritionPlan = {
+        title: "Balanced week",
+        summary: "Adjusted targets based on weekly adherence patterns.",
+        caloriesPerDay: 2200,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        hydrationLiters: null,
+        mealStructure: [{ label: "Breakfast" }],
+      };
+      const provenanceService = createService({
+        summaryExistsForUser: async () => false,
+      });
+
+      const errors = await provenanceService.validateProvenanceOwnership(
+        userId,
+        "adjust_nutrition_plan",
+        {
+          plan: nutritionPlan,
+          sourceSummaryId: summaryId,
+        },
+      );
+
+      expect(errors).toContain(
+        "proposedChanges.sourceSummaryId: Weekly progress summary was not found for this user.",
+      );
+    });
+
+    it("accepts owned progress provenance for habit adaptations", async () => {
+      const provenanceService = createService({
+        summaryExistsForUser: async () => true,
+        findTrendsOwnedByUser: async () => [{ id: trendId, summaryId }],
+      });
+
+      const errors = await provenanceService.validateProvenanceOwnership(
+        userId,
+        "adapt_habit_plan",
+        {
+          plan: {
+            habits: [
+              {
+                habitDefinitionId: "a1000001-0000-4000-8000-000000000001",
+                title: "Morning hydration",
+                category: "hydration",
+                status: "active",
+                schedule: { type: "daily" },
+                target: { type: "boolean" },
+                required: true,
+                displayOrder: 0,
+              },
+            ],
+          },
+          sourceSummaryId: summaryId,
+          sourceTrendObservationIds: [trendId],
+        },
+      );
+
+      expect(errors).toEqual([]);
+    });
   });
 
   describe("correlation evidence ownership", () => {
@@ -991,6 +1095,17 @@ describe("ProposalValidationService", () => {
       expect(result.valid).toBe(true);
     });
 
+    it("validates progress-wrapped adapt_habit_plan payloads without emptying habits", () => {
+      const result = service.validateStoredProposal("adapt_habit_plan", {
+        plan: habitPayload,
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
     it("rejects habit proposals with invalid proposedChanges shape", () => {
       const result = service.validateStoredProposal("create_habit_plan", {
         habits: [{ title: "Missing fields" }],
@@ -1016,6 +1131,125 @@ describe("ProposalValidationService", () => {
 
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("habits: At most 12 active habits are allowed.");
+    });
+
+    it("rejects create_habit_plan when an active habit plan already exists", async () => {
+      const intentService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          findActivePlanByUserId: async () => ({
+            id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+            activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+          }),
+        },
+      );
+
+      const errors = await intentService.validateHabitPlanProposalState(
+        "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+        "create_habit_plan",
+        habitPayload,
+      );
+
+      expect(errors[0]).toMatch(/create_habit_plan requires no active habit plan/);
+    });
+
+    it("rejects adapt_habit_plan when no active habit plan exists", async () => {
+      const intentService = createService();
+
+      const errors = await intentService.validateHabitPlanProposalState(
+        "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+        "adapt_habit_plan",
+        habitPayload,
+      );
+
+      expect(errors[0]).toMatch(/adapt_habit_plan requires an active habit plan/);
+    });
+
+    it("rejects adapt_habit_plan when continuity ids are dropped", async () => {
+      const currentPayload = habitPayload;
+      const proposedPayload = {
+        habits: [
+          {
+            ...habitPayload.habits[0]!,
+            habitDefinitionId: "b2000002-0000-4000-8000-000000000002",
+          },
+        ],
+      };
+      const intentService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          findActivePlanByUserId: async () => ({
+            id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+            activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+          }),
+          findActiveRevisionByPlanId: async () => ({ payload: currentPayload }),
+        },
+      );
+
+      const errors = await intentService.validateHabitPlanProposalState(
+        "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+        "adapt_habit_plan",
+        proposedPayload,
+      );
+
+      expect(errors[0]).toMatch(/must include habitDefinitionId/);
+    });
+
+    it("accepts adapt_habit_plan when removed habits are omitted", async () => {
+      const currentPayload = {
+        habits: [
+          habitPayload.habits[0]!,
+          {
+            ...habitPayload.habits[0]!,
+            habitDefinitionId: "b2000002-0000-4000-8000-000000000002",
+            title: "Evening walk",
+            status: "removed",
+            displayOrder: 1,
+          },
+        ],
+      };
+      const intentService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          findActivePlanByUserId: async () => ({
+            id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+            activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+          }),
+          findActiveRevisionByPlanId: async () => ({ payload: currentPayload }),
+        },
+      );
+
+      const errors = await intentService.validateHabitPlanProposalState(
+        "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+        "adapt_habit_plan",
+        habitPayload,
+      );
+
+      expect(errors).toEqual([]);
     });
   });
 
@@ -1084,6 +1318,78 @@ describe("ProposalValidationService", () => {
       });
 
       const errors = await templateService.validateHabitTemplateReferences(
+        "create_workout_plan",
+        habitPayload,
+      );
+
+      expect(errors).toEqual([]);
+    });
+  });
+
+  describe("validateHabitProposalContext", () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const habitDefinitionId = "a1000001-0000-4000-8000-000000000001";
+    const hydrationTemplateId = "d1000001-0000-4000-8000-000000000099";
+
+    const habitPayload = {
+      habits: [
+        {
+          habitDefinitionId,
+          title: "Morning hydration",
+          category: "hydration",
+          status: "active",
+          schedule: { type: "daily" },
+          target: { type: "boolean" },
+          required: true,
+          templateId: hydrationTemplateId,
+          displayOrder: 0,
+        },
+      ],
+    };
+
+    it("combines template reference and plan state validation errors", async () => {
+      const contextService = createService(
+        {},
+        {},
+        {
+          getHabitTemplateReferenceErrors: async () => [
+            `habits: "Morning hydration" templateId "${hydrationTemplateId}" was not found in the active habit template catalog.`,
+          ],
+        },
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          findActivePlanByUserId: async () => ({
+            id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+            activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+          }),
+        },
+      );
+
+      const errors = await contextService.validateHabitProposalContext(
+        userId,
+        "create_habit_plan",
+        habitPayload,
+      );
+
+      expect(errors).toHaveLength(2);
+      expect(errors[0]).toMatch(/templateId/);
+      expect(errors[1]).toMatch(/create_habit_plan requires no active habit plan/);
+    });
+
+    it("returns no errors for non-habit intents", async () => {
+      const contextService = createService({}, {}, {
+        getHabitTemplateReferenceErrors: async () => {
+          throw new Error("Should not be called.");
+        },
+      });
+
+      const errors = await contextService.validateHabitProposalContext(
+        userId,
         "create_workout_plan",
         habitPayload,
       );

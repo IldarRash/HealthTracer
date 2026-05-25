@@ -6,7 +6,10 @@ import {
   decideProposal,
   apiQueryKeys,
   getAcceptedProposalRefreshQueryKeys,
+  getProposalDecisionRefreshQueryKeys,
   getCurrentUserState,
+  getHabitDependentRefreshQueryKeys,
+  getHabitExecutionRefreshQueryKeys,
   getOnboardingRefreshQueryKeys,
   getActiveNutritionPlan,
   getActiveWorkoutPlan,
@@ -18,12 +21,14 @@ import {
   buildWellbeingHistoryQueryString,
   getInspectorState,
   generateWeeklyProgressSummary,
+  postWeeklyReview,
   getCurrentWeeklyProgressSummary,
   getLatestWeeklyProgressSummary,
   getMetricsRefreshQueryKeys,
   getNutritionAdherenceRefreshQueryKeys,
   getProgressSummaryRefreshQueryKeys,
   getTodayNutritionAdherence,
+  getTodayItemStatusRefreshQueryKeys,
   upsertNutritionAdherence,
   upsertTodayNutritionAdherence,
   getWorkoutExecutionRefreshQueryKeys,
@@ -763,6 +768,7 @@ describe("web api helpers", () => {
       apiQueryKeys.workoutRevisions,
       apiQueryKeys.progressWeeklyLatest,
       apiQueryKeys.progressWeeklyCurrent,
+      apiQueryKeys.progressWeeklyReview,
       apiQueryKeys.todayDayPrefix,
       apiQueryKeys.todayHistoryPrefix,
     ]);
@@ -782,6 +788,7 @@ describe("web api helpers", () => {
       apiQueryKeys.workoutRevisions,
       apiQueryKeys.progressWeeklyLatest,
       apiQueryKeys.progressWeeklyCurrent,
+      apiQueryKeys.progressWeeklyReview,
       apiQueryKeys.todayDayPrefix,
       apiQueryKeys.todayHistoryPrefix,
     ]);
@@ -795,6 +802,7 @@ describe("web api helpers", () => {
       apiQueryKeys.proposals,
       apiQueryKeys.progressWeeklyLatest,
       apiQueryKeys.progressWeeklyCurrent,
+      apiQueryKeys.progressWeeklyReview,
     ]);
     expect(
       getAcceptedProposalRefreshQueryKeys(
@@ -879,6 +887,78 @@ describe("web api helpers", () => {
         status: "rejected",
       }),
     ).toEqual([]);
+  });
+
+  it("returns habit refresh keys for habit intents regardless of targetDomain", () => {
+    const expectedHabitKeys = [
+      apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
+      apiQueryKeys.proposals,
+      apiQueryKeys.habitActive,
+      apiQueryKeys.habitRevisions,
+      apiQueryKeys.habitAdherencePrefix,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
+    ];
+
+    for (const targetDomain of ["today", "workout", "nutrition"] as const) {
+      expect(
+        getAcceptedProposalRefreshQueryKeys(
+          createAcceptedProposal("create_habit_plan", targetDomain, sampleHabitProposalChanges),
+        ),
+      ).toEqual(expectedHabitKeys);
+      expect(
+        getAcceptedProposalRefreshQueryKeys(
+          createAcceptedProposal("adapt_habit_plan", targetDomain, sampleHabitProposalChanges),
+        ),
+      ).toEqual(expectedHabitKeys);
+    }
+  });
+
+  it("preserves targetDomain refresh keys for non-habit intents", () => {
+    expect(
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("create_today_checklist", "today", sampleTodayChecklistChanges),
+      ),
+    ).toEqual([
+      apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
+      apiQueryKeys.proposals,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
+    ]);
+    expect(
+      getAcceptedProposalRefreshQueryKeys({
+        ...createAcceptedProposal("summarize_progress", "general", {}),
+        status: "rejected",
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns shared habit-dependent refresh keys", () => {
+    expect(getHabitDependentRefreshQueryKeys()).toEqual([
+      apiQueryKeys.habitActive,
+      apiQueryKeys.habitRevisions,
+      apiQueryKeys.habitAdherencePrefix,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
+    ]);
+
+    expect(getHabitExecutionRefreshQueryKeys()).toEqual([
+      ...getHabitDependentRefreshQueryKeys(),
+      apiQueryKeys.longevityState,
+      apiQueryKeys.dashboardState,
+    ]);
+
+    expect(getTodayItemStatusRefreshQueryKeys()).toEqual(getWorkoutExecutionRefreshQueryKeys());
+    expect(getTodayItemStatusRefreshQueryKeys()).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.todayDayPrefix,
+        apiQueryKeys.todayHistoryPrefix,
+        apiQueryKeys.habitAdherencePrefix,
+        apiQueryKeys.longevityState,
+      ]),
+    );
   });
 
   it("parses today day and history responses", async () => {
@@ -1229,6 +1309,106 @@ describe("web api helpers", () => {
 
     const generated = await generateWeeklyProgressSummary(token, { refresh: true });
     expect(generated.data?.summary.userMessage).toContain("2 of 3");
+  });
+
+  it("posts weekly review packs with lane outcomes and candidate previews", async () => {
+    const summaryPayload = {
+      summary: {
+        id: "14a08176-64a7-4a2d-8a44-581807368394",
+        userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+        weekStart: "2026-05-18",
+        weekEnd: "2026-05-24",
+        generatedAt: "2026-05-22T12:00:00.000Z",
+        dataStatus: "partial",
+        sourceAggregates: {
+          workout: {
+            plannedCount: 3,
+            completedCount: 2,
+            skippedCount: 0,
+            adherencePercent: 67,
+            activeDays: 2,
+            sessionIds: ["78d40655-b4b5-47b3-b28e-470192e05f04"],
+            averageFatigue: null,
+            exercisePlannedCount: 0,
+            exerciseCompletedCount: 0,
+            exerciseSkippedCount: 0,
+            exerciseAdjustedCount: 0,
+            exerciseCompletionPercent: null,
+            partialSessionCount: 0,
+          },
+        },
+        deferredDomains: [],
+        userMessage: "Partial cross-domain weekly review.",
+        supersededById: null,
+        createdAt: "2026-05-22T12:00:00.000Z",
+      },
+      trends: [],
+    };
+
+    const reviewPayload = {
+      summary: summaryPayload,
+      laneOutcomes: [
+        {
+          lane: "workout",
+          eligible: true,
+          blockedReason: null,
+          confidence: 0.8,
+          explanationOnly: false,
+        },
+      ],
+      packMeta: {
+        selectedLanes: [],
+        droppedLanes: [],
+        adaptationMessage: "No safe adaptation was packaged for this weekly review.",
+      },
+      candidateProposals: [],
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "POST" && path.endsWith("/progress/weekly/review")) {
+          return new Response(JSON.stringify(reviewPayload), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ statusCode: 404, message: "not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+
+    const review = await postWeeklyReview(token, { refresh: true });
+
+    expect(review.data?.laneOutcomes).toHaveLength(1);
+    expect(review.data?.packMeta.adaptationMessage).toContain("No safe adaptation");
+  });
+
+  it("returns progress refresh keys after rejected progress-linked proposals", () => {
+    expect(
+      getProposalDecisionRefreshQueryKeys({
+        ...createAcceptedProposal(
+          "adapt_workout_plan_from_progress",
+          "workout",
+          sampleAdaptWorkoutFromProgressChanges,
+        ),
+        status: "rejected",
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.proposals,
+        apiQueryKeys.progressWeeklyLatest,
+        apiQueryKeys.progressWeeklyCurrent,
+        apiQueryKeys.progressWeeklyReview,
+        apiQueryKeys.longevityState,
+      ]),
+    );
   });
 
   it("returns API errors for missing weekly summaries", async () => {
@@ -2030,6 +2210,7 @@ describe("web api helpers", () => {
     expect(getProgressSummaryRefreshQueryKeys()).toEqual([
       apiQueryKeys.dashboardState,
       apiQueryKeys.longevityState,
+      apiQueryKeys.progressWeeklyReview,
     ]);
   });
 

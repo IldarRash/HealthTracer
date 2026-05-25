@@ -13,6 +13,31 @@ import type {
 export const PROGRESS_PLAN_CHANGE_NOTICE =
   "Plan changes still require a coach proposal that you review and accept before anything updates.";
 
+const FORBIDDEN_WELLNESS_DISPLAY_TERMS = [
+  "longevity score",
+  "health score",
+  "readiness score",
+  "biological age",
+  "risk",
+  "normal",
+  "abnormal",
+] as const;
+
+export const SAFE_WELLNESS_DISPLAY_FALLBACK =
+  "Weekly wellness pattern noted from your logged activity.";
+
+export function sanitizeWellnessDisplayText(text: string): string {
+  const lower = text.toLowerCase();
+
+  for (const term of FORBIDDEN_WELLNESS_DISPLAY_TERMS) {
+    if (lower.includes(term)) {
+      return SAFE_WELLNESS_DISPLAY_FALLBACK;
+    }
+  }
+
+  return text;
+}
+
 export function isProgressSummaryNotFoundError(error: string): boolean {
   const normalized = error.toLowerCase();
   return normalized.includes("not found") || normalized.includes("returned 404");
@@ -36,11 +61,11 @@ export function formatProgressTimestamp(value: string): string {
 export function progressDataStatusLabel(status: ProgressDataStatus): string {
   switch (status) {
     case "sufficient":
-      return "Enough workout data";
+      return "Enough cross-domain data";
     case "partial":
-      return "Partial workout data";
+      return "Partial cross-domain data";
     case "insufficient":
-      return "Not enough workout data yet";
+      return "Not enough data for a full review yet";
   }
 }
 
@@ -91,6 +116,14 @@ export function trendTypeLabel(type: TrendType): string {
       return "Skip rate";
     case "fatigue_pattern":
       return "Fatigue pattern";
+    case "cross_domain_execution":
+      return "Cross-domain execution";
+    case "habit_consistency":
+      return "Habit consistency";
+    case "recovery_load_balance":
+      return "Recovery load balance";
+    default:
+      return "Trend observation";
   }
 }
 
@@ -127,11 +160,11 @@ export function deferredDomainAvailabilityLabel(domain: ProgressDomain): string 
     case "today":
       return "Deferred for this summary";
     case "nutrition":
-      return "Not included yet";
+      return "Deferred for this summary";
     case "recipes":
-      return "Not available yet";
+      return "Deferred for this summary";
     case "recovery":
-      return "Not available yet";
+      return "Deferred for this summary";
     case "workout":
       return "Unavailable";
   }
@@ -224,5 +257,13 @@ function trendSortRank(type: TrendType): number {
       return 2;
     case "fatigue_pattern":
       return 3;
+    case "cross_domain_execution":
+      return 4;
+    case "habit_consistency":
+      return 5;
+    case "recovery_load_balance":
+      return 6;
+    default:
+      return 7;
   }
 }
