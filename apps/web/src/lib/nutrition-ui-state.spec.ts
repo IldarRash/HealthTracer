@@ -3,6 +3,7 @@ import type { AiProposal, NutritionPlanPayload } from "@health/types";
 import {
   buildAdherenceState,
   buildMealCompletionState,
+  buildNutritionPlanAdherenceFacts,
   formatHydrationProgress,
   hasActiveNutritionPlan,
   parseHydrationInput,
@@ -135,6 +136,39 @@ describe("nutrition UI state", () => {
       { label: "Lunch", completed: false },
     ]);
     expect(state.notes).toEqual(["Felt consistent"]);
+  });
+
+  it("builds read-only adherence facts for nutrition plan views", () => {
+    const state = buildAdherenceState({
+      date: "2026-05-22",
+      payload: samplePayload,
+      record: {
+        id: "adh-1",
+        userId: "user-1",
+        date: "2026-05-22",
+        hydrationLitersConsumed: 1.25,
+        mealCompletion: [{ label: "Breakfast", completed: true }],
+        targetCompletion: {
+          caloriesOnTarget: true,
+          proteinOnTarget: false,
+          carbsOnTarget: null,
+          fatOnTarget: null,
+        },
+        notes: ["Felt consistent"],
+        createdAt: "2026-05-22T12:00:00.000Z",
+        updatedAt: "2026-05-22T12:00:00.000Z",
+      },
+    });
+
+    expect(buildNutritionPlanAdherenceFacts({ adherenceState: state, payload: samplePayload })).toEqual([
+      { term: "Meals followed", description: "1 of 2 logged today" },
+      { term: "Hydration", description: "1.25 / 2.5 L" },
+      { term: "Calories", description: "On target" },
+      { term: "Protein", description: "Off target" },
+      { term: "Carbs", description: "Not logged" },
+      { term: "Fat", description: "Not logged" },
+      { term: "Notes", description: "Felt consistent" },
+    ]);
   });
 
   it("summarizes richer nutrition proposal changes for inline cards", () => {

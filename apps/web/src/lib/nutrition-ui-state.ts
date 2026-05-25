@@ -233,3 +233,52 @@ export function targetCompletionLabel(
       return "Fat";
   }
 }
+
+export type NutritionPlanAdherenceFact = {
+  term: string;
+  description: string;
+};
+
+export function buildNutritionPlanAdherenceFacts(input: {
+  adherenceState: NutritionAdherenceState;
+  payload: NutritionPlanPayload;
+}): NutritionPlanAdherenceFact[] {
+  const facts: NutritionPlanAdherenceFact[] = [];
+  const { mealCompletion, hydrationLitersConsumed, targetCompletion, notes } =
+    input.adherenceState;
+  const completedMeals = mealCompletion.filter((meal) => meal.completed).length;
+  const totalMeals = mealCompletion.length;
+
+  if (totalMeals > 0) {
+    facts.push({
+      term: "Meals followed",
+      description: `${completedMeals} of ${totalMeals} logged today`,
+    });
+  }
+
+  if (input.payload.hydrationLiters != null) {
+    facts.push({
+      term: "Hydration",
+      description: formatHydrationProgress(
+        hydrationLitersConsumed,
+        input.payload.hydrationLiters,
+      ),
+    });
+  }
+
+  for (const key of targetCompletionKeysForPayload(input.payload)) {
+    facts.push({
+      term: targetCompletionLabel(key),
+      description: formatTargetCompletionLabel(targetCompletion[key]),
+    });
+  }
+
+  if (notes.length > 0) {
+    facts.push({
+      term: "Notes",
+      description: notes.join(" · "),
+    });
+  }
+
+  return facts;
+}

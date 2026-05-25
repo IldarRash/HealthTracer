@@ -11,7 +11,13 @@ import {
   hasCoachingHierarchySummary,
   joinCommaSeparatedList,
 } from "../../lib/onboarding-ui-state";
-import { DashboardCard, EmptyState, ErrorState, LoadingState } from "../ui";
+import {
+  CompactGoalHierarchyPanel,
+  DashboardCard,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+} from "../ui";
 
 function WeeklyFocusList({
   weeklyFocus,
@@ -81,7 +87,7 @@ export function CoachingHierarchySummaryPanel() {
     return null;
   }
 
-  const { hierarchy, profile } = state;
+  const { hierarchy } = state;
   const direction = formatHierarchyDirection(hierarchy);
 
   if (!state.onboardingCompleted && !hasCoachingHierarchySummary(hierarchy)) {
@@ -99,12 +105,12 @@ export function CoachingHierarchySummaryPanel() {
   }
 
   return (
-    <div className="coaching-hierarchy">
+    <CompactGoalHierarchyPanel hint="Structured coaching context visible to you and your coach.">
       <DashboardCard
         className="dashboard-card--span-12 coaching-hierarchy__card"
         label="Coaching direction"
         title="Your goal hierarchy"
-        hint="Structured coaching context visible to you and your coach."
+        hint="Longevity direction, quarterly objective, and weekly focus."
       >
         {direction ? (
           <div className="coaching-hierarchy__section">
@@ -143,29 +149,7 @@ export function CoachingHierarchySummaryPanel() {
         )}
 
         <WeeklyFocusList weeklyFocus={hierarchy.weeklyFocus} />
-
-        {profile ? (
-          <div className="coaching-hierarchy__section coaching-hierarchy__context">
-            <p className="section-label">Personal context</p>
-            <dl>
-              <dt>Preferences</dt>
-              <dd>{profile.preferences.join(", ") || "None listed"}</dd>
-              <dt>Constraints</dt>
-              <dd>{profile.constraints.join(", ") || "None listed"}</dd>
-              {profile.coachingNotes.length > 0 ? (
-                <>
-                  <dt>Coach notes</dt>
-                  <dd>
-                    {profile.coachingNotes
-                      .map((note) => note.text)
-                      .join(" · ")}
-                  </dd>
-                </>
-              ) : null}
-            </dl>
-          </div>
-        ) : null}
       </DashboardCard>
-    </div>
+    </CompactGoalHierarchyPanel>
   );
 }

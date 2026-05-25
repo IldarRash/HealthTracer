@@ -1,12 +1,17 @@
 "use client";
 
 import type { WellbeingCheckInAggregatesResponse } from "@health/types";
-import Link from "next/link";
 import {
   buildWellbeingHistoryPanelView,
   formatWellbeingAggregatesError,
 } from "../../lib/wellbeing-ui-state";
-import { EmptyState } from "../ui";
+import { LONGEVITY_CTA_ROUTES } from "../../lib/longevity-ui-state";
+import {
+  CanvasErrorState,
+  CanvasLoadingState,
+  OverviewCardLink,
+  OverviewInlineEmptyState,
+} from "../ui";
 
 type WellbeingHistoryPanelProps = {
   aggregates: WellbeingCheckInAggregatesResponse | null;
@@ -22,18 +27,16 @@ export function WellbeingHistoryPanel({
   errorMessage = null,
 }: WellbeingHistoryPanelProps) {
   if (isLoading) {
-    return (
-      <div className="wellbeing-history-panel">
-        <p className="muted-text">Loading wellbeing history…</p>
-      </div>
-    );
+    return <CanvasLoadingState compact title="Loading wellbeing history…" />;
   }
 
   if (errorMessage) {
     return (
-      <p className="form-error" role="alert">
-        {formatWellbeingAggregatesError(errorMessage) ?? errorMessage}
-      </p>
+      <CanvasErrorState
+        compact
+        title="Wellbeing history unavailable"
+        description={formatWellbeingAggregatesError(errorMessage) ?? errorMessage}
+      />
     );
   }
 
@@ -46,13 +49,13 @@ export function WellbeingHistoryPanel({
 
   if (view.status === "empty") {
     return (
-      <EmptyState
+      <OverviewInlineEmptyState
         title={view.title}
         description={view.message}
         action={
-          <Link href="/today" className="confirmation-card__link">
+          <OverviewCardLink href={LONGEVITY_CTA_ROUTES.today}>
             Log a check-in on Today →
-          </Link>
+          </OverviewCardLink>
         }
       />
     );

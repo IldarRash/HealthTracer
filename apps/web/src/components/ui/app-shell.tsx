@@ -1,4 +1,5 @@
 import { type HTMLAttributes, type ReactNode } from "react";
+import type { AppShellMainVariant } from "../../lib/shell-ui-state";
 import { cn } from "../../lib/utils";
 
 type AppShellProps = HTMLAttributes<HTMLDivElement> & {
@@ -31,16 +32,16 @@ export function AppShellHeader({ brand, nav, actions, className, ...props }: App
 }
 
 type AppShellMainProps = HTMLAttributes<HTMLElement> & {
-  variant?: "default" | "chat" | "dashboard";
+  variant?: AppShellMainVariant;
 };
 
-export function AppShellMain({ variant = "default", className, ...props }: AppShellMainProps) {
+export function AppShellMain({ variant = "structured", className, ...props }: AppShellMainProps) {
   return (
     <main
       className={cn(
         "app-shell__main",
         variant === "chat" && "app-shell__main--chat",
-        variant === "dashboard" && "app-shell__main--dashboard",
+        variant === "structured" && "app-shell__main--structured",
         className,
       )}
       {...props}

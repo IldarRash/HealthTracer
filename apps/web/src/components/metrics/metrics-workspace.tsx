@@ -55,7 +55,9 @@ function metricsQueryKeysToRefresh(): ReadonlyArray<readonly unknown[]> {
   return getMetricsRefreshQueryKeys();
 }
 
-export function MetricsWorkspace() {
+export function MetricsWorkspace({ embedded = false }: { embedded?: boolean }) {
+  const SectionHeading = embedded ? "h3" : "h2";
+  const SubsectionHeading = embedded ? "h4" : "h3";
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const [selectedScopes, setSelectedScopes] = useState<MetricScope[]>([]);
@@ -330,7 +332,7 @@ export function MetricsWorkspace() {
           <div className="metrics-header">
             <div>
               <p className="section-label">Device sync</p>
-              <h2>Connection status</h2>
+              <SectionHeading>Connection status</SectionHeading>
               <p className="metrics-intro">
                 Web is a developer and support view. Native Apple Health and Health Connect
                 connections happen on mobile after consent.
@@ -388,7 +390,7 @@ export function MetricsWorkspace() {
         {showConsentFlow ? (
           <section className="panel">
             <p className="section-label">Consent</p>
-            <h3>Choose what to collect</h3>
+            <SubsectionHeading>Choose what to collect</SubsectionHeading>
             <p className="metrics-copy">
               Select the wellness signals you want to share. Scopes stay off until you turn
               them on. You can revoke access anytime.
@@ -489,7 +491,7 @@ export function MetricsWorkspace() {
 
         <section className="panel">
           <p className="section-label">Snapshots</p>
-          <h3>Recent normalized metrics</h3>
+          <SubsectionHeading>Recent normalized metrics</SubsectionHeading>
           {snapshotsQuery.isError ? (
             <ErrorState
               title="Snapshots unavailable"
@@ -525,7 +527,9 @@ export function MetricsWorkspace() {
 
         <section className="panel">
           <p className="section-label">Aggregates</p>
-          <h3>Trend summaries</h3>
+          <SubsectionHeading>
+            {embedded ? "Device aggregates" : "Trend summaries"}
+          </SubsectionHeading>
           {aggregatesQuery.isError ? (
             <ErrorState
               title="Aggregates unavailable"
@@ -557,7 +561,7 @@ export function MetricsWorkspace() {
 
         <section className="panel">
           <p className="section-label">AI context preview</p>
-          <h3>Coach-visible metric summaries</h3>
+          <SubsectionHeading>Coach-visible metric summaries</SubsectionHeading>
           <PrivacyBoundaryNote>
             This preview shows the structured summaries that may enter coaching context. Raw
             provider logs and high-frequency streams stay excluded by default.

@@ -48,6 +48,7 @@ import { DocumentSignalsPanel } from "./document-signals-panel";
 import {
   Badge,
   Button,
+  ConsentManagementCard,
   ConsentScopeList,
   EmptyState,
   ErrorState,
@@ -73,7 +74,8 @@ function toggleConsentScope(
   return [...scopes, scope];
 }
 
-export function DocumentsWorkspace() {
+export function DocumentsWorkspace({ embedded = false }: { embedded?: boolean }) {
+  const SectionHeading = embedded ? "h3" : "h2";
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -370,26 +372,26 @@ export function DocumentsWorkspace() {
 
   return (
     <div className="documents-workspace">
-      <section className="notice">
-        <p className="section-label">Consent-first handling</p>
-        <h2>Health documents stay under your control</h2>
-        <p>
-          Uploads are used for wellness coaching context only. Summaries and extracted signals are
-          cautious, non-diagnostic, and never apply plan changes automatically. Any coaching updates
-          derived from document context appear as proposals you must review and accept.
-        </p>
-      </section>
-
-      <PrivacyBoundaryNote title="Document privacy boundary">
-        Raw document files are stored outside the database. The UI shows metadata, parse status,
-        reviewed summaries, and extracted wellness signals—not full document text. Revoking consent
-        or deleting a document stops future search, signal use, and coach context for that source.
-      </PrivacyBoundaryNote>
+      {embedded ? (
+        <PrivacyBoundaryNote title="Document privacy boundary">
+          Raw document files are stored outside the database. The UI shows metadata, parse status,
+          reviewed summaries, and extracted wellness signals—not full document text. Revoking consent
+          or deleting a document stops future search, signal use, and coach context for that source.
+        </PrivacyBoundaryNote>
+      ) : (
+        <ConsentManagementCard
+          sectionId="consent"
+          title="Health documents stay under your control"
+          description="Uploads are used for wellness coaching context only. Summaries and extracted signals are cautious, non-diagnostic, and never apply plan changes automatically. Any coaching updates derived from document context appear as proposals you must review and accept."
+          boundaryTitle="Document privacy boundary"
+          boundaryBody="Raw document files are stored outside the database. The UI shows metadata, parse status, reviewed summaries, and extracted wellness signals—not full document text. Revoking consent or deleting a document stops future search, signal use, and coach context for that source."
+        />
+      )}
 
       <div className="documents-layout">
         <section className="panel panel-prominent">
           <p className="section-label">Document upload</p>
-          <h2>Upload health document</h2>
+          <SectionHeading>Upload health document</SectionHeading>
           <p className="muted-text">
             Upload a PDF or plain text file for wellness coaching context. Text is extracted on
             the server for review—raw document content is not shown here. You can revoke consent or
@@ -583,7 +585,7 @@ export function DocumentsWorkspace() {
 
         <section className="panel panel-secondary panel-wide">
           <p className="section-label">Your documents</p>
-          <h2>Status and review</h2>
+          <SectionHeading>Status and review</SectionHeading>
 
           {documents.length === 0 ? (
             <EmptyState
@@ -606,6 +608,7 @@ export function DocumentsWorkspace() {
 
           {selectedDetail ? (
             <DocumentDetailPanel
+              embedded={embedded}
               detail={selectedDetail}
               isBusy={isDetailBusy}
               actionError={actionError}
@@ -647,7 +650,7 @@ export function DocumentsWorkspace() {
 
       <section className="panel panel-secondary panel-wide">
         <p className="section-label">Search approved summaries</p>
-        <h2>Find document context</h2>
+        <SectionHeading>Find document context</SectionHeading>
         <p className="muted-text">
           Search returns approved summary snippets only, with source document references. Raw
           document text is not shown.
@@ -767,6 +770,7 @@ function DocumentListItem({ document, selected, onSelect }: DocumentListItemProp
 }
 
 type DocumentDetailPanelProps = {
+  embedded?: boolean;
   detail: HealthDocumentDetail;
   isBusy: boolean;
   actionError: string | null;
@@ -789,6 +793,7 @@ type DocumentDetailPanelProps = {
 };
 
 function DocumentDetailPanel({
+  embedded = false,
   detail,
   isBusy,
   actionError,
@@ -809,6 +814,8 @@ function DocumentDetailPanel({
   deletePending,
   onSignalsActionError,
 }: DocumentDetailPanelProps) {
+  const SubsectionHeading = embedded ? "h4" : "h3";
+  const DetailHeading = embedded ? "h5" : "h4";
   const revoked = isDocumentRevoked(detail);
   const canParse = canParseDocument(detail);
   const canReview = canReviewSummary(detail);
@@ -822,7 +829,7 @@ function DocumentDetailPanel({
       <div className="documents-detail-header">
         <div>
           <p className="section-label">Selected document</p>
-          <h3>{detail.title}</h3>
+          <SubsectionHeading>{detail.title}</SubsectionHeading>
         </div>
         <Badge tone={parseStatusBadgeTone(detail.parseStatus)}>
           {parseStatusLabel(detail.parseStatus)}
@@ -870,7 +877,7 @@ function DocumentDetailPanel({
       {detail.summary ? (
         <article className="card card-flat documents-summary-card">
           <div className="documents-detail-header">
-            <h4>Structured summary</h4>
+            <DetailHeading>Structured summary</DetailHeading>
             <Badge tone={reviewStatusBadgeTone(detail.summary.reviewStatus)}>
               {reviewStatusLabel(detail.summary.reviewStatus)}
             </Badge>

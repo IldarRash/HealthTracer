@@ -14,7 +14,11 @@ import {
   moodScoreLabel,
   resolveWellbeingCrisisDisplay,
   resolveWellbeingCrisisPreview,
+  resolveWellbeingCrisisForParent,
+  resolveWellbeingLiveCrisisPreviewForParent,
+  shouldRenderWellbeingCrisisInCard,
   stressScoreLabel,
+  wellbeingCheckInIndicatesCrisisSupport,
   wellbeingDataSufficiencyMessage,
   wellbeingScoreFillPercent,
   wellbeingTrendDirectionLabel,
@@ -197,6 +201,102 @@ describe("wellbeing UI state", () => {
     expect(copyText).not.toContain("diagnosis");
     expect(copyText).not.toContain("treatment");
     expect(copyText).not.toContain("therapy");
+  });
+
+  it("delegates live and saved crisis support to parent when callback is provided", () => {
+    const livePreview = resolveWellbeingCrisisPreview({ moodScore: 1, note: "" });
+    const server = resolveWellbeingCrisisPreview({ moodScore: 1, note: "saved" });
+    const persistedCrisisCheckIn = {
+      ...sampleCheckIn,
+      moodScore: 1 as const,
+      crisisFlagReasons: ["lowest_mood" as const],
+    };
+
+    expect(
+      resolveWellbeingCrisisForParent({
+        preview: resolveWellbeingCrisisPreview({ moodScore: 4, note: "" }),
+        serverCrisisSupport: null,
+        persistedCheckIn: persistedCrisisCheckIn,
+      }),
+    ).toEqual({
+      shouldShowCrisisSupport: true,
+      reasons: ["lowest_mood"],
+      copy: WELLBEING_CRISIS_SUPPORT_COPY,
+    });
+
+    expect(
+      resolveWellbeingCrisisForParent({
+        preview: livePreview,
+        serverCrisisSupport: server,
+        persistedCheckIn: null,
+      }),
+    ).toEqual(server);
+
+    expect(
+      resolveWellbeingCrisisForParent({
+        preview: livePreview,
+        serverCrisisSupport: null,
+        persistedCheckIn: null,
+      }),
+    ).toEqual({
+      ...livePreview,
+      copy: WELLBEING_CRISIS_SUPPORT_COPY,
+    });
+
+    expect(
+      resolveWellbeingCrisisForParent({
+        preview: resolveWellbeingCrisisPreview({ moodScore: 4, note: "" }),
+        serverCrisisSupport: null,
+        persistedCheckIn: null,
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveWellbeingLiveCrisisPreviewForParent(livePreview, null),
+    ).toEqual({
+      ...livePreview,
+      copy: WELLBEING_CRISIS_SUPPORT_COPY,
+    });
+
+    const display = resolveWellbeingCrisisDisplay(livePreview, null);
+    expect(
+      shouldRenderWellbeingCrisisInCard({
+        crisisDisplay: display,
+        delegateToParent: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenderWellbeingCrisisInCard({
+        crisisDisplay: resolveWellbeingCrisisDisplay(livePreview, server),
+        delegateToParent: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenderWellbeingCrisisInCard({
+        crisisDisplay: display,
+        delegateToParent: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("detects crisis support from saved wellbeing check-in data", () => {
+    expect(wellbeingCheckInIndicatesCrisisSupport(null)).toBe(false);
+    expect(wellbeingCheckInIndicatesCrisisSupport(sampleCheckIn)).toBe(false);
+
+    expect(
+      wellbeingCheckInIndicatesCrisisSupport({
+        ...sampleCheckIn,
+        moodScore: 1,
+      }),
+    ).toBe(true);
+
+    expect(
+      wellbeingCheckInIndicatesCrisisSupport({
+        ...sampleCheckIn,
+        crisisFlagReasons: ["keyword_match"],
+        note: "feeling hopeless",
+      }),
+    ).toBe(true);
   });
 
   it("builds saved summary view", () => {

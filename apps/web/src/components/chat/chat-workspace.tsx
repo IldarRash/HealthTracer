@@ -18,6 +18,8 @@ import {
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
   resolveChatMessageWeeklyReview,
+  CHAT_EMPTY_STATE_DESCRIPTION,
+  CHAT_EMPTY_STATE_TITLE,
   resolvePrimaryThreadId,
   SUGGESTED_CHAT_PROMPTS,
   type OptimisticChatMessage,
@@ -30,10 +32,13 @@ import {
   Button,
   ChatBubble,
   ChatComposer,
+  ChatThinkingIndicator,
   ChatTranscript,
   EmptyState,
   ErrorState,
   LoadingState,
+  PromptChip,
+  PromptChipList,
 } from "../ui";
 
 export function ChatWorkspace() {
@@ -268,22 +273,20 @@ export function ChatWorkspace() {
             {messages.length === 0 && !sendMessageMutation.isPending ? (
               <li className="chat-empty-state">
                 <EmptyState
-                  title="Start a conversation with your coach"
-                  description="Ask about workouts, goals, nutrition, or how you're feeling this week."
+                  title={CHAT_EMPTY_STATE_TITLE}
+                  description={CHAT_EMPTY_STATE_DESCRIPTION}
                 />
-                <div className="chat-prompt-chips" role="list">
+                <PromptChipList>
                   {SUGGESTED_CHAT_PROMPTS.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      className="chat-prompt-chip"
+                    <PromptChip
+                      key={prompt.message}
                       disabled={sendMessageMutation.isPending}
-                      onClick={() => handlePromptSelect(prompt)}
+                      onClick={() => handlePromptSelect(prompt.message)}
                     >
-                      {prompt}
-                    </button>
+                      {prompt.label}
+                    </PromptChip>
                   ))}
-                </div>
+                </PromptChipList>
               </li>
             ) : null}
 
@@ -301,12 +304,8 @@ export function ChatWorkspace() {
                 <li key={message.id}>
                   <ChatBubble
                     role={isUser ? "user" : "assistant"}
-                    className={
-                      isUser
-                        ? undefined
-                        : crisisSupportCopy
-                          ? "chat-bubble--coach chat-bubble--crisis"
-                          : "chat-bubble--coach"
+                    variant={
+                      isUser ? "default" : crisisSupportCopy ? "crisis" : "coach"
                     }
                     meta={
                       <time dateTime={message.createdAt}>
@@ -348,9 +347,8 @@ export function ChatWorkspace() {
 
             {sendMessageMutation.isPending ? (
               <li>
-                <ChatBubble role="assistant" className="chat-bubble--coach">
-                  <span className="state-message__spinner" aria-hidden="true" />
-                  Your coach is thinking…
+                <ChatBubble role="assistant">
+                  <ChatThinkingIndicator />
                 </ChatBubble>
               </li>
             ) : null}

@@ -15,6 +15,9 @@ export const apiEnvSchema = z.object({
     .default("postgres://postgres:postgres@localhost:5432/health_tracer"),
   CLERK_JWKS_URL: z.string().url().optional(),
   DOCUMENT_STORAGE_PATH: z.string().min(1).default(".data/documents"),
+  AI_COACH_PROVIDER: z.enum(["stub", "openai"]).default("stub"),
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
 });
 
 const parsedEnv = validateEnv(apiEnvSchema);

@@ -25,7 +25,12 @@ import {
   resolveTodayNutritionCardPhase,
   todayNutritionPayload,
 } from "../../lib/today-nutrition-ui-state";
-import { EmptyState } from "../ui";
+import {
+  CanvasEmptyState,
+  CompactDomainCard,
+  ProgressiveDisclosure,
+  StatusBadge,
+} from "../ui";
 
 type TodayNutritionCardProps = {
   nutrition: TodayNutritionDetail | null;
@@ -103,9 +108,14 @@ export function TodayNutritionCard({
 
   if (phase === "empty") {
     return (
-      <section className="today-nutrition-panel nested-card" aria-labelledby="today-nutrition-heading">
-        <p className="section-label">Today&apos;s nutrition</p>
-        <EmptyState
+      <CompactDomainCard
+        className="today-nutrition-panel"
+        label="Today&apos;s nutrition"
+        title="Nutrition"
+        titleId="today-nutrition-heading"
+      >
+        <CanvasEmptyState
+          compact
           title="No active nutrition plan"
           description="Accept a nutrition proposal in Chat to see today's meals, hydration focus, and targets here."
           action={
@@ -119,7 +129,7 @@ export function TodayNutritionCard({
             </div>
           }
         />
-      </section>
+      </CompactDomainCard>
     );
   }
 
@@ -131,24 +141,31 @@ export function TodayNutritionCard({
   const adherenceSaved = hasTodayNutritionAdherenceSaved(nutrition);
 
   return (
-    <section
-      className="today-nutrition-panel nested-card"
-      aria-labelledby="today-nutrition-heading"
-      aria-busy={cardBusy || undefined}
-    >
-      <p className="section-label">Today&apos;s nutrition</p>
-      <div className="training-session-header">
-        <div>
-          <h3 id="today-nutrition-heading">{payload.title}</h3>
-          <p className="muted-text">{formatTodayNutritionPlanSummary(payload)}</p>
-        </div>
-        {adherenceSaved ? (
-          <span className="badge badge-session-completed">Saved</span>
+    <CompactDomainCard
+      className="today-nutrition-panel"
+      label="Today&apos;s nutrition"
+      title={payload.title}
+      titleId="today-nutrition-heading"
+      summary={formatTodayNutritionPlanSummary(payload)}
+      badge={
+        adherenceSaved ? (
+          <StatusBadge className="badge badge-session-completed">Saved</StatusBadge>
         ) : (
-          <span className="badge badge-session-planned">Not logged</span>
-        )}
-      </div>
-
+          <StatusBadge className="badge badge-session-planned">Not logged</StatusBadge>
+        )
+      }
+      busy={cardBusy}
+      actions={
+        <div className="today-nutrition-links">
+          <Link href="/nutrition" className="confirmation-card__link">
+            Open Nutrition →
+          </Link>
+          <Link href="/chat" className="confirmation-card__link">
+            Ask the coach to adjust this plan →
+          </Link>
+        </div>
+      }
+    >
       {phase === "partial" ? (
         <p className="muted-text">
           Your plan is active, but meals, hydration, and targets are not configured yet. Ask the
@@ -157,8 +174,7 @@ export function TodayNutritionCard({
       ) : null}
 
       {payload.mealStructure.length > 0 ? (
-        <div className="training-notes">
-          <h4>Meals</h4>
+        <ProgressiveDisclosure className="training-notes" summary="Meals" defaultOpen>
           <p className="muted-text">{mealSummary}</p>
           <ul className="training-revision-list">
             {adherenceState.mealCompletion.map((meal) => {
@@ -190,12 +206,11 @@ export function TodayNutritionCard({
               );
             })}
           </ul>
-        </div>
+        </ProgressiveDisclosure>
       ) : null}
 
       {payload.hydrationLiters != null ? (
-        <div className="training-notes">
-          <h4>Hydration focus</h4>
+        <ProgressiveDisclosure className="training-notes" summary="Hydration focus" defaultOpen>
           <p className="muted-text">
             Target: {payload.hydrationLiters} L ·{" "}
             {formatHydrationProgress(
@@ -233,12 +248,11 @@ export function TodayNutritionCard({
               }}
             />
           </label>
-        </div>
+        </ProgressiveDisclosure>
       ) : null}
 
       {targetKeys.length > 0 ? (
-        <div className="training-notes">
-          <h4>Daily targets</h4>
+        <ProgressiveDisclosure className="training-notes" summary="Daily targets" defaultOpen>
           <ul className="training-revision-list">
             {targetKeys.map((key) => (
               <li key={key} className="training-revision-card nested-card">
@@ -266,11 +280,10 @@ export function TodayNutritionCard({
               </li>
             ))}
           </ul>
-        </div>
+        </ProgressiveDisclosure>
       ) : null}
 
-      <div className="training-notes">
-        <h4>Daily note</h4>
+      <ProgressiveDisclosure className="training-notes" summary="Daily note" defaultOpen>
         {adherenceState.notes.length > 0 ? (
           <ul>
             {adherenceState.notes.map((note) => (
@@ -309,16 +322,7 @@ export function TodayNutritionCard({
         >
           {adherenceMutation.isPending ? "Saving…" : "Save note"}
         </button>
-      </div>
-
-      <div className="action-row proposal-actions today-nutrition-links">
-        <Link href="/nutrition" className="confirmation-card__link">
-          Open Nutrition →
-        </Link>
-        <Link href="/chat" className="confirmation-card__link">
-          Ask the coach to adjust this plan →
-        </Link>
-      </div>
+      </ProgressiveDisclosure>
 
       {saveSucceeded && !adherenceMutation.isPending ? (
         <p className="muted-text" role="status">
@@ -333,6 +337,6 @@ export function TodayNutritionCard({
             : "Nutrition adherence could not be saved."}
         </p>
       ) : null}
-    </section>
+    </CompactDomainCard>
   );
 }

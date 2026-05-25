@@ -157,6 +157,7 @@ export class ChatService {
       {
         parseErrors: generated.parseErrors,
         replySafetyErrors: generated.replySafetyErrors,
+        agent: generated.agentMetadata,
         ...(weeklyReviewMetadata ?? {}),
       },
     );

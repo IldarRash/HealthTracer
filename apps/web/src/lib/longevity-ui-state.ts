@@ -32,6 +32,7 @@ import {
 } from "./metrics-ui-state";
 import {
   deferredDomainAvailabilityLabel,
+  formatWeekRange,
   isProgressSummaryNotFoundError,
   progressDomainLabel,
   sanitizeWellnessDisplayText,
@@ -48,6 +49,11 @@ import {
 } from "./weekly-review-ui-state";
 import { formatAdherenceScore, formatAdherenceSummary } from "./today-ui-state";
 import { formatLocalIsoDate } from "./training-ui-state";
+import {
+  buildTrendStripClassName,
+  buildSevenDayTrendAriaLabel as buildOverviewSevenDayTrendAriaLabel,
+  OVERVIEW_WEEKDAY_LABELS,
+} from "./overview-ui-state";
 
 export const FORBIDDEN_LONGEVITY_TERMS = [
   "longevity score",
@@ -80,6 +86,21 @@ export const LONGEVITY_COACH_PROMPTS = [
   "What should I focus on in Today?",
 ] as const;
 
+export type LongevityCoachPromptChip = {
+  message: string;
+  displayLabel: string;
+};
+
+const LONGEVITY_COACH_PROMPT_DISPLAY_LABELS: Record<string, string> = {
+  "Help me improve consistency this week": "Improve consistency",
+  "Review my logged recovery pattern": "Review recovery",
+  "What should I focus on in Today?": "Today focus",
+  [WEEKLY_REVIEW_CHAT_PROMPT]: "Cross-domain review",
+  "Help me build a simple weekly routine": "Build weekly routine",
+  "What wellness signals should I track this week?": "Track wellness signals",
+  "Help me set a wellness goal": "Set a wellness goal",
+};
+
 /** Approved in-dashboard CTA destinations for Longevity cards. */
 export const LONGEVITY_CTA_ROUTES = {
   chat: "/chat",
@@ -89,23 +110,17 @@ export const LONGEVITY_CTA_ROUTES = {
   profile: "/profile",
   profileGoals: "/profile#goals",
   profileDocuments: "/profile#documents",
-  profileConsent: "/profile",
+  profileConsent: "/profile#data-consent",
 } as const;
 
 /** Monday-start labels aligned with weekly trend bar indices. */
-export const WEEKDAY_TREND_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+export const WEEKDAY_TREND_LABELS = OVERVIEW_WEEKDAY_LABELS;
 
 export function buildSevenDayTrendAriaLabel(
   trend: readonly number[],
   sparse: boolean,
 ): string {
-  if (sparse) {
-    return "Seven day activity trend unavailable. Not enough data yet.";
-  }
-
-  return `Seven day activity trend. ${trend
-    .map((value, index) => `${WEEKDAY_TREND_LABELS[index]}: ${value}%`)
-    .join(", ")}.`;
+  return buildOverviewSevenDayTrendAriaLabel(trend, WEEKDAY_TREND_LABELS, sparse);
 }
 
 export type LongevityHeroTrendStripView = {
@@ -123,7 +138,7 @@ export function buildLongevityHeroTrendStripView(
     sparse,
     trend,
     ariaLabel: buildSevenDayTrendAriaLabel(trend, sparse),
-    className: sparse ? "trend-strip trend-strip--sparse" : "trend-strip",
+    className: buildTrendStripClassName(sparse),
   };
 }
 
@@ -242,6 +257,66 @@ function toIsoDate(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function resolveCurrentWeekIsoRange(now = new Date()): { weekStart: string; weekEnd: string } {
+  const weekStartDate = startOfWeek(now);
+  const weekEndDate = new Date(weekStartDate);
+  weekEndDate.setDate(weekEndDate.getDate() + 6);
+
+  return {
+    weekStart: toIsoDate(weekStartDate),
+    weekEnd: toIsoDate(weekEndDate),
+  };
+}
+
+export function buildLongevityWeekEyebrow(now = new Date()): string {
+  const { weekStart, weekEnd } = resolveCurrentWeekIsoRange(now);
+  return formatWeekRange(weekStart, weekEnd);
+}
+
+/** Align page header week copy with dashboard anchor dates such as `todayIsoDate()`. */
+export function buildLongevityWeekEyebrowFromAnchorDate(anchorDate: string): string {
+  const [year, month, day] = anchorDate.split("-").map(Number);
+  const anchor = new Date(year!, month! - 1, day!);
+  return buildLongevityWeekEyebrow(anchor);
+}
+
+export function buildLongevityHeroSubtitles(input: {
+  sparse: boolean;
+  subtitle: string;
+  activeDaysLabel: string;
+  habitHint: string | null;
+}): readonly string[] {
+  if (input.sparse) {
+    return [input.subtitle];
+  }
+
+  const secondaryParts = [input.activeDaysLabel];
+  if (input.habitHint) {
+    secondaryParts.push(input.habitHint);
+  }
+
+  return [input.subtitle, secondaryParts.join(" · ")];
+}
+
+export function shortenLongevityCoachPromptLabel(message: string): string {
+  return LONGEVITY_COACH_PROMPT_DISPLAY_LABELS[message] ?? message;
+}
+
+export function formatDeferredDomainsCollapsibleSummary(
+  deferredDomains: readonly { domain: string }[],
+): string {
+  if (deferredDomains.length === 0) {
+    return "";
+  }
+
+  if (deferredDomains.length === 1) {
+    return `${deferredDomains[0]!.domain} deferred for this review`;
+  }
+
+  const domainNames = deferredDomains.map((entry) => entry.domain).join(", ");
+  return `${deferredDomains.length} domains deferred · ${domainNames}`;
 }
 
 export function mergeTodayHistoryIntoTrend(
@@ -707,7 +782,7 @@ export function buildLongevityCoachPrompts(input: {
   activeGoalCount: number;
   goalsFetchFailed?: boolean;
   hasWeeklyProgress?: boolean;
-}): readonly string[] {
+}): readonly LongevityCoachPromptChip[] {
   const prompts = new Set<string>(LONGEVITY_COACH_PROMPTS);
 
   if (input.hasWeeklyProgress) {
@@ -726,7 +801,10 @@ export function buildLongevityCoachPrompts(input: {
     prompts.add("Help me set a wellness goal");
   }
 
-  return [...prompts].slice(0, 4);
+  return [...prompts].slice(0, 4).map((message) => ({
+    message,
+    displayLabel: shortenLongevityCoachPromptLabel(message),
+  }));
 }
 
 export function summarizeActiveGoals(goals: readonly Goal[]): {

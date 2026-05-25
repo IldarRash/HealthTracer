@@ -161,6 +161,15 @@ export function getProposalDomainPillClass(domain: ProposalTargetDomain): string
   }
 }
 
+export const INLINE_PROPOSAL_VALIDATION_HEADING = "Needs attention";
+
+export function shouldShowInlineProposalIntentLabel(
+  intent: ProposalIntent,
+  proposedChanges?: unknown,
+): boolean {
+  return getProposalIntentLabel(intent, proposedChanges) != null;
+}
+
 export function getProposalStatusLabel(
   status: AiProposal["status"],
 ): string {

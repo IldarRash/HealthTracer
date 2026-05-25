@@ -1,20 +1,21 @@
 import { auth } from "@clerk/nextjs/server";
+import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
 import { AppLayout } from "../../src/components/app-layout";
 import { NutritionWorkspace } from "../../src/components/nutrition/nutrition-workspace";
 import { PageContent, PageHeader } from "../../src/components/ui";
 
 export default async function NutritionPage() {
-  const { isAuthenticated, redirectToSignIn } = await auth();
+  const { isAuthenticated } = await auth();
 
   if (!isAuthenticated) {
-    return redirectToSignIn();
+    redirectToAppSignIn("/nutrition");
   }
 
   return (
     <AppLayout>
       <PageHeader
         title="Nutrition"
-        description="Review your active nutrition plan revision and meal structure guidance."
+        description="Read-only view of your active nutrition plan, meal structure, and today's logged follow-through."
       />
       <PageContent>
         <NutritionWorkspace />

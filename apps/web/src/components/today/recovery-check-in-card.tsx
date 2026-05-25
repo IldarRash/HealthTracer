@@ -21,6 +21,13 @@ import {
   SORENESS_SCORE_LABELS,
 } from "../../lib/recovery-ui-state";
 import { WellbeingScaleInput } from "../wellbeing/wellbeing-scale-input";
+import {
+  CanvasErrorState,
+  CanvasLoadingState,
+  CompactDomainCard,
+  ProgressiveDisclosure,
+  StatusBadge,
+} from "../ui";
 
 type RecoveryCheckInCardProps = {
   selectedDate: string;
@@ -127,43 +134,55 @@ export function RecoveryCheckInCard({ selectedDate }: RecoveryCheckInCardProps) 
 
   if (contextQuery.isLoading) {
     return (
-      <section className="recovery-check-in-card nested-card" aria-busy="true">
-        <p className="section-label">Recovery focus</p>
-        <p className="muted-text">Loading recovery context…</p>
-      </section>
+      <CompactDomainCard
+        className="recovery-check-in-card"
+        label="Recovery focus"
+        title="How is your body feeling?"
+        titleId="recovery-check-in-heading"
+        busy
+      >
+        <CanvasLoadingState compact title="Loading recovery context…" />
+      </CompactDomainCard>
     );
   }
 
   if (contextQuery.isError) {
     return (
-      <section className="recovery-check-in-card nested-card">
-        <p className="section-label">Recovery focus</p>
-        <p className="form-error" role="alert">
-          {contextQuery.error instanceof Error
-            ? contextQuery.error.message
-            : "Recovery context could not be loaded."}
-        </p>
-      </section>
+      <CompactDomainCard
+        className="recovery-check-in-card"
+        label="Recovery focus"
+        title="How is your body feeling?"
+        titleId="recovery-check-in-heading"
+      >
+        <CanvasErrorState
+          compact
+          title="Recovery context unavailable"
+          description={
+            contextQuery.error instanceof Error
+              ? contextQuery.error.message
+              : "Recovery context could not be loaded."
+          }
+        />
+      </CompactDomainCard>
     );
   }
 
   return (
-    <section
-      className="recovery-check-in-card nested-card"
-      aria-labelledby="recovery-check-in-heading"
+    <CompactDomainCard
+      className="recovery-check-in-card"
+      label="Recovery focus"
+      title="How is your body feeling?"
+      titleId="recovery-check-in-heading"
+      summary="Wellness context for coaching — soreness, fatigue, and optional mood or stress. Not a medical assessment."
     >
-      <p className="section-label">Recovery focus</p>
-      <h3 id="recovery-check-in-heading">How is your body feeling?</h3>
-      <p className="muted-text">
-        Wellness context for coaching — soreness, fatigue, and optional mood or stress. Not a
-        medical assessment.
-      </p>
-
       {focusView ? (
-        <div className="recovery-focus-panel nested-card">
+        <ProgressiveDisclosure
+          className="recovery-focus-panel"
+          summary="Today&apos;s recovery focus"
+          defaultOpen
+        >
           <div className="recovery-focus-header">
-            <strong className="recovery-focus-title">Today&apos;s recovery focus</strong>
-            <span className={focusView.bandBadgeClass}>{focusView.bandLabel}</span>
+            <StatusBadge className={focusView.bandBadgeClass}>{focusView.bandLabel}</StatusBadge>
           </div>
           <p className="recovery-focus-message">{focusView.focusMessage}</p>
           <p className="muted-text recovery-focus-sufficiency">{focusView.sufficiencyMessage}</p>
@@ -176,7 +195,7 @@ export function RecoveryCheckInCard({ selectedDate }: RecoveryCheckInCardProps) 
               ))}
             </ul>
           ) : null}
-        </div>
+        </ProgressiveDisclosure>
       ) : null}
 
       {summaryView?.status === "saved" && !isEditing ? (
@@ -274,6 +293,6 @@ export function RecoveryCheckInCard({ selectedDate }: RecoveryCheckInCardProps) 
           ) : null}
         </div>
       )}
-    </section>
+    </CompactDomainCard>
   );
 }

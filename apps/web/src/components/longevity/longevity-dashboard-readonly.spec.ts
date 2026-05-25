@@ -53,11 +53,13 @@ describe("LongevityDashboard read-only behavior", () => {
   it("routes card actions through approved CTA constants without inline mutation flows", () => {
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.chat}`);
+    expect(componentSource).toContain(`promptLabel={prompt.message}`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.today}`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.training}`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.nutrition}`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.profileGoals}`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.profileDocuments}`);
+    expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.profileConsent}`);
     expect(componentSource).not.toMatch(/method:\s*["'](POST|PUT|PATCH|DELETE)["']/);
     expect(componentSource).not.toContain("proposal-actions");
   });
@@ -68,5 +70,12 @@ describe("LongevityDashboard read-only behavior", () => {
     expect(componentSource).toContain(
       "Some sections could not refresh just now. Available wellness data is shown below.",
     );
+  });
+
+  it("shows weekly review read-only notice without inline mutation controls", () => {
+    expect(componentSource).toContain("OverviewReadOnlyNotice");
+    expect(componentSource).toContain("WEEKLY_REVIEW_READ_ONLY_NOTICE");
+    expect(componentSource).not.toContain("acceptProposal");
+    expect(componentSource).not.toContain("InlineProposalCard");
   });
 });

@@ -173,6 +173,88 @@ export function sortSessionsByPlannedDate(
   );
 }
 
+const WEEK_STRIP_SHORT_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+export type TrainingWeekStripView = {
+  dayLabels: readonly string[];
+  trend: readonly number[];
+  sparse: boolean;
+  ariaLabel: string;
+};
+
+function getWeekStartMonday(date: Date): Date {
+  const normalized = new Date(date);
+  const weekday = normalized.getDay();
+  const offset = weekday === 0 ? -6 : 1 - weekday;
+  normalized.setDate(normalized.getDate() + offset);
+  normalized.setHours(0, 0, 0, 0);
+  return normalized;
+}
+
+function sessionTrendValue(status: WorkoutSessionStatus | undefined): number {
+  if (!status) {
+    return 0;
+  }
+
+  switch (status) {
+    case "completed":
+      return 100;
+    case "planned":
+      return 55;
+    case "skipped":
+      return 25;
+  }
+}
+
+/** Maps current-week sessions to a sparse-friendly trend strip for plan headers. */
+export function buildTrainingWeekStripView(
+  sessions: readonly WorkoutSession[],
+  referenceDate = new Date(),
+): TrainingWeekStripView {
+  const weekStart = getWeekStartMonday(referenceDate);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+
+  const weekStartIso = formatLocalIsoDate(weekStart);
+  const weekEndIso = formatLocalIsoDate(weekEnd);
+  const sessionsByDate = new Map(
+    sessions
+      .filter(
+        (session) =>
+          session.plannedDate >= weekStartIso && session.plannedDate <= weekEndIso,
+      )
+      .map((session) => [session.plannedDate, session]),
+  );
+
+  const dayLabels: string[] = [];
+  const trend: number[] = [];
+
+  for (let index = 0; index < 7; index += 1) {
+    const day = new Date(weekStart);
+    day.setDate(weekStart.getDate() + index);
+    const isoDate = formatLocalIsoDate(day);
+    dayLabels.push(WEEK_STRIP_SHORT_LABELS[index]!);
+    trend.push(sessionTrendValue(sessionsByDate.get(isoDate)?.status));
+  }
+
+  const scheduledDays = trend.filter((value) => value > 0).length;
+  const completedDays = [...sessionsByDate.values()].filter(
+    (session) => session.status === "completed",
+  ).length;
+  const hasSessions = scheduledDays > 0;
+
+  const ariaLabel = hasSessions
+    ? `This week: ${completedDays} completed workout${completedDays === 1 ? "" : "s"} across ${scheduledDays} scheduled day${scheduledDays === 1 ? "" : "s"}.`
+    : "No workouts scheduled this week yet.";
+
+  return {
+    dayLabels,
+    trend,
+    sparse: !hasSessions,
+    ariaLabel,
+  };
+}
+
 export function hasActiveWorkoutPlan(
   response: { plan: { id: string } | null; activeRevision: { id: string } | null },
 ): boolean {

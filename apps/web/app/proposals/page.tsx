@@ -1,12 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
+import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
 import { AppNav } from "../../src/components/app-nav";
 import { ProposalInspector } from "../../src/components/proposals/proposal-inspector";
 
 export default async function ProposalsPage() {
-  const { isAuthenticated, redirectToSignIn } = await auth();
+  const { isAuthenticated } = await auth();
 
   if (!isAuthenticated) {
-    return redirectToSignIn();
+    redirectToAppSignIn("/proposals");
   }
 
   return (

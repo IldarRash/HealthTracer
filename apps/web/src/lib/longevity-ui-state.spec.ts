@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { WEEKLY_REVIEW_CHAT_PROMPT } from "@health/types";
 import type {
   DeviceConnection,
   Goal,
@@ -18,14 +19,18 @@ import {
   buildDocumentsContextView,
   buildGoalsSectionView,
   buildLongevityCoachPrompts,
+  buildLongevityHeroSubtitles,
   buildLongevityHeroTrendStripView,
   buildLongevityTrendsView,
+  buildLongevityWeekEyebrow,
+  buildLongevityWeekEyebrowFromAnchorDate,
   buildLongevityWeeklyHero,
   buildNutritionConsistencyCardView,
   buildSevenDayTrendAriaLabel,
   buildTodayAdherenceCardView,
   buildWellnessSignalsPanelView,
   buildWorkoutConsistencyCardView,
+  formatDeferredDomainsCollapsibleSummary,
   goalsCardHint,
   goalsCardValue,
   hasMeaningfulHabitAdherence,
@@ -34,6 +39,7 @@ import {
   LONGEVITY_CTA_ROUTES,
   mergeTodayHistoryIntoTrend,
   sanitizeLongevityBackendText,
+  shortenLongevityCoachPromptLabel,
   summarizeActiveGoals,
   summarizeHabitConsistencyHint,
 } from "./longevity-ui-state.js";
@@ -402,6 +408,39 @@ describe("longevity UI state", () => {
 
       expect(populatedTrend.sparse).toBe(false);
       expect(populatedTrend.className).toBe("trend-strip");
+    });
+
+    it("consolidates hero subtitles to at most two lines", () => {
+      const sparseLines = buildLongevityHeroSubtitles({
+        sparse: true,
+        subtitle: "Not enough data yet — log tasks on Today or complete a workout to start seeing patterns.",
+        activeDaysLabel: "0 of 7 days with logged activity",
+        habitHint: null,
+      });
+
+      expect(sparseLines).toHaveLength(1);
+
+      const populatedLines = buildLongevityHeroSubtitles({
+        sparse: false,
+        subtitle: "Based on your logged workouts, Today adherence, and habits this week.",
+        activeDaysLabel: "3 of 7 days with logged activity",
+        habitHint: "71% required completion (7 days) · Morning hydration · 3-day streak",
+      });
+
+      expect(populatedLines).toHaveLength(2);
+      expect(populatedLines[1]).toContain("3 of 7 days");
+      expect(populatedLines[1]).toContain("71% required completion");
+    });
+
+    it("formats the current week range for the page header eyebrow", () => {
+      const eyebrow = buildLongevityWeekEyebrow(new Date("2026-05-22T15:00:00.000Z"));
+      expect(eyebrow).toContain("2026");
+    });
+
+    it("aligns page header eyebrow with dashboard anchor dates", () => {
+      const anchorEyebrow = buildLongevityWeekEyebrowFromAnchorDate("2026-05-22");
+      const directEyebrow = buildLongevityWeekEyebrow(new Date(2026, 4, 22));
+      expect(anchorEyebrow).toBe(directEyebrow);
     });
   });
 
@@ -1049,7 +1088,7 @@ describe("longevity UI state", () => {
         profile: "/profile",
         profileGoals: "/profile#goals",
         profileDocuments: "/profile#documents",
-        profileConsent: "/profile",
+        profileConsent: "/profile#data-consent",
       });
     });
 
@@ -1082,7 +1121,8 @@ describe("longevity UI state", () => {
         wellnessStatus: "consent_required",
         activeGoalCount: 0,
       });
-      expect(sparsePrompts).toContain("Help me build a simple weekly routine");
+      expect(sparsePrompts.some((prompt) => prompt.message === "Help me build a simple weekly routine")).toBe(true);
+      expect(sparsePrompts.every((prompt) => prompt.displayLabel.length < prompt.message.length)).toBe(true);
       expect(sparsePrompts.length).toBeLessThanOrEqual(4);
       assertNoForbiddenTerms(sparsePrompts);
 
@@ -1091,14 +1131,33 @@ describe("longevity UI state", () => {
         wellnessStatus: "consent_required",
         activeGoalCount: 1,
       });
-      expect(wellnessPrompts).toContain("What wellness signals should I track this week?");
+      expect(wellnessPrompts.some((prompt) => prompt.message === "What wellness signals should I track this week?")).toBe(true);
+      expect(wellnessPrompts.some((prompt) => prompt.displayLabel === "Track wellness signals")).toBe(true);
 
       const goalPrompts = buildLongevityCoachPrompts({
         sparseHero: false,
         wellnessStatus: "ready",
         activeGoalCount: 0,
       });
-      expect(goalPrompts).toContain("Help me set a wellness goal");
+      expect(goalPrompts.some((prompt) => prompt.message === "Help me set a wellness goal")).toBe(true);
+      expect(goalPrompts.some((prompt) => prompt.displayLabel === "Set a wellness goal")).toBe(true);
+    });
+
+    it("shortens weekly review chat prompt labels while preserving full message text", () => {
+      expect(shortenLongevityCoachPromptLabel(WEEKLY_REVIEW_CHAT_PROMPT)).toBe("Cross-domain review");
+    });
+
+    it("summarizes deferred domains for collapsible trend details", () => {
+      expect(formatDeferredDomainsCollapsibleSummary([])).toBe("");
+      expect(formatDeferredDomainsCollapsibleSummary([{ domain: "Nutrition" }])).toBe(
+        "Nutrition deferred for this review",
+      );
+      expect(
+        formatDeferredDomainsCollapsibleSummary([
+          { domain: "Nutrition" },
+          { domain: "Recovery" },
+        ]),
+      ).toBe("2 domains deferred · Nutrition, Recovery");
     });
 
     it("omits goal-setting coach prompt when goals fetch failed", () => {
@@ -1109,7 +1168,7 @@ describe("longevity UI state", () => {
         goalsFetchFailed: true,
       });
 
-      expect(prompts).not.toContain("Help me set a wellness goal");
+      expect(prompts.some((prompt) => prompt.message === "Help me set a wellness goal")).toBe(false);
       assertNoForbiddenTerms(prompts);
     });
 

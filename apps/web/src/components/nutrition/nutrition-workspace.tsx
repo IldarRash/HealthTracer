@@ -1,37 +1,42 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { NutritionAdherenceState } from "@health/types";
-import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import {
   apiQueryKeys,
   getActiveNutritionPlan,
-  getNutritionAdherenceRefreshQueryKeys,
   getTodayNutritionAdherence,
   listNutritionRevisions,
-  upsertTodayNutritionAdherence,
 } from "../../lib/api";
 import {
   buildAdherenceState,
-  formatHydrationProgress,
+  buildNutritionPlanAdherenceFacts,
   formatLocalIsoDate,
-  formatTargetCompletionLabel,
   summarizeNutritionTargets,
-  targetCompletionKeysForPayload,
-  targetCompletionLabel,
-  toggleMealCompletion,
-  toggleTargetCompletion,
 } from "../../lib/nutrition-ui-state";
-import { EmptyState, ErrorState, LoadingState } from "../ui";
-
-function formatTimestamp(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
+import {
+  formatPlanRevisionSource,
+  formatPlanRevisionTimestamp,
+  formatRevisionHistoryMeta,
+} from "../../lib/plan-view-ui-state";
+import {
+  ChangeViaChatNotice,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PlanExecutionCallout,
+  PlanFacts,
+  PlanHeader,
+  PlanSection,
+  PlanViewCtaLink,
+  PlanViewGrid,
+  PlanViewLayout,
+  PlanViewPanel,
+  RevisionHistoryCollapsible,
+  RevisionHistoryItem,
+  RevisionHistoryList,
+} from "../ui";
 
 function formatList(values: readonly string[], emptyLabel: string): string {
   return values.length > 0 ? values.join(", ") : emptyLabel;
@@ -39,10 +44,7 @@ function formatList(values: readonly string[], emptyLabel: string): string {
 
 export function NutritionWorkspace() {
   const { getToken } = useAuth();
-  const queryClient = useQueryClient();
   const today = useMemo(() => formatLocalIsoDate(new Date()), []);
-  const [noteDraft, setNoteDraft] = useState("");
-  const [hydrationDraft, setHydrationDraft] = useState<string>("");
 
   const activePlanQuery = useQuery({
     queryKey: apiQueryKeys.nutritionActive,
@@ -96,32 +98,6 @@ export function NutritionWorkspace() {
     enabled: Boolean(activePlanQuery.data?.activeRevision),
   });
 
-  const adherenceMutation = useMutation({
-    mutationFn: async (input: {
-      hydrationLitersConsumed?: number | null;
-      mealCompletion?: NutritionAdherenceState["mealCompletion"];
-      targetCompletion?: NutritionAdherenceState["targetCompletion"];
-      notes?: string[];
-    }) => {
-      const token = await getToken();
-      if (!token) {
-        throw new Error("Clerk session token is unavailable.");
-      }
-
-      const result = await upsertTodayNutritionAdherence(token, input);
-      if (result.error || !result.data) {
-        throw new Error(result.error ?? "Nutrition adherence could not be saved.");
-      }
-
-      return result.data;
-    },
-    onSuccess: () => {
-      for (const queryKey of getNutritionAdherenceRefreshQueryKeys()) {
-        void queryClient.invalidateQueries({ queryKey });
-      }
-    },
-  });
-
   if (activePlanQuery.isLoading || revisionsQuery.isLoading) {
     return <LoadingState title="Loading your nutrition plan…" />;
   }
@@ -158,15 +134,17 @@ export function NutritionWorkspace() {
 
   if (!activeRevision || !payload) {
     return (
-      <EmptyState
-        title="No active nutrition plan yet"
-        description="Accept a nutrition proposal in Chat to create your first plan revision."
-        action={
-          <Link href="/chat" className="confirmation-card__link">
-            Open Chat →
-          </Link>
-        }
-      />
+      <PlanViewLayout>
+        <EmptyState
+          title="No active nutrition plan yet"
+          description="Accept a nutrition proposal in Chat to create your first plan revision."
+          action={
+            <PlanViewCtaLink href="/chat" variant="primary">
+              Open Chat →
+            </PlanViewCtaLink>
+          }
+        />
+      </PlanViewLayout>
     );
   }
 
@@ -177,50 +155,58 @@ export function NutritionWorkspace() {
     payload,
     record: adherenceRecord,
   });
-  const targetKeys = targetCompletionKeysForPayload(payload);
   const targetSummary = summarizeNutritionTargets(payload);
-
-  const saveAdherence = (next: Partial<NutritionAdherenceState>) => {
-    adherenceMutation.mutate({
-      hydrationLitersConsumed:
-        next.hydrationLitersConsumed ?? adherenceState.hydrationLitersConsumed,
-      mealCompletion: next.mealCompletion ?? adherenceState.mealCompletion,
-      targetCompletion: next.targetCompletion ?? adherenceState.targetCompletion,
-      notes: next.notes ?? adherenceState.notes,
-    });
-  };
+  const adherenceFacts = buildNutritionPlanAdherenceFacts({ adherenceState, payload });
 
   return (
-    <div className="training-workspace">
-      <div className="training-layout">
-        <section className="panel panel-prominent training-plan-panel">
-          <p className="section-label">Active revision</p>
-          <h2>{payload.title}</h2>
-          <p>{payload.summary}</p>
+    <PlanViewLayout>
+      <ChangeViaChatNotice />
 
-          <dl className="training-meta">
-            <dt>Revision</dt>
-            <dd>#{activeRevision.revisionNumber}</dd>
-            <dt>Updated</dt>
-            <dd>{formatTimestamp(activeRevision.createdAt)}</dd>
-            <dt>Why this revision</dt>
-            <dd>{activeRevision.reason}</dd>
-          </dl>
+      <PlanViewGrid>
+        <PlanViewPanel variant="prominent">
+          <PlanHeader
+            label="Active plan"
+            title={payload.title}
+            summary={payload.summary}
+            revisionNumber={activeRevision.revisionNumber}
+          />
+
+          <PlanExecutionCallout
+            label="Daily execution"
+            title="Log meals and hydration on Today"
+            description={`Meal check-ins, hydration, and target follow-through belong on the Today screen for ${adherenceDate} and any other date.`}
+            action={
+              <PlanViewCtaLink href="/today">Log on Today →</PlanViewCtaLink>
+            }
+          />
+
+          <PlanFacts
+            items={[
+              { term: "Revision", description: `#${activeRevision.revisionNumber}` },
+              {
+                term: "Updated",
+                description: formatPlanRevisionTimestamp(activeRevision.createdAt),
+              },
+              {
+                term: "Source",
+                description: formatPlanRevisionSource(activeRevision.source),
+              },
+              { term: "Why this revision", description: activeRevision.reason },
+            ]}
+          />
 
           {targetSummary.length > 0 ? (
-            <div className="training-notes">
-              <h3>Daily targets</h3>
+            <PlanSection title="Daily targets">
               <ul>
                 {targetSummary.map((line) => (
                   <li key={line}>{line}</li>
                 ))}
               </ul>
-            </div>
+            </PlanSection>
           ) : null}
 
           {payload.mealStructure.length > 0 ? (
-            <div className="training-notes">
-              <h3>Meal structure</h3>
+            <PlanSection title="Meal structure">
               <ul>
                 {payload.mealStructure.map((meal) => (
                   <li key={meal.label}>
@@ -229,239 +215,88 @@ export function NutritionWorkspace() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </PlanSection>
           ) : null}
 
-          <dl className="training-meta">
-            <dt>Preferences</dt>
-            <dd>{formatList(payload.preferences, "None listed")}</dd>
-            <dt>Restrictions</dt>
-            <dd>{formatList(payload.restrictions, "None listed")}</dd>
-            <dt>Allergies to note</dt>
-            <dd>{formatList(payload.allergies, "None listed")}</dd>
-          </dl>
+          <PlanFacts
+            items={[
+              { term: "Preferences", description: formatList(payload.preferences, "None listed") },
+              { term: "Restrictions", description: formatList(payload.restrictions, "None listed") },
+              {
+                term: "Allergies to note",
+                description: formatList(payload.allergies, "None listed"),
+              },
+            ]}
+          />
 
           {payload.notes.length > 0 ? (
-            <div className="training-notes">
-              <h3>Coach notes</h3>
+            <PlanSection title="Coach notes">
               <ul>
                 {payload.notes.map((note) => (
                   <li key={note}>{note}</li>
                 ))}
               </ul>
-            </div>
+            </PlanSection>
           ) : null}
-        </section>
+        </PlanViewPanel>
 
-        <section className="panel panel-secondary panel-wide training-history-panel">
-          <p className="section-label">Today&apos;s adherence</p>
-          <h2>Daily follow-through ({adherenceDate})</h2>
-
+        <PlanViewPanel
+          variant="wide"
+          label="Today's follow-through"
+          title="What you've logged today"
+          titleId="nutrition-adherence-panel"
+          intro={`Read-only summary for ${adherenceDate}. Update meals, hydration, and notes on Today.`}
+        >
           {adherenceQuery.isLoading ? <p className="muted-text">Loading adherence…</p> : null}
           {adherenceQuery.isError ? (
             <p className="form-error" role="alert">
               {adherenceQuery.error instanceof Error
                 ? adherenceQuery.error.message
-                : "Today&apos;s adherence could not be loaded."}
+                : "Today's adherence could not be loaded."}
             </p>
           ) : null}
 
           {!adherenceQuery.isLoading && !adherenceQuery.isError ? (
             <>
-              {payload.hydrationLiters != null ? (
-                <div className="training-notes">
-                  <h3>Hydration progress</h3>
-                  <p className="muted-text">
-                    Target: {payload.hydrationLiters} L ·{" "}
-                    {formatHydrationProgress(
-                      adherenceState.hydrationLitersConsumed,
-                      payload.hydrationLiters,
-                    )}
-                  </p>
-                  <label className="form-field">
-                    <span>Liters consumed</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={
-                        hydrationDraft ||
-                        (adherenceState.hydrationLitersConsumed?.toString() ?? "")
-                      }
-                      onChange={(event) => setHydrationDraft(event.target.value)}
-                      onBlur={() => {
-                        const parsed = hydrationDraft.trim()
-                          ? Number(hydrationDraft)
-                          : adherenceState.hydrationLitersConsumed;
-                        saveAdherence({
-                          hydrationLitersConsumed:
-                            parsed == null || Number.isNaN(parsed) ? null : parsed,
-                        });
-                        setHydrationDraft("");
-                      }}
-                    />
-                  </label>
-                </div>
-              ) : null}
-
-              {payload.mealStructure.length > 0 ? (
-                <div className="training-notes">
-                  <h3>Meals followed</h3>
-                  <ul className="training-revision-list">
-                    {adherenceState.mealCompletion.map((meal) => (
-                      <li key={meal.label} className="training-revision-card nested-card">
-                        <label className="form-field">
-                          <input
-                            type="checkbox"
-                            checked={meal.completed}
-                            disabled={adherenceMutation.isPending}
-                            onChange={() => {
-                              saveAdherence({
-                                mealCompletion: toggleMealCompletion(
-                                  adherenceState.mealCompletion,
-                                  meal.label,
-                                ),
-                              });
-                            }}
-                          />
-                          <span>{meal.label}</span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {targetKeys.length > 0 ? (
-                <div className="training-notes">
-                  <h3>Target completion</h3>
-                  <ul className="training-revision-list">
-                    {targetKeys.map((key) => (
-                      <li key={key} className="training-revision-card nested-card">
-                        <div className="training-revision-header">
-                          <strong>{targetCompletionLabel(key)}</strong>
-                          <span className="muted-text">
-                            {formatTargetCompletionLabel(adherenceState.targetCompletion[key])}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          className="button-secondary"
-                          disabled={adherenceMutation.isPending}
-                          onClick={() => {
-                            saveAdherence({
-                              targetCompletion: toggleTargetCompletion(
-                                adherenceState.targetCompletion,
-                                key,
-                              ),
-                            });
-                          }}
-                        >
-                          Cycle status
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              <div className="training-notes">
-                <h3>Daily note</h3>
-                {adherenceState.notes.length > 0 ? (
-                  <ul>
-                    {adherenceState.notes.map((note) => (
-                      <li key={note}>{note}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="muted-text">No notes logged for today yet.</p>
-                )}
-                <label className="form-field">
-                  <span>Add note</span>
-                  <textarea
-                    rows={2}
-                    value={noteDraft}
-                    onChange={(event) => setNoteDraft(event.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="button-coach"
-                  disabled={!noteDraft.trim() || adherenceMutation.isPending}
-                  onClick={() => {
-                    const trimmed = noteDraft.trim();
-                    if (!trimmed) {
-                      return;
-                    }
-
-                    saveAdherence({
-                      notes: [...adherenceState.notes, trimmed],
-                    });
-                    setNoteDraft("");
-                  }}
-                >
-                  Save note
-                </button>
-              </div>
-
-              {adherenceRecord ? (
-                <details className="proposal-details">
-                  <summary>Adherence debug record</summary>
-                  <pre>{JSON.stringify(adherenceRecord, null, 2)}</pre>
-                </details>
+              {adherenceFacts.length > 0 ? (
+                <PlanFacts items={adherenceFacts} />
               ) : (
-                <p className="muted-text">No adherence record persisted for today yet.</p>
+                <p className="muted-text">No adherence logged for today yet.</p>
               )}
 
-              {adherenceMutation.isError ? (
-                <p className="form-error" role="alert">
-                  {adherenceMutation.error instanceof Error
-                    ? adherenceMutation.error.message
-                    : "Adherence could not be saved."}
-                </p>
-              ) : null}
+              <p>
+                <PlanViewCtaLink href="/today">Log on Today →</PlanViewCtaLink>
+              </p>
             </>
           ) : null}
-        </section>
+        </PlanViewPanel>
 
-        <section className="panel panel-secondary panel-wide training-history-panel">
-          <p className="section-label">Past revisions</p>
-          <h2>Revision history</h2>
-          {revisions.length === 0 ? (
-            <p className="muted-text">No earlier revisions yet.</p>
-          ) : (
-            <ul className="training-revision-list">
+        <PlanViewPanel
+          label="Revision context"
+          title="Revision history"
+          titleId="nutrition-revision-history"
+          intro="Earlier revisions stay on record. Logged meals and hydration stay tied to the revision that was active when you logged them."
+        >
+          <RevisionHistoryCollapsible
+            count={revisions.length}
+            activeRevisionNumber={activeRevision.revisionNumber}
+            emptyState={<p className="muted-text">No earlier revisions yet.</p>}
+          >
+            <RevisionHistoryList>
               {revisions.map((revision) => (
-                <li
+                <RevisionHistoryItem
                   key={revision.id}
-                  className={
-                    revision.id === activeRevision.id
-                      ? "training-revision-card nested-card active"
-                      : "training-revision-card nested-card"
-                  }
-                >
-                  <div className="training-revision-header">
-                    <strong>
-                      #{revision.revisionNumber} · {revision.payload.title}
-                    </strong>
-                    {revision.id === activeRevision.id ? (
-                      <span className="badge badge-valid">Active</span>
-                    ) : null}
-                  </div>
-                  <p className="muted-text">{revision.reason}</p>
-                  <p className="muted-text">
-                    {revision.source} · {formatTimestamp(revision.createdAt)}
-                  </p>
-                  <details className="proposal-details">
-                    <summary>Payload</summary>
-                    <pre>{JSON.stringify(revision.payload, null, 2)}</pre>
-                  </details>
-                </li>
+                  revisionNumber={revision.revisionNumber}
+                  title={revision.payload.title}
+                  reason={revision.reason}
+                  meta={formatRevisionHistoryMeta(revision.source, revision.createdAt)}
+                  active={revision.id === activeRevision.id}
+                />
               ))}
-            </ul>
-          )}
-        </section>
-      </div>
-    </div>
+            </RevisionHistoryList>
+          </RevisionHistoryCollapsible>
+        </PlanViewPanel>
+      </PlanViewGrid>
+    </PlanViewLayout>
   );
 }

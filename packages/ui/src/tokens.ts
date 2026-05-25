@@ -129,6 +129,62 @@ export const tokens = {
     metricHero: { sizeMin: "2.5rem", sizeMax: "3rem", weight: 600 },
     meta: { size: "0.8125rem" },
   },
+  /** Chat transcript surfaces — dark shell with elevated coach bubbles. */
+  chat: {
+    bubble: {
+      user: {
+        bg: "#f0fdfa",
+        border: "rgb(45 212 191 / 35%)",
+        text: "#0f766e",
+      },
+      assistant: {
+        bg: "#1a1a1a",
+        border: "#3a3a3a",
+        text: "#f5f5f3",
+        accent: "#2dd4bf",
+      },
+      crisis: {
+        bg: "#1a1a1a",
+        border: "#fca5a5",
+        accent: "#b91c1c",
+      },
+    },
+    metadata: {
+      neutral: { bg: "#111111", border: "#2a2a2a", text: "#c8c8c4" },
+      notice: { bg: "#fff7ed", border: "#fed7aa", text: "#9a3412" },
+      crisis: { bg: "#fef2f2", border: "#fca5a5", text: "#991b1b" },
+    },
+    promptChip: {
+      bg: "#141414",
+      border: "#3a3a3a",
+      text: "#c8c8c4",
+      hoverBorder: "#0d9488",
+      hoverText: "#0f766e",
+    },
+  },
+  /** Premium overview cards — dark hero on light canvas, read-only trend sections. */
+  overview: {
+    hero: {
+      surface: "#1a1a1a",
+      text: "#f5f5f3",
+      textMuted: "rgb(245 245 243 / 72%)",
+    },
+    card: {
+      surface: "#ffffff",
+      surfaceMuted: "#f0f0ed",
+      border: "#e5e5e0",
+      shadow: "0 1px 2px rgb(0 0 0 / 4%), 0 4px 16px rgb(0 0 0 / 6%)",
+    },
+    coachCard: {
+      border: "rgb(45 212 191 / 45%)",
+      shadow: "0 8px 24px rgb(20 184 166 / 18%)",
+    },
+    trend: {
+      barBg: "rgb(255 255 255 / 14%)",
+      barBgSparse: "rgb(255 255 255 / 8%)",
+      fill: "#14b8a6",
+    },
+  },
   font: {
     sans: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
@@ -147,6 +203,13 @@ export const cssVar = {
   surfaceMuted: "--color-surface-muted",
   surfaceNav: "--color-surface-sidebar",
   surfaceHeroDark: "--color-surface-hero-dark",
+  surfaceContent: "--color-surface-content",
+  surfaceContentElevated: "--color-surface-content-elevated",
+  textOnLight: "--color-text-on-light",
+  textOnLightSecondary: "--color-text-on-light-secondary",
+  borderSubtle: "--color-border-subtle",
+  borderStrongLight: "--color-border-strong-light",
+  accentPrimary: "--color-accent-primary",
   textPrimary: "--color-text-primary",
   textSecondary: "--color-text-secondary",
   textMuted: "--color-text-muted",
@@ -162,6 +225,14 @@ export const cssVar = {
   focusOutline: "--focus-outline",
   focusOutlineOffset: "--focus-outline-offset",
   touchTargetMin: "--touch-target-min",
+  chatBubbleUserBg: "--color-chat-bubble-user-bg",
+  chatBubbleUserBorder: "--color-chat-bubble-user-border",
+  chatBubbleAssistantBg: "--color-chat-bubble-assistant-bg",
+  chatBubbleAssistantBorder: "--color-chat-bubble-assistant-border",
+  chatBubbleCoachAccent: "--color-chat-bubble-coach-accent",
+  chatMetadataNoticeBg: "--color-chat-metadata-notice-bg",
+  chatMetadataCrisisBg: "--color-chat-metadata-crisis-bg",
+  chatMetadataCrisisBorder: "--color-chat-metadata-crisis-border",
 } as const;
 
 /** Returns a CSS `var(...)` reference for a mapped custom property. */

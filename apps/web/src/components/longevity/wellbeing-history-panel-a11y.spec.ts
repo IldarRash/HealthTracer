@@ -17,16 +17,15 @@ describe("WellbeingHistoryPanel accessibility", () => {
     expect(componentSource).toContain("wellbeing-trend-day__label");
   });
 
-  it("uses alert role for fetch errors and routes logging to Today", () => {
-    expect(componentSource).toContain('role="alert"');
-    expect(componentSource).toContain('href="/today"');
-    expect(componentSource).not.toContain("clinical assessment");
-  });
-
-  it("maps raw wellbeing fetch errors to friendly dashboard copy", () => {
+  it("uses compact canvas error and loading states with route constants", () => {
+    expect(componentSource).toContain("CanvasErrorState");
+    expect(componentSource).toContain("CanvasLoadingState");
+    expect(componentSource).toContain("OverviewInlineEmptyState");
+    expect(componentSource).toContain("OverviewCardLink");
+    expect(componentSource).toContain("LONGEVITY_CTA_ROUTES.today");
     expect(componentSource).toContain("formatWellbeingAggregatesError");
-    expect(componentSource).toContain(
-      "{formatWellbeingAggregatesError(errorMessage) ?? errorMessage}",
-    );
+    expect(componentSource).not.toContain('role="alert"');
+    expect(componentSource).not.toContain('href="/today"');
+    expect(componentSource).not.toContain("clinical assessment");
   });
 });

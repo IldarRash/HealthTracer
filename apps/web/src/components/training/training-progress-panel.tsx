@@ -35,7 +35,7 @@ import {
   buildWeeklyReviewPackView,
 } from "../../lib/weekly-review-ui-state";
 import { WeeklyReviewAdaptationPreview } from "../progress/weekly-review-adaptation-preview";
-import { Badge, Button, DashboardCard, DashboardGrid, EmptyState, ErrorState, LoadingState } from "../ui";
+import { Badge, Button, DashboardCard, DashboardGrid, EmptyState, ErrorState, LoadingState, ProgressiveDisclosure } from "../ui";
 
 async function loadOptionalWeeklySummary(
   token: string,
@@ -278,87 +278,24 @@ export function TrainingProgressPanel() {
           <p className="dashboard-card__hint">
             Structured summaries and trends across workouts, Today, nutrition, habits, and recovery.
           </p>
+          <p className="dashboard-card__hint">
+            Read-only on this page. Explore cross-domain patterns on{" "}
+            <Link href="/longevity" className="confirmation-card__link">
+              Longevity
+            </Link>{" "}
+            and accept plan changes in{" "}
+            <Link href="/chat" className="confirmation-card__link">
+              Chat
+            </Link>
+            .
+          </p>
         </div>
       </div>
-
-      <div
-        className="action-row progress-actions"
-        role="group"
-        aria-label="Weekly review actions"
-        aria-busy={isActionPending}
-      >
-        <Button
-          type="button"
-          className="button-coach"
-          disabled={isActionPending}
-          onClick={() => generateMutation.mutate(false)}
-        >
-          {isGeneratingSummary ? "Working…" : "Generate weekly summary"}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={!hasAnySummary || isActionPending}
-          onClick={() => generateMutation.mutate(true)}
-        >
-          Refresh current week
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={isActionPending}
-          onClick={() => reviewMutation.mutate(false)}
-        >
-          {isPackagingReview ? "Packaging…" : "Preview adaptation pack"}
-        </Button>
-      </div>
-      {actionStatusMessage ? (
-        <p className="sr-only" aria-live="polite">
-          {actionStatusMessage}
-        </p>
-      ) : null}
-
-      <div className="notice notice-inline" role="note">
-        <p>{PROGRESS_PLAN_CHANGE_NOTICE}</p>
-        <p>
-          Adaptation previews do not change your plans. Accept formal proposals in{" "}
-          <Link href="/chat" className="confirmation-card__link">
-            Chat
-          </Link>{" "}
-          when your coach returns typed suggestions.
-        </p>
-      </div>
-
-      {generateMutation.isError ? (
-        <p className="form-error" role="alert">
-          {generateMutation.error instanceof Error
-            ? generateMutation.error.message
-            : "Weekly summary could not be generated."}
-        </p>
-      ) : null}
-
-      {reviewMutation.isError ? (
-        <p className="form-error" role="alert">
-          {reviewMutation.error instanceof Error
-            ? reviewMutation.error.message
-            : "Weekly adaptation review could not be generated."}
-        </p>
-      ) : null}
 
       {!hasAnySummary ? (
         <EmptyState
           title="No weekly summary yet"
-          description="Generate a cross-domain summary from your structured history. Sparse domains stay visible as partial or deferred instead of hidden."
-          action={
-            <Button
-              type="button"
-              className="button-coach"
-              disabled={generateMutation.isPending}
-              onClick={() => generateMutation.mutate(false)}
-            >
-              Generate weekly summary
-            </Button>
-          }
+          description="Your latest cross-domain summary will appear here once available. Open Advanced weekly review tools below to generate one from your structured history."
         />
       ) : null}
 
@@ -382,6 +319,80 @@ export function TrainingProgressPanel() {
           <WeeklyReviewAdaptationPreview pack={reviewPack} />
         </section>
       ) : null}
+
+      <ProgressiveDisclosure
+        className="training-progress-tools-disclosure"
+        summary="Advanced weekly review tools"
+      >
+        <p className="dashboard-card__hint">
+          Generate or refresh summaries and preview adaptation packs. These tools do not change your
+          plans.
+        </p>
+
+        <div
+          className="action-row progress-actions"
+          role="group"
+          aria-label="Weekly review actions"
+          aria-busy={isActionPending}
+        >
+          <Button
+            type="button"
+            className="button-coach"
+            disabled={isActionPending}
+            onClick={() => generateMutation.mutate(false)}
+          >
+            {isGeneratingSummary ? "Working…" : "Generate weekly summary"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!hasAnySummary || isActionPending}
+            onClick={() => generateMutation.mutate(true)}
+          >
+            Refresh current week
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isActionPending}
+            onClick={() => reviewMutation.mutate(false)}
+          >
+            {isPackagingReview ? "Packaging…" : "Preview adaptation pack"}
+          </Button>
+        </div>
+        {actionStatusMessage ? (
+          <p className="sr-only" aria-live="polite">
+            {actionStatusMessage}
+          </p>
+        ) : null}
+
+        <div className="notice notice-inline" role="note">
+          <p>{PROGRESS_PLAN_CHANGE_NOTICE}</p>
+          <p>
+            Adaptation previews do not change your plans. Accept formal proposals in{" "}
+            <Link href="/chat" className="confirmation-card__link">
+              Chat
+            </Link>{" "}
+            when your coach returns typed suggestions.
+          </p>
+        </div>
+
+        {generateMutation.isError ? (
+          <p className="form-error" role="alert">
+            {generateMutation.error instanceof Error
+              ? generateMutation.error.message
+              : "Weekly summary could not be generated."}
+          </p>
+        ) : null}
+
+        {reviewMutation.isError ? (
+          <p className="form-error" role="alert">
+            {reviewMutation.error instanceof Error
+              ? reviewMutation.error.message
+              : "Weekly adaptation review could not be generated."}
+          </p>
+        ) : null}
+      </ProgressiveDisclosure>
     </div>
   );
 }

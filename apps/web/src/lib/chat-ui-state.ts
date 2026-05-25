@@ -10,6 +10,7 @@ import {
 import {
   buildChatWeeklyReviewPackView,
   parseChatWeeklyReviewMetadata,
+  WEEKLY_REVIEW_CHAT_PROMPT,
   type ChatWeeklyReviewPackView,
 } from "./weekly-review-ui-state";
 
@@ -25,12 +26,36 @@ export type OptimisticChatMessage = {
 
 export type DisplayChatMessage = ChatMessage | OptimisticChatMessage;
 
-export const SUGGESTED_CHAT_PROMPTS = [
-  "Review my cross-domain weekly summary and suggest typed adaptations I can approve individually.",
-  "Review my workout week",
-  "Help me adjust my goals",
-  "What's in my nutrition plan?",
-] as const;
+export type SuggestedChatPrompt = {
+  /** Short coach-forward label shown on the prompt chip. */
+  label: string;
+  /** Message sent to the coach when the chip is selected. */
+  message: string;
+};
+
+export const CHAT_EMPTY_STATE_TITLE = "Start a conversation with your coach";
+
+export const CHAT_EMPTY_STATE_DESCRIPTION =
+  "Ask about your week, workouts, goals, nutrition, or how you're feeling.";
+
+export const SUGGESTED_CHAT_PROMPTS: readonly SuggestedChatPrompt[] = [
+  {
+    label: "Review my weekly progress",
+    message: WEEKLY_REVIEW_CHAT_PROMPT,
+  },
+  {
+    label: "Review my workout week",
+    message: "Review my workout week",
+  },
+  {
+    label: "Help me adjust my goals",
+    message: "Help me adjust my goals",
+  },
+  {
+    label: "What's in my nutrition plan?",
+    message: "What's in my nutrition plan?",
+  },
+];
 
 export function createOptimisticUserMessage(
   threadId: string,

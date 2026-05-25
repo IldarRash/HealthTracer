@@ -49,6 +49,86 @@ function createChatService(deps: {
 }
 
 describe("ChatService", () => {
+  it("persists agent turn metadata on assistant messages", async () => {
+    let assistantMetadata: Record<string, unknown> = {};
+    const agentMetadata = {
+      provider: "stub" as const,
+      intent: "adjust_workout" as const,
+      purpose: "workout_adaptation" as const,
+      depth: "medium" as const,
+      timeRange: "14d" as const,
+      toolsInvoked: ["getWeeklyProgressContext" as const],
+      safety: {
+        status: "passed" as const,
+        blockedReasons: [],
+        constraintsApplied: ["Plan changes must be proposals requiring user approval."],
+      },
+      citations: [],
+    };
+
+    const service = createChatService({
+      chatRepository: {
+        findThreadById: async () => thread,
+        listMessagesByThreadId: async () => [],
+        createMessage: async (
+          _threadId: string,
+          role: "user" | "assistant" | "system",
+          content: string,
+          metadata: Record<string, unknown> = {},
+        ) => {
+          if (role === "assistant") {
+            assistantMetadata = metadata;
+          }
+
+          return {
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          };
+        },
+        createProposal: async () => {
+          throw new Error("createProposal should not be called");
+        },
+        touchThread: async () => undefined,
+      },
+      usersService: {
+        resolveFromAuth: async () => user,
+      },
+      aiService: {
+        generateCoachResponse: async () => ({
+          output: {
+            reply: "Here is a coaching reply.",
+            proposals: [],
+          },
+          parseErrors: [],
+          replySafetyErrors: [],
+          agentMetadata,
+        }),
+      },
+      proposalValidationService: {
+        validateRawProposal: () => ({ valid: true, errors: [] }),
+        validateCorrelationEvidenceOwnership: async () => [],
+        validateProvenanceOwnership: async () => [],
+        validateProgressLinkedProvenanceRequired: () => [],
+        validateGoalProposalHierarchy: async () => [],
+        validateTodayChecklistGoalSourceRefs: async () => [],
+        validateRecoveryAwareWorkoutAdaptation: async () => [],
+        validateHabitProposalContext: async () => [],
+      },
+    });
+
+    await service.sendMessage(auth, thread.id, {
+      content: "Can you adapt my workout this week?",
+    });
+
+    expect(assistantMetadata.agent).toEqual(agentMetadata);
+    expect(assistantMetadata.parseErrors).toEqual([]);
+    expect(assistantMetadata.replySafetyErrors).toEqual([]);
+  });
+
   it("persists invalid proposals with validation errors instead of dropping them", async () => {
     const captured: Array<{
       validationStatus: string;

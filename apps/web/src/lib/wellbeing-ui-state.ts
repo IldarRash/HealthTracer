@@ -131,6 +131,23 @@ export function resolveWellbeingCrisisPreview(input: {
   });
 }
 
+export function wellbeingCheckInIndicatesCrisisSupport(
+  checkIn: WellbeingCheckInRecord | null | undefined,
+): boolean {
+  if (!checkIn) {
+    return false;
+  }
+
+  if (checkIn.crisisFlagReasons.length > 0) {
+    return true;
+  }
+
+  return evaluateWellbeingCrisisFlags({
+    moodScore: checkIn.moodScore,
+    note: checkIn.note,
+  }).shouldShowCrisisSupport;
+}
+
 export function resolveWellbeingCrisisDisplay(
   preview: WellbeingCrisisEvaluation,
   serverEvaluation: WellbeingCrisisEvaluation | null,
@@ -151,6 +168,74 @@ export function resolveWellbeingCrisisDisplay(
     reasons: [],
     copy: null,
   };
+}
+
+export function resolveWellbeingLiveCrisisPreviewForParent(
+  preview: WellbeingCrisisEvaluation,
+  serverCrisisSupport: WellbeingCrisisEvaluation | null,
+): WellbeingCrisisEvaluation | null {
+  return resolveWellbeingCrisisForParent({
+    preview,
+    serverCrisisSupport,
+    persistedCheckIn: null,
+  });
+}
+
+export function resolveWellbeingCrisisForParent(input: {
+  preview: WellbeingCrisisEvaluation;
+  serverCrisisSupport: WellbeingCrisisEvaluation | null;
+  persistedCheckIn: WellbeingCheckInRecord | null;
+}): WellbeingCrisisEvaluation | null {
+  if (input.serverCrisisSupport?.shouldShowCrisisSupport) {
+    return input.serverCrisisSupport;
+  }
+
+  if (
+    input.persistedCheckIn &&
+    wellbeingCheckInIndicatesCrisisSupport(input.persistedCheckIn)
+  ) {
+    const evaluation = evaluateWellbeingCrisisFlags({
+      moodScore: input.persistedCheckIn.moodScore,
+      note: input.persistedCheckIn.note,
+    });
+
+    return {
+      shouldShowCrisisSupport: true,
+      reasons:
+        input.persistedCheckIn.crisisFlagReasons.length > 0
+          ? input.persistedCheckIn.crisisFlagReasons
+          : evaluation.reasons,
+      copy: WELLBEING_CRISIS_SUPPORT_COPY,
+    };
+  }
+
+  if (!input.preview.shouldShowCrisisSupport) {
+    return null;
+  }
+
+  return {
+    ...input.preview,
+    copy: input.preview.copy ?? WELLBEING_CRISIS_SUPPORT_COPY,
+  };
+}
+
+export function shouldRenderWellbeingCrisisInCard(input: {
+  crisisDisplay: WellbeingCrisisEvaluation;
+  crisisPreview?: WellbeingCrisisEvaluation;
+  serverCrisisSupport?: WellbeingCrisisEvaluation | null;
+  delegateLivePreviewToParent?: boolean;
+  delegateToParent?: boolean;
+}): boolean {
+  if (!input.crisisDisplay.shouldShowCrisisSupport || !input.crisisDisplay.copy) {
+    return false;
+  }
+
+  const delegateToParent =
+    input.delegateToParent ??
+    input.delegateLivePreviewToParent ??
+    false;
+
+  return !delegateToParent;
 }
 
 export type WellbeingCheckInCardView =

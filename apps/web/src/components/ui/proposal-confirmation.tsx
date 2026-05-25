@@ -4,6 +4,8 @@ import { cn } from "../../lib/utils";
 type ProposalConfirmationProps = HTMLAttributes<HTMLElement> & {
   status?: "pending" | "accepted" | "rejected" | "valid" | "invalid" | "superseded";
   title: string;
+  /** Compact inline card styling for chat transcript proposal summaries. */
+  inline?: boolean;
   meta?: ReactNode;
   badges?: ReactNode;
   actions?: ReactNode;
@@ -13,6 +15,7 @@ type ProposalConfirmationProps = HTMLAttributes<HTMLElement> & {
 export function ProposalConfirmation({
   status = "pending",
   title,
+  inline = false,
   meta,
   badges,
   actions,
@@ -22,7 +25,14 @@ export function ProposalConfirmation({
 }: ProposalConfirmationProps) {
   return (
     <article
-      className={cn("confirmation-card", "proposal-card", `status-${status}`, className)}
+      className={cn(
+        "confirmation-card",
+        "proposal-card",
+        "proposal-summary-card",
+        `status-${status}`,
+        inline && "confirmation-card--inline",
+        className,
+      )}
       {...props}
     >
       <header className="confirmation-card__header proposal-header">

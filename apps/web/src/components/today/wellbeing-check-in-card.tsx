@@ -17,13 +17,17 @@ import {
   MOOD_SCORE_LABELS,
   resolveWellbeingCrisisDisplay,
   resolveWellbeingCrisisPreview,
+  resolveWellbeingCrisisForParent,
+  shouldRenderWellbeingCrisisInCard,
   STRESS_SCORE_LABELS,
 } from "../../lib/wellbeing-ui-state";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
 import { WellbeingScaleInput } from "../wellbeing/wellbeing-scale-input";
+import { CanvasErrorState, CanvasLoadingState, CompactDomainCard } from "../ui";
 
 type WellbeingCheckInCardProps = {
   selectedDate: string;
+  onCrisisSupportChange?: (evaluation: WellbeingCrisisEvaluation | null) => void;
 };
 
 function checkInToFormState(checkIn: WellbeingCheckInRecord | null): {
@@ -38,7 +42,10 @@ function checkInToFormState(checkIn: WellbeingCheckInRecord | null): {
   };
 }
 
-export function WellbeingCheckInCard({ selectedDate }: WellbeingCheckInCardProps) {
+export function WellbeingCheckInCard({
+  selectedDate,
+  onCrisisSupportChange,
+}: WellbeingCheckInCardProps) {
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const [moodScore, setMoodScore] = useState<WellbeingScore | null>(null);
@@ -113,6 +120,30 @@ export function WellbeingCheckInCard({ selectedDate }: WellbeingCheckInCardProps
 
   const crisisPreview = resolveWellbeingCrisisPreview({ moodScore, note });
   const crisisDisplay = resolveWellbeingCrisisDisplay(crisisPreview, serverCrisisSupport);
+  const showCrisisInCard = shouldRenderWellbeingCrisisInCard({
+    crisisDisplay,
+    delegateToParent: onCrisisSupportChange != null,
+  });
+
+  useEffect(() => {
+    if (!onCrisisSupportChange) {
+      return;
+    }
+
+    onCrisisSupportChange(
+      resolveWellbeingCrisisForParent({
+        preview: resolveWellbeingCrisisPreview({ moodScore, note }),
+        serverCrisisSupport,
+        persistedCheckIn: existingCheckIn,
+      }),
+    );
+  }, [
+    existingCheckIn,
+    moodScore,
+    note,
+    onCrisisSupportChange,
+    serverCrisisSupport,
+  ]);
   const canSave = canSubmitWellbeingCheckIn({
     moodScore,
     stressScore,
@@ -125,38 +156,49 @@ export function WellbeingCheckInCard({ selectedDate }: WellbeingCheckInCardProps
 
   if (checkInQuery.isLoading) {
     return (
-      <section className="wellbeing-check-in-card nested-card" aria-busy="true">
-        <p className="section-label">Wellbeing check-in</p>
-        <p className="muted-text">Loading today&apos;s check-in…</p>
-      </section>
+      <CompactDomainCard
+        className="wellbeing-check-in-card"
+        label="Wellbeing check-in"
+        title="How are you feeling?"
+        titleId="wellbeing-check-in-heading"
+        busy
+      >
+        <CanvasLoadingState compact title="Loading today&apos;s check-in…" />
+      </CompactDomainCard>
     );
   }
 
   if (checkInQuery.isError) {
     return (
-      <section className="wellbeing-check-in-card nested-card">
-        <p className="section-label">Wellbeing check-in</p>
-        <p className="form-error" role="alert">
-          {checkInQuery.error instanceof Error
-            ? checkInQuery.error.message
-            : "Check-in could not be loaded."}
-        </p>
-      </section>
+      <CompactDomainCard
+        className="wellbeing-check-in-card"
+        label="Wellbeing check-in"
+        title="How are you feeling?"
+        titleId="wellbeing-check-in-heading"
+      >
+        <CanvasErrorState
+          compact
+          title="Check-in unavailable"
+          description={
+            checkInQuery.error instanceof Error
+              ? checkInQuery.error.message
+              : "Check-in could not be loaded."
+          }
+        />
+      </CompactDomainCard>
     );
   }
 
   return (
-    <section className="wellbeing-check-in-card nested-card" aria-labelledby="wellbeing-check-in-heading">
-      <p className="section-label">Wellbeing check-in</p>
-      <h3 id="wellbeing-check-in-heading">How are you feeling?</h3>
-      <p className="muted-text">
-        Quick mood and stress snapshot for wellness coaching — separate from daily execution
-        feedback.
-      </p>
+    <CompactDomainCard
+      className="wellbeing-check-in-card"
+      label="Wellbeing check-in"
+      title="How are you feeling?"
+      titleId="wellbeing-check-in-heading"
+      summary="Quick mood and stress snapshot for wellness coaching — separate from daily execution feedback."
+    >
 
-      {crisisDisplay.shouldShowCrisisSupport && crisisDisplay.copy ? (
-        <CrisisSupportPanel copy={crisisDisplay.copy} />
-      ) : null}
+      {showCrisisInCard ? <CrisisSupportPanel copy={crisisDisplay.copy!} /> : null}
 
       {summaryView?.status === "saved" && !isEditing ? (
         <div className="wellbeing-check-in-summary">
@@ -247,6 +289,6 @@ export function WellbeingCheckInCard({ selectedDate }: WellbeingCheckInCardProps
           ) : null}
         </div>
       )}
-    </section>
+    </CompactDomainCard>
   );
 }

@@ -16,8 +16,10 @@ import {
   getProposalIntentLabel,
   getProposalStatusBadgeTone,
   getProposalStatusLabel,
+  INLINE_PROPOSAL_VALIDATION_HEADING,
   isHabitPlanProposalIntent,
   mergeProposalsById,
+  shouldShowInlineProposalIntentLabel,
 } from "./proposal-ui-state.js";
 
 describe("proposal UI state", () => {
@@ -109,11 +111,30 @@ describe("proposal UI state", () => {
     expect(getProposalDomainLabel("workout")).toBe("Workout");
     expect(getProposalDomainLabel("goal")).toBe("Goal");
     expect(getProposalDomainLabel("recipe")).toBe("Recipe");
+    expect(getProposalDomainRoute("workout")).toBe("/training");
     expect(getProposalDomainRoute("goal")).toBe("/profile#goals");
     expect(getProposalDomainRoute("nutrition")).toBe("/nutrition");
     expect(getProposalDomainRoute("recipe")).toBe("/nutrition");
     expect(getProposalDomainRoute("today")).toBe("/today");
     expect(getProposalDomainRoute("general")).toBeNull();
+    expect(
+      getProposalNavigationRoute({
+        intent: "adapt_workout_plan",
+        targetDomain: "workout",
+      }),
+    ).toBe("/training");
+    expect(
+      getProposalNavigationRoute({
+        intent: "adjust_nutrition_plan",
+        targetDomain: "nutrition",
+      }),
+    ).toBe("/nutrition");
+    expect(
+      getProposalNavigationRoute({
+        intent: "recommend_recipes",
+        targetDomain: "recipe",
+      }),
+    ).toBe("/nutrition");
     expect(getProposalStatusLabel("pending")).toBe("Pending review");
     expect(getProposalDomainPillClass("profile")).toBe("proposal-domain-pill--profile");
     expect(getProposalDomainPillClass("recipe")).toBe("proposal-domain-pill--recipe");
@@ -225,5 +246,13 @@ describe("proposal UI state", () => {
     expect(getProposalStatusBadgeTone("accepted")).toBe("success");
     expect(getProposalStatusBadgeTone("rejected")).toBe("error");
     expect(getProposalStatusBadgeTone("superseded")).toBe("neutral");
+  });
+
+  it("uses user-facing inline proposal validation heading and intent visibility", () => {
+    expect(INLINE_PROPOSAL_VALIDATION_HEADING).toBe("Needs attention");
+    expect(shouldShowInlineProposalIntentLabel("create_goal")).toBe(false);
+    expect(shouldShowInlineProposalIntentLabel("adapt_workout_plan_from_progress")).toBe(
+      true,
+    );
   });
 });

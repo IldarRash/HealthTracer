@@ -1,37 +1,46 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { TodayDailyFeedback, TodayWorkoutDetail } from "@health/types";
+import type { TodayDailyFeedback, TodayWorkoutDetail, WellbeingCrisisEvaluation } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   apiQueryKeys,
+  getRecoveryContext,
   getTodayDay,
   getTodayHistory,
   getTodayItemStatusRefreshQueryKeys,
+  getWellbeingCheckIn,
   startTodayWorkout,
   updateTodayFeedback,
   updateTodayItemStatus,
   updateWorkoutSessionExercise,
 } from "../../lib/api";
+import { resolveTodayNutritionMealAction } from "../../lib/today-nutrition-ui-state";
 import {
   buildFeedbackPayload,
   canExecuteTodayWorkout,
   canStartTodayWorkout,
   canSubmitTodayFeedback,
   canUpdateTodayItem,
-  formatAdherenceScore,
   formatAdherenceSummary,
+  formatDisplayDate,
+  formatHistoryTaskCountBadge,
+  formatLocalIsoDate,
+  formatTaskCountChip,
   formatTodayHierarchySourceRef,
   formatTodayHabitItemSourceLabel,
-  formatDisplayDate,
-  formatLocalIsoDate,
   hasTodayWorkoutExecutionStarted,
   historyEntrySummaryLabel,
   isTodayHabitItem,
   mergeTodayHistoryWithCurrentDay,
+  resolveTodayNextAction,
+  buildTodayDisclosureResetKey,
   sessionStatusLabel,
+  shouldExpandTodayCheckInsSection,
+  shouldExpandTodayDetailsSection,
+  shouldExpandTodayPlanSection,
   todayItemCardClass,
   todayItemClosedMessage,
   todayItemKindLabel,
@@ -40,6 +49,7 @@ import {
   todayWorkoutStatusBadgeClass,
   todayWorkoutSummaryLabel,
 } from "../../lib/today-ui-state";
+import { wellbeingCheckInIndicatesCrisisSupport } from "../../lib/wellbeing-ui-state";
 import {
   canUpdateSessionExercise,
   formatSessionExerciseDetailLines,
@@ -50,13 +60,29 @@ import {
   sessionExerciseStatusBadgeClass,
   sessionExerciseStatusLabel,
 } from "../../lib/training-ui-state";
-import { EmptyState, ErrorState, LoadingState } from "../ui";
-import { HabitAdherenceSummary } from "./habit-adherence-summary";
+import {
+  ActionPriorityCard,
+  CanvasEmptyState,
+  CanvasErrorState,
+  CanvasLoadingState,
+  CommandCenterLayout,
+  CompactDomainCard,
+  ProgressiveDisclosure,
+  SectionNav,
+  StatusBadge,
+} from "../ui";
+import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
 import { RecoveryCheckInCard } from "./recovery-check-in-card";
 import { TodayNutritionCard } from "./today-nutrition-card";
 import { WellbeingCheckInCard } from "./wellbeing-check-in-card";
 
 const HISTORY_LIMIT = 7;
+
+const TODAY_SECTIONS = [
+  { id: "today-plan", label: "Plan" },
+  { id: "today-check-ins", label: "Check-ins" },
+  { id: "today-details", label: "Details" },
+] as const;
 
 function feedbackToFormState(feedback: TodayDailyFeedback | null): {
   notes: string;
@@ -169,27 +195,25 @@ function TodayWorkoutPanel({
   };
 
   return (
-    <section
-      className={`today-workout-panel nested-card training-session-card training-session-card--${workout.status}`}
-      aria-labelledby="today-workout-heading"
-    >
-      <p className="section-label">Today&apos;s workout</p>
-      <div className="training-session-header">
-        <div>
-          <h3 id="today-workout-heading">{workout.title}</h3>
-          <p className="muted-text">{todayWorkoutSummaryLabel(workout)}</p>
-        </div>
-        <span className={todayWorkoutStatusBadgeClass(workout.status)}>
+    <CompactDomainCard
+      className={`today-workout-panel training-session-card training-session-card--${workout.status}`}
+      label="Today&apos;s workout"
+      title={workout.title}
+      titleId="today-workout-heading"
+      summary={todayWorkoutSummaryLabel(workout)}
+      badge={
+        <StatusBadge className={todayWorkoutStatusBadgeClass(workout.status)}>
           {sessionStatusLabel(workout.status)}
-        </span>
-      </div>
-
-      <div className="action-row proposal-actions today-workout-links">
-        <Link href="/training" className="confirmation-card__link">
-          Open Workouts →
-        </Link>
-      </div>
-
+        </StatusBadge>
+      }
+      actions={
+        <div className="today-workout-links">
+          <Link href="/training" className="confirmation-card__link">
+            Open Workouts →
+          </Link>
+        </div>
+      }
+    >
       {workout.isRestDay ? (
         <p className="muted-text">Rest day — no structured workout to run.</p>
       ) : null}
@@ -208,7 +232,11 @@ function TodayWorkoutPanel({
       ) : null}
 
       {showExerciseList ? (
-        <div className="today-workout-exercises">
+        <ProgressiveDisclosure
+          className="today-workout-exercises"
+          summary="Exercise list"
+          defaultOpen
+        >
           {exerciseGroups.map((group, groupIndex) => (
             <div key={`${group.circuitLabel ?? "standalone"}-${groupIndex}`} className="today-workout-group">
               {group.circuitLabel ? (
@@ -226,9 +254,11 @@ function TodayWorkoutPanel({
                     >
                       <div className="today-workout-exercise-header">
                         <strong>{formatSessionExercisePrescription(exercise)}</strong>
-                        <span className={sessionExerciseStatusBadgeClass(exercise.execution.status)}>
+                        <StatusBadge
+                          className={sessionExerciseStatusBadgeClass(exercise.execution.status)}
+                        >
                           {sessionExerciseStatusLabel(exercise.execution.status)}
-                        </span>
+                        </StatusBadge>
                       </div>
 
                       {detailLines.length > 0 ? (
@@ -283,7 +313,7 @@ function TodayWorkoutPanel({
               </ul>
             </div>
           ))}
-        </div>
+        </ProgressiveDisclosure>
       ) : null}
 
       {!workout.isRestDay && isTerminalSessionStatus(workout.status) ? (
@@ -311,7 +341,7 @@ function TodayWorkoutPanel({
             : "Exercise could not be updated."}
         </p>
       ) : null}
-    </section>
+    </CompactDomainCard>
   );
 }
 
@@ -323,6 +353,13 @@ export function TodayWorkspace() {
   const [feedbackEnergy, setFeedbackEnergy] = useState("");
   const [feedbackDifficulty, setFeedbackDifficulty] = useState("");
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
+  const [activeCrisisSupport, setActiveCrisisSupport] = useState<WellbeingCrisisEvaluation | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setActiveCrisisSupport(null);
+  }, [selectedDate]);
 
   const dayQuery = useQuery({
     queryKey: apiQueryKeys.todayDay(selectedDate),
@@ -359,6 +396,40 @@ export function TodayWorkspace() {
       }
 
       return result.data?.entries ?? [];
+    },
+  });
+
+  const wellbeingQuery = useQuery({
+    queryKey: apiQueryKeys.wellbeingCheckIn(selectedDate),
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Clerk session token is unavailable.");
+      }
+
+      const result = await getWellbeingCheckIn(token, selectedDate);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      return result.data?.checkIn ?? null;
+    },
+  });
+
+  const recoveryQuery = useQuery({
+    queryKey: apiQueryKeys.recoveryContext(selectedDate),
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Clerk session token is unavailable.");
+      }
+
+      const result = await getRecoveryContext(token, selectedDate);
+      if (result.error || !result.data) {
+        throw new Error(result.error ?? "Recovery context could not be loaded.");
+      }
+
+      return result.data;
     },
   });
 
@@ -461,12 +532,12 @@ export function TodayWorkspace() {
   };
 
   if (dayQuery.isLoading) {
-    return <LoadingState title="Loading your day…" />;
+    return <CanvasLoadingState title="Loading your day…" />;
   }
 
   if (dayQuery.isError) {
     return (
-      <ErrorState
+      <CanvasErrorState
         title="Today unavailable"
         description={
           dayQuery.error instanceof Error
@@ -488,13 +559,77 @@ export function TodayWorkspace() {
     skippedOptional: 0,
   };
   const historyEntries = mergeTodayHistoryWithCurrentDay(historyQuery.data ?? [], day);
+  const nutritionMealAction = resolveTodayNutritionMealAction(day?.nutrition ?? null);
+  const hasWellbeingCheckIn =
+    wellbeingQuery.isLoading || wellbeingQuery.isError
+      ? null
+      : wellbeingQuery.data != null;
+  const hasRecoveryCheckIn =
+    recoveryQuery.isLoading || recoveryQuery.isError ? null : recoveryQuery.data?.checkIn != null;
+  const wellbeingIndicatesCrisisSupport =
+    wellbeingQuery.isLoading || wellbeingQuery.isError
+      ? null
+      : wellbeingCheckInIndicatesCrisisSupport(wellbeingQuery.data ?? null);
+  const nextAction = resolveTodayNextAction({
+    items,
+    workout: day?.workout ?? null,
+    hasWellbeingCheckIn,
+    hasRecoveryCheckIn,
+    hasPendingNutritionMeal: nutritionMealAction.hasPendingMeal,
+    pendingNutritionMealLabel: nutritionMealAction.pendingMealLabel,
+    existingFeedback: day?.feedback ?? null,
+  });
+  const expandMovement = shouldExpandTodayPlanSection("movement", {
+    nextAction,
+    workout: day?.workout ?? null,
+    items,
+    hasPendingNutritionMeal: nutritionMealAction.hasPendingMeal,
+  });
+  const expandNutrition = shouldExpandTodayPlanSection("nutrition", {
+    nextAction,
+    workout: day?.workout ?? null,
+    items,
+    hasPendingNutritionMeal: nutritionMealAction.hasPendingMeal,
+  });
+  const expandHabits = shouldExpandTodayPlanSection("habits", {
+    nextAction,
+    workout: day?.workout ?? null,
+    items,
+    hasPendingNutritionMeal: nutritionMealAction.hasPendingMeal,
+  });
+  const expandCheckIns = shouldExpandTodayCheckInsSection({
+    nextAction,
+    hasWellbeingCheckIn,
+    hasRecoveryCheckIn,
+    wellbeingIndicatesCrisisSupport,
+  });
+  const expandDetails = shouldExpandTodayDetailsSection(nextAction);
 
   return (
-    <div className="training-workspace today-workspace" aria-busy={isBusy || undefined}>
-      <div className="training-layout">
-        <section className="panel panel-prominent training-sessions-panel">
-          <p className="section-label">Daily execution</p>
-          <h2>{formatDisplayDate(selectedDate)}</h2>
+    <CommandCenterLayout
+      className="training-workspace today-workspace"
+      aria-busy={isBusy || undefined}
+    >
+      <SectionNav sections={TODAY_SECTIONS} ariaLabel="Today sections" />
+      <div className="training-layout command-center__layout">
+        <ActionPriorityCard
+          id="today-hero-heading"
+          className="today-hero"
+          label="Today"
+          title={formatDisplayDate(selectedDate)}
+          hint={formatAdherenceSummary(adherence)}
+        >
+          <div className="today-hero-meta">
+            <StatusBadge className="badge badge-info today-progress-chip">
+              {formatTaskCountChip(adherence)}
+            </StatusBadge>
+            {adherence.completedOptional > 0 || adherence.skippedOptional > 0 ? (
+              <span className="muted-text today-adherence-optional">
+                Optional: {adherence.completedOptional} completed
+                {adherence.skippedOptional > 0 ? ` · ${adherence.skippedOptional} skipped` : ""}
+              </span>
+            ) : null}
+          </div>
 
           <div className="training-schedule-form nested-card today-date-picker">
             <div className="training-schedule-field">
@@ -510,273 +645,383 @@ export function TodayWorkspace() {
             </div>
           </div>
 
-          <div className="today-adherence-summary nested-card">
-            <p className="section-label">Adherence</p>
-            <div className="today-adherence-header">
-              <strong className="today-adherence-score">{formatAdherenceScore(adherence)}</strong>
-              <p className="muted-text">{formatAdherenceSummary(adherence)}</p>
-            </div>
-            {adherence.completedOptional > 0 || adherence.skippedOptional > 0 ? (
-              <p className="muted-text today-adherence-optional">
-                Optional: {adherence.completedOptional} completed
-                {adherence.skippedOptional > 0
-                  ? ` · ${adherence.skippedOptional} skipped`
-                  : ""}
-              </p>
-            ) : null}
-          </div>
+          <p className="muted-text today-longevity-link">
+            Habit consistency trends live on{" "}
+            <Link href="/longevity" className="confirmation-card__link">
+              Longevity →
+            </Link>
+          </p>
+        </ActionPriorityCard>
 
-          <HabitAdherenceSummary />
+        <ActionPriorityCard
+          className="today-next-action"
+          label="Next up"
+          title={nextAction.title}
+          hint={nextAction.description}
+          headingLevel={3}
+          footer={
+            <a href={`#${nextAction.anchorId}`} className="confirmation-card__link">
+              {nextAction.ctaLabel} →
+            </a>
+          }
+        />
 
-          <WellbeingCheckInCard selectedDate={selectedDate} />
+        <section
+          id="today-plan"
+          className="panel panel-prominent training-sessions-panel today-plan-panel"
+          aria-labelledby="today-plan-heading"
+        >
+          <p className="section-label">Today&apos;s plan</p>
+          <h2 id="today-plan-heading">Movement, nutrition, and tasks</h2>
 
-          <RecoveryCheckInCard selectedDate={selectedDate} />
+          <ProgressiveDisclosure
+            key={buildTodayDisclosureResetKey("movement", selectedDate, expandMovement)}
+            id="today-movement"
+            className="today-plan-section"
+            summary="Movement"
+            defaultOpen={expandMovement}
+          >
+            {day?.workout ? (
+              <TodayWorkoutPanel
+                workout={day.workout}
+                selectedDate={selectedDate}
+                isBusy={isBusy}
+                onRefresh={invalidateTodayQueries}
+              />
+            ) : (
+              <CanvasEmptyState
+                compact
+                title="No workout scheduled"
+                description="Schedule a session in Workouts or ask the coach in Chat."
+                action={
+                  <div className="action-row proposal-actions">
+                    <Link href="/training" className="confirmation-card__link">
+                      Open Workouts →
+                    </Link>
+                    <Link href="/chat" className="confirmation-card__link">
+                      Open Chat →
+                    </Link>
+                  </div>
+                }
+              />
+            )}
+          </ProgressiveDisclosure>
 
-          {day?.workout ? (
-            <TodayWorkoutPanel
-              workout={day.workout}
+          <ProgressiveDisclosure
+            key={buildTodayDisclosureResetKey("nutrition", selectedDate, expandNutrition)}
+            id="today-nutrition"
+            className="today-plan-section"
+            summary="Nutrition"
+            defaultOpen={expandNutrition}
+          >
+            <TodayNutritionCard
+              nutrition={day?.nutrition ?? null}
               selectedDate={selectedDate}
               isBusy={isBusy}
               onRefresh={invalidateTodayQueries}
             />
+          </ProgressiveDisclosure>
+
+          <ProgressiveDisclosure
+            key={buildTodayDisclosureResetKey("habits", selectedDate, expandHabits)}
+            id="today-habits"
+            className="today-plan-section"
+            summary="Habits & tasks"
+            defaultOpen={expandHabits}
+          >
+            {items.length === 0 ? (
+              <CanvasEmptyState
+                compact
+                title="No tasks for this day"
+                description="Accept a habit plan in Chat or accept a Today checklist proposal to build your daily plan."
+                action={
+                  <div className="action-row proposal-actions">
+                    <Link href="/training" className="confirmation-card__link">
+                      Open Workouts →
+                    </Link>
+                    <Link href="/chat" className="confirmation-card__link">
+                      Open Chat →
+                    </Link>
+                  </div>
+                }
+              />
+            ) : (
+              <ul className="training-session-list today-item-list">
+                {items.map((item) => {
+                  const hierarchySourceLabel = formatTodayHierarchySourceRef(item.source);
+                  const isHabitItem = isTodayHabitItem(item);
+
+                  return (
+                    <li key={item.id} className={todayItemCardClass(item.status)}>
+                      <div className="training-session-header">
+                        <div>
+                          <strong>{item.label}</strong>
+                          <p className="muted-text">
+                            {todayItemKindLabel(item.kind)}
+                            {item.required ? "" : " · Optional"}
+                          </p>
+                        </div>
+                        <StatusBadge className={todayItemStatusBadgeClass(item.status)}>
+                          {todayItemStatusLabel(item.status)}
+                        </StatusBadge>
+                      </div>
+
+                      {isHabitItem ? (
+                        <p className="muted-text today-item-source">
+                          {formatTodayHabitItemSourceLabel()}
+                        </p>
+                      ) : null}
+
+                      {!isHabitItem && hierarchySourceLabel ? (
+                        <p className="muted-text today-item-source">{hierarchySourceLabel}</p>
+                      ) : null}
+
+                      {!isHabitItem && item.source.type === "workout_session" ? (
+                        <p className="muted-text today-item-source">
+                          Linked to a scheduled workout session.
+                        </p>
+                      ) : null}
+
+                      {canUpdateTodayItem(item) ? (
+                        <div className="action-row proposal-actions today-item-actions">
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            disabled={updateItemMutation.isPending}
+                            onClick={() => handleItemStatus(item.id, "completed")}
+                          >
+                            {updatingItemId === item.id && updateItemMutation.isPending
+                              ? "Saving…"
+                              : isHabitItem
+                                ? "Mark habit complete"
+                                : "Mark complete"}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={updateItemMutation.isPending}
+                            onClick={() => handleItemStatus(item.id, "skipped")}
+                          >
+                            {isHabitItem ? "Skip habit today" : "Skip for now"}
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="muted-text">{todayItemClosedMessage(item)}</p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {updateItemMutation.isError ? (
+              <p className="form-error" role="alert">
+                {updateItemMutation.error instanceof Error
+                  ? updateItemMutation.error.message
+                  : "Task could not be updated."}
+              </p>
+            ) : null}
+          </ProgressiveDisclosure>
+        </section>
+
+        <section
+          id="today-check-ins"
+          className="panel panel-plan today-check-ins-panel"
+          aria-labelledby="today-check-ins-heading"
+        >
+          {activeCrisisSupport?.shouldShowCrisisSupport && activeCrisisSupport.copy ? (
+            <CrisisSupportPanel
+              copy={activeCrisisSupport.copy}
+              titleId="today-crisis-support-title"
+            />
           ) : null}
 
-          <TodayNutritionCard
-            nutrition={day?.nutrition ?? null}
-            selectedDate={selectedDate}
-            isBusy={isBusy}
-            onRefresh={invalidateTodayQueries}
-          />
+          <p className="section-label">Check-ins</p>
+          <h2 id="today-check-ins-heading">Recovery and wellbeing</h2>
+          <p className="muted-text">
+            Recovery and wellbeing snapshots for coaching — not medical assessments.
+          </p>
 
-          {items.length === 0 ? (
-            <EmptyState
-              title="No tasks for this day"
-              description="Schedule a workout, accept a habit plan in Chat, or accept a Today checklist proposal to build your daily plan."
-              action={
-                <div className="action-row proposal-actions">
-                  <Link href="/training" className="confirmation-card__link">
-                    Open Workouts →
-                  </Link>
-                  <Link href="/chat" className="confirmation-card__link">
-                    Open Chat →
-                  </Link>
-                </div>
-              }
-            />
-          ) : (
-            <ul className="training-session-list today-item-list">
-              {items.map((item) => {
-                const hierarchySourceLabel = formatTodayHierarchySourceRef(item.source);
-                const isHabitItem = isTodayHabitItem(item);
+          <ProgressiveDisclosure
+            key={buildTodayDisclosureResetKey("check-ins", selectedDate, expandCheckIns)}
+            className="today-check-ins-disclosure"
+            summary="Wellbeing and recovery forms"
+            defaultOpen={expandCheckIns}
+          >
+            <div className="today-check-ins-content">
+              <WellbeingCheckInCard
+                selectedDate={selectedDate}
+                onCrisisSupportChange={setActiveCrisisSupport}
+              />
+              <RecoveryCheckInCard selectedDate={selectedDate} />
+            </div>
+          </ProgressiveDisclosure>
+        </section>
 
-                return (
-                <li key={item.id} className={todayItemCardClass(item.status)}>
-                  <div className="training-session-header">
-                    <div>
-                      <strong>{item.label}</strong>
-                      <p className="muted-text">
-                        {todayItemKindLabel(item.kind)}
-                        {item.required ? "" : " · Optional"}
-                      </p>
-                    </div>
-                    <span className={todayItemStatusBadgeClass(item.status)}>
-                      {todayItemStatusLabel(item.status)}
-                    </span>
+        <section
+          id="today-details"
+          className="panel panel-secondary panel-wide today-details-panel"
+          aria-labelledby="today-details-heading"
+        >
+          <p className="section-label">Details</p>
+          <h2 id="today-details-heading">Reflection and recent history</h2>
+
+          <ProgressiveDisclosure
+            key={buildTodayDisclosureResetKey("details", selectedDate, expandDetails)}
+            className="today-details-disclosure"
+            summary="Daily reflection and history"
+            defaultOpen={expandDetails}
+          >
+            <div className="today-details-content">
+              <div
+                id="today-reflection"
+                className="today-feedback-panel"
+                aria-labelledby="today-reflection-heading"
+              >
+                <p className="section-label">Daily reflection</p>
+                <h3 id="today-reflection-heading">How did today go?</h3>
+                <p className="muted-text">
+                  Optional wellness context for your coach — energy, difficulty, or a short note.
+                </p>
+
+                <div className="today-feedback-form">
+                  <div className="training-schedule-field">
+                    <label htmlFor="today-feedback-notes">Notes</label>
+                    <textarea
+                      id="today-feedback-notes"
+                      rows={3}
+                      className="form-textarea training-notes-input"
+                      placeholder="What helped, what felt hard, anything to remember…"
+                      value={feedbackNotes}
+                      disabled={updateFeedbackMutation.isPending}
+                      maxLength={500}
+                      onChange={(event) => setFeedbackNotes(event.target.value)}
+                    />
                   </div>
 
-                  {isHabitItem ? (
-                    <p className="muted-text today-item-source">{formatTodayHabitItemSourceLabel()}</p>
-                  ) : null}
+                  <div className="training-schedule-fields">
+                    <div className="training-schedule-field">
+                      <label htmlFor="today-feedback-energy">Energy (1–10)</label>
+                      <input
+                        id="today-feedback-energy"
+                        className="training-schedule-input"
+                        type="number"
+                        min={1}
+                        max={10}
+                        inputMode="numeric"
+                        placeholder="Optional"
+                        value={feedbackEnergy}
+                        disabled={updateFeedbackMutation.isPending}
+                        onChange={(event) => setFeedbackEnergy(event.target.value)}
+                      />
+                    </div>
 
-                  {!isHabitItem && hierarchySourceLabel ? (
-                    <p className="muted-text today-item-source">{hierarchySourceLabel}</p>
-                  ) : null}
+                    <div className="training-schedule-field">
+                      <label htmlFor="today-feedback-difficulty">Difficulty (1–10)</label>
+                      <input
+                        id="today-feedback-difficulty"
+                        className="training-schedule-input"
+                        type="number"
+                        min={1}
+                        max={10}
+                        inputMode="numeric"
+                        placeholder="Optional"
+                        value={feedbackDifficulty}
+                        disabled={updateFeedbackMutation.isPending}
+                        onChange={(event) => setFeedbackDifficulty(event.target.value)}
+                      />
+                    </div>
+                  </div>
 
-                  {!isHabitItem && item.source.type === "workout_session" ? (
-                    <p className="muted-text today-item-source">
-                      Linked to a scheduled workout session.
+                  <div className="action-row proposal-actions">
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={!canSaveFeedback || updateFeedbackMutation.isPending}
+                      onClick={handleSaveFeedback}
+                    >
+                      {updateFeedbackMutation.isPending ? "Saving…" : "Save feedback"}
+                    </button>
+                  </div>
+
+                  {updateFeedbackMutation.isError ? (
+                    <p className="form-error" role="alert">
+                      {updateFeedbackMutation.error instanceof Error
+                        ? updateFeedbackMutation.error.message
+                        : "Feedback could not be saved."}
                     </p>
                   ) : null}
 
-                  {canUpdateTodayItem(item) ? (
-                    <div className="action-row proposal-actions today-item-actions">
-                      <button
-                        type="button"
-                        className="button button-primary"
-                        disabled={updateItemMutation.isPending}
-                        onClick={() => handleItemStatus(item.id, "completed")}
-                      >
-                        {updatingItemId === item.id && updateItemMutation.isPending
-                          ? "Saving…"
-                          : isHabitItem
-                            ? "Mark habit complete"
-                            : "Mark complete"}
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        disabled={updateItemMutation.isPending}
-                        onClick={() => handleItemStatus(item.id, "skipped")}
-                      >
-                        {isHabitItem ? "Skip habit today" : "Skip for now"}
-                      </button>
+                  {existingFeedback ? (
+                    <div className="training-feedback-callout">
+                      <span className="training-feedback-label">Saved feedback</span>
+                      <p>
+                        {[
+                          existingFeedback.notes,
+                          existingFeedback.energy != null
+                            ? `Energy ${existingFeedback.energy}/10`
+                            : null,
+                          existingFeedback.difficulty != null
+                            ? `Difficulty ${existingFeedback.difficulty}/10`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "Feedback recorded."}
+                      </p>
                     </div>
-                  ) : (
-                    <p className="muted-text">{todayItemClosedMessage(item)}</p>
-                  )}
-                </li>
-                );
-              })}
-            </ul>
-          )}
-
-          {updateItemMutation.isError ? (
-            <p className="form-error" role="alert">
-              {updateItemMutation.error instanceof Error
-                ? updateItemMutation.error.message
-                : "Task could not be updated."}
-            </p>
-          ) : null}
-        </section>
-
-        <section className="panel panel-plan today-feedback-panel">
-          <p className="section-label">Daily reflection</p>
-          <h2>How did today go?</h2>
-          <p className="muted-text">
-            Optional wellness context for your coach — energy, difficulty, or a short note.
-          </p>
-
-          <div className="today-feedback-form">
-            <div className="training-schedule-field">
-              <label htmlFor="today-feedback-notes">Notes</label>
-              <textarea
-                id="today-feedback-notes"
-                rows={3}
-                className="form-textarea training-notes-input"
-                placeholder="What helped, what felt hard, anything to remember…"
-                value={feedbackNotes}
-                disabled={updateFeedbackMutation.isPending}
-                maxLength={500}
-                onChange={(event) => setFeedbackNotes(event.target.value)}
-              />
-            </div>
-
-            <div className="training-schedule-fields">
-              <div className="training-schedule-field">
-                <label htmlFor="today-feedback-energy">Energy (1–10)</label>
-                <input
-                  id="today-feedback-energy"
-                  className="training-schedule-input"
-                  type="number"
-                  min={1}
-                  max={10}
-                  inputMode="numeric"
-                  placeholder="Optional"
-                  value={feedbackEnergy}
-                  disabled={updateFeedbackMutation.isPending}
-                  onChange={(event) => setFeedbackEnergy(event.target.value)}
-                />
+                  ) : null}
+                </div>
               </div>
 
-              <div className="training-schedule-field">
-                <label htmlFor="today-feedback-difficulty">Difficulty (1–10)</label>
-                <input
-                  id="today-feedback-difficulty"
-                  className="training-schedule-input"
-                  type="number"
-                  min={1}
-                  max={10}
-                  inputMode="numeric"
-                  placeholder="Optional"
-                  value={feedbackDifficulty}
-                  disabled={updateFeedbackMutation.isPending}
-                  onChange={(event) => setFeedbackDifficulty(event.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="action-row proposal-actions">
-              <button
-                type="button"
-                className="button button-primary"
-                disabled={!canSaveFeedback || updateFeedbackMutation.isPending}
-                onClick={handleSaveFeedback}
+              <div
+                id="today-history"
+                className="training-history-panel"
+                aria-labelledby="today-history-heading"
               >
-                {updateFeedbackMutation.isPending ? "Saving…" : "Save feedback"}
-              </button>
-            </div>
+                <p className="section-label">Recent days</p>
+                <h3 id="today-history-heading">Past 7 days</h3>
 
-            {updateFeedbackMutation.isError ? (
-              <p className="form-error" role="alert">
-                {updateFeedbackMutation.error instanceof Error
-                  ? updateFeedbackMutation.error.message
-                  : "Feedback could not be saved."}
-              </p>
-            ) : null}
-
-            {existingFeedback ? (
-              <div className="training-feedback-callout">
-                <span className="training-feedback-label">Saved feedback</span>
-                <p>
-                  {[
-                    existingFeedback.notes,
-                    existingFeedback.energy != null
-                      ? `Energy ${existingFeedback.energy}/10`
-                      : null,
-                    existingFeedback.difficulty != null
-                      ? `Difficulty ${existingFeedback.difficulty}/10`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") || "Feedback recorded."}
-                </p>
+                {historyQuery.isLoading ? (
+                  <p className="muted-text">Loading recent history…</p>
+                ) : historyQuery.isError ? (
+                  <p className="form-error" role="alert">
+                    {historyQuery.error instanceof Error
+                      ? historyQuery.error.message
+                      : "Recent history could not be loaded."}
+                  </p>
+                ) : historyEntries.length === 0 ? (
+                  <p className="muted-text">No recent daily history yet.</p>
+                ) : (
+                  <ul className="training-revision-list today-history-list">
+                    {historyEntries.map((entry) => (
+                      <li key={entry.date} className="training-revision-card nested-card">
+                        <div className="training-revision-header">
+                          <strong>{formatDisplayDate(entry.date)}</strong>
+                          <StatusBadge className="badge badge-info">
+                            {formatHistoryTaskCountBadge(entry)}
+                          </StatusBadge>
+                        </div>
+                        <p className="muted-text">{historyEntrySummaryLabel(entry)}</p>
+                        {entry.date !== selectedDate ? (
+                          <button
+                            type="button"
+                            className="confirmation-card__link today-history-link"
+                            onClick={() => setSelectedDate(entry.date)}
+                          >
+                            View this day →
+                          </button>
+                        ) : (
+                          <p className="muted-text">Currently selected</p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="panel panel-secondary panel-wide training-history-panel">
-          <p className="section-label">Recent days</p>
-          <h2>Daily progress history</h2>
-
-          {historyQuery.isLoading ? (
-            <p className="muted-text">Loading recent history…</p>
-          ) : historyQuery.isError ? (
-            <p className="form-error" role="alert">
-              {historyQuery.error instanceof Error
-                ? historyQuery.error.message
-                : "Recent history could not be loaded."}
-            </p>
-          ) : historyEntries.length === 0 ? (
-            <p className="muted-text">No recent daily history yet.</p>
-          ) : (
-            <ul className="training-revision-list today-history-list">
-              {historyEntries.map((entry) => (
-                <li key={entry.date} className="training-revision-card nested-card">
-                  <div className="training-revision-header">
-                    <strong>{formatDisplayDate(entry.date)}</strong>
-                    <span className="badge badge-info">
-                      {formatAdherenceScore(entry.adherence)}
-                    </span>
-                  </div>
-                  <p className="muted-text">{historyEntrySummaryLabel(entry)}</p>
-                  {entry.date !== selectedDate ? (
-                    <button
-                      type="button"
-                      className="confirmation-card__link today-history-link"
-                      onClick={() => setSelectedDate(entry.date)}
-                    >
-                      View this day →
-                    </button>
-                  ) : (
-                    <p className="muted-text">Currently selected</p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+            </div>
+          </ProgressiveDisclosure>
         </section>
       </div>
-    </div>
+    </CommandCenterLayout>
   );
 }

@@ -1,20 +1,21 @@
 import { auth } from "@clerk/nextjs/server";
+import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
 import { AppLayout } from "../../src/components/app-layout";
 import { PageContent, PageHeader } from "../../src/components/ui";
 import { TodayWorkspace } from "../../src/components/today/today-workspace";
 
 export default async function TodayPage() {
-  const { isAuthenticated, redirectToSignIn } = await auth();
+  const { isAuthenticated } = await auth();
 
   if (!isAuthenticated) {
-    return redirectToSignIn();
+    redirectToAppSignIn("/today");
   }
 
   return (
     <AppLayout>
       <PageHeader
         title="Today"
-        description="Run through your daily checklist, track adherence, and leave short coaching feedback."
+        description="Your daily command center — plan, check-ins, and optional coaching feedback."
       />
       <PageContent>
         <TodayWorkspace />

@@ -1,21 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
+import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
 import { AppLayout } from "../../src/components/app-layout";
 import { LongevityDashboard } from "../../src/components/longevity/longevity-dashboard";
-import { PageHeader } from "../../src/components/ui";
+import { LongevityPageHeader } from "../../src/components/longevity/longevity-page-header";
 
 export default async function LongevityPage() {
-  const { isAuthenticated, redirectToSignIn } = await auth();
+  const { isAuthenticated } = await auth();
 
   if (!isAuthenticated) {
-    return redirectToSignIn();
+    redirectToAppSignIn("/longevity");
   }
 
   return (
     <AppLayout variant="dashboard">
-      <PageHeader
-        title="Longevity"
-        description="Your weekly wellness overview across Today, training, nutrition, goals, and logged signals."
-      />
+      <LongevityPageHeader />
       <LongevityDashboard />
     </AppLayout>
   );

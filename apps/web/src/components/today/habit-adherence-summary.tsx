@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
 import { apiQueryKeys, getHabitAdherence } from "../../lib/api";
 import { buildHabitAdherenceSummaryView } from "../../lib/habit-ui-state";
+import { ActionPriorityCard, CanvasErrorState, CanvasLoadingState } from "../ui";
 
 export function HabitAdherenceSummary() {
   const { getToken } = useAuth();
@@ -27,23 +28,33 @@ export function HabitAdherenceSummary() {
 
   if (adherenceQuery.isLoading) {
     return (
-      <div className="today-adherence-summary nested-card" aria-busy="true">
-        <p className="section-label">Habit consistency</p>
-        <p className="muted-text">Loading recent habit consistency…</p>
-      </div>
+      <ActionPriorityCard
+        className="today-adherence-summary"
+        label="Habit consistency"
+        title="Recent habit consistency"
+        aria-busy="true"
+      >
+        <CanvasLoadingState
+          compact
+          title="Loading recent habit consistency…"
+        />
+      </ActionPriorityCard>
     );
   }
 
   if (adherenceQuery.isError) {
     return (
-      <div className="today-adherence-summary nested-card">
-        <p className="section-label">Habit consistency</p>
-        <p className="form-error" role="alert">
-          {adherenceQuery.error instanceof Error
-            ? adherenceQuery.error.message
-            : "Habit consistency could not be loaded."}
-        </p>
-      </div>
+      <ActionPriorityCard className="today-adherence-summary" label="Habit consistency" title="Habit consistency">
+        <CanvasErrorState
+          compact
+          title="Habit consistency unavailable"
+          description={
+            adherenceQuery.error instanceof Error
+              ? adherenceQuery.error.message
+              : "Habit consistency could not be loaded."
+          }
+        />
+      </ActionPriorityCard>
     );
   }
 
@@ -51,25 +62,26 @@ export function HabitAdherenceSummary() {
 
   if (summary.status === "empty") {
     return (
-      <div className="today-adherence-summary nested-card">
-        <p className="section-label">Habit consistency</p>
-        <p className="muted-text">
-          No habit plan yet. Ask the coach in Chat to suggest daily habits.
-        </p>
-      </div>
+      <ActionPriorityCard
+        className="today-adherence-summary"
+        label="Habit consistency"
+        title="Habit consistency"
+        hint="No habit plan yet. Ask the coach in Chat to suggest daily habits."
+      />
     );
   }
 
   return (
-    <div className="today-adherence-summary nested-card">
-      <p className="section-label">Habit consistency</p>
-      <div className="today-adherence-header">
-        <strong className="today-adherence-score">{summary.requiredCompletionRate}</strong>
-        <p className="muted-text">7-day required completion rate</p>
-      </div>
-      <p className="muted-text today-adherence-optional">
-        <strong>{summary.streakTitle}</strong> · {summary.streakDetail}
-      </p>
-    </div>
+    <ActionPriorityCard
+      className="today-adherence-summary"
+      label="Habit consistency"
+      title="7-day required completion rate"
+      metric={summary.requiredCompletionRate}
+      hint={
+        <>
+          <strong>{summary.streakTitle}</strong> · {summary.streakDetail}
+        </>
+      }
+    />
   );
 }

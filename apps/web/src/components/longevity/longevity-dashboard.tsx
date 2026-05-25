@@ -23,6 +23,7 @@ import {
   buildDocumentsContextView,
   buildGoalsSectionView,
   buildLongevityCoachPrompts,
+  buildLongevityHeroSubtitles,
   buildLongevityTrendsView,
   buildLongevityHeroTrendStripView,
   buildLongevityWeeklyHero,
@@ -30,6 +31,7 @@ import {
   buildTodayAdherenceCardView,
   buildWellnessSignalsPanelView,
   buildWorkoutConsistencyCardView,
+  formatDeferredDomainsCollapsibleSummary,
   goalsCardHint,
   goalsCardValue,
   isOptionalProgressNotFound,
@@ -40,7 +42,7 @@ import {
 } from "../../lib/longevity-ui-state";
 import { WEEKLY_REVIEW_READ_ONLY_NOTICE } from "../../lib/weekly-review-ui-state";
 import type { WeeklyProgressSummaryResponse } from "@health/types";
-import { Badge, DashboardCard, DashboardGrid, EmptyState, ErrorState, LoadingState } from "../ui";
+import { Badge, DashboardCard, DashboardGrid, ErrorState, LoadingState, OverviewCardLink, OverviewHeroCard, OverviewHeroContent, OverviewHeroSubtitle, OverviewInlineEmptyState, OverviewMetricRing, OverviewReadOnlyNotice, OverviewSignalItem, OverviewSignalList, OverviewSparseHint, OverviewTrendSection, PromptChipLink, PromptChipList, TrendStrip } from "../ui";
 import { WellbeingHistoryPanel } from "./wellbeing-history-panel";
 
 async function loadOptionalWeeklyProgress(
@@ -204,6 +206,12 @@ export function LongevityDashboard() {
 
   const heroValue = hero.sparse ? hero.emptyMessage : `${hero.percent}%`;
   const heroTrend = buildLongevityHeroTrendStripView(hero.trend, hero.sparse);
+  const heroSubtitles = buildLongevityHeroSubtitles({
+    sparse: hero.sparse,
+    subtitle: hero.subtitle,
+    activeDaysLabel: hero.activeDaysLabel,
+    habitHint,
+  });
 
   return (
     <div className="page-content longevity-dashboard">
@@ -216,39 +224,22 @@ export function LongevityDashboard() {
       ) : null}
 
       <DashboardGrid className="dashboard-grid--profile">
-        <section className="dashboard-hero dashboard-hero--full">
-          <div>
-            <p className="dashboard-hero__label">Weekly consistency</p>
-            <p className="dashboard-hero__value">{heroValue}</p>
-            <p className="dashboard-hero__subtitle">{hero.subtitle}</p>
-            {!hero.sparse ? (
-              <p className="dashboard-hero__subtitle">{hero.activeDaysLabel}</p>
-            ) : null}
-            {habitHint ? <p className="dashboard-hero__subtitle">{habitHint}</p> : null}
-          </div>
-          {!hero.sparse ? (
-            <div
-              className="metric-ring"
-              style={{ ["--ring-progress" as string]: hero.percent }}
-            >
-              <span className="sr-only">{hero.percent}% weekly consistency</span>
-            </div>
-          ) : null}
-          <div className={heroTrend.className} role="img" aria-label={heroTrend.ariaLabel}>
-            {heroTrend.trend.map((value, index) => (
-              <div key={WEEKDAY_TREND_LABELS[index]} className="trend-strip__day">
-                <p className="trend-strip__label" aria-hidden="true">
-                  {WEEKDAY_TREND_LABELS[index]}
-                </p>
-                <div className="trend-strip__bar">
-                  {!heroTrend.sparse ? (
-                    <span className="trend-strip__fill" style={{ width: `${value}%` }} />
-                  ) : null}
-                </div>
-              </div>
+        <OverviewHeroCard fullWidth>
+          <OverviewHeroContent label="Weekly consistency" value={heroValue}>
+            {heroSubtitles.map((line) => (
+              <OverviewHeroSubtitle key={line}>{line}</OverviewHeroSubtitle>
             ))}
-          </div>
-        </section>
+          </OverviewHeroContent>
+          {!hero.sparse ? (
+            <OverviewMetricRing progress={hero.percent} label={`${hero.percent}% weekly consistency`} />
+          ) : null}
+          <TrendStrip
+            trend={heroTrend.trend}
+            dayLabels={WEEKDAY_TREND_LABELS}
+            sparse={heroTrend.sparse}
+            ariaLabel={heroTrend.ariaLabel}
+          />
+        </OverviewHeroCard>
 
         <DashboardCard
           className="dashboard-card--span-4"
@@ -261,9 +252,9 @@ export function LongevityDashboard() {
               : todayCard.message
           }
           footer={
-            <Link href={LONGEVITY_CTA_ROUTES.today} className="confirmation-card__link">
+            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.today}>
               Open Today →
-            </Link>
+            </OverviewCardLink>
           }
         />
 
@@ -282,9 +273,9 @@ export function LongevityDashboard() {
             workoutCard.status === "ready" ? workoutCard.hint : workoutCard.message
           }
           footer={
-            <Link href={LONGEVITY_CTA_ROUTES.training} className="confirmation-card__link">
+            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.training}>
               View training plan →
-            </Link>
+            </OverviewCardLink>
           }
         />
 
@@ -307,9 +298,9 @@ export function LongevityDashboard() {
               : nutritionCard.message
           }
           footer={
-            <Link href={LONGEVITY_CTA_ROUTES.nutrition} className="confirmation-card__link">
+            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.nutrition}>
               View nutrition plan →
-            </Link>
+            </OverviewCardLink>
           }
         />
 
@@ -320,29 +311,26 @@ export function LongevityDashboard() {
           value={goalsCardValue(goalsSection)}
           hint={goalsCardHint(goalsSection)}
           footer={
-            <Link href={LONGEVITY_CTA_ROUTES.profileGoals} className="confirmation-card__link">
+            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.profileGoals}>
               Manage goals →
-            </Link>
+            </OverviewCardLink>
           }
         >
           {goalsSection.status === "ready" ? (
-            <ul className="goals">
+            <OverviewSignalList>
               {goalsSection.items.map((goal) => (
-                <li key={goal.id}>
-                  <strong>{goal.title}</strong>
-                  <span>{goal.meta}</span>
-                </li>
+                <OverviewSignalItem key={goal.id} title={goal.title} meta={goal.meta} />
               ))}
-            </ul>
+            </OverviewSignalList>
           ) : (
-            <EmptyState
+            <OverviewInlineEmptyState
               title={goalsSection.title}
               description={goalsSection.description}
               action={
                 goalsSection.status === "empty" ? (
-                  <Link href={LONGEVITY_CTA_ROUTES.chat} className="confirmation-card__link">
+                  <OverviewCardLink href={LONGEVITY_CTA_ROUTES.chat}>
                     Open Chat →
-                  </Link>
+                  </OverviewCardLink>
                 ) : undefined
               }
             />
@@ -355,9 +343,9 @@ export function LongevityDashboard() {
           title="7-day mood & stress"
           hint="Daily check-ins from Today — wellness context only, not a clinical assessment."
           footer={
-            <Link href={LONGEVITY_CTA_ROUTES.today} className="confirmation-card__link">
+            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.today}>
               Log today&apos;s check-in →
-            </Link>
+            </OverviewCardLink>
           }
         >
           <WellbeingHistoryPanel
@@ -374,16 +362,17 @@ export function LongevityDashboard() {
           hint="Consent-gated trends from synced data and self-check-ins on Today."
         >
           {wellnessPanel.status === "ready" ? (
-            <ul className="goals">
+            <OverviewSignalList>
               {wellnessPanel.signals.map((signal) => (
-                <li key={signal.id}>
-                  <strong>{signal.label}</strong>
-                  <span>{signal.detail}</span>
-                </li>
+                <OverviewSignalItem
+                  key={signal.id}
+                  title={signal.label}
+                  meta={signal.detail}
+                />
               ))}
-            </ul>
+            </OverviewSignalList>
           ) : (
-            <EmptyState
+            <OverviewInlineEmptyState
               title={
                 wellnessPanel.status === "revoked"
                   ? "Sync consent revoked"
@@ -393,9 +382,9 @@ export function LongevityDashboard() {
               }
               description={wellnessPanel.message}
               action={
-                <Link href={LONGEVITY_CTA_ROUTES.profileConsent} className="confirmation-card__link">
+                <OverviewCardLink href={LONGEVITY_CTA_ROUTES.profileConsent}>
                   Manage consent in Profile →
-                </Link>
+                </OverviewCardLink>
               }
             />
           )}
@@ -413,70 +402,66 @@ export function LongevityDashboard() {
           }
           footer={
             trendsView.status === "ready" ? (
-              <Link href={LONGEVITY_CTA_ROUTES.chat} className="confirmation-card__link">
+              <OverviewCardLink href={LONGEVITY_CTA_ROUTES.chat}>
                 Open Chat to review adaptation proposals →
-              </Link>
+              </OverviewCardLink>
             ) : undefined
           }
         >
           {trendsView.status === "ready" ? (
             <>
               {trendsView.aggregates.length > 0 ? (
-                <>
-                  <h4 className="section-label" style={{ marginTop: "var(--space-2)", marginBottom: "var(--space-2)", display: "block" }}>
-                    Included Domains
-                  </h4>
-                  <ul className="goals">
+                <OverviewTrendSection title="Included Domains">
+                  <OverviewSignalList>
                     {trendsView.aggregates.map((aggregate) => (
-                      <li key={aggregate.id}>
-                        <strong>{aggregate.domain}</strong>
-                        <span>{aggregate.sufficiency}</span>
-                        <p className="dashboard-card__hint">
-                          {aggregate.headline} · {aggregate.detail}
-                        </p>
-                      </li>
+                      <OverviewSignalItem
+                        key={aggregate.id}
+                        title={aggregate.domain}
+                        meta={aggregate.sufficiency}
+                        detail={`${aggregate.headline} · ${aggregate.detail}`}
+                      />
                     ))}
-                  </ul>
-                </>
+                  </OverviewSignalList>
+                </OverviewTrendSection>
               ) : null}
               {trendsView.trends.length > 0 ? (
-                <>
-                  <h4 className="section-label" style={{ marginTop: "var(--space-4)", marginBottom: "var(--space-2)", display: "block" }}>
-                    Detected Patterns
-                  </h4>
-                  <ul className="goals">
+                <OverviewTrendSection title="Detected Patterns">
+                  <OverviewSignalList>
                     {trendsView.trends.map((trend) => (
-                      <li key={trend.id}>
-                        <strong>{trend.title}</strong>
-                        <span>{trend.meta}</span>
-                        <p className="dashboard-card__hint">{trend.message}</p>
-                      </li>
+                      <OverviewSignalItem
+                        key={trend.id}
+                        title={trend.title}
+                        meta={trend.meta}
+                        detail={trend.message}
+                      />
                     ))}
-                  </ul>
-                </>
+                  </OverviewSignalList>
+                </OverviewTrendSection>
               ) : (
-                <p className="dashboard-card__hint" style={{ marginTop: "var(--space-4)" }}>
+                <OverviewSparseHint>
                   Cross-domain trends will appear after more structured entries are logged.
-                </p>
+                </OverviewSparseHint>
               )}
               {trendsView.deferredDomains.length > 0 ? (
-                <>
-                  <h4 className="section-label" style={{ marginTop: "var(--space-4)", marginBottom: "var(--space-2)", display: "block" }}>
-                    Deferred Domains
-                  </h4>
-                  <ul className="goals" style={{ opacity: 0.75 }}>
+                <details className="overview-deferred-domains">
+                  <summary>
+                    {formatDeferredDomainsCollapsibleSummary(trendsView.deferredDomains)}
+                  </summary>
+                  <OverviewSignalList>
                     {trendsView.deferredDomains.map((entry) => (
-                      <li key={`${entry.domain}-${entry.detail}`}>
-                        <strong>{entry.domain}</strong>
-                        <span>{entry.detail}</span>
-                      </li>
+                      <OverviewSignalItem
+                        key={`${entry.domain}-${entry.detail}`}
+                        title={entry.domain}
+                        meta={entry.detail}
+                        muted
+                      />
                     ))}
-                  </ul>
-                </>
+                  </OverviewSignalList>
+                </details>
               ) : (
-                <p className="dashboard-card__hint" style={{ marginTop: "var(--space-4)" }}>{trendsView.deferredSummary}</p>
+                <OverviewSparseHint>{trendsView.deferredSummary}</OverviewSparseHint>
               )}
-              <p className="dashboard-card__hint" style={{ marginTop: "var(--space-4)" }}>{WEEKLY_REVIEW_READ_ONLY_NOTICE}</p>
+              <OverviewReadOnlyNotice>{WEEKLY_REVIEW_READ_ONLY_NOTICE}</OverviewReadOnlyNotice>
             </>
           ) : null}
         </DashboardCard>
@@ -487,31 +472,30 @@ export function LongevityDashboard() {
           title="Document context"
           hint="Metadata only — no clinical interpretation on this screen."
           footer={
-            <Link href={LONGEVITY_CTA_ROUTES.profileDocuments} className="confirmation-card__link">
+            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.profileDocuments}>
               Open documents →
-            </Link>
+            </OverviewCardLink>
           }
         >
           {documentsView.status === "ready" ? (
-            <ul className="goals">
+            <OverviewSignalList>
               {documentsView.items.map((document) => (
-                <li key={document.id}>
-                  <strong>{document.title}</strong>
-                  <span>
-                    {document.uploadedLabel} · {document.parseStatusLabel}
-                  </span>
-                  <Badge tone="neutral">{document.consentLabel}</Badge>
-                </li>
+                <OverviewSignalItem
+                  key={document.id}
+                  title={document.title}
+                  meta={`${document.uploadedLabel} · ${document.parseStatusLabel}`}
+                  badge={<Badge tone="neutral">{document.consentLabel}</Badge>}
+                />
               ))}
-            </ul>
+            </OverviewSignalList>
           ) : (
-            <EmptyState
+            <OverviewInlineEmptyState
               title="No documents yet"
               description={documentsView.message}
               action={
-                <Link href={LONGEVITY_CTA_ROUTES.profileDocuments} className="confirmation-card__link">
+                <OverviewCardLink href={LONGEVITY_CTA_ROUTES.profileDocuments}>
                   Upload from Profile →
-                </Link>
+                </OverviewCardLink>
               }
             />
           )}
@@ -528,19 +512,17 @@ export function LongevityDashboard() {
             </Link>
           }
         >
-          <div className="chat-prompt-chips" role="list" aria-label="Suggested prompts for chat">
+          <PromptChipList label="Suggested prompts for chat">
             {coachPrompts.map((prompt) => (
-              <Link
-                key={prompt}
+              <PromptChipLink
+                key={prompt.message}
                 href={LONGEVITY_CTA_ROUTES.chat}
-                role="listitem"
-                className="chat-prompt-chip"
-                aria-label={`Open Chat and discuss: ${prompt}`}
+                promptLabel={prompt.message}
               >
-                {prompt}
-              </Link>
+                {prompt.displayLabel}
+              </PromptChipLink>
             ))}
-          </div>
+          </PromptChipList>
         </DashboardCard>
       </DashboardGrid>
     </div>

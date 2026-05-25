@@ -116,3 +116,24 @@ export function todayNutritionPayload(
 ): NutritionPlanPayload | null {
   return nutrition.activeRevision?.payload ?? null;
 }
+
+export function resolveTodayNutritionMealAction(nutrition: TodayNutritionDetail | null | undefined): {
+  hasPendingMeal: boolean;
+  pendingMealLabel: string | null;
+} {
+  if (!nutrition || resolveTodayNutritionCardPhase(nutrition) !== "ready") {
+    return { hasPendingMeal: false, pendingMealLabel: null };
+  }
+
+  const adherence = buildTodayNutritionAdherenceView(nutrition);
+  if (adherence.mealCompletion.length === 0) {
+    return { hasPendingMeal: false, pendingMealLabel: null };
+  }
+
+  const nextMeal = adherence.mealCompletion.find((meal) => !meal.completed) ?? null;
+
+  return {
+    hasPendingMeal: nextMeal != null,
+    pendingMealLabel: nextMeal?.label ?? null,
+  };
+}

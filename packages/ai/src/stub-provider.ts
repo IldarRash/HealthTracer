@@ -28,6 +28,13 @@ export interface CoachAiRequest {
     readonly content: string;
   }>;
   readonly coachingContext: Record<string, unknown>;
+  readonly agentMetadata?: {
+    readonly purpose: string;
+    readonly intent: string;
+    readonly depth: string;
+    readonly timeRange: string;
+    readonly safetyConstraints: readonly string[];
+  };
 }
 
 export interface CoachAiProvider {

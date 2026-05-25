@@ -17,7 +17,9 @@ import {
   getProposalIntentLabel,
   getProposalStatusBadgeTone,
   getProposalStatusLabel,
+  INLINE_PROPOSAL_VALIDATION_HEADING,
   isHabitPlanProposalIntent,
+  shouldShowInlineProposalIntentLabel,
 } from "../../lib/proposal-ui-state";
 import { summarizeNutritionProposalChanges } from "../../lib/nutrition-ui-state";
 import { ProposalEvidenceList } from "./proposal-evidence-list";
@@ -63,6 +65,10 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
   const domainRoute = getProposalNavigationRoute(proposal);
   const domainLabel = getProposalDomainLabel(proposal.targetDomain);
   const intentLabel = getProposalIntentLabel(proposal.intent, proposal.proposedChanges);
+  const showIntentLabel = shouldShowInlineProposalIntentLabel(
+    proposal.intent,
+    proposal.proposedChanges,
+  );
   const validationErrors = formatProposalValidationErrors(proposal);
   const appliedMessage =
     proposal.targetDomain === "recipe"
@@ -80,10 +86,6 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
                 : "Change recorded in your coaching history.";
   const showValidationNotice =
     isPending && (!canAccept || validationErrors.length > 0);
-  const intentAcceptanceCopy =
-    proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition"
-      ? "accept only if you want this plan revision applied."
-      : "accept only if you want this structured change applied.";
 
   const nutritionSummary =
     proposal.targetDomain === "nutrition"
@@ -94,7 +96,7 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
     <ProposalConfirmation
       status={proposal.status}
       title={proposal.title}
-      className="confirmation-card--inline"
+      inline
       aria-busy={decisionMutation.isPending || undefined}
       aria-live="polite"
       meta={
@@ -104,12 +106,9 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
           >
             {domainLabel}
           </span>
-          {intentLabel ? (
-            <span className="confirmation-card__meta">
-              {intentLabel} — {intentAcceptanceCopy}
-            </span>
+          {showIntentLabel && intentLabel ? (
+            <span className="confirmation-card__meta proposal-meta">{intentLabel}</span>
           ) : null}
-          <span className="confirmation-card__meta">{proposal.reason}</span>
         </>
       }
       badges={
@@ -158,6 +157,8 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
         ) : null
       }
     >
+      {proposal.reason ? <p className="proposal-meta">{proposal.reason}</p> : null}
+
       {nutritionSummary.length > 0 ? (
         <ul>
           {nutritionSummary.map((line) => (
@@ -175,7 +176,7 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
           {acceptDisabledReason ? <p className="proposal-meta">{acceptDisabledReason}</p> : null}
           {validationErrors.length > 0 ? (
             <>
-              <strong>Validation issues</strong>
+              <strong>{INLINE_PROPOSAL_VALIDATION_HEADING}</strong>
               <ul>
                 {validationErrors.map((error) => (
                   <li key={error}>{error}</li>

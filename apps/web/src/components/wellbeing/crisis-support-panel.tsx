@@ -1,4 +1,5 @@
 import type { WellbeingCrisisSupportCopy } from "@health/types";
+import { ChatMetadataPanel } from "../ui";
 
 type CrisisSupportPanelProps = {
   copy: WellbeingCrisisSupportCopy;
@@ -10,12 +11,12 @@ export function CrisisSupportPanel({
   titleId = "wellbeing-crisis-title",
 }: CrisisSupportPanelProps) {
   return (
-    <aside
-      className="wellbeing-crisis-panel notice"
-      role="region"
-      aria-labelledby={titleId}
+    <ChatMetadataPanel
+      title={copy.title}
+      titleId={titleId}
+      tone="crisis"
+      className="wellbeing-crisis-panel"
     >
-      <h3 id={titleId}>{copy.title}</h3>
       <p>{copy.message}</p>
       <ul className="wellbeing-crisis-resources">
         {copy.resources.map((resource) => (
@@ -26,6 +27,6 @@ export function CrisisSupportPanel({
           </li>
         ))}
       </ul>
-    </aside>
+    </ChatMetadataPanel>
   );
 }

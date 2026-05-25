@@ -1,25 +1,35 @@
 import type {
+  AgentContextPacket,
   AiDocumentContextSummary,
   AiDocumentSignalContextSummary,
   AiMetricsContextSummary,
   AiRecoveryContextSummary,
   AiWellbeingContextSummary,
+  BuildAgentContextRequest,
   CoachingHierarchySummary,
   CorrelationInsightPreviewResponse,
+  GetUserContextSliceInput,
   Goal,
   HabitAdherenceCoachingSummary,
   HabitPlanCoachingSummary,
+  NutritionPlanPayload,
   PersonalContextSummary,
   User,
+  UserContextSlice,
   UserProfile,
   WeeklyProgressSummaryResponse,
   WorkoutPlanCoachingSummary,
 } from "@health/types";
 import {
+  agentContextPacketSchema,
   buildCoachingHierarchySummary,
+  DEFAULT_AGENT_SAFETY_CONSTRAINTS,
   getTodayIsoDateInTimezone,
+  getUserContextSliceInputSchema,
   getWeekStartIsoDate,
   habitPlanPayloadSchema,
+  INTENT_TO_SLICE_PURPOSE,
+  nutritionPlanPayloadSchema,
   summarizeHabitPlanForCoaching,
   summarizePersonalContext,
   summarizeWorkoutPlanForCoaching,
@@ -27,6 +37,8 @@ import {
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
+import { buildAgentPromptContextFromPacket } from "./agent-prompt-context.js";
+import { buildUserContextSliceFromSnapshot, resolveSliceOptions } from "./user-context-slice.builder.js";
 import { DocumentsService } from "../documents/documents.service.js";
 import { DocumentSignalsService } from "../documents/document-signals.service.js";
 import { CorrelationsService } from "../documents/correlations.service.js";
@@ -243,5 +255,80 @@ export class CoachingContextService {
       wellbeingSummary: snapshot.wellbeingSummary,
       recoveryContext: snapshot.recoveryContext,
     };
+  }
+
+  async getActiveNutritionPlanPayload(
+    auth: ClerkAuthContext,
+  ): Promise<NutritionPlanPayload | null> {
+    const user = await this.usersService.resolveFromAuth(auth);
+    const nutritionPlan = await this.nutritionRepository.findActivePlanByUserId(user.id);
+
+    if (!nutritionPlan?.activeRevisionId) {
+      return null;
+    }
+
+    const activeRevision = await this.nutritionRepository.findActiveRevisionByPlanId(
+      nutritionPlan.id,
+      nutritionPlan.activeRevisionId,
+    );
+    const parsedPayload = nutritionPlanPayloadSchema.safeParse(activeRevision?.payload);
+
+    return parsedPayload.success ? parsedPayload.data : null;
+  }
+
+  async getUserContextSlice(
+    auth: ClerkAuthContext,
+    input: GetUserContextSliceInput,
+  ): Promise<UserContextSlice> {
+    const normalized = getUserContextSliceInputSchema.parse(input);
+    const snapshot = await this.buildSnapshot(auth);
+    const activeNutritionPlan =
+      normalized.purpose === "nutrition_adaptation"
+        ? await this.getActiveNutritionPlanPayload(auth)
+        : null;
+
+    return buildUserContextSliceFromSnapshot(snapshot, normalized, {
+      activeNutritionPlan,
+      curatedMemories: [],
+    });
+  }
+
+  async buildAgentContext(
+    auth: ClerkAuthContext,
+    request: BuildAgentContextRequest,
+  ): Promise<AgentContextPacket> {
+    const intent = request.intent ?? "general";
+    const purpose = request.purpose ?? INTENT_TO_SLICE_PURPOSE[intent];
+    const resolved = resolveSliceOptions(
+      getUserContextSliceInputSchema.parse({
+        purpose,
+        depth: request.depth,
+        timeRange: request.timeRange,
+        includeDocuments: request.includeDocuments,
+      }),
+    );
+
+    const slice = await this.getUserContextSlice(auth, {
+      purpose,
+      depth: resolved.depth,
+      timeRange: resolved.timeRange,
+      includeDocuments: resolved.includeDocuments,
+      includeRawData: false,
+    });
+
+    return agentContextPacketSchema.parse({
+      purpose,
+      depth: resolved.depth,
+      timeRange: resolved.timeRange,
+      intent,
+      generatedAt: new Date().toISOString(),
+      slice,
+      safetyConstraints: [...DEFAULT_AGENT_SAFETY_CONSTRAINTS],
+      sourceRefs: slice.sourceRefs,
+    });
+  }
+
+  toAgentPromptContext(packet: AgentContextPacket): Record<string, unknown> {
+    return buildAgentPromptContextFromPacket(packet);
   }
 }

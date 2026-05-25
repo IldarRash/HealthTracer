@@ -36,6 +36,12 @@ describe("shell and surface tokens", () => {
     expect(tokens.color.surface.content).toBe("#f7f7f5");
     expect(tokens.color.surface.contentElevated).toBe("#ffffff");
   });
+
+  it("defines premium overview card tokens for structured canvas", () => {
+    expect(tokens.overview.hero.surface).toBe(tokens.color.surface.heroDark);
+    expect(tokens.overview.card.surface).toBe(tokens.color.surface.contentElevated);
+    expect(tokens.overview.trend.fill).toBe(tokens.color.coach[500]);
+  });
 });
 
 describe("layout and metric tokens", () => {
@@ -80,7 +86,16 @@ describe("css variable mapping", () => {
   it("exposes coach and focus vars for web stylesheet parity", () => {
     expect(cssVar.coach600).toBe("--color-coach-600");
     expect(cssVar.focusOutline).toBe("--focus-outline");
+    expect(cssVar.surfaceContent).toBe("--color-surface-content");
+    expect(cssVar.accentPrimary).toBe("--color-accent-primary");
     expect(tokenVar("coach600")).toBe("var(--color-coach-600)");
+  });
+
+  it("exposes chat bubble and metadata vars for transcript polish", () => {
+    expect(cssVar.chatBubbleAssistantBg).toBe("--color-chat-bubble-assistant-bg");
+    expect(cssVar.chatMetadataCrisisBorder).toBe("--color-chat-metadata-crisis-border");
+    expect(tokens.chat.bubble.user.bg).toBe("#f0fdfa");
+    expect(tokens.chat.metadata.crisis.border).toBe("#fca5a5");
   });
 });
 

@@ -17,7 +17,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <ClerkProvider>
+        <ClerkProvider
+          signInUrl="/sign-in"
+          signUpUrl="/sign-up"
+          signInFallbackRedirectUrl="/chat"
+          signUpFallbackRedirectUrl="/onboarding"
+        >
           <QueryProvider>{children}</QueryProvider>
         </ClerkProvider>
       </body>

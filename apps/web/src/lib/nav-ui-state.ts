@@ -38,10 +38,54 @@ export function isNavLinkActive(pathname: string, link: NavLink): boolean {
   return isActivePath(pathname, link.href, link.aliases);
 }
 
+export function getNavLinkAriaCurrent(
+  pathname: string,
+  link: NavLink,
+): "page" | undefined {
+  return isNavLinkActive(pathname, link) ? "page" : undefined;
+}
+
+/** Class tokens for a primary nav link at the current pathname. */
+export function getNavLinkClassNames(pathname: string, link: NavLink): readonly string[] {
+  const active = isNavLinkActive(pathname, link);
+  const isFeatured = link.featured === true;
+  const classes = ["app-nav__link"];
+
+  if (isFeatured) {
+    classes.push("app-nav__link--featured");
+  }
+
+  if (active && !isFeatured) {
+    classes.push("app-nav__link--active");
+  }
+
+  return classes;
+}
+
 export function isSecondaryRoute(pathname: string): boolean {
   return SECONDARY_ROUTE_LINKS.some((link) => isNavLinkActive(pathname, link));
 }
 
 export function findSecondaryRoute(pathname: string): NavLink | undefined {
   return SECONDARY_ROUTE_LINKS.find((link) => isNavLinkActive(pathname, link));
+}
+
+export type RouteWayfindingTrail = {
+  parent: { href: string; label: string };
+  current: { label: string };
+};
+
+/** Breadcrumb trail for secondary plan views — parent defaults to Today per IA. */
+export function resolveSecondaryRouteWayfinding(
+  pathname: string,
+): RouteWayfindingTrail | undefined {
+  const route = findSecondaryRoute(pathname);
+  if (!route) {
+    return undefined;
+  }
+
+  return {
+    parent: { href: "/today", label: "Today" },
+    current: { label: route.label },
+  };
 }

@@ -1,11 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
+import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
 import { redirect } from "next/navigation";
 
 export default async function DocumentsPage() {
-  const { isAuthenticated, redirectToSignIn } = await auth();
+  const { isAuthenticated } = await auth();
 
   if (!isAuthenticated) {
-    return redirectToSignIn();
+    redirectToAppSignIn("/documents");
   }
 
   redirect("/profile#documents");

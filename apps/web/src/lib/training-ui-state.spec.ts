@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WorkoutSession, WorkoutSessionExercise } from "@health/types";
 import {
   buildSessionTitleFromDay,
+  buildTrainingWeekStripView,
   canCompleteSession,
   canSubmitScheduleForm,
   canUpdateSessionExercise,
@@ -109,6 +110,35 @@ describe("training UI state", () => {
       "2026-05-22",
       "2026-05-25",
     ]);
+  });
+
+  it("builds a sparse week strip when no sessions are scheduled this week", () => {
+    const view = buildTrainingWeekStripView([], new Date("2026-05-25T12:00:00"));
+
+    expect(view.dayLabels).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+    expect(view.trend).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(view.sparse).toBe(true);
+    expect(view.ariaLabel).toContain("No workouts scheduled");
+  });
+
+  it("maps current-week session statuses into trend strip values", () => {
+    const sessions = [
+      {
+        plannedDate: "2026-05-25",
+        status: "completed",
+      },
+      {
+        plannedDate: "2026-05-27",
+        status: "planned",
+      },
+    ] as WorkoutSession[];
+
+    const view = buildTrainingWeekStripView(sessions, new Date("2026-05-25T12:00:00"));
+
+    expect(view.sparse).toBe(false);
+    expect(view.trend[0]).toBe(100);
+    expect(view.trend[2]).toBe(55);
+    expect(view.ariaLabel).toContain("1 completed workout");
   });
 
   it("detects when an active plan and revision are present", () => {
