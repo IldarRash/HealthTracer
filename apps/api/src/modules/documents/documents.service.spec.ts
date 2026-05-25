@@ -14,6 +14,19 @@ const auth = {
   email: "test@example.com",
 };
 
+const noopDocumentSignalsService = {
+  revokeSignalsForDocument: async () => undefined,
+} as never;
+
+function createDocumentsService(
+  repository: Record<string, unknown>,
+  usersService: Record<string, unknown> = {
+    resolveFromAuth: async () => user,
+  },
+) {
+  return new DocumentsService(repository as never, noopDocumentSignalsService, usersService as never);
+}
+
 const user = {
   id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
   displayName: "Test User",
@@ -32,6 +45,9 @@ const documentRow = {
   mimeType: "text/plain",
   fileSizeBytes: 42,
   parseStatus: "summary_ready" as const,
+  signalExtractionStatus: "not_started" as const,
+  signalExtractionFailureReason: null,
+  signalExtractedAt: null,
   consentScopes: [
     "upload_storage",
     "parse_ocr",
@@ -51,9 +67,9 @@ const documentRow = {
 
 describe("DocumentsService", () => {
   it("requires upload consent before creating a document", async () => {
-    const service = new DocumentsService({} as never, {
+    const service = createDocumentsService({}, {
       resolveFromAuth: async () => user,
-    } as never);
+    });
 
     await expect(
       service.createDocument(auth, {
@@ -67,8 +83,35 @@ describe("DocumentsService", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it("accepts base64 file uploads within size bounds", async () => {
+    const captured: Array<{ fileSizeBytes: number; mimeType: string }> = [];
+    const service = createDocumentsService({
+      create: async (_userId: string, input: { fileSizeBytes: number; mimeType: string }) => {
+        captured.push({ fileSizeBytes: input.fileSizeBytes, mimeType: input.mimeType });
+
+        return {
+          ...documentRow,
+          mimeType: input.mimeType,
+          fileSizeBytes: input.fileSizeBytes,
+        };
+      },
+    });
+
+    await service.createDocument(auth, {
+      documentType: "lab_report",
+      title: "Annual panel",
+      consentScopes: ["upload_storage"],
+      consentVersion: "v1",
+      mimeType: "application/pdf",
+      fileContentBase64: Buffer.from("%PDF-1.4 sample", "utf8").toString("base64"),
+    });
+
+    expect(captured[0]?.mimeType).toBe("application/pdf");
+    expect(captured[0]?.fileSizeBytes).toBeGreaterThan(0);
+  });
+
   it("rejects parse requests without parse consent", async () => {
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         findActiveById: async () => ({
           ...documentRow,
@@ -87,7 +130,7 @@ describe("DocumentsService", () => {
   });
 
   it("rejects parse requests for revoked documents", async () => {
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         findActiveById: async () => ({
           ...documentRow,
@@ -105,7 +148,7 @@ describe("DocumentsService", () => {
   });
 
   it("throws when deleting a document the user does not own", async () => {
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         findActiveById: async () => null,
       } as never,
@@ -120,7 +163,7 @@ describe("DocumentsService", () => {
   });
 
   it("filters coaching context to approved chat-consented summaries", async () => {
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         listContextCandidates: async () => [
           {
@@ -176,7 +219,7 @@ describe("DocumentsService", () => {
 
   it("records a safe failed status when document processing fails", async () => {
     const statusUpdates: Array<{ parseStatus: string; parseFailureReason?: string | null }> = [];
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         findActiveById: async () => ({
           ...documentRow,
@@ -222,7 +265,7 @@ describe("DocumentsService", () => {
   });
 
   it("excludes rejected summaries from approved search results", async () => {
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         searchApprovedSummaries: async () => [
           {
@@ -278,7 +321,7 @@ describe("DocumentsService", () => {
 
   it("tombstones summaries when deleting a document", async () => {
     let tombstoned = false;
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         findActiveById: async () => documentRow,
         tombstoneSummariesForDocument: async () => {
@@ -306,7 +349,7 @@ describe("DocumentsService", () => {
 
   it("tombstones summaries when revoking consent", async () => {
     let tombstoned = false;
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         findActiveById: async () => documentRow,
         updateConsent: async () => ({
@@ -339,7 +382,7 @@ describe("DocumentsService", () => {
       expect(containsUnsafeDocumentSummaryLanguage(generated.summaryText)).toBe(false);
 
       let reviewedStatus: string | null = null;
-      const service = new DocumentsService(
+      const service = createDocumentsService(
         {
           findActiveById: async () => ({
             ...documentRow,
@@ -395,7 +438,7 @@ describe("DocumentsService", () => {
   });
 
   it("returns consent-approved search rows without post-limit starvation", async () => {
-    const service = new DocumentsService(
+    const service = createDocumentsService(
       {
         searchApprovedSummaries: async (_userId: string, _query: string, limit: number) => {
           expect(limit).toBe(5);

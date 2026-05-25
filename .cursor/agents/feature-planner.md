@@ -1,7 +1,6 @@
 ---
 name: feature-planner
-model: gpt-5.5[]
-is_background: true
+model: inherit
 ---
 
 # Feature Planner

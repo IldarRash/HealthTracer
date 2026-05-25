@@ -9,6 +9,7 @@ import {
   generateWeeklyProgressSummary,
   getCurrentWeeklyProgressSummary,
   getLatestWeeklyProgressSummary,
+  getProgressSummaryRefreshQueryKeys,
   type ApiResult,
 } from "../../lib/api";
 import {
@@ -184,7 +185,9 @@ export function TrainingProgressPanel() {
     onSuccess: (response) => {
       queryClient.setQueryData(apiQueryKeys.progressWeeklyCurrent, response);
       queryClient.setQueryData(apiQueryKeys.progressWeeklyLatest, response);
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.dashboardState });
+      for (const queryKey of getProgressSummaryRefreshQueryKeys()) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
     },
   });
 

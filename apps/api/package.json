@@ -22,6 +22,7 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.3",
+    "pdf-parse": "^2.4.5",
     "postgres": "^3.4.9",
     "reflect-metadata": "latest",
     "rxjs": "latest",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@swc-node/register": "^1.10.10",
     "@swc/core": "^1.11.29",
+    "@types/pdf-parse": "^1.1.5",
     "tsx": "latest"
   }
 }

@@ -1,174 +1,210 @@
 # Longevity Dashboard
 
-**Status:** Proposed — underlying data partially exists; named Longevity Dashboard surface not implemented.
+**Status:** Implementation-ready MVP brief. Underlying data partially exists; named Longevity Dashboard surface is not implemented.
 
 ## UX Placement
 
-Longevity is the fourth primary web tab alongside Chat, Today, and Profile. It owns the weekly wellness overview and cross-domain trend surface. It may deep-link to read-only Training and Nutrition plan views, but plan changes happen through Chat proposals.
+Longevity is the fourth primary web tab alongside Chat, Today, and Profile. It owns the weekly wellness overview and cross-domain trend surface. Training and Nutrition remain routeable secondary read-only plan views linked from Today, Longevity, and Chat proposal flows. Profile remains the account, context, consent, documents, and settings surface.
+
+Default v1 route and nav label: **`/longevity` with nav label `Longevity`**. Do not use `/dashboard` or `/overview` for the MVP because the architecture docs already reserve Longevity as the named primary surface.
 
 ## Summary
 
-Introduce a **consumer-facing Longevity Dashboard** that positions AI Health Coach around living longer and healthier through **habits, consistency, and coaching progress** — not clinical risk or diagnosis. The dashboard aggregates authoritative structured state (Today adherence, workout/nutrition consistency, goals, synced wellness metrics, self-reported recovery/mood, and consent-aware document context) into one premium, trend-oriented overview.
+Introduce a consumer-facing **Longevity Dashboard** that helps users understand how their weekly habits, training, nutrition, goals, and logged wellness signals are trending over time. The dashboard should feel premium and useful, but it must remain wellness-only: no diagnosis, treatment guidance, biological age, clinical risk score, readiness score, or lab interpretation.
 
-Chat remains the primary coaching entry point. The Longevity Dashboard is the structured "how am I doing?" home users return to between conversations.
+Chat remains the dominant coaching and proposal surface. Longevity is the structured "how am I doing this week?" overview users return to between conversations, built only from authoritative structured state.
 
 ## Problem
 
-The product lacks a unified longevity-oriented overview:
+The product lacks one unified wellness overview:
 
-- **Profile** is partially dashboard-like but account-centric — no sleep/steps, recovery rhythm, mood/energy, Today adherence, or document context as wellness signals.
-- **Metrics** is a developer/support surface, not a consumer dashboard.
-- **Progress** is workout-only weekly summaries embedded under secondary Training/plan context; nutrition, Today, recovery are deferred.
-- Nothing ties signals together under a "longer, healthier life" narrative without crossing into clinical scoring.
+- **Profile** is account and context oriented. It should not become the main trend dashboard.
+- **Metrics** is not a consumer primary surface. Consent/settings belong under Profile, while selected trends can appear in Longevity.
+- **Training and Nutrition** are secondary read-only plan views. They show domain detail, not cross-domain wellbeing.
+- **Progress** is not yet a unified consumer surface across Today, nutrition, recovery, wellbeing, goals, and documents.
 
-Users need one calm, dense screen that answers: *What patterns matter for my wellness this week? Where am I consistent? What should I discuss with my coach?*
+Users need one calm, dense screen that answers: *What patterns mattered this week? Where am I consistent? What should I discuss with my coach?*
 
-## In Scope (MVP slice)
+## MVP Decisions
 
-**Web-first**
+| Decision | v1 default |
+|----------|------------|
+| Route | `/longevity` |
+| Primary nav label | `Longevity` |
+| Composition strategy | Web-first client composition from existing structured endpoints using TanStack Query where possible |
+| Backend changes | Minimal; add backend/BFF only if existing endpoints cannot provide required structured fields safely |
+| Hero framing | "Weekly consistency" from visible structured signals, not "longevity score" |
+| Hero metric behavior | Show a non-clinical percent/count summary plus 7-day activity/adherence strip; show "not enough data yet" instead of imputing |
+| Secondary links | Compact card actions to `/today`, secondary Training, secondary Nutrition, Profile goals/documents, and Chat |
+| Coach CTA | Static prompts based on visible gaps; no page-load LLM narrative |
+| Document behavior | Metadata/status only, linked to Profile documents; no parsed clinical values or interpretation |
+| Metrics behavior | Show consent-gated trends only; hide or placeholder revoked/missing data |
+| Mobile scope | Deferred until web v1 is stable |
 
-1. **New primary route** `/longevity` (or `/dashboard`) with nav label **Longevity** or **Overview**.
-2. **Hero + signal grid** aggregating:
-   - Weekly coaching consistency
-   - Today adherence (7-day strip or current-week score)
-   - Workout adherence + link to secondary Training weekly plan
-   - Nutrition consistency + link to secondary Nutrition weekly plan
-   - Active goals summary + link to Profile goals
-3. **Wellness signals panel** (consent-gated): steps, sleep duration, weight trend; recovery rhythm from soreness, fatigue, mood — reframed as logged wellness signals, never vendor "readiness score" UX.
-4. **Trends section** reusing weekly progress summary + trend observations; honest deferred-domain placeholders.
-5. **Mental wellbeing strip:** Today daily feedback + mood recovery inputs — self-reported, non-clinical.
-6. **Documents context card** (consent-aware): recent parsed document titles + "coach has context" indicator; link to Profile documents — no lab interpretation or clinical flags.
-7. **Coach CTA:** "Message your coach about this week" → Chat; optional static suggested prompts from visible gaps.
-8. **Empty/loading/partial states** per domain.
+## In Scope
 
-**Backend (minimal first pass)**
+**Web-first MVP**
 
-- Prefer read-model composition from existing endpoints.
-- Optional `GET /longevity/overview` BFF aggregate returning typed `LongevityOverviewResponse` in `@health/types`.
-
-**Visual**
-
-- Reuse chat-primary design tokens; WHOOP-like density, wellness-only copy.
+1. Authenticated `/longevity` page and primary nav item.
+2. Dashboard shell with responsive premium card layout using existing chat-primary visual language and design tokens.
+3. Hero module titled around **Weekly consistency**, showing:
+   - Current week summary from available structured adherence data.
+   - 7-day strip for logged activity/adherence where data exists.
+   - Clear partial/empty state when data is sparse.
+4. Core cards:
+   - Today adherence with link to `/today`.
+   - Workout consistency with compact link to the secondary Training weekly plan.
+   - Nutrition consistency with compact link to the secondary Nutrition weekly plan.
+   - Active goals summary with link to Profile goals/context.
+5. Wellness signals panel:
+   - Consent-gated steps, sleep duration, and weight trend when available.
+   - Self-reported mood, energy, soreness, or fatigue when available.
+   - Safe labels such as "logged wellness signals", "sleep trend", and "self-check-ins".
+6. Trends section:
+   - Reuse existing weekly progress/workout summary where available.
+   - Show honest deferred placeholders for domains without enough data.
+7. Documents context card:
+   - Show document title, upload/parse status, date, and consent status only.
+   - Link to Profile documents.
+8. Coach CTA:
+   - Primary action: "Message your coach about this week" linking to Chat.
+   - Static suggested prompts such as "Help me improve consistency this week" or "Review my logged recovery pattern".
+9. Loading, error, empty, and partial-data states for every domain card.
+10. Focused tests for dashboard composition, safe copy, empty states, and consent-gated rendering.
 
 ## Out of Scope
 
-- Clinical longevity scoring, biological age, healthspan risk indices, readiness/recovery scores, or traffic-light "health status."
-- Diagnosis, treatment guidance, lab result interpretation, or "normal/abnormal" clinical framing.
-- Replacing Chat as primary nav anchor.
-- Mobile/Expo dashboard in first slice.
-- New wearable integrations beyond existing Phase 8 stack.
-- AI-generated dashboard narratives that bypass proposal/approval for plan changes.
-- Full document RAG UI on the dashboard (summary card + deep link only).
-- Replacing Today execution or the secondary Training/Nutrition plan views.
+- Clinical longevity scoring, biological age, healthspan risk indices, readiness/recovery scores, traffic-light health status, or normal/abnormal labels.
+- Diagnosis, treatment guidance, lab result interpretation, or medical certainty language.
+- Replacing Chat as the dominant coaching/proposal surface.
+- Mobile/Expo implementation in the first slice.
+- New wearable, lab, document, or integration ingestion flows.
+- AI-generated dashboard narratives on page load.
+- Dashboard-driven plan mutation or proposal application.
+- Full document RAG, document summaries, lab values, or clinical flags on the dashboard.
+- Replacing Today execution or secondary Training/Nutrition plan views.
+- Broad progress-domain expansion beyond what is needed to render v1 safely.
 
 ## Safety Rules
 
 | Rule | Requirement |
 |------|-------------|
-| No clinical scoring | Never surface readiness_score or vendor recovery scores as headline metrics |
-| Source attribution | Copy uses "Based on your logged …" / "From synced data you shared" |
-| Documents | Show title, date, consent status, parse status only; no diagnostic summaries |
-| Labs | Labs appear as "uploaded context available to coach" — not interpreted values or reference ranges |
-| Mental wellbeing | Mood/energy are self-reported wellness check-ins, not mental health assessment |
-| AI context | Dashboard reads structured state; coach AI uses consented metric summaries |
-| Proposals | Dashboard may surface pending proposals count/link to Chat; it does not apply changes |
-| Deferred domains | Show "not enough data yet" — never impute or score |
+| No clinical scoring | Never surface `readiness_score`, vendor recovery scores, biological age, healthspan risk, or clinical status as product truth |
+| Source attribution | Copy uses "Based on your logged..." or "From synced data you shared" |
+| Documents | Show title, date, consent status, and parse status only; no diagnostic summaries |
+| Labs | Labs appear only as "uploaded context available to coach" when consented; no values, ranges, or interpretations |
+| Mental wellbeing | Mood, energy, soreness, fatigue, and stress are self-reported wellness check-ins, not mental health assessments |
+| AI context | Dashboard reads structured state; coach AI may use consented summaries only inside Chat |
+| Proposals | Dashboard may link to Chat for pending coach work; it does not apply changes |
+| Deferred domains | Show "not enough data yet"; never impute, score, or infer risk |
 
 ## User Stories
 
-1. As a user, I open Longevity and see a coaching snapshot of my week across habits, training, nutrition, and goals.
-2. As a user, I see simple 7-day trends without medical scores.
-3. As a user with device consent, I see normalized wellness signals as trends, not raw device logs.
-4. As a user, I see how I've been feeling when I've logged it — framed as self-check-ins.
-5. As a user with uploaded documents, I see that document context is available to my coach with consent boundaries.
-6. As a user, I can jump to Chat with context from any empty or insight card.
-7. As a user, I deep-link to Today, secondary Training, secondary Nutrition, or Profile for detail.
-8. As a user without much data, I see encouraging empty states and clear next steps.
+1. As a user, I open Longevity and see a weekly coaching snapshot across Today, training, nutrition, goals, and logged wellness signals.
+2. As a user, I see simple 7-day consistency trends without medical scores.
+3. As a user with device consent, I see selected synced wellness trends in a consumer-friendly way.
+4. As a user without device consent or enough data, I see useful placeholders and next actions instead of broken cards.
+5. As a user with uploaded documents, I can see whether document context is available to my coach without seeing clinical interpretation.
+6. As a user, I can jump from each card to the authoritative detail surface.
+7. As a user, I can message my coach about visible patterns without the dashboard becoming an AI chat surface.
 
 ## Acceptance Criteria
 
-- Authenticated web route renders Longevity Dashboard with loading, error, empty, and partial-data states.
-- Dashboard pulls from structured APIs only; no chat transcript as source of truth.
-- Hero shows weekly coaching consistency with 7-day trend strip.
-- Cards present Today adherence, workout adherence, nutrition consistency, active goals — each links to authoritative screen.
-- Consented metric aggregates appear when present; hidden or placeholder when consent revoked or no sync.
-- Recovery/mood/energy use wellness-safe labels; no "recovery score" or clinical terms in UI strings.
-- Documents card respects consent; no parsed clinical content on dashboard.
-- Weekly progress section shows workout trends when generated; deferred domains listed honestly.
-- Primary nav includes Longevity/Overview; Chat remains visually dominant.
-- All user-visible copy passes wellness-only review.
+- Authenticated web users can open `/longevity`; unauthenticated behavior follows existing app auth routing.
+- Primary web navigation includes `Longevity`; Chat remains visually dominant in the overall app shell.
+- Dashboard uses structured APIs/state only; chat transcripts are never used as dashboard source data.
+- Hero displays **Weekly consistency** using available non-clinical adherence/logging signals and a 7-day strip.
+- No card labels the hero or any metric as "longevity score", "health score", "readiness score", "biological age", "risk", "normal", or "abnormal".
+- Today, workout, nutrition, and goals cards render with real data when available and partial/empty states when not.
+- Card actions route to authoritative surfaces: Today, secondary Training, secondary Nutrition, Profile goals/context, Profile documents, or Chat.
+- Wellness signals are hidden or replaced with consent-aware placeholders when consent is missing, revoked, or no data is available.
+- Recovery, mood, energy, soreness, fatigue, and stress copy is framed as self-reported wellness check-ins.
+- Documents card shows metadata/status only and never exposes parsed clinical values, reference ranges, or interpretations.
+- Trends section reuses existing weekly progress where available and labels missing domains as "not enough data yet".
+- Static Chat prompts are safe, wellness-oriented, and do not promise diagnosis, treatment, or medical interpretation.
+- Dashboard has loading, error, empty, and partial-data states that are covered by focused tests.
+- User-visible copy passes a wellness-only safety review.
 
-## Data and API Implications
+## Data And API Implications
 
-**Existing sources to compose:**
+V1 should prefer client-side composition from existing structured endpoints to avoid inventing a new backend aggregate too early. If the frontend cannot safely compose required values from existing endpoints, add the smallest backend read endpoint rather than duplicating business rules in the UI.
 
-| Domain | Dashboard use |
-|--------|---------------|
-| Training | Adherence, consistency hero, trend strip |
-| Today | Daily adherence score, energy/difficulty |
-| Nutrition | Consistency card |
-| Goals | Active goals summary |
-| Progress | Trends, userMessage, deferred domains |
-| Metrics | Steps/sleep/weight trends; mood/soreness/fatigue |
-| Documents | Context card (metadata only) |
-| Proposals | Recent coach activity strip |
+**Structured sources to compose**
 
-**Gaps to close:**
+| Domain | Dashboard use | v1 handling |
+|--------|---------------|-------------|
+| Today | Daily adherence, current-week strip, feedback/check-ins | Use existing Today/checklist data where available; empty state otherwise |
+| Training | Workout adherence and weekly trend | Link to secondary Training; reuse existing workout/progress summaries |
+| Nutrition | Nutrition consistency and weekly plan context | Link to secondary Nutrition; show partial state if adherence is unavailable |
+| Goals | Active goals summary | Link to Profile goals/context |
+| Progress | Weekly summary and trend observations | Reuse workout-focused summary; label other domains as deferred/not enough data |
+| Metrics | Steps, sleep, weight, mood, soreness, fatigue, energy | Consent-gated trends only; filter unsafe readiness/recovery scores |
+| Documents | Recent document metadata and consent status | Metadata only; link to Profile documents |
+| Proposals/Chat | Coach CTA and optional pending-work link | Link to Chat; no dashboard mutation |
 
-- Extend progress aggregates to include today, nutrition, recovery (Phase 10 extension).
-- Add `LongevityOverviewResponse` Zod schema.
-- Optional `GET /longevity/overview?weekStart=` — server-side aggregation.
-- Dashboard read model must not expose raw `readiness_score` to UI.
+**Backend default**
 
-**Metrics route:** Keep `/metrics` out of primary nav and place metric consent/settings under Profile; Longevity becomes the consumer metrics view.
+- Do not require `GET /longevity/overview` for MVP if existing endpoints can support the page.
+- If composition becomes duplicated or unsafe, add `GET /longevity/overview?weekStart=` returning a typed `LongevityOverviewResponse` from `@health/types`.
+- Any aggregate endpoint must filter out raw `readiness_score`, clinical lab values, reference ranges, diagnosis/treatment language, and document summary content.
+- Keep `/metrics` out of primary nav. Consent and raw metric management belong under Profile/settings; Longevity is the consumer trend view.
 
-## AI and Proposal Implications
+## AI And Proposal Implications
 
-- Dashboard is **read-only** for structured state.
-- Coach may reference dashboard-visible aggregates in Chat when user has `allowAiContext`.
-- Suggested Chat prompts on dashboard are **static templates** tied to visible gaps, not LLM-generated clinical advice on page load.
+- Longevity is read-only for structured state.
+- The dashboard may link to Chat with a visible prompt template, but it should not generate an LLM narrative during page load.
+- Chat may reference dashboard-visible structured aggregates only when the user has appropriate AI context consent.
+- Any plan changes suggested from a Longevity conversation must still use typed proposals, user approval, backend validation, and revision-safe updates.
 
 ## Implementation Slices
 
-| Slice | Deliverable |
-|-------|-------------|
-| L1 — Shell and IA | Route, nav item, page layout, empty scaffold |
-| L2 — Core cards | Hero consistency + Today/workout/nutrition/goals cards |
-| L3 — Progress integration | Weekly summary + trends section |
-| L4 — Wellness signals | Consent-gated metrics cards |
-| L5 — Documents context | Consent-aware metadata card |
-| L6 — Backend aggregate (optional) | LongevityOverviewResponse + endpoint |
-| L7 — Progress domain expansion | Include today/nutrition/recovery in weekly summaries |
-| L8 — Polish and tests | Motion, responsive grid, copy audit, snapshot tests |
+| Slice | Deliverable | Likely owner |
+|-------|-------------|--------------|
+| L1 - Shell and IA | `/longevity` route, primary nav item, app-shell placement, responsive empty scaffold | Frontend Implementer |
+| L2 - Core overview cards | Hero weekly consistency, Today/workout/nutrition/goals cards, compact links | Frontend Implementer |
+| L3 - Data composition | TanStack Query composition from existing structured APIs; safe partial states | Frontend Implementer with Backend Implementer support if endpoint gaps appear |
+| L4 - Wellness and documents | Consent-gated wellness signals, self-check-in labels, documents metadata card | Frontend Implementer, Backend Implementer if data filtering is needed |
+| L5 - Backend aggregate fallback | Optional `LongevityOverviewResponse` and `GET /longevity/overview` only if needed | Backend Implementer |
+| L6 - Tests and safety copy | Focused tests for composition, empty states, consent gating, and forbidden terms | Test Writer |
+| L7 - Review and runtime verification | Architecture/safety review, then run local stack and smoke test `/longevity` | Implementation Reviewer, App Runner |
 
-Recommended MVP: L1–L5.
+Recommended MVP: L1-L4 plus L6-L7. L5 is a fallback, not a default requirement.
 
-## Risks and Open Questions
+## Execution Plan
 
-- **IA collision:** Profile already has coaching snapshot — split roles (Profile = account/settings; Longevity = wellness overview).
-- **Score leakage:** `recoveryInputTypeSchema` includes `readiness_score` — strict UI/backend filtering required.
-- **Sparse data:** early users see mostly empty states; dashboard must feel useful, not broken.
-- **Metrics on web:** native sync is mobile-first; web may show "connect on mobile" placeholders often.
+1. **Frontend Implementer** builds the `/longevity` route, nav entry, layout shell, hero, cards, static prompts, links, and loading/error/empty/partial states.
+2. **Frontend Implementer** composes available structured data with TanStack Query and keeps all derived labels non-clinical.
+3. **Backend Implementer** only steps in if required fields are unavailable or unsafe to compose in the client; the default task is to add a narrow read model or filter unsafe fields, not a broad new domain.
+4. **Test Writer** adds focused coverage for rendering states, consent gating, card links, and forbidden clinical/readiness-score copy.
+5. **Implementation Reviewer** checks structured-state usage, safety language, IA fit, backend scope, and test coverage.
+6. **App Runner** starts the local stack, opens `/longevity`, verifies navigation and key states, and reports any blocker with the next owner.
 
-**Open questions:**
+## Risks And Open Questions
 
-1. Route name: `/longevity` vs `/dashboard` vs `/overview`?
-2. Secondary plan links: should Training/Nutrition detail links appear as full cards, compact links, or proposal-card destinations?
-3. Profile relationship: keep Profile focused on account/context while Longevity owns wellness overview.
-4. Hero metric: weekly consistency composite or longevity-framed composite (still non-clinical)?
-5. Backend BFF vs client compose for v1?
-6. Which deferred domain first in progress expansion?
+**Known risks**
 
-## Status vs Current Implementation
+- **Score leakage:** Existing recovery/metric schemas may include readiness-style values. UI and any aggregate response must filter these out.
+- **Sparse data:** Early users may see many empty cards. Empty states must explain what to log next and link to Today or Chat.
+- **Metrics availability:** Device sync may be mobile-first or absent on web. V1 must tolerate missing signals gracefully.
+- **Profile overlap:** Profile may already show some coaching/context cards. Keep Profile focused on account, goals, documents, consent, and settings; Longevity owns weekly overview.
+- **Overbuilding backend:** A BFF endpoint could be useful later, but v1 should not block on it unless client composition is unsafe or too duplicated.
 
-| Area | Current state | Gap |
-|------|---------------|-----|
-| Nav | Chat, Today, Workouts, Nutrition, Metrics, Profile | Target is Chat, Today, Longevity, Profile |
-| Profile dashboard | Hero consistency, goals, workout/nutrition cards | Not longevity-positioned |
-| Progress | Workout-only in Training/plan context | Not on unified overview |
-| Metrics | Dev-oriented UI at `/metrics` | No consumer trend visualization |
-| Today | Rich execution UI | Not aggregated on overview |
-| Documents | Profile section with consent | No dashboard-level context card |
-| Types | WeeklyProgressSummary, device metrics | No LongevityOverviewResponse |
+**Remaining open questions**
 
-**Overall:** ~25–30% of underlying data exists; ~0% of named Longevity Dashboard product surface.
+1. What exact existing endpoint names and fields are available for Today adherence, nutrition consistency, goals, metrics, documents, and weekly progress in the current branch?
+2. What are the final secondary route paths for Training, Nutrition, Profile goals, and Profile documents if they differ from the architecture names?
+3. Should the MVP include a pending-proposals indicator on Longevity, or defer that to Chat after the core dashboard is working?
+
+## Status Vs Current Implementation
+
+| Area | Current state | MVP gap |
+|------|---------------|---------|
+| IA | Architecture docs define Chat, Today, Longevity, Profile as primary surfaces | Add `/longevity` route and nav item |
+| Profile | Account/context-oriented surface with some dashboard-like content | Keep as context/settings; avoid moving Profile into dashboard role |
+| Progress | Workout-focused weekly summary exists conceptually | Reuse where available; defer broader progress expansion |
+| Metrics | Consumer trend placement belongs in Longevity, raw settings under Profile | Add consent-gated trend cards only |
+| Today | Daily execution surface | Aggregate weekly adherence/logging into Longevity |
+| Documents | Profile-owned consent/document context | Add metadata/status card and Profile link |
+| Types/API | No required Longevity read model yet | Prefer client composition; add `LongevityOverviewResponse` only if needed |
+
+**Overall:** The MVP can start with a web-first, mostly frontend implementation that composes existing structured data, adds safe empty states, and keeps backend work narrowly scoped to missing or unsafe read fields.

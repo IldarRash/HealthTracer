@@ -11,11 +11,15 @@ import { GoalsModule } from "./modules/goals/goals.module.js";
 import { HabitsModule } from "./modules/habits/habits.module.js";
 import { HealthMetricsModule } from "./modules/health-metrics/health-metrics.module.js";
 import { NutritionModule } from "./modules/nutrition/nutrition.module.js";
+import { OnboardingModule } from "./modules/onboarding/onboarding.module.js";
 import { ProfilesModule } from "./modules/profiles/profiles.module.js";
 import { ProgressModule } from "./modules/progress/progress.module.js";
 import { ProposalsModule } from "./modules/proposals/proposals.module.js";
 import { RecipesModule } from "./modules/recipes/recipes.module.js";
+import { RecoveryModule } from "./modules/recovery/recovery.module.js";
 import { TodayModule } from "./modules/today/today.module.js";
+import { UserStateModule } from "./modules/user-state/user-state.module.js";
+import { WellbeingCheckInsModule } from "./modules/wellbeing-check-ins/wellbeing-check-ins.module.js";
 import { UsersModule } from "./modules/users/users.module.js";
 import { WorkoutsModule } from "./modules/workouts/workouts.module.js";
 
@@ -23,6 +27,8 @@ import { WorkoutsModule } from "./modules/workouts/workouts.module.js";
   imports: [
     DatabaseModule,
     UsersModule,
+    UserStateModule,
+    OnboardingModule,
     ProfilesModule,
     GoalsModule,
     HabitsModule,
@@ -31,6 +37,8 @@ import { WorkoutsModule } from "./modules/workouts/workouts.module.js";
     NutritionModule,
     RecipesModule,
     TodayModule,
+    WellbeingCheckInsModule,
+    RecoveryModule,
     ProgressModule,
     DocumentsModule,
     CoachingContextModule,

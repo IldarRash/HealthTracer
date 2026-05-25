@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import {
   apiQueryKeys,
   connectDevice,
+  getMetricsRefreshQueryKeys,
   grantDeviceConsent,
   listDeviceConnections,
   listHealthMetricAggregates,
@@ -51,12 +52,7 @@ function formatTimestamp(value: string): string {
 }
 
 function metricsQueryKeysToRefresh(): ReadonlyArray<readonly unknown[]> {
-  return [
-    apiQueryKeys.deviceConnections,
-    apiQueryKeys.healthMetricSnapshots,
-    apiQueryKeys.healthMetricAggregates,
-    apiQueryKeys.healthMetricsAiPreview,
-  ];
+  return getMetricsRefreshQueryKeys();
 }
 
 export function MetricsWorkspace() {
@@ -164,7 +160,9 @@ export function MetricsWorkspace() {
       setPendingConsentId(consent.id);
       setActionError(null);
       setActionMessage("Consent saved. You can connect a dev device connection on web.");
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.deviceConnections });
+      for (const key of getMetricsRefreshQueryKeys()) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
     },
     onError: (error) => {
       setActionMessage(null);
@@ -197,7 +195,9 @@ export function MetricsWorkspace() {
     onSuccess: () => {
       setActionError(null);
       setActionMessage("Dev device connection established on web.");
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.deviceConnections });
+      for (const key of getMetricsRefreshQueryKeys()) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
     },
     onError: (error) => {
       setActionMessage(null);

@@ -7,6 +7,11 @@ import {
   stubCreateHabitPlan,
 } from "./stub-habit-plan.js";
 import {
+  buildWellbeingCoachReply,
+  isWellbeingRelatedMessage,
+  parseWellbeingSummaryFromContext,
+} from "./stub-wellbeing.js";
+import {
   stubProgressAdaptedWorkoutPlan,
   stubReducedLoadWorkoutPlan,
   stubRemoveExerciseWorkoutPlan,
@@ -241,6 +246,32 @@ export class StubCoachAiProvider implements CoachAiProvider {
             },
           },
         ],
+      });
+    }
+
+    if (isWellbeingRelatedMessage(normalized)) {
+      const summary = parseWellbeingSummaryFromContext(request.coachingContext);
+
+      return stubCoachOutput({
+        reply: buildWellbeingCoachReply(
+          summary ?? {
+            latestDate: null,
+            latestMoodScore: null,
+            latestStressScore: null,
+            windowDays: 7,
+            windowStart: null,
+            windowEnd: null,
+            checkInCount: 0,
+            moodAverage: null,
+            stressAverage: null,
+            moodTrendDirection: "unknown",
+            stressTrendDirection: "unknown",
+            currentStreak: 0,
+            dataSufficiency: "insufficient",
+            generatedAt: new Date().toISOString(),
+          },
+        ),
+        proposals: [],
       });
     }
 

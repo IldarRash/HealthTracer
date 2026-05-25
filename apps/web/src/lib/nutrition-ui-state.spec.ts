@@ -5,6 +5,7 @@ import {
   buildMealCompletionState,
   formatHydrationProgress,
   hasActiveNutritionPlan,
+  parseHydrationInput,
   summarizeNutritionProposalChanges,
   summarizeNutritionTargets,
   targetCompletionKeysForPayload,
@@ -97,6 +98,13 @@ describe("nutrition UI state", () => {
       "carbsOnTarget",
       "fatOnTarget",
     ]);
+  });
+
+  it("guards hydration input parsing for Today adherence saves", () => {
+    expect(parseHydrationInput("2.25")).toBe(2.25);
+    expect(parseHydrationInput("  ")).toBeNull();
+    expect(parseHydrationInput("-1")).toBeNull();
+    expect(parseHydrationInput("not a number")).toBeNull();
   });
 
   it("builds adherence state for today from payload and record", () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getTodayIsoDateInTimezone, getWeekStartIsoDate } from "@health/types";
 import { CoachingContextService } from "./coaching-context.service.js";
 
 const auth = {
@@ -8,6 +9,7 @@ const auth = {
 };
 
 const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+const currentWeekStart = getWeekStartIsoDate(getTodayIsoDateInTimezone("UTC"));
 
 const activeWorkoutPayload = {
   title: "Three day strength base",
@@ -71,15 +73,67 @@ function createCoachingContextService(overrides: {
         email: auth.email,
         displayName: auth.displayName,
         timezone: "UTC",
+        onboardingCompletedAt: "2026-05-20T12:00:00.000Z",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }),
     } as never,
     {
-      getCurrentProfile: async () => null,
+      getCurrentProfile: async () => ({
+        id: "profile-1",
+        userId,
+        birthDate: null,
+        heightCm: null,
+        baselineWeightKg: null,
+        activityLevel: "moderately_active",
+        trainingExperience: "intermediate",
+        preferences: ["morning workouts"],
+        constraints: ["low impact cardio"],
+        longevityDirection: {
+          statement: "Stay strong and mobile.",
+          tags: ["strength"],
+        },
+        longevityDirectionTags: ["strength"],
+        coachingNotes: [{ text: "Prefers short sessions." }],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
     } as never,
     {
-      listCurrentGoals: async () => [],
+      listCurrentGoals: async () => [
+        {
+          id: "goal-q1",
+          userId,
+          type: "general_wellness",
+          status: "active",
+          priority: "primary",
+          title: "Complete 36 workouts this quarter",
+          target: {},
+          horizon: "quarterly",
+          parentGoalId: null,
+          weekStart: null,
+          startDate: "2026-05-01",
+          targetDate: "2026-07-31",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "goal-w1",
+          userId,
+          type: "general_wellness",
+          status: "active",
+          priority: "secondary",
+          title: "Keep training friction low",
+          target: {},
+          horizon: "weekly",
+          parentGoalId: "goal-q1",
+          weekStart: currentWeekStart,
+          startDate: currentWeekStart,
+          targetDate: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
     } as never,
     (overrides.workoutsRepository ??
       {
@@ -132,20 +186,119 @@ function createCoachingContextService(overrides: {
     } as never,
     {
       buildDocumentContextSummary: async () => ({
-        availableDocuments: 0,
-        summaries: [],
+        items: [],
+        generatedAt: new Date().toISOString(),
+      }),
+    } as never,
+    {
+      buildSignalContextSummary: async () => ({
+        signals: [],
+        generatedAt: new Date().toISOString(),
+      }),
+    } as never,
+    {
+      previewInsights: async () => ({
+        insights: [],
+        generatedAt: new Date().toISOString(),
+        dataStatus: "insufficient",
       }),
     } as never,
     {
       buildSummaryForUser: async () => ({
-        availableMetrics: [],
-        recentHighlights: [],
+        items: [],
+        generatedAt: new Date().toISOString(),
+      }),
+    } as never,
+    {
+      buildSummaryForUser: async () => ({
+        latestDate: "2026-05-25",
+        latestMoodScore: 4,
+        latestStressScore: 2,
+        windowDays: 7,
+        windowStart: "2026-05-19",
+        windowEnd: "2026-05-25",
+        checkInCount: 4,
+        moodAverage: 3.5,
+        stressAverage: 2.75,
+        moodTrendDirection: "up",
+        stressTrendDirection: "down",
+        currentStreak: 2,
+        dataSufficiency: "sufficient",
+        generatedAt: new Date().toISOString(),
+      }),
+    } as never,
+    {
+      buildSummaryForUser: async () => ({
+        band: "moderate_load",
+        dataSufficiency: "partial",
+        focusMessage:
+          "Based on what you logged, today may carry a moderate load. A balanced pace could help you stay consistent.",
+        signals: [{ source: "manual_check_in", label: "Fatigue check-in", detail: "Moderate fatigue" }],
+        date: "2026-05-25",
       }),
     } as never,
   );
 }
 
 describe("CoachingContextService", () => {
+  it("includes onboarding hierarchy and personal context in prompt context", async () => {
+    const service = createCoachingContextService();
+
+    const snapshot = await service.buildSnapshot(auth);
+    const promptContext = service.toPromptContext(snapshot);
+
+    expect(snapshot.onboardingCompleted).toBe(true);
+    expect(snapshot.coachingHierarchy.activeQuarterlyGoal?.title).toContain("36 workouts");
+    expect(snapshot.coachingHierarchy.weeklyFocus).toEqual([
+      expect.objectContaining({
+        title: "Keep training friction low",
+        weekStart: currentWeekStart,
+      }),
+    ]);
+    expect(snapshot.personalContextSummary.preferences).toEqual(["morning workouts"]);
+    expect(snapshot.personalContextSummary.coachingNotes).toEqual([
+      { text: "Prefers short sessions." },
+    ]);
+    expect(promptContext.onboardingCompleted).toBe(true);
+    expect(promptContext.coachingHierarchy).toEqual(snapshot.coachingHierarchy);
+    expect(promptContext.personalContextSummary).toEqual(snapshot.personalContextSummary);
+    expect(promptContext.profile).toMatchObject({
+      longevityDirection: {
+        statement: "Stay strong and mobile.",
+        tags: ["strength"],
+      },
+    });
+  });
+
+  it("includes wellbeing summary in snapshot and prompt context without notes", async () => {
+    const service = createCoachingContextService();
+
+    const snapshot = await service.buildSnapshot(auth);
+    const promptContext = service.toPromptContext(snapshot);
+
+    expect(snapshot.wellbeingSummary).toMatchObject({
+      latestMoodScore: 4,
+      latestStressScore: 2,
+      dataSufficiency: "sufficient",
+    });
+    expect(promptContext.wellbeingSummary).toEqual(snapshot.wellbeingSummary);
+    expect(promptContext.wellbeingSummary).not.toHaveProperty("note");
+  });
+
+  it("includes recovery context in snapshot and prompt context without numeric score", async () => {
+    const service = createCoachingContextService();
+
+    const snapshot = await service.buildSnapshot(auth);
+    const promptContext = service.toPromptContext(snapshot);
+
+    expect(snapshot.recoveryContext).toMatchObject({
+      band: "moderate_load",
+      dataSufficiency: "partial",
+    });
+    expect(promptContext.recoveryContext).toEqual(snapshot.recoveryContext);
+    expect(JSON.stringify(promptContext.recoveryContext)).not.toMatch(/score/i);
+  });
+
   it("includes active workout plan summary and weekly progress in prompt context", async () => {
     const service = createCoachingContextService();
 

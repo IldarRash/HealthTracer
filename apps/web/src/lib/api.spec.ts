@@ -2,35 +2,59 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { aiProposalSchema, type AiProposal, type UpdateRecipeRecommendationStatusInput } from "@health/types";
 import {
   completeWorkoutSession,
+  completeOnboarding,
   decideProposal,
   apiQueryKeys,
   getAcceptedProposalRefreshQueryKeys,
+  getCurrentUserState,
+  getOnboardingRefreshQueryKeys,
   getActiveNutritionPlan,
   getActiveWorkoutPlan,
   getActiveHabitPlan,
+  getDocumentsRefreshQueryKeys,
   getHabitAdherence,
   buildHabitAdherenceQueryString,
+  buildWellbeingAggregatesQueryString,
+  buildWellbeingHistoryQueryString,
   getInspectorState,
   generateWeeklyProgressSummary,
   getCurrentWeeklyProgressSummary,
   getLatestWeeklyProgressSummary,
+  getMetricsRefreshQueryKeys,
+  getNutritionAdherenceRefreshQueryKeys,
+  getProgressSummaryRefreshQueryKeys,
   getTodayNutritionAdherence,
   upsertNutritionAdherence,
   upsertTodayNutritionAdherence,
   getWorkoutExecutionRefreshQueryKeys,
+  getWellbeingRefreshQueryKeys,
+  getWellbeingAggregates,
+  getWellbeingCheckIn,
+  getWellbeingHistory,
+  upsertWellbeingCheckIn,
+  buildRecoveryContextQueryString,
+  buildRecoveryWeeklyContextQueryString,
+  getRecoveryContext,
+  getRecoveryRefreshQueryKeys,
+  getRecoveryWeeklyContext,
+  upsertRecoveryCheckIn,
   getTodayDay,
   getTodayHistory,
   buildRecipeListQueryString,
   createDocument,
   deleteDocument,
+  extractDocumentSignals,
   generateRecipeRecommendations,
   getDocument,
   grantDeviceConsent,
+  listDocumentSignals,
   listDocuments,
   listDeviceConnections,
   listHealthMetricSnapshots,
+  previewCorrelationInsights,
   previewHealthMetricsAiContext,
   parseDocument,
+  reviewDocumentSignal,
   syncHealthMetrics,
   listRecipeRecommendations,
   listRecipes,
@@ -587,7 +611,8 @@ describe("web api helpers", () => {
   it("upserts nutrition adherence for a date", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(input)).toContain("/nutrition/adherence/2026-05-22");
         expect(init?.method).toBe("PUT");
         expect(JSON.parse(String(init?.body))).toEqual({
           hydrationLitersConsumed: 2,
@@ -717,6 +742,7 @@ describe("web api helpers", () => {
 
     expect(getAcceptedProposalRefreshQueryKeys(baseProposal)).toEqual([
       apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
       apiQueryKeys.proposals,
       apiQueryKeys.nutritionActive,
       apiQueryKeys.nutritionRevisions,
@@ -731,6 +757,7 @@ describe("web api helpers", () => {
       ),
     ).toEqual([
       apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
       apiQueryKeys.proposals,
       apiQueryKeys.workoutActive,
       apiQueryKeys.workoutRevisions,
@@ -749,6 +776,7 @@ describe("web api helpers", () => {
       ),
     ).toEqual([
       apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
       apiQueryKeys.proposals,
       apiQueryKeys.workoutActive,
       apiQueryKeys.workoutRevisions,
@@ -763,6 +791,7 @@ describe("web api helpers", () => {
       ),
     ).toEqual([
       apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
       apiQueryKeys.proposals,
       apiQueryKeys.progressWeeklyLatest,
       apiQueryKeys.progressWeeklyCurrent,
@@ -774,12 +803,22 @@ describe("web api helpers", () => {
           title: "Lose 5 kg",
         }),
       ),
-    ).toEqual([apiQueryKeys.dashboardState, apiQueryKeys.proposals, apiQueryKeys.goals]);
+    ).toEqual([
+      apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
+      apiQueryKeys.proposals,
+      apiQueryKeys.goals,
+    ]);
     expect(
       getAcceptedProposalRefreshQueryKeys(
         createAcceptedProposal("update_profile", "profile", {}),
       ),
-    ).toEqual([apiQueryKeys.dashboardState, apiQueryKeys.proposals, apiQueryKeys.profile]);
+    ).toEqual([
+      apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
+      apiQueryKeys.proposals,
+      apiQueryKeys.profile,
+    ]);
     expect(
       getAcceptedProposalRefreshQueryKeys(
         createAcceptedProposal(
@@ -790,6 +829,7 @@ describe("web api helpers", () => {
       ),
     ).toEqual([
       apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
       apiQueryKeys.proposals,
       apiQueryKeys.recipeRecommendations,
       apiQueryKeys.recipesCatalog,
@@ -800,6 +840,7 @@ describe("web api helpers", () => {
       ),
     ).toEqual([
       apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
       apiQueryKeys.proposals,
       apiQueryKeys.todayDayPrefix,
       apiQueryKeys.todayHistoryPrefix,
@@ -810,6 +851,7 @@ describe("web api helpers", () => {
       ),
     ).toEqual([
       apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
       apiQueryKeys.proposals,
       apiQueryKeys.habitActive,
       apiQueryKeys.habitRevisions,
@@ -823,6 +865,7 @@ describe("web api helpers", () => {
       ),
     ).toEqual([
       apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
       apiQueryKeys.proposals,
       apiQueryKeys.habitActive,
       apiQueryKeys.habitRevisions,
@@ -866,6 +909,7 @@ describe("web api helpers", () => {
       createdAt: "2026-05-22T08:00:00.000Z",
       updatedAt: "2026-05-22T08:00:00.000Z",
       workout: null,
+      nutrition: null,
     };
 
     vi.stubGlobal(
@@ -899,11 +943,123 @@ describe("web api helpers", () => {
     const dayResult = await getTodayDay(token, "2026-05-22");
     expect(dayResult.error).toBeUndefined();
     expect(dayResult.data?.items).toHaveLength(1);
+    expect(dayResult.data?.nutrition).toBeNull();
 
     const historyResult = await getTodayHistory(token, 14);
     expect(historyResult.error).toBeUndefined();
     expect(historyResult.data?.entries).toHaveLength(1);
     expect(String(vi.mocked(fetch).mock.calls[1]?.[0])).toContain("limit=14");
+  });
+
+  it("parses selected-date today nutrition detail without dropping workout or checklist fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        expect(String(input)).toContain("/today/2026-05-23");
+
+        return new Response(
+          JSON.stringify({
+            id: "a1b2c3d4-e5f6-4890-abcd-ef1234567890",
+            userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+            date: "2026-05-23",
+            items: [
+              {
+                id: "b2c3d4e5-f6a7-4901-bcde-f12345678901",
+                label: "Recovery walk",
+                kind: "recovery",
+                status: "pending",
+                required: false,
+                source: { type: "weekly_focus", id: "33333333-3333-4333-8333-333333333333" },
+              },
+            ],
+            source: "generated",
+            feedback: { notes: "Easy day", energy: 6 },
+            adherence: {
+              score: null,
+              completedRequired: 0,
+              totalRequired: 0,
+              completedOptional: 0,
+              skippedRequired: 0,
+              skippedOptional: 0,
+            },
+            createdAt: "2026-05-23T08:00:00.000Z",
+            updatedAt: "2026-05-23T08:00:00.000Z",
+            workout: {
+              sessionId: "78d40655-b4b5-47b3-b28e-470192e05f04",
+              workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+              workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+              plannedDate: "2026-05-23",
+              weekday: "saturday",
+              title: "Zone 2 run",
+              focus: "Aerobic base",
+              status: "planned",
+              exercises: [],
+              isRestDay: false,
+            },
+            nutrition: {
+              date: "2026-05-23",
+              plan: {
+                id: "33333333-3333-4333-8333-333333333333",
+                userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+                activeRevisionId: "44444444-4444-4444-8444-444444444444",
+                status: "active",
+                createdAt: "2026-05-22T08:00:00.000Z",
+                updatedAt: "2026-05-22T08:00:00.000Z",
+              },
+              activeRevision: {
+                id: "44444444-4444-4444-8444-444444444444",
+                nutritionPlanId: "33333333-3333-4333-8333-333333333333",
+                revisionNumber: 1,
+                reason: "Initial plan",
+                source: "ai_proposal",
+                payload: {
+                  title: "Balanced base",
+                  summary: "Consistent meals.",
+                  caloriesPerDay: 2200,
+                  proteinGrams: 140,
+                  carbsGrams: 220,
+                  fatGrams: 70,
+                  hydrationLiters: 2.5,
+                  mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+                  preferences: [],
+                  restrictions: [],
+                  allergies: [],
+                  notes: [],
+                },
+                createdAt: "2026-05-22T08:00:00.000Z",
+              },
+              adherence: {
+                id: "66666666-6666-4666-8666-666666666666",
+                userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+                date: "2026-05-23",
+                hydrationLitersConsumed: 2,
+                mealCompletion: [{ label: "Breakfast", completed: true }],
+                targetCompletion: {
+                  caloriesOnTarget: true,
+                  proteinOnTarget: null,
+                  carbsOnTarget: null,
+                  fatOnTarget: null,
+                },
+                notes: ["Steady appetite"],
+                createdAt: "2026-05-23T08:00:00.000Z",
+                updatedAt: "2026-05-23T09:00:00.000Z",
+              },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+
+    const result = await getTodayDay(token, "2026-05-23");
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.date).toBe("2026-05-23");
+    expect(result.data?.items[0]?.kind).toBe("recovery");
+    expect(result.data?.feedback?.energy).toBe(6);
+    expect(result.data?.workout?.title).toBe("Zone 2 run");
+    expect(result.data?.nutrition?.date).toBe("2026-05-23");
+    expect(result.data?.nutrition?.adherence?.hydrationLitersConsumed).toBe(2);
   });
 
   it("rejects invalid today item status updates before calling the API", async () => {
@@ -960,6 +1116,7 @@ describe("web api helpers", () => {
       createdAt: "2026-05-22T08:00:00.000Z",
       updatedAt: "2026-05-22T12:00:00.000Z",
       workout: null,
+      nutrition: null,
     };
 
     vi.stubGlobal(
@@ -1323,6 +1480,9 @@ describe("web api helpers", () => {
       mimeType: "text/plain",
       fileSizeBytes: 128,
       parseStatus: "uploaded",
+      signalExtractionStatus: "not_started",
+      signalExtractionFailureReason: null,
+      signalExtractedAt: null,
       consentScopes: [
         "upload_storage",
         "parse_ocr",
@@ -1470,6 +1630,244 @@ describe("web api helpers", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[6]?.[1]?.body))).toEqual({ revoke: true });
   });
 
+  it("posts fileContentBase64 payloads for supported document uploads", async () => {
+    const token = "test-token";
+    const now = "2026-05-22T12:00:00.000Z";
+    const documentId = "aa639495-cf87-4110-a1b0-b11900a01285";
+    const fileContentBase64 = Buffer.from("%PDF-1.4 wellness sample", "utf8").toString("base64");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "POST" && path.endsWith("/documents")) {
+        return new Response(
+          JSON.stringify({
+            id: documentId,
+            userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+            documentType: "lab_report",
+            title: "Lab PDF upload",
+            storageReference: "local://documents/lab.pdf",
+            mimeType: "application/pdf",
+            fileSizeBytes: Buffer.from(fileContentBase64, "base64").byteLength,
+            parseStatus: "uploaded",
+            signalExtractionStatus: "not_started",
+            signalExtractionFailureReason: null,
+            signalExtractedAt: null,
+            consentScopes: ["upload_storage", "parse_ocr"],
+            consentVersion: "v1",
+            consentGrantedAt: now,
+            parseFailureReason: null,
+            revokedAt: null,
+            deletedAt: null,
+            uploadedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            summary: null,
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createDocument(token, {
+      documentType: "lab_report",
+      title: "Lab PDF upload",
+      consentScopes: ["upload_storage", "parse_ocr"],
+      consentVersion: "v1",
+      mimeType: "application/pdf",
+      fileContentBase64,
+    });
+
+    expect(result.data?.mimeType).toBe("application/pdf");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      documentType: "lab_report",
+      title: "Lab PDF upload",
+      consentScopes: ["upload_storage", "parse_ocr"],
+      consentVersion: "v1",
+      mimeType: "application/pdf",
+      fileContentBase64,
+    });
+  });
+
+  it("calls document signal and correlation preview API helpers", async () => {
+    const documentId = "3f98f3dd-806d-4386-8c5f-43499626c5d6";
+    const signalId = "4a98f3dd-806d-4386-8c5f-43499626c5d7";
+    const now = "2026-05-22T12:00:00.000Z";
+    const signal = {
+      id: signalId,
+      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      healthDocumentId: documentId,
+      signalKey: "vitamin_d",
+      displayLabel: "Vitamin D",
+      valueText: "28",
+      unit: "ng/mL",
+      referenceRangeText: "30-100 ng/mL",
+      observedAt: "2026-05-01",
+      sourceSection: "Lab results",
+      confidenceScore: 0.85,
+      reviewStatus: "pending_review",
+      ignoredReason: null,
+      extractedAt: now,
+      reviewedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const signalListResponse = {
+      documentId,
+      extractionStatus: "ready",
+      extractionFailureReason: null,
+      extractedAt: now,
+      signals: [signal],
+      ignoredContentExplanation: null,
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "GET" && path.endsWith(`/documents/${documentId}/signals`)) {
+          return new Response(JSON.stringify(signalListResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (method === "POST" && path.endsWith(`/documents/${documentId}/extract-signals`)) {
+          return new Response(JSON.stringify(signalListResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (
+          method === "PATCH" &&
+          path.endsWith(`/documents/${documentId}/signals/${signalId}/review`)
+        ) {
+          return new Response(
+            JSON.stringify({ ...signal, reviewStatus: "approved", reviewedAt: now }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        if (method === "GET" && path.endsWith("/documents/correlations/preview")) {
+          return new Response(
+            JSON.stringify({
+              insights: [
+                {
+                  id: "insight-abc",
+                  headline: "Sleep and training completion may be linked",
+                  summary:
+                    "Recent sleep summaries and lower training completion appeared around the same period.",
+                  coachingDomain: "recovery",
+                  evidenceRefs: [
+                    {
+                      type: "health_metric_aggregate",
+                      id: "sleep:2026-05-15:2026-05-21",
+                      label: "Recent sleep summary",
+                    },
+                  ],
+                  confidence: "medium",
+                },
+              ],
+              generatedAt: now,
+              dataStatus: "sufficient",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    expect((await listDocumentSignals(token, documentId)).data?.signals).toHaveLength(1);
+    expect((await extractDocumentSignals(token, documentId)).data?.extractionStatus).toBe("ready");
+    expect(
+      (await reviewDocumentSignal(token, documentId, signalId, { reviewStatus: "approved" })).data
+        ?.reviewStatus,
+    ).toBe("approved");
+    expect((await previewCorrelationInsights(token)).data?.insights).toHaveLength(1);
+  });
+
+  it("rejects invalid document signal reviews before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      reviewDocumentSignal(
+        token,
+        "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+        "4a98f3dd-806d-4386-8c5f-43499626c5d7",
+        { reviewStatus: "pending_review" as "approved" },
+      ),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed correlation preview responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            insights: [
+              {
+                id: "insight-missing-evidence",
+                headline: "Sleep and training completion may be linked",
+                summary: "Recent sleep summaries and lower training completion appeared together.",
+                coachingDomain: "recovery",
+                evidenceRefs: [],
+                confidence: "medium",
+              },
+            ],
+            generatedAt: "2026-05-22T12:00:00.000Z",
+            dataStatus: "sufficient",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await previewCorrelationInsights(token);
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toBe("/documents/correlations/preview could not be loaded");
+  });
+
+  it("parses proposal evidence refs from API payloads", () => {
+    const parsed = aiProposalSchema.parse({
+      ...acceptedProposalFixtureIds,
+      sourceMessageId: null,
+      intent: "summarize_progress",
+      targetDomain: "general",
+      title: "Recovery-focused week",
+      reason: "Training completion dipped alongside lower sleep summaries.",
+      evidenceRefs: [
+        {
+          type: "document_signal",
+          id: "4a98f3dd-806d-4386-8c5f-43499626c5d7",
+          label: "Energy level from uploaded document",
+        },
+      ],
+      proposedChanges: {},
+      status: "pending",
+      validationStatus: "valid",
+      validationErrors: [],
+      userDecisionAt: null,
+      appliedReference: null,
+      createdAt: "2026-05-22T12:00:00.000Z",
+      updatedAt: "2026-05-22T12:00:00.000Z",
+    });
+
+    expect(parsed.evidenceRefs).toHaveLength(1);
+  });
+
   it("surfaces document parse failures from API error bodies", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1588,6 +1986,583 @@ describe("web api helpers", () => {
         apiQueryKeys.habitAdherencePrefix,
         apiQueryKeys.workoutActive,
         apiQueryKeys.progressWeeklyCurrent,
+        apiQueryKeys.longevityState,
+        apiQueryKeys.wellbeingCheckInPrefix,
+        apiQueryKeys.wellbeingHistoryPrefix,
+        apiQueryKeys.wellbeingAggregatesPrefix,
+      ]),
+    );
+  });
+
+  it("returns nutrition adherence refresh query keys with longevity state", () => {
+    expect(getNutritionAdherenceRefreshQueryKeys()).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.nutritionAdherenceToday,
+        apiQueryKeys.nutritionAdherencePrefix,
+        apiQueryKeys.todayDayPrefix,
+        apiQueryKeys.todayHistoryPrefix,
+        apiQueryKeys.longevityState,
+      ]),
+    );
+  });
+
+  it("returns metrics refresh query keys with longevity state", () => {
+    expect(getMetricsRefreshQueryKeys()).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.deviceConnections,
+        apiQueryKeys.healthMetricSnapshots,
+        apiQueryKeys.healthMetricAggregates,
+        apiQueryKeys.healthMetricsAiPreview,
+        apiQueryKeys.longevityState,
+      ]),
+    );
+  });
+
+  it("returns documents refresh query keys with longevity state", () => {
+    expect(getDocumentsRefreshQueryKeys()).toEqual([
+      apiQueryKeys.documents,
+      apiQueryKeys.longevityState,
+      apiQueryKeys.correlationPreview,
+    ]);
+  });
+
+  it("returns progress summary refresh query keys with longevity state", () => {
+    expect(getProgressSummaryRefreshQueryKeys()).toEqual([
+      apiQueryKeys.dashboardState,
+      apiQueryKeys.longevityState,
+    ]);
+  });
+
+  it("builds wellbeing query strings", () => {
+    expect(buildWellbeingHistoryQueryString(7)).toBe("?limit=7");
+    expect(buildWellbeingAggregatesQueryString(7)).toBe("?periodType=daily&limit=7");
+  });
+
+  it("returns wellbeing refresh query keys", () => {
+    expect(getWellbeingRefreshQueryKeys()).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.wellbeingCheckInPrefix,
+        apiQueryKeys.wellbeingHistoryPrefix,
+        apiQueryKeys.wellbeingAggregatesPrefix,
+        apiQueryKeys.longevityState,
+      ]),
+    );
+  });
+
+  it("loads and upserts wellbeing check-ins", async () => {
+    const checkIn = {
+      id: "11111111-1111-4111-8111-111111111111",
+      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      date: "2026-05-25",
+      moodScore: 3,
+      stressScore: 4,
+      tags: [],
+      note: null,
+      source: "user_entry",
+      crisisFlagReasons: [],
+      createdAt: "2026-05-25T12:00:00.000Z",
+      updatedAt: "2026-05-25T12:00:00.000Z",
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes("/wellbeing-check-ins/2026-05-25") && init?.method === "PUT") {
+          return new Response(
+            JSON.stringify({
+              checkIn,
+              crisisSupport: {
+                shouldShowCrisisSupport: false,
+                reasons: [],
+                copy: null,
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        if (url.includes("/wellbeing-check-ins/2026-05-25")) {
+          return new Response(JSON.stringify({ checkIn }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url.includes("/wellbeing-check-ins/history")) {
+          return new Response(JSON.stringify({ entries: [checkIn] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url.includes("/wellbeing-check-ins/aggregates")) {
+          return new Response(
+            JSON.stringify({
+              periodType: "daily",
+              aggregates: [{ date: "2026-05-25", moodScore: 3, stressScore: 4 }],
+              summary: {
+                windowDays: 7,
+                checkInCount: 1,
+                moodAverage: 3,
+                stressAverage: 4,
+                moodTrendDirection: "unknown",
+                stressTrendDirection: "unknown",
+                currentStreak: 1,
+                dataSufficiency: "partial",
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    const getResult = await getWellbeingCheckIn(token, "2026-05-25");
+    expect(getResult.error).toBeUndefined();
+    expect(getResult.data?.checkIn?.moodScore).toBe(3);
+
+    const upsertResult = await upsertWellbeingCheckIn(token, "2026-05-25", {
+      moodScore: 3,
+      stressScore: 4,
+      source: "user_entry",
+    });
+    expect(upsertResult.error).toBeUndefined();
+    expect(upsertResult.data?.checkIn.date).toBe("2026-05-25");
+
+    const historyResult = await getWellbeingHistory(token, 7);
+    expect(historyResult.error).toBeUndefined();
+    expect(historyResult.data?.entries).toHaveLength(1);
+
+    const aggregatesResult = await getWellbeingAggregates(token, 7);
+    expect(aggregatesResult.error).toBeUndefined();
+    expect(aggregatesResult.data?.summary.checkInCount).toBe(1);
+  });
+
+  it("rejects invalid wellbeing upsert payloads before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      upsertWellbeingCheckIn(token, "2026-05-25", {
+        moodScore: 6,
+        stressScore: 3,
+      }),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown wellbeing upsert fields before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      upsertWellbeingCheckIn(token, "2026-05-25", {
+        moodScore: 3,
+        stressScore: 3,
+        rawNoteForAi: "private text should never be accepted",
+      } as never),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("builds recovery context query strings", () => {
+    expect(buildRecoveryContextQueryString("2026-05-25")).toBe("?date=2026-05-25");
+    expect(buildRecoveryContextQueryString("2026-05-25?bad=true")).toBe(
+      "?date=2026-05-25%3Fbad%3Dtrue",
+    );
+    expect(buildRecoveryWeeklyContextQueryString("2026-05-19")).toBe(
+      "?weekStart=2026-05-19",
+    );
+  });
+
+  it("returns recovery refresh query keys", () => {
+    expect(getRecoveryRefreshQueryKeys()).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.recoveryContextPrefix,
+        apiQueryKeys.longevityState,
+        apiQueryKeys.todayDayPrefix,
+      ]),
+    );
+  });
+
+  it("loads and upserts recovery check-ins", async () => {
+    const checkIn = {
+      id: "11111111-1111-4111-8111-111111111111",
+      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      date: "2026-05-25",
+      soreness: 2,
+      fatigue: 3,
+      moodScore: 4,
+      perceivedStress: null,
+      source: "user_entry",
+      createdAt: "2026-05-25T12:00:00.000Z",
+      updatedAt: "2026-05-25T12:00:00.000Z",
+    };
+    const context = {
+      id: "33333333-3333-4333-8333-333333333333",
+      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      date: "2026-05-25",
+      band: "moderate_load",
+      payload: {
+        band: "moderate_load",
+        dataSufficiency: "partial",
+        signals: [
+          {
+            source: "manual_check_in",
+            label: "Soreness check-in",
+            detail: "Low soreness",
+          },
+        ],
+        focusMessage:
+          "Based on what you logged, today may carry a moderate load. A balanced pace could help you stay consistent.",
+      },
+      calculatedAt: "2026-05-25T12:00:00.000Z",
+      createdAt: "2026-05-25T12:00:00.000Z",
+      updatedAt: "2026-05-25T12:00:00.000Z",
+    };
+
+    const requests: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({
+          url,
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+
+        if (url.includes("/recovery/check-in") && init?.method === "POST") {
+          return new Response(JSON.stringify({ checkIn, context }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url.includes("/recovery/context")) {
+          return new Response(JSON.stringify({ checkIn, context }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    const getResult = await getRecoveryContext(token, "2026-05-25");
+    expect(getResult.error).toBeUndefined();
+    expect(getResult.data?.context.payload.band).toBe("moderate_load");
+    expect(getResult.data?.checkIn?.soreness).toBe(2);
+    expect(JSON.stringify(getResult.data?.context)).not.toMatch(/readiness score|recovery score/i);
+
+    const upsertResult = await upsertRecoveryCheckIn(token, {
+      soreness: 2,
+      fatigue: 3,
+      moodScore: 4,
+      perceivedStress: null,
+      date: "2026-05-25",
+      source: "user_entry",
+    });
+    expect(upsertResult.error).toBeUndefined();
+    expect(upsertResult.data?.context.date).toBe("2026-05-25");
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: expect.stringContaining("/recovery/context?date=2026-05-25"),
+        }),
+        expect.objectContaining({
+          url: expect.stringContaining("/recovery/check-in"),
+          body: expect.objectContaining({
+            date: "2026-05-25",
+            source: "user_entry",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("loads weekly recovery context summaries without score framing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          weekStart: "2026-05-19",
+          weekEnd: "2026-05-25",
+          entries: [
+            {
+              date: "2026-05-25",
+              band: "moderate_load",
+              dataSufficiency: "partial",
+              signalCount: 2,
+            },
+          ],
+          summary: {
+            daysWithContext: 1,
+            checkInCount: 1,
+            bandCounts: {
+              well_supported: 0,
+              moderate_load: 1,
+              prioritize_recovery: 0,
+              insufficient_data: 6,
+            },
+            dominantBand: "moderate_load",
+            dataSufficiency: "insufficient",
+            message: "This week shows a mixed recovery pattern based on the entries available.",
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getRecoveryWeeklyContext(token, "2026-05-19");
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.summary.dominantBand).toBe("moderate_load");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/recovery/context/weekly?weekStart=2026-05-19"),
+      expect.any(Object),
+    );
+    expect(JSON.stringify(result.data)).not.toMatch(/readiness score|recovery score/i);
+  });
+
+  it("rejects invalid recovery upsert payloads before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      upsertRecoveryCheckIn(token, {
+        soreness: 6,
+        fatigue: 3,
+      }),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("loads current user state from /users/me/state", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          user: {
+            id: "11111111-1111-4111-8111-111111111111",
+            clerkUserId: "user_123",
+            email: "alex@example.com",
+            displayName: "Alex",
+            timezone: "UTC",
+            onboardingCompletedAt: null,
+            createdAt: "2026-05-25T12:00:00.000Z",
+            updatedAt: "2026-05-25T12:00:00.000Z",
+          },
+          profile: null,
+          goals: [
+            {
+              id: "33333333-3333-4333-8333-333333333333",
+              userId: "11111111-1111-4111-8111-111111111111",
+              type: "general_wellness",
+              status: "active",
+              priority: "primary",
+              title: "Complete 36 workouts this quarter",
+              target: {},
+              horizon: "quarterly",
+              parentGoalId: null,
+              weekStart: null,
+              startDate: "2026-04-01",
+              targetDate: "2026-06-30",
+              createdAt: "2026-05-25T12:00:00.000Z",
+              updatedAt: "2026-05-25T12:00:00.000Z",
+            },
+            {
+              id: "44444444-4444-4444-8444-444444444444",
+              userId: "11111111-1111-4111-8111-111111111111",
+              type: "general_wellness",
+              status: "active",
+              priority: "secondary",
+              title: "Mobility focus this week",
+              target: {},
+              horizon: "weekly",
+              parentGoalId: "33333333-3333-4333-8333-333333333333",
+              weekStart: "2026-05-25",
+              startDate: "2026-05-25",
+              targetDate: null,
+              createdAt: "2026-05-25T12:00:00.000Z",
+              updatedAt: "2026-05-25T12:00:00.000Z",
+            },
+          ],
+          onboardingCompleted: true,
+          hierarchy: {
+            direction: {
+              statement: "Stay strong and mobile.",
+              tags: ["strength"],
+            },
+            activeQuarterlyGoal: {
+              id: "33333333-3333-4333-8333-333333333333",
+              userId: "11111111-1111-4111-8111-111111111111",
+              type: "general_wellness",
+              status: "active",
+              priority: "primary",
+              title: "Complete 36 workouts this quarter",
+              target: {},
+              horizon: "quarterly",
+              parentGoalId: null,
+              weekStart: null,
+              startDate: "2026-04-01",
+              targetDate: "2026-06-30",
+              createdAt: "2026-05-25T12:00:00.000Z",
+              updatedAt: "2026-05-25T12:00:00.000Z",
+            },
+            weeklyFocus: [
+              {
+                id: "44444444-4444-4444-8444-444444444444",
+                userId: "11111111-1111-4111-8111-111111111111",
+                type: "general_wellness",
+                status: "active",
+                priority: "secondary",
+                title: "Mobility focus this week",
+                target: {},
+                horizon: "weekly",
+                parentGoalId: "33333333-3333-4333-8333-333333333333",
+                weekStart: "2026-05-25",
+                startDate: "2026-05-25",
+                targetDate: null,
+                createdAt: "2026-05-25T12:00:00.000Z",
+                updatedAt: "2026-05-25T12:00:00.000Z",
+              },
+            ],
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getCurrentUserState(token);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.onboardingCompleted).toBe(true);
+    expect(result.data?.hierarchy.activeQuarterlyGoal?.title).toBe(
+      "Complete 36 workouts this quarter",
+    );
+    expect(result.data?.hierarchy.weeklyFocus[0]?.title).toBe("Mobility focus this week");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/users/me/state"),
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("submits onboarding to POST /onboarding", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          user: {
+            id: "11111111-1111-4111-8111-111111111111",
+            clerkUserId: "user_123",
+            email: "alex@example.com",
+            displayName: "Alex",
+            timezone: "UTC",
+            onboardingCompletedAt: "2026-05-25T12:00:00.000Z",
+            updatedAt: "2026-05-25T12:00:00.000Z",
+            createdAt: "2026-05-25T12:00:00.000Z",
+          },
+          profile: {
+            id: "22222222-2222-4222-8222-222222222222",
+            userId: "11111111-1111-4111-8111-111111111111",
+            birthDate: null,
+            heightCm: null,
+            baselineWeightKg: null,
+            activityLevel: "moderately_active",
+            trainingExperience: "beginner",
+            preferences: [],
+            constraints: [],
+            longevityDirection: {
+              statement: "Stay strong and mobile.",
+              tags: ["strength"],
+            },
+            longevityDirectionTags: ["strength"],
+            coachingNotes: [],
+            createdAt: "2026-05-25T12:00:00.000Z",
+            updatedAt: "2026-05-25T12:00:00.000Z",
+          },
+          goals: [],
+          onboardingCompleted: true,
+          hierarchy: {
+            direction: {
+              statement: "Stay strong and mobile.",
+              tags: ["strength"],
+            },
+            activeQuarterlyGoal: null,
+            weeklyFocus: [],
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await completeOnboarding(token, {
+      user: {
+        displayName: "Alex",
+        timezone: "UTC",
+      },
+      profile: {
+        activityLevel: "moderately_active",
+        longevityDirection: {
+          statement: "Stay strong and mobile.",
+          tags: ["strength"],
+        },
+      },
+      quarterlyGoal: {
+        type: "general_wellness",
+        title: "Complete 36 workouts this quarter",
+        startDate: "2026-04-01",
+        targetDate: "2026-06-30",
+        priority: "primary",
+        horizon: "quarterly",
+        target: {},
+      },
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.onboardingCompleted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/onboarding"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("rejects invalid onboarding payloads before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      completeOnboarding(token, {
+        user: {
+          displayName: "Alex",
+          timezone: "UTC",
+        },
+        profile: {
+          activityLevel: "moderately_active",
+        },
+        quarterlyGoal: {
+          type: "general_wellness",
+          title: "Complete 36 workouts this quarter",
+          startDate: "2026-04-01",
+          targetDate: "2026-06-30",
+        },
+      } as never),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns onboarding refresh query keys", () => {
+    expect(getOnboardingRefreshQueryKeys()).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.currentUserState,
+        apiQueryKeys.profile,
+        apiQueryKeys.goals,
       ]),
     );
   });

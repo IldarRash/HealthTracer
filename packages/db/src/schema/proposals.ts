@@ -33,6 +33,12 @@ export const proposalTargetDomainEnum = pgEnum("proposal_target_domain", [
   "general",
 ]);
 
+export type ProposalEvidenceRefRow = {
+  type: string;
+  id: string;
+  label: string;
+};
+
 export const proposalIntentEnum = pgEnum("proposal_intent", [
   "update_profile",
   "create_goal",
@@ -66,6 +72,7 @@ export const aiProposals = pgTable(
     targetDomain: proposalTargetDomainEnum("target_domain").notNull(),
     title: text("title").notNull(),
     reason: text("reason").notNull(),
+    evidenceRefs: jsonb("evidence_refs").$type<ProposalEvidenceRefRow[] | null>(),
     proposedChanges: jsonb("proposed_changes")
       .$type<Record<string, unknown>>()
       .notNull(),

@@ -95,6 +95,11 @@ function createValidationServiceMock(overrides: Record<string, unknown> = {}) {
     validateProvenanceOwnership: async () => [],
     validateExerciseReferences: async () => [],
     validateHabitTemplateReferences: async () => [],
+    validateCorrelationEvidenceRefs: () => [],
+    validateCorrelationEvidenceOwnership: async () => [],
+    validateGoalProposalHierarchy: async () => [],
+    validateTodayChecklistGoalSourceRefs: async () => [],
+    validateRecoveryAwareWorkoutAdaptation: async () => [],
     ...overrides,
   };
 }
@@ -440,6 +445,71 @@ describe("ProposalsService", () => {
     await expect(
       service.decideProposal(auth, pendingProposal.id, { decision: "accept" }),
     ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+    expect(acceptCalled).toBe(false);
+  });
+
+  it("blocks acceptance when evidence refs are not approved for the user", async () => {
+    let applyCalled = false;
+    let acceptCalled = false;
+    let markedValidation:
+      | { status: "invalid" | "valid" | "pending_validation"; errors: string[] }
+      | undefined;
+    const evidenceError =
+      "evidenceRefs[0].id: Approved document signal was not found for this user.";
+    const proposalWithEvidence = {
+      ...pendingProposal,
+      evidenceRefs: [
+        {
+          type: "document_signal" as const,
+          id: "4a98f3dd-806d-4386-8c5f-43499626c5d7",
+          label: "Energy level from uploaded document",
+        },
+      ],
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => proposalWithEvidence,
+        acceptPendingProposal: async () => {
+          acceptCalled = true;
+          return proposalWithEvidence;
+        },
+        markValidation: async (
+          _id: string,
+          status: "invalid" | "valid" | "pending_validation",
+          errors: string[],
+        ) => {
+          markedValidation = { status, errors };
+
+          return {
+            ...proposalWithEvidence,
+            validationStatus: status,
+            validationErrors: errors,
+          };
+        },
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateCorrelationEvidenceOwnership: async () => [evidenceError],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "summary:applied";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, pendingProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(markedValidation).toEqual({
+      status: "invalid",
+      errors: [evidenceError],
+    });
     expect(applyCalled).toBe(false);
     expect(acceptCalled).toBe(false);
   });

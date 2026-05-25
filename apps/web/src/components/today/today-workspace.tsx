@@ -23,6 +23,7 @@ import {
   canUpdateTodayItem,
   formatAdherenceScore,
   formatAdherenceSummary,
+  formatTodayHierarchySourceRef,
   formatDisplayDate,
   formatLocalIsoDate,
   hasTodayWorkoutExecutionStarted,
@@ -48,6 +49,9 @@ import {
 } from "../../lib/training-ui-state";
 import { EmptyState, ErrorState, LoadingState } from "../ui";
 import { HabitAdherenceSummary } from "./habit-adherence-summary";
+import { RecoveryCheckInCard } from "./recovery-check-in-card";
+import { TodayNutritionCard } from "./today-nutrition-card";
+import { WellbeingCheckInCard } from "./wellbeing-check-in-card";
 
 const HISTORY_LIMIT = 7;
 
@@ -175,6 +179,12 @@ function TodayWorkoutPanel({
         <span className={todayWorkoutStatusBadgeClass(workout.status)}>
           {sessionStatusLabel(workout.status)}
         </span>
+      </div>
+
+      <div className="action-row proposal-actions today-workout-links">
+        <Link href="/training" className="confirmation-card__link">
+          Open Workouts →
+        </Link>
       </div>
 
       {workout.isRestDay ? (
@@ -515,6 +525,10 @@ export function TodayWorkspace() {
 
           <HabitAdherenceSummary />
 
+          <WellbeingCheckInCard selectedDate={selectedDate} />
+
+          <RecoveryCheckInCard selectedDate={selectedDate} />
+
           {day?.workout ? (
             <TodayWorkoutPanel
               workout={day.workout}
@@ -523,6 +537,13 @@ export function TodayWorkspace() {
               onRefresh={invalidateTodayQueries}
             />
           ) : null}
+
+          <TodayNutritionCard
+            nutrition={day?.nutrition ?? null}
+            selectedDate={selectedDate}
+            isBusy={isBusy}
+            onRefresh={invalidateTodayQueries}
+          />
 
           {items.length === 0 ? (
             <EmptyState
@@ -541,7 +562,10 @@ export function TodayWorkspace() {
             />
           ) : (
             <ul className="training-session-list today-item-list">
-              {items.map((item) => (
+              {items.map((item) => {
+                const hierarchySourceLabel = formatTodayHierarchySourceRef(item.source);
+
+                return (
                 <li key={item.id} className={todayItemCardClass(item.status)}>
                   <div className="training-session-header">
                     <div>
@@ -555,6 +579,10 @@ export function TodayWorkspace() {
                       {todayItemStatusLabel(item.status)}
                     </span>
                   </div>
+
+                  {hierarchySourceLabel ? (
+                    <p className="muted-text today-item-source">{hierarchySourceLabel}</p>
+                  ) : null}
 
                   {item.source.type === "workout_session" ? (
                     <p className="muted-text today-item-source">
@@ -587,7 +615,8 @@ export function TodayWorkspace() {
                     <p className="muted-text">This task is closed for the day.</p>
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
 

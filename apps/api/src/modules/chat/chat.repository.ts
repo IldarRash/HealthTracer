@@ -126,6 +126,10 @@ export class ChatRepository {
           targetDomain: proposal.targetDomain,
           title: proposal.title,
           reason: proposal.reason,
+          evidenceRefs:
+            proposal.evidenceRefs && proposal.evidenceRefs.length > 0
+              ? proposal.evidenceRefs
+              : null,
           proposedChanges: proposal.proposedChanges as Record<string, unknown>,
           validationStatus,
           validationErrors,

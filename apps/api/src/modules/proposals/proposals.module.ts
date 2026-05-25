@@ -1,11 +1,14 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
+import { DocumentsModule } from "../documents/documents.module.js";
 import { ExercisesModule } from "../exercises/exercises.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
 import { HabitsModule } from "../habits/habits.module.js";
+import { HealthMetricsModule } from "../health-metrics/health-metrics.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { ProfilesModule } from "../profiles/profiles.module.js";
 import { ProgressModule } from "../progress/progress.module.js";
+import { RecoveryModule } from "../recovery/recovery.module.js";
 import { RecipesModule } from "../recipes/recipes.module.js";
 import { TodayModule } from "../today/today.module.js";
 import { UsersModule } from "../users/users.module.js";
@@ -19,10 +22,13 @@ import { ProposalsService } from "./proposals.service.js";
 @Module({
   imports: [
     DatabaseModule,
+    DocumentsModule,
+    HealthMetricsModule,
     UsersModule,
     ExercisesModule,
     ProfilesModule,
     ProgressModule,
+    RecoveryModule,
     GoalsModule,
     WorkoutsModule,
     NutritionModule,

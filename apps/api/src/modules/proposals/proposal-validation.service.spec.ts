@@ -37,6 +37,32 @@ function createService(
   habitsService: {
     getHabitTemplateReferenceErrors?: (payload: unknown) => Promise<string[]>;
   } = {},
+  documentSignalsRepository: {
+    findApprovedSignalById?: (userId: string, signalId: string) => Promise<unknown>;
+    findCorrelationEligibleSignalById?: (userId: string, signalId: string) => Promise<unknown>;
+  } = {},
+  metricsAiContextService: {
+    buildSummaryForUser?: (userId: string) => Promise<{
+      items: Array<{ metricType: string; periodStart: string; periodEnd: string }>;
+      generatedAt: string;
+    }>;
+  } = {},
+  goalsRepository: {
+    listByUserId?: (userId: string) => Promise<unknown[]>;
+  } = {},
+  recoveryContextService: {
+    computeAndPersistSnapshot?: (
+      userId: string,
+      date: string,
+    ) => Promise<{ id: string; band: string }>;
+  } = {},
+  workoutsRepository: {
+    findActivePlanByUserId?: (userId: string) => Promise<{ activeRevisionId: string | null } | null>;
+    findRevisionById?: (revisionId: string) => Promise<{ payload: unknown } | null>;
+  } = {},
+  usersRepository: {
+    findByUserId?: (userId: string) => Promise<{ timezone: string } | null>;
+  } = {},
 ) {
   return new ProposalValidationService(
     {
@@ -51,6 +77,35 @@ function createService(
     {
       getHabitTemplateReferenceErrors: async () => [],
       ...habitsService,
+    } as never,
+    {
+      findApprovedSignalById: async () => null,
+      findCorrelationEligibleSignalById: async () => null,
+      ...documentSignalsRepository,
+    } as never,
+    {
+      buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }),
+      ...metricsAiContextService,
+    } as never,
+    {
+      listByUserId: async () => [],
+      ...goalsRepository,
+    } as never,
+    {
+      computeAndPersistSnapshot: async () => ({
+        id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+        band: "moderate_load",
+      }),
+      ...recoveryContextService,
+    } as never,
+    {
+      findActivePlanByUserId: async () => null,
+      findRevisionById: async () => null,
+      ...workoutsRepository,
+    } as never,
+    {
+      findByUserId: async () => ({ timezone: "UTC" }),
+      ...usersRepository,
     } as never,
   );
 }
@@ -111,6 +166,297 @@ describe("ProposalValidationService", () => {
 
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("rejects create_goal proposals with invalid hierarchy fields before apply", () => {
+    const result = service.validateStoredProposal("create_goal", {
+      type: "general_wellness",
+      title: "Weekly without weekStart",
+      target: {},
+      horizon: "weekly",
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("goal: weekStart is required when horizon is weekly.");
+  });
+
+  it("rejects create_goal proposals without a quarterly parent", () => {
+    const result = service.validateStoredProposal("create_goal", {
+      type: "general_wellness",
+      title: "Weekly without parent",
+      target: {},
+      horizon: "weekly",
+      weekStart: "2026-05-25",
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("goal: parentGoalId is required when horizon is weekly.");
+  });
+
+  it("rejects create_goal proposals that exceed active quarterly caps", async () => {
+    const quarterlyGoalId = "44444444-4444-4444-8444-444444444444";
+    const goalService = createService({}, {}, {}, {}, {}, {
+      listByUserId: async () => [
+        {
+          id: quarterlyGoalId,
+          userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+          type: "general_wellness",
+          status: "active",
+          priority: "primary",
+          title: "Existing quarterly",
+          target: {},
+          horizon: "quarterly",
+          parentGoalId: null,
+          weekStart: null,
+          startDate: "2026-05-01",
+          targetDate: "2026-07-31",
+          createdAt: new Date("2026-05-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    const errors = await goalService.validateGoalProposalHierarchy(
+      "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      "create_goal",
+      {
+        type: "general_wellness",
+        title: "Another quarterly",
+        target: {},
+        horizon: "quarterly",
+      },
+    );
+
+    expect(errors).toContain("goal: At most 1 active quarterly goal is allowed.");
+  });
+
+  it("rejects create_goal proposals with invalid owned parent hierarchy", async () => {
+    const weeklyParentId = "33333333-3333-4333-8333-333333333333";
+    const goalService = createService({}, {}, {}, {}, {}, {
+      listByUserId: async () => [
+        {
+          id: weeklyParentId,
+          userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+          type: "general_wellness",
+          status: "active",
+          priority: "secondary",
+          title: "Existing weekly focus",
+          target: {},
+          horizon: "weekly",
+          parentGoalId: "44444444-4444-4444-8444-444444444444",
+          weekStart: "2026-05-25",
+          startDate: null,
+          targetDate: null,
+          createdAt: new Date("2026-05-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    const errors = await goalService.validateGoalProposalHierarchy(
+      "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      "create_goal",
+      {
+        type: "general_wellness",
+        title: "Daily walk",
+        target: {},
+        horizon: "weekly",
+        weekStart: "2026-05-25",
+        parentGoalId: weeklyParentId,
+      },
+    );
+
+    expect(errors).toContain(
+      "goal: weekly goals must reference an active quarterly parent goal.",
+    );
+  });
+
+  it("rejects update_goal proposals after merging persisted hierarchy state", async () => {
+    const weeklyGoalId = "33333333-3333-4333-8333-333333333333";
+    const quarterlyGoalId = "44444444-4444-4444-8444-444444444444";
+    const goalService = createService({}, {}, {}, {}, {}, {
+      listByUserId: async () => [
+        {
+          id: weeklyGoalId,
+          userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+          type: "general_wellness",
+          status: "active",
+          priority: "secondary",
+          title: "Existing weekly focus",
+          target: {},
+          horizon: "weekly",
+          parentGoalId: quarterlyGoalId,
+          weekStart: "2026-05-25",
+          startDate: null,
+          targetDate: null,
+          createdAt: new Date("2026-05-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+        },
+        {
+          id: quarterlyGoalId,
+          userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+          type: "general_wellness",
+          status: "active",
+          priority: "primary",
+          title: "Existing quarterly goal",
+          target: {},
+          horizon: "quarterly",
+          parentGoalId: null,
+          weekStart: null,
+          startDate: "2026-05-01",
+          targetDate: "2026-07-31",
+          createdAt: new Date("2026-05-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    const errors = await goalService.validateGoalProposalHierarchy(
+      "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      "update_goal",
+      {
+        goalId: weeklyGoalId,
+        changes: {
+          weekStart: null,
+        },
+      },
+    );
+
+    expect(errors).toContain("goal: weekStart is required when horizon is weekly.");
+  });
+
+  it("rejects update_goal proposals for goals not owned by the user", async () => {
+    const goalService = createService({}, {}, {}, {}, {}, {
+      listByUserId: async () => [],
+    });
+
+    const errors = await goalService.validateGoalProposalHierarchy(
+      "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      "update_goal",
+      {
+        goalId: "33333333-3333-4333-8333-333333333333",
+        changes: {
+          title: "Rename goal",
+        },
+      },
+    );
+
+    expect(errors).toEqual(["proposedChanges.goalId: Goal was not found for this user."]);
+  });
+
+  it("rejects today checklist proposals with unsupported source refs", () => {
+    const result = service.validateStoredProposal("create_today_checklist", {
+      date: "2026-05-22",
+      items: [
+        {
+          label: "Workout",
+          kind: "workout",
+          source: {
+            type: "workout_session",
+            id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+          },
+        },
+      ],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.includes("weekly_focus or goal"))).toBe(true);
+  });
+
+  it("rejects today checklist proposals when goal source refs are not owned", async () => {
+    const todayService = createService({}, {}, {}, {}, {}, {
+      listByUserId: async () => [],
+    });
+
+    const errors = await todayService.validateTodayChecklistGoalSourceRefs(
+      "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      "create_today_checklist",
+      {
+        date: "2026-05-22",
+        items: [
+          {
+            label: "Walk after lunch",
+            kind: "habit",
+            source: {
+              type: "goal",
+              id: "44444444-4444-4444-8444-444444444444",
+            },
+          },
+        ],
+      },
+    );
+
+    expect(errors[0]).toMatch(/Referenced goal was not found/);
+  });
+
+  it("rejects today checklist goal source refs with the wrong horizon or status", async () => {
+    const todayService = createService({}, {}, {}, {}, {}, {
+      listByUserId: async () => [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+          type: "general_wellness",
+          status: "paused",
+          priority: "secondary",
+          title: "Paused weekly focus",
+          target: {},
+          horizon: "weekly",
+          parentGoalId: "44444444-4444-4444-8444-444444444444",
+          weekStart: "2026-05-25",
+          startDate: null,
+          targetDate: null,
+          createdAt: new Date("2026-05-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+        },
+        {
+          id: "44444444-4444-4444-8444-444444444444",
+          userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+          type: "general_wellness",
+          status: "active",
+          priority: "primary",
+          title: "Active quarterly goal",
+          target: {},
+          horizon: "quarterly",
+          parentGoalId: null,
+          weekStart: null,
+          startDate: "2026-05-01",
+          targetDate: "2026-07-31",
+          createdAt: new Date("2026-05-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    const errors = await todayService.validateTodayChecklistGoalSourceRefs(
+      "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      "create_today_checklist",
+      {
+        date: "2026-05-22",
+        items: [
+          {
+            label: "Walk after lunch",
+            kind: "habit",
+            source: {
+              type: "goal",
+              id: "33333333-3333-4333-8333-333333333333",
+            },
+          },
+          {
+            label: "Mobility reset",
+            kind: "recovery",
+            source: {
+              type: "weekly_focus",
+              id: "44444444-4444-4444-8444-444444444444",
+            },
+          },
+        ],
+      },
+    );
+
+    expect(errors).toEqual([
+      "proposedChanges.items[0].source.id: Goal source refs must point to an active quarterly goal.",
+      "proposedChanges.items[1].source.id: weekly_focus source refs must point to an active weekly goal.",
+    ]);
   });
 
   it("validates nutrition and today payloads by intent", () => {
@@ -359,6 +705,122 @@ describe("ProposalValidationService", () => {
       );
 
       expect(errors).toEqual([]);
+    });
+  });
+
+  describe("correlation evidence ownership", () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const signalId = "14a08176-64a7-4a2d-8a44-581807368394";
+    const summaryId = "24b19287-75b8-4a3e-9c10-691908479405";
+
+    it("accepts owned approved document signals and weekly progress evidence refs", async () => {
+      const evidenceService = createService(
+        {
+          summaryExistsForUser: async () => true,
+        },
+        {},
+        {},
+        {
+          findApprovedSignalById: async () => ({ id: signalId }),
+          findCorrelationEligibleSignalById: async () => ({ id: signalId }),
+        },
+      );
+
+      const errors = await evidenceService.validateCorrelationEvidenceOwnership(userId, [
+        {
+          type: "document_signal",
+          id: signalId,
+          label: "Energy level from uploaded document",
+        },
+        {
+          type: "weekly_progress_summary",
+          id: summaryId,
+          label: "Weekly workout completion",
+        },
+      ]);
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects evidence refs that are not owned or approved for the user", async () => {
+      const evidenceService = createService(
+        {
+          summaryExistsForUser: async () => false,
+        },
+        {},
+        {},
+        {
+          findApprovedSignalById: async () => null,
+          findCorrelationEligibleSignalById: async () => null,
+        },
+      );
+
+      const errors = await evidenceService.validateCorrelationEvidenceOwnership(userId, [
+        {
+          type: "document_signal",
+          id: signalId,
+          label: "Energy level from uploaded document",
+        },
+        {
+          type: "weekly_progress_summary",
+          id: summaryId,
+          label: "Weekly workout completion",
+        },
+      ]);
+
+      expect(errors).toEqual([
+        "evidenceRefs[0].id: Approved document signal was not found for this user.",
+        "evidenceRefs[1].id: Weekly progress summary was not found for this user.",
+      ]);
+    });
+
+    it("rejects unverifiable habit adherence evidence refs", async () => {
+      const evidenceService = createService();
+
+      const errors = await evidenceService.validateCorrelationEvidenceOwnership(userId, [
+        {
+          type: "habit_adherence",
+          id: "habit-plan:2026-05-15",
+          label: "Recent habit adherence",
+        },
+      ]);
+
+      expect(errors).toEqual([
+        "evidenceRefs[0].type: Habit adherence evidence refs cannot be verified yet.",
+      ]);
+    });
+
+    it("rejects health metric aggregate refs that are not in the user context", async () => {
+      const evidenceService = createService(
+        {},
+        {},
+        {},
+        {},
+        {
+          buildSummaryForUser: async () => ({
+            items: [
+              {
+                metricType: "sleep",
+                periodStart: "2026-05-15",
+                periodEnd: "2026-05-21",
+              },
+            ],
+            generatedAt: "2026-05-22T12:00:00.000Z",
+          }),
+        },
+      );
+
+      const errors = await evidenceService.validateCorrelationEvidenceOwnership(userId, [
+        {
+          type: "health_metric_aggregate",
+          id: "sleep:2026-05-01:2026-05-07",
+          label: "Recent sleep summary",
+        },
+      ]);
+
+      expect(errors).toEqual([
+        "evidenceRefs[0].id: Health metric aggregate was not found for this user.",
+      ]);
     });
   });
 
@@ -627,6 +1089,254 @@ describe("ProposalValidationService", () => {
       );
 
       expect(errors).toEqual([]);
+    });
+  });
+
+  describe("recovery-aware workout adaptations", () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const activeRevisionId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b85";
+    const currentPlan = {
+      title: "Strength base",
+      summary: "Three day plan.",
+      days: [
+        {
+          weekday: "monday",
+          focus: "Strength",
+          exercises: [structuredExercise],
+        },
+      ],
+    };
+    const increasedPlan = {
+      ...currentPlan,
+      days: [
+        ...currentPlan.days,
+        {
+          weekday: "wednesday",
+          focus: "Extra work",
+          exercises: [{ ...structuredExercise, sets: 4 }],
+        },
+      ],
+    };
+
+    it("rejects volume increases during prioritize_recovery without override", async () => {
+      const recoveryService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          computeAndPersistSnapshot: async () => ({
+            id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+            band: "prioritize_recovery",
+          }),
+        },
+        {
+          findActivePlanByUserId: async () => ({ activeRevisionId }),
+          findRevisionById: async () => ({ payload: currentPlan }),
+        },
+      );
+
+      const errors = await recoveryService.validateRecoveryAwareWorkoutAdaptation(
+        userId,
+        "adapt_workout_plan",
+        increasedPlan,
+      );
+
+      expect(errors.some((error) => error.includes("prioritized"))).toBe(true);
+    });
+
+    it("allows volume increases during prioritize_recovery when override is set", async () => {
+      const recoveryService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          computeAndPersistSnapshot: async () => ({
+            id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+            band: "prioritize_recovery",
+          }),
+        },
+        {
+          findActivePlanByUserId: async () => ({ activeRevisionId }),
+          findRevisionById: async () => ({ payload: currentPlan }),
+        },
+      );
+
+      const errors = await recoveryService.validateRecoveryAwareWorkoutAdaptation(
+        userId,
+        "adapt_workout_plan",
+        {
+          ...increasedPlan,
+          adaptationMetadata: {
+            operations: [{ operation: "create", description: "User requested extra day." }],
+            allowVolumeIncrease: true,
+          },
+        },
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects progress-derived volume increases during prioritize_recovery without override", async () => {
+      const recoveryService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          computeAndPersistSnapshot: async () => ({
+            id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+            band: "prioritize_recovery",
+          }),
+        },
+        {
+          findActivePlanByUserId: async () => ({ activeRevisionId }),
+          findRevisionById: async () => ({ payload: currentPlan }),
+        },
+      );
+
+      const errors = await recoveryService.validateRecoveryAwareWorkoutAdaptation(
+        userId,
+        "adapt_workout_plan_from_progress",
+        {
+          plan: increasedPlan,
+          sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+          recoverySourceRefs: [
+            {
+              date: "2026-05-25",
+              snapshotId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+            },
+          ],
+        },
+      );
+
+      expect(errors.some((error) => error.includes("allowVolumeIncrease"))).toBe(true);
+    });
+
+    it("allows progress-derived volume increases during prioritize_recovery with top-level override", async () => {
+      const recoveryService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          computeAndPersistSnapshot: async () => ({
+            id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+            band: "prioritize_recovery",
+          }),
+        },
+        {
+          findActivePlanByUserId: async () => ({ activeRevisionId }),
+          findRevisionById: async () => ({ payload: currentPlan }),
+        },
+      );
+
+      const errors = await recoveryService.validateRecoveryAwareWorkoutAdaptation(
+        userId,
+        "adapt_workout_plan_from_progress",
+        {
+          plan: increasedPlan,
+          sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+          recoverySourceRefs: [
+            {
+              date: "2026-05-25",
+              snapshotId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+            },
+          ],
+          allowVolumeIncrease: true,
+        },
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects stale recovery source refs", async () => {
+      const recoveryService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          computeAndPersistSnapshot: async () => ({
+            id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b99",
+            band: "prioritize_recovery",
+          }),
+        },
+        {
+          findActivePlanByUserId: async () => ({ activeRevisionId }),
+          findRevisionById: async () => ({ payload: currentPlan }),
+        },
+      );
+
+      const errors = await recoveryService.validateRecoveryAwareWorkoutAdaptation(
+        userId,
+        "adapt_workout_plan",
+        {
+          ...currentPlan,
+          adaptationMetadata: {
+            operations: [{ operation: "reduce_load", description: "Lower load." }],
+            recoverySourceRefs: [
+              {
+                date: "2026-05-25",
+                snapshotId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+              },
+            ],
+          },
+        },
+      );
+
+      expect(errors.some((error) => error.includes("stale"))).toBe(true);
+    });
+
+    it("rejects stale top-level recovery source refs on progress-derived adaptations", async () => {
+      const recoveryService = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          computeAndPersistSnapshot: async () => ({
+            id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b99",
+            band: "moderate_load",
+          }),
+        },
+        {
+          findActivePlanByUserId: async () => ({ activeRevisionId }),
+          findRevisionById: async () => ({ payload: currentPlan }),
+        },
+      );
+
+      const errors = await recoveryService.validateRecoveryAwareWorkoutAdaptation(
+        userId,
+        "adapt_workout_plan_from_progress",
+        {
+          plan: currentPlan,
+          sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+          recoverySourceRefs: [
+            {
+              date: "2026-05-25",
+              snapshotId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+            },
+          ],
+        },
+      );
+
+      expect(errors).toEqual([
+        "proposedChanges.recoverySourceRefs[0].snapshotId: Recovery context snapshot is stale for the cited date.",
+      ]);
     });
   });
 });

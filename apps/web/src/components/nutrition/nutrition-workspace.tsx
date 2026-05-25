@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import {
   apiQueryKeys,
   getActiveNutritionPlan,
+  getNutritionAdherenceRefreshQueryKeys,
   getTodayNutritionAdherence,
   listNutritionRevisions,
   upsertTodayNutritionAdherence,
@@ -115,10 +116,9 @@ export function NutritionWorkspace() {
       return result.data;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.nutritionAdherenceToday });
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.nutritionAdherencePrefix });
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.todayDayPrefix });
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.todayHistoryPrefix });
+      for (const queryKey of getNutritionAdherenceRefreshQueryKeys()) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
     },
   });
 

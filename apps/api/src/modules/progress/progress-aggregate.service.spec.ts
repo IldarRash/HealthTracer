@@ -122,7 +122,7 @@ describe("ProgressAggregateService", () => {
     const message = buildSummaryUserMessage(aggregates, status);
 
     expect(status).toBe("insufficient");
-    expect(message).toContain("not enough workout history");
+    expect(message).toContain("not enough workout or recovery history");
     expect(isWellnessSafeProgressMessage(message)).toBe(true);
   });
 
@@ -143,6 +143,24 @@ describe("ProgressAggregateService", () => {
       "recipes",
       "recovery",
     ]);
+  });
+
+  it("removes recovery from deferred domains when recovery aggregate exists", () => {
+    const deferredDomains = buildDeferredDomains({
+      daysWithContext: 3,
+      checkInCount: 2,
+      bandCounts: {
+        well_supported: 1,
+        moderate_load: 2,
+        prioritize_recovery: 0,
+        insufficient_data: 4,
+      },
+      dominantBand: "moderate_load",
+      dataSufficiency: "partial",
+      message: "This week shows a mixed recovery pattern based on the entries available.",
+    });
+
+    expect(deferredDomains.map((domain) => domain.domain)).not.toContain("recovery");
   });
 
   it("labels insufficient trend data when the week is too sparse", () => {

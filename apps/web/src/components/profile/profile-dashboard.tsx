@@ -26,6 +26,7 @@ import {
 } from "../../lib/proposal-ui-state";
 import { DocumentsWorkspace } from "../documents/documents-workspace";
 import { GoalsWorkspace } from "../goals/goals-workspace";
+import { CoachingHierarchySummaryPanel } from "./coaching-hierarchy-summary";
 import { DashboardCard, DashboardGrid, EmptyState, ErrorState, LoadingState } from "../ui";
 
 export function ProfileDashboard() {
@@ -120,6 +121,20 @@ export function ProfileDashboard() {
         {getTimeOfDayGreeting()}, {displayName} — here&apos;s your coaching snapshot
       </p>
 
+      <section id="coaching-hierarchy" className="dashboard-section profile-section">
+        <div className="profile-section__header">
+          <div>
+            <p className="section-label">Coaching direction</p>
+            <h2>Goal hierarchy</h2>
+            <p className="dashboard-card__hint">
+              Your longevity direction, quarterly objective, and weekly focus guide coaching
+              across Chat, Today, and Longevity.
+            </p>
+          </div>
+        </div>
+        <CoachingHierarchySummaryPanel />
+      </section>
+
       {data.errors.length > 0 ? (
         <section className="notice notice-inline" role="status">
           <p>
@@ -170,10 +185,10 @@ export function ProfileDashboard() {
           ) : (
             <EmptyState
               title="No active goals yet"
-              description="Ask your coach in Chat to help you set a wellness goal."
+              description="Finish onboarding or ask your coach in Chat to refine your wellness goals."
               action={
-                <Link href="/chat" className="confirmation-card__link">
-                  Open Chat →
+                <Link href="/onboarding" className="confirmation-card__link">
+                  Review onboarding →
                 </Link>
               }
             />
@@ -286,10 +301,10 @@ export function ProfileDashboard() {
         ) : (
           <EmptyState
             title="Profile not set up yet"
-            description="Your coach can help you fill in preferences and constraints through Chat."
+            description="Complete onboarding or update preferences through coach proposals in Chat."
             action={
-              <Link href="/chat" className="confirmation-card__link">
-                Set up in Chat →
+              <Link href="/onboarding" className="confirmation-card__link">
+                Continue onboarding →
               </Link>
             }
           />

@@ -1,8 +1,17 @@
-import { createGoalSchema, updateGoalSchema } from "@health/types";
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { createGoalSchema, goalListQuerySchema, updateGoalSchema } from "@health/types";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { ClerkAuthGuard } from "../../auth.guard.js";
-import { parseBody } from "../../common/zod.js";
+import { parseBody, parseQuery } from "../../common/zod.js";
 import { CurrentAuth } from "../../current-auth.decorator.js";
 import { GoalsService } from "./goals.service.js";
 
@@ -12,8 +21,11 @@ export class GoalsController {
   constructor(private readonly goalsService: GoalsService) {}
 
   @Get()
-  listGoals(@CurrentAuth() auth: ClerkAuthContext) {
-    return this.goalsService.listCurrentGoals(auth);
+  listGoals(@CurrentAuth() auth: ClerkAuthContext, @Query() query: unknown) {
+    return this.goalsService.listCurrentGoals(
+      auth,
+      parseQuery(goalListQuerySchema, query),
+    );
   }
 
   @Post()

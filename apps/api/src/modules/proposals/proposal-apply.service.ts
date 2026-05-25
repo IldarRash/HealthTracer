@@ -5,6 +5,7 @@ import {
   createGoalProposalChangesSchema,
   generateWeeklyProgressSummarySchema,
   habitPlanPayloadSchema,
+  mergeRecoveryMetadataIntoWorkoutPlanProposal,
   nutritionPlanPayloadSchema,
   profileProposalChangesSchema,
   recipeRecommendationProposalPayloadSchema,
@@ -78,10 +79,14 @@ export class ProposalApplyService {
         const changes = adaptWorkoutPlanFromProgressChangesSchema.parse(
           proposal.proposedChanges,
         );
+        const payload = mergeRecoveryMetadataIntoWorkoutPlanProposal(changes.plan, {
+          recoverySourceRefs: changes.recoverySourceRefs,
+          allowVolumeIncrease: changes.allowVolumeIncrease,
+        });
 
         return this.workoutsService.applyWorkoutPlanProposal(
           userId,
-          changes.plan,
+          payload,
           proposal.reason,
           "adapt_workout_plan",
         );

@@ -2,6 +2,8 @@ import { Module } from "@nestjs/common";
 import { DocumentsModule } from "../documents/documents.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
 import { HealthMetricsModule } from "../health-metrics/health-metrics.module.js";
+import { RecoveryModule } from "../recovery/recovery.module.js";
+import { WellbeingCheckInsModule } from "../wellbeing-check-ins/wellbeing-check-ins.module.js";
 import { HabitsModule } from "../habits/habits.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { ProgressModule } from "../progress/progress.module.js";
@@ -21,6 +23,8 @@ import { CoachingContextService } from "./coaching-context.service.js";
     ProgressModule,
     DocumentsModule,
     HealthMetricsModule,
+    WellbeingCheckInsModule,
+    RecoveryModule,
   ],
   providers: [CoachingContextService],
   exports: [CoachingContextService],

@@ -5,6 +5,7 @@ import type {
 import { Injectable, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { UsersService } from "../users/users.service.js";
+import { RecoveryContextService } from "../recovery/recovery-context.service.js";
 import { WorkoutsRepository } from "../workouts/workouts.repository.js";
 import { toWorkoutSession } from "../workouts/workout.mapper.js";
 import {
@@ -25,6 +26,7 @@ export class ProgressService {
   constructor(
     private readonly progressRepository: ProgressRepository,
     private readonly workoutsRepository: WorkoutsRepository,
+    private readonly recoveryContextService: RecoveryContextService,
     private readonly usersService: UsersService,
   ) {}
 
@@ -103,11 +105,20 @@ export class ProgressService {
       priorWeekRange.weekStart,
       priorWeekRange.weekEnd,
     );
+    const recoveryAggregate = await this.recoveryContextService.buildWeeklyRecoveryAggregate(
+      user.id,
+      weekRange.weekStart,
+      weekRange.weekEnd,
+    );
 
     const sourceAggregates = {
       workout: currentWorkoutAggregate.plannedCount > 0 ? currentWorkoutAggregate : null,
+      recovery:
+        recoveryAggregate.daysWithContext > 0 || recoveryAggregate.checkInCount > 0
+          ? recoveryAggregate
+          : null,
     };
-    const deferredDomains = buildDeferredDomains();
+    const deferredDomains = buildDeferredDomains(sourceAggregates.recovery);
     const dataStatus = resolveProgressDataStatus(sourceAggregates);
     const userMessage = buildSummaryUserMessage(sourceAggregates, dataStatus);
     const trendDrafts = detectWorkoutTrends(

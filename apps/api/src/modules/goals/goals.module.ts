@@ -9,6 +9,6 @@ import { GoalsService } from "./goals.service.js";
   imports: [DatabaseModule, UsersModule],
   controllers: [GoalsController],
   providers: [GoalsRepository, GoalsService],
-  exports: [GoalsService],
+  exports: [GoalsService, GoalsRepository],
 })
 export class GoalsModule {}

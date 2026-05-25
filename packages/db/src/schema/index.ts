@@ -11,8 +11,11 @@ export * from "./user-profiles.js";
 export * from "./users.js";
 export * from "./workouts.js";
 export * from "./device-metrics.js";
+export * from "./document-signals.js";
 export * from "./documents.js";
 export * from "./exercises.js";
+export * from "./wellbeing-check-ins.js";
+export * from "./recovery.js";
 
 export const migrationChecks = pgTable("migration_checks", {
   id: uuid("id").defaultRandom().primaryKey(),

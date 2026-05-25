@@ -315,4 +315,142 @@ describe("NutritionService", () => {
 
     expect(dates).toEqual(["read:2026-05-23", "write:2026-05-23"]);
   });
+
+  it("returns null nutrition day detail when no active plan exists", async () => {
+    const service = new NutritionService(createRepositoryMock() as never, usersService as never);
+
+    await expect(service.getNutritionDayDetail(auth as never, "2026-05-22")).resolves.toBeNull();
+  });
+
+  it("returns null nutrition day detail when active plan has no revision", async () => {
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-1",
+          userId,
+          activeRevisionId: null,
+          status: "active",
+          createdAt: new Date("2026-05-22T12:00:00.000Z"),
+          updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+        }),
+      }) as never,
+      usersService as never,
+    );
+
+    await expect(service.getNutritionDayDetail(auth as never, "2026-05-22")).resolves.toBeNull();
+  });
+
+  it("composes active revision and date-scoped adherence without plan writes", async () => {
+    let appendCalled = false;
+    let createCalled = false;
+    let upsertCalled = false;
+    let lookupDate: string | undefined;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-1",
+          userId,
+          activeRevisionId: "rev-1",
+          status: "active",
+          createdAt: new Date("2026-05-22T12:00:00.000Z"),
+          updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+        }),
+        findActiveRevisionByPlanId: async () => ({
+          id: "rev-1",
+          nutritionPlanId: "plan-1",
+          revisionNumber: 1,
+          reason: "Initial plan",
+          source: "ai_proposal",
+          payload,
+          createdAt: new Date("2026-05-22T12:00:00.000Z"),
+        }),
+        findAdherenceByUserIdAndDate: async (_resolvedUserId: string, date: string) => {
+          lookupDate = date;
+          return {
+            id: "adherence-1",
+            userId,
+            date,
+            hydrationLitersConsumed: 1.5,
+            mealCompletion: [{ label: "Breakfast", completed: true }],
+            targetCompletion: { caloriesOnTarget: true },
+            notes: [],
+            createdAt: new Date("2026-05-22T12:00:00.000Z"),
+            updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+          };
+        },
+        appendRevision: async () => {
+          appendCalled = true;
+          return { id: "rev-append-1" };
+        },
+        createPlanWithRevision: async () => {
+          createCalled = true;
+          return { revision: { id: "rev-create-1" } };
+        },
+        upsertAdherenceByUserIdAndDate: async () => {
+          upsertCalled = true;
+          return {
+            id: "adherence-1",
+            userId,
+            date: "2026-05-22",
+            hydrationLitersConsumed: 1.5,
+            mealCompletion: [],
+            targetCompletion: {},
+            notes: [],
+            createdAt: new Date("2026-05-22T12:00:00.000Z"),
+            updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+          };
+        },
+      }) as never,
+      usersService as never,
+    );
+
+    const detail = await service.getNutritionDayDetail(auth as never, "2026-05-22");
+
+    expect(lookupDate).toBe("2026-05-22");
+    expect(detail?.date).toBe("2026-05-22");
+    expect(detail?.plan?.id).toBe("plan-1");
+    expect(detail?.activeRevision?.payload.mealStructure).toHaveLength(3);
+    expect(detail?.adherence?.hydrationLitersConsumed).toBe(1.5);
+    expect(appendCalled).toBe(false);
+    expect(createCalled).toBe(false);
+    expect(upsertCalled).toBe(false);
+  });
+
+  it("rejects invalid dates when building nutrition day detail", async () => {
+    const service = new NutritionService(createRepositoryMock() as never, usersService as never);
+
+    await expect(
+      service.getNutritionDayDetail(auth as never, "05-22-2026"),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("upserts adherence without creating nutrition plan revisions", async () => {
+    let appendCalled = false;
+    let createCalled = false;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        appendRevision: async () => {
+          appendCalled = true;
+          return { id: "rev-append-1" };
+        },
+        createPlanWithRevision: async () => {
+          createCalled = true;
+          return { revision: { id: "rev-create-1" } };
+        },
+      }) as never,
+      usersService as never,
+    );
+
+    await service.upsertAdherenceForDate(auth as never, "2026-05-22", {
+      hydrationLitersConsumed: 2,
+      mealCompletion: [{ label: "Breakfast", completed: true }],
+      targetCompletion: { proteinOnTarget: true },
+      notes: ["Felt steady."],
+    });
+
+    expect(appendCalled).toBe(false);
+    expect(createCalled).toBe(false);
+  });
 });

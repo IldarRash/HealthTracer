@@ -11,7 +11,7 @@ import type {
   UpdateDocumentConsentInput,
   UpdateDocumentSummaryReviewInput,
 } from "@health/types";
-import { hasDocumentConsentScope } from "@health/types";
+import { hasDocumentConsentScope, MAX_HEALTH_DOCUMENT_UPLOAD_BYTES } from "@health/types";
 import {
   BadRequestException,
   ForbiddenException,
@@ -24,7 +24,7 @@ import { env } from "../../env.js";
 import { UsersService } from "../users/users.service.js";
 import {
   DevDocumentSummarizer,
-  DevTextDocumentParser,
+  LabDocumentParser,
   type DocumentParser,
   type DocumentSummarizer,
 } from "./document-processing.js";
@@ -40,6 +40,7 @@ import {
   type DocumentStorageAdapter,
 } from "./local-document-storage.js";
 import { DocumentsRepository } from "./documents.repository.js";
+import { DocumentSignalsService } from "./document-signals.service.js";
 
 const REQUIRED_UPLOAD_CONSENT = "upload_storage" as const;
 
@@ -51,11 +52,12 @@ export class DocumentsService {
 
   constructor(
     private readonly documentsRepository: DocumentsRepository,
+    private readonly documentSignalsService: DocumentSignalsService,
     private readonly usersService: UsersService,
   ) {
     const storageRoot = resolve(process.cwd(), env.DOCUMENT_STORAGE_PATH);
     this.storage = new LocalDocumentStorageAdapter(storageRoot);
-    this.parser = new DevTextDocumentParser();
+    this.parser = new LabDocumentParser();
     this.summarizer = new DevDocumentSummarizer();
   }
 
@@ -67,14 +69,25 @@ export class DocumentsService {
       throw new BadRequestException("Upload consent is required before creating a document.");
     }
 
-    if (!input.sampleText) {
+    if (!input.sampleText && !input.fileContentBase64) {
       throw new BadRequestException(
-        "Development uploads require sampleText for the text/plain smoke path.",
+        "Uploads require sampleText or fileContentBase64 for supported document types.",
       );
     }
 
     const user = await this.usersService.resolveFromAuth(auth);
-    const content = Buffer.from(input.sampleText, "utf8");
+    const content = resolveUploadContent(input);
+
+    if (content.byteLength === 0) {
+      throw new BadRequestException("Uploaded document content is empty.");
+    }
+
+    if (content.byteLength > MAX_HEALTH_DOCUMENT_UPLOAD_BYTES) {
+      throw new BadRequestException(
+        `Uploaded document exceeds the ${MAX_HEALTH_DOCUMENT_UPLOAD_BYTES} byte limit.`,
+      );
+    }
+
     const documentId = crypto.randomUUID();
     const storageReference = await this.storage.store(
       user.id,
@@ -139,6 +152,7 @@ export class DocumentsService {
 
     if (input.revoke) {
       await this.documentsRepository.tombstoneSummariesForDocument(user.id, documentId);
+      await this.documentSignalsService.revokeSignalsForDocument(user.id, documentId);
     }
 
     return toHealthDocument(document);
@@ -286,6 +300,7 @@ export class DocumentsService {
 
     await this.storage.delete(existing.storageReference);
     await this.documentsRepository.tombstoneSummariesForDocument(user.id, documentId);
+    await this.documentSignalsService.revokeSignalsForDocument(user.id, documentId);
     const document = await this.documentsRepository.softDelete(user.id, documentId);
 
     if (!document) {
@@ -302,5 +317,21 @@ export class DocumentsService {
       items: filterContextReferences(rows).slice(0, 10),
       generatedAt: new Date().toISOString(),
     };
+  }
+}
+
+function resolveUploadContent(input: CreateHealthDocumentInput): Buffer {
+  if (input.sampleText) {
+    return Buffer.from(input.sampleText, "utf8");
+  }
+
+  if (!input.fileContentBase64) {
+    throw new BadRequestException("Uploaded document content is missing.");
+  }
+
+  try {
+    return Buffer.from(input.fileContentBase64, "base64");
+  } catch {
+    throw new BadRequestException("Uploaded document content is not valid base64.");
   }
 }

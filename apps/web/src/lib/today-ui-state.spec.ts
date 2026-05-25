@@ -249,6 +249,7 @@ describe("today UI state", () => {
       createdAt: "2026-05-23T12:00:00.000Z",
       updatedAt: "2026-05-23T12:00:00.000Z",
       workout: null,
+      nutrition: null,
     });
 
     expect(merged[0]?.adherence.score).toBe(1);

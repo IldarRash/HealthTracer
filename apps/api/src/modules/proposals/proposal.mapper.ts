@@ -11,6 +11,9 @@ export function toAiProposal(row: AiProposalRow): AiProposal {
     targetDomain: row.targetDomain,
     title: row.title,
     reason: row.reason,
+    ...(row.evidenceRefs && row.evidenceRefs.length > 0
+      ? { evidenceRefs: row.evidenceRefs }
+      : {}),
     proposedChanges: row.proposedChanges,
     status: row.status,
     validationStatus: row.validationStatus,
@@ -28,7 +31,13 @@ export function toAiProposal(row: AiProposalRow): AiProposal {
     return mapped as AiProposal;
   }
 
-  return parsed.data;
+  const proposal = parsed.data;
+  if (!proposal.evidenceRefs || proposal.evidenceRefs.length === 0) {
+    const { evidenceRefs: _ignored, ...withoutEvidence } = proposal;
+    return withoutEvidence as AiProposal;
+  }
+
+  return proposal;
 }
 
 export type { AiProposalRow };

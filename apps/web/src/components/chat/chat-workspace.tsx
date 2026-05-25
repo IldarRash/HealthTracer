@@ -16,10 +16,12 @@ import {
   createOptimisticUserMessage,
   formatChatTimestamp,
   mergeDisplayMessages,
+  resolveChatMessageCrisisSupport,
   resolvePrimaryThreadId,
   SUGGESTED_CHAT_PROMPTS,
   type OptimisticChatMessage,
 } from "../../lib/chat-ui-state";
+import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
 import { mergeProposalsById } from "../../lib/proposal-ui-state";
 import { InlineProposalCard } from "../proposals/inline-proposal-card";
 import {
@@ -286,19 +288,35 @@ export function ChatWorkspace() {
             {messages.map((message) => {
               const linkedProposals = proposalsByMessageId.get(message.id) ?? [];
               const isUser = message.role === "user";
+              const crisisSupportCopy = isUser
+                ? null
+                : resolveChatMessageCrisisSupport(message);
 
               return (
                 <li key={message.id}>
                   <ChatBubble
                     role={isUser ? "user" : "assistant"}
-                    className={isUser ? undefined : "chat-bubble--coach"}
+                    className={
+                      isUser
+                        ? undefined
+                        : crisisSupportCopy
+                          ? "chat-bubble--coach chat-bubble--crisis"
+                          : "chat-bubble--coach"
+                    }
                     meta={
                       <time dateTime={message.createdAt}>
                         {formatChatTimestamp(message.createdAt)}
                       </time>
                     }
                   >
-                    {message.content}
+                    {crisisSupportCopy ? (
+                      <CrisisSupportPanel
+                        copy={crisisSupportCopy}
+                        titleId={`chat-crisis-${message.id}`}
+                      />
+                    ) : (
+                      message.content
+                    )}
                   </ChatBubble>
 
                   {linkedProposals.length > 0 ? (

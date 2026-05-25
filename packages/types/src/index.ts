@@ -1,6 +1,15 @@
 import { z } from "zod";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
+import {
+  coachingNotesSchema,
+  goalHorizonsStoredOnGoalsSchema,
+  longevityDirectionSchema,
+  MAX_ACTIVE_WEEKLY_FOCUS,
+  onboardingQuarterlyGoalSchema,
+} from "./goal-hierarchy.js";
+import { proposalCorrelationEvidenceRefsSchema } from "./document-signals.js";
 import { habitPlanPayloadSchema } from "./habits.js";
+import { recoveryProgressAggregateSchema } from "./recovery.js";
 import { todayChecklistPayloadSchema } from "./today.js";
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
@@ -61,6 +70,7 @@ export const userSchema = z.object({
   email: z.string().email(),
   displayName: z.string().min(1).max(120).nullable(),
   timezone: z.string().min(1).max(80),
+  onboardingCompletedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
 });
@@ -84,6 +94,9 @@ export const userProfileSchema = z.object({
   trainingExperience: trainingExperienceSchema.nullable(),
   preferences: z.array(z.string().min(1).max(160)).default([]),
   constraints: z.array(z.string().min(1).max(160)).default([]),
+  longevityDirection: longevityDirectionSchema.nullable(),
+  longevityDirectionTags: z.array(z.string().min(1).max(80)).max(10).default([]),
+  coachingNotes: coachingNotesSchema.default([]),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
 });
@@ -98,6 +111,9 @@ export const upsertUserProfileSchema = z.object({
   trainingExperience: trainingExperienceSchema.nullable().optional(),
   preferences: z.array(z.string().min(1).max(160)).max(30).optional(),
   constraints: z.array(z.string().min(1).max(160)).max(30).optional(),
+  longevityDirection: longevityDirectionSchema.nullable().optional(),
+  longevityDirectionTags: z.array(z.string().min(1).max(80)).max(10).optional(),
+  coachingNotes: coachingNotesSchema.optional(),
 });
 
 export type UpsertUserProfileInput = z.infer<typeof upsertUserProfileSchema>;
@@ -112,6 +128,9 @@ export const goalSchema = z.object({
   priority: goalPrioritySchema,
   title: z.string().min(1).max(160),
   target: goalTargetSchema,
+  horizon: goalHorizonsStoredOnGoalsSchema.nullable(),
+  parentGoalId: z.string().uuid().nullable(),
+  weekStart: isoDateSchema.nullable(),
   startDate: isoDateSchema.nullable(),
   targetDate: isoDateSchema.nullable(),
   createdAt: isoDateTimeSchema,
@@ -125,6 +144,9 @@ export const createGoalSchema = z.object({
   priority: goalPrioritySchema.default("secondary"),
   title: z.string().min(1).max(160),
   target: goalTargetSchema.default({}),
+  horizon: goalHorizonsStoredOnGoalsSchema.nullable().optional(),
+  parentGoalId: z.string().uuid().nullable().optional(),
+  weekStart: isoDateSchema.nullable().optional(),
   startDate: isoDateSchema.nullable().optional(),
   targetDate: isoDateSchema.nullable().optional(),
 });
@@ -137,24 +159,48 @@ export const updateGoalSchema = z.object({
   priority: goalPrioritySchema.optional(),
   title: z.string().min(1).max(160).optional(),
   target: goalTargetSchema.optional(),
+  horizon: goalHorizonsStoredOnGoalsSchema.nullable().optional(),
+  parentGoalId: z.string().uuid().nullable().optional(),
+  weekStart: isoDateSchema.nullable().optional(),
   startDate: isoDateSchema.nullable().optional(),
   targetDate: isoDateSchema.nullable().optional(),
 });
 
 export type UpdateGoalInput = z.infer<typeof updateGoalSchema>;
 
+export const onboardingUserSchema = z.object({
+  displayName: z.string().min(1).max(120),
+  timezone: z.string().min(1).max(80),
+});
+
+export const onboardingProfileSchema = upsertUserProfileSchema
+  .omit({ longevityDirectionTags: true })
+  .extend({
+    longevityDirection: longevityDirectionSchema,
+  });
+
 export const onboardingSchema = z.object({
-  user: updateCurrentUserSchema.optional(),
-  profile: upsertUserProfileSchema,
-  goals: z.array(createGoalSchema).min(1),
+  user: onboardingUserSchema,
+  profile: onboardingProfileSchema,
+  quarterlyGoal: onboardingQuarterlyGoalSchema,
 });
 
 export type OnboardingInput = z.infer<typeof onboardingSchema>;
+
+export const coachingHierarchySummarySchema = z.object({
+  direction: longevityDirectionSchema.nullable(),
+  activeQuarterlyGoal: goalSchema.nullable(),
+  weeklyFocus: z.array(goalSchema).max(MAX_ACTIVE_WEEKLY_FOCUS),
+});
+
+export type CoachingHierarchySummary = z.infer<typeof coachingHierarchySummarySchema>;
 
 export const currentUserStateSchema = z.object({
   user: userSchema,
   profile: userProfileSchema.nullable(),
   goals: z.array(goalSchema),
+  onboardingCompleted: z.boolean(),
+  hierarchy: coachingHierarchySummarySchema,
 });
 
 export type CurrentUserState = z.infer<typeof currentUserStateSchema>;
@@ -275,6 +321,9 @@ export {
   updateWorkoutSessionExerciseSchema,
   stripWorkoutPlanProposalExtras,
   summarizeWorkoutPlanForCoaching,
+  estimateWorkoutPlanLoadMetrics,
+  workoutAdaptationIncreasesVolumeOrLoad,
+  mergeRecoveryMetadataIntoWorkoutPlanProposal,
   workoutAdaptationOperationRecordSchema,
   workoutAdaptationOperationSchema,
   workoutCompletionFeedbackSchema,
@@ -316,6 +365,7 @@ export {
   type WorkoutPlanAdaptationMetadata,
   type WorkoutPlanCoachingDaySummary,
   type WorkoutPlanCoachingSummary,
+  type WorkoutPlanLoadMetrics,
   type WorkoutPlanDay,
   type WorkoutPlanDomainValidationOptions,
   type WorkoutPlanExercise,
@@ -479,6 +529,15 @@ export const nutritionAdherenceResponseSchema = z.object({
 
 export type NutritionAdherenceResponse = z.infer<typeof nutritionAdherenceResponseSchema>;
 
+export const todayNutritionDetailSchema = z.object({
+  date: isoDateSchema,
+  plan: nutritionPlanSchema.nullable(),
+  activeRevision: nutritionPlanRevisionSchema.nullable(),
+  adherence: nutritionAdherenceRecordSchema.nullable(),
+});
+
+export type TodayNutritionDetail = z.infer<typeof todayNutritionDetailSchema>;
+
 export const recipeMealTypeSchema = z.enum([
   "breakfast",
   "lunch",
@@ -640,6 +699,7 @@ export type RecipeRecommendationProposalPayload = z.infer<
 
 export {
   calculateTodayAdherence,
+  resolveProposalItemSource,
   resolveProposalItemStatus,
   todayAdherenceSummarySchema,
   todayChecklistItemKindSchema,
@@ -651,7 +711,7 @@ export {
   todayChecklistRecordSchema,
   todayChecklistPayloadSchema,
   todayDailyFeedbackSchema,
-  todayDayResponseSchema,
+  todayDayResponseBaseSchema,
   todayHistoryEntrySchema,
   todayHistoryQuerySchema,
   todayHistoryResponseSchema,
@@ -668,7 +728,7 @@ export {
   type TodayChecklistProposalItem,
   type TodayChecklistRecord,
   type TodayDailyFeedback,
-  type TodayDayResponse,
+  type TodayDayResponseBase,
   type TodayHistoryEntry,
   type TodayHistoryQuery,
   type TodayHistoryResponse,
@@ -676,6 +736,13 @@ export {
   type UpdateTodayFeedbackInput,
   type UpdateTodayItemStatusInput,
 } from "./today.js";
+import { todayDayResponseBaseSchema } from "./today.js";
+
+export const todayDayResponseSchema = todayDayResponseBaseSchema.extend({
+  nutrition: todayNutritionDetailSchema.nullable(),
+});
+
+export type TodayDayResponse = z.infer<typeof todayDayResponseSchema>;
 
 /** Strict so optional profile fields cannot match and strip other domain payloads in unions. */
 export const profileProposalChangesSchema = upsertUserProfileSchema.strict();
@@ -760,6 +827,7 @@ export type ProposalChanges = z.infer<typeof proposalChangesSchema>;
 const proposalTitleReasonFields = {
   title: z.string().min(1).max(160),
   reason: z.string().min(1).max(1000),
+  evidenceRefs: proposalCorrelationEvidenceRefsSchema.optional(),
 };
 
 export const rawAiProposalSchema = z.discriminatedUnion("intent", [
@@ -854,6 +922,7 @@ const aiProposalCoreSchema = z.object({
   targetDomain: proposalTargetDomainSchema,
   title: z.string().min(1).max(160),
   reason: z.string().min(1).max(1000),
+  evidenceRefs: proposalCorrelationEvidenceRefsSchema.optional(),
   proposedChanges: z.unknown(),
   status: proposalStatusSchema,
   validationStatus: proposalValidationStatusSchema,
@@ -975,8 +1044,44 @@ export {
   type HabitTimeOfDayHint,
 } from "./habits.js";
 export * from "./device-metrics.js";
+export * from "./document-signals.js";
 export * from "./documents.js";
 export * from "./exercises.js";
+export * from "./wellbeing-check-ins.js";
+export * from "./recovery.js";
+export {
+  buildCoachingHierarchySummary,
+  coachingNoteCategorySchema,
+  coachingNoteSchema,
+  coachingNotesSchema,
+  countActiveGoalsByHorizon,
+  getActiveHierarchyLimitErrors,
+  getGoalHierarchyFieldErrors,
+  getGoalHierarchyValidationErrors,
+  getGoalParentReferenceErrors,
+  mergeGoalHierarchyState,
+  getWeekStartIsoDate,
+  goalHorizonSchema,
+  goalHorizonsStoredOnGoalsSchema,
+  goalHierarchyFieldsSchema,
+  goalListQuerySchema,
+  longevityDirectionSchema,
+  MAX_ACTIVE_QUARTERLY_GOALS,
+  MAX_ACTIVE_WEEKLY_FOCUS,
+  onboardingQuarterlyGoalSchema,
+  personalContextSummarySchema,
+  summarizePersonalContext,
+  type CoachingNote,
+  type CoachingNoteCategory,
+  type GoalHorizon,
+  type GoalHorizonStoredOnGoal,
+  type GoalHierarchyState,
+  type GoalListQuery,
+  type ParentGoalContext,
+  type LongevityDirection,
+  type OnboardingQuarterlyGoalInput,
+  type PersonalContextSummary,
+} from "./goal-hierarchy.js";
 
 export const progressDomainSchema = z.enum([
   "workout",
@@ -1045,6 +1150,7 @@ export type WorkoutProgressAggregate = z.infer<typeof workoutProgressAggregateSc
 
 export const progressSourceAggregatesSchema = z.object({
   workout: workoutProgressAggregateSchema.nullable(),
+  recovery: recoveryProgressAggregateSchema.nullable().optional(),
 });
 
 export type ProgressSourceAggregates = z.infer<typeof progressSourceAggregatesSchema>;

@@ -7,6 +7,7 @@ import type {
 } from "@health/types";
 import {
   calculateTodayAdherence,
+  resolveProposalItemSource,
   resolveProposalItemStatus,
 } from "@health/types";
 
@@ -91,9 +92,7 @@ export function normalizeProposalItems(
     kind: item.kind,
     status: resolveProposalItemStatus(item),
     required: item.required ?? item.kind !== "habit",
-    source: {
-      type: "ai_proposal" as const,
-    },
+    source: resolveProposalItemSource(item),
   }));
 }
 

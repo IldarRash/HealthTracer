@@ -74,6 +74,8 @@ export class HealthMetricsRepository {
     periodStart: Date,
     periodEnd: Date,
   ) {
+    const periodStartBound = periodStart.toISOString();
+
     return this.db
       .select()
       .from(healthMetricSnapshots)
@@ -85,7 +87,7 @@ export class HealthMetricsRepository {
           lte(healthMetricSnapshots.observedAt, periodEnd),
           gte(
             sql`coalesce(${healthMetricSnapshots.observedEndAt}, ${healthMetricSnapshots.observedAt})`,
-            periodStart,
+            periodStartBound,
           ),
         ),
       )
@@ -194,5 +196,61 @@ export class HealthMetricsRepository {
       )
       .orderBy(desc(healthMetricSnapshots.observedAt))
       .limit(limit);
+  }
+
+  async listActiveConsentSnapshotsForDate(
+    userId: string,
+    consentIds: string[],
+    date: string,
+    metricTypes: HealthMetricType[],
+  ) {
+    if (consentIds.length === 0 || metricTypes.length === 0) {
+      return [];
+    }
+
+    const dayStart = `${date}T00:00:00.000Z`;
+    const dayEnd = `${date}T23:59:59.999Z`;
+
+    return this.db
+      .select()
+      .from(healthMetricSnapshots)
+      .where(
+        and(
+          eq(healthMetricSnapshots.userId, userId),
+          inArray(healthMetricSnapshots.consentId, consentIds),
+          inArray(healthMetricSnapshots.metricType, metricTypes),
+          lte(healthMetricSnapshots.observedAt, new Date(dayEnd)),
+          gte(
+            sql`coalesce(${healthMetricSnapshots.observedEndAt}, ${healthMetricSnapshots.observedAt})`,
+            dayStart,
+          ),
+        ),
+      )
+      .orderBy(desc(healthMetricSnapshots.observedAt));
+  }
+
+  async listActiveConsentAggregatesForDate(
+    userId: string,
+    consentIds: string[],
+    date: string,
+    metricTypes: HealthMetricType[],
+  ) {
+    if (consentIds.length === 0 || metricTypes.length === 0) {
+      return [];
+    }
+
+    return this.db
+      .select()
+      .from(healthMetricAggregates)
+      .where(
+        and(
+          eq(healthMetricAggregates.userId, userId),
+          inArray(healthMetricAggregates.consentId, consentIds),
+          inArray(healthMetricAggregates.metricType, metricTypes),
+          lte(healthMetricAggregates.periodStart, date),
+          gte(healthMetricAggregates.periodEnd, date),
+        ),
+      )
+      .orderBy(desc(healthMetricAggregates.calculatedAt));
   }
 }

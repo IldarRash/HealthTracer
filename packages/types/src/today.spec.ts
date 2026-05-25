@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateTodayAdherence,
+  resolveProposalItemSource,
   resolveProposalItemStatus,
   todayChecklistItemSchema,
   todayChecklistPayloadSchema,
   todayDailyFeedbackSchema,
-  todayDayResponseSchema,
+  todayDayResponseBaseSchema,
   todayHistoryQuerySchema,
   todayHistoryResponseSchema,
   updateTodayItemStatusSchema,
@@ -20,6 +21,57 @@ describe("phase 5 today contracts", () => {
 
     expect(payload.items[0]?.completed).toBe(false);
     expect(resolveProposalItemStatus(payload.items[0]!)).toBe("pending");
+  });
+
+  it("accepts proposal items with weekly_focus and goal source refs", () => {
+    const payload = todayChecklistPayloadSchema.parse({
+      date: "2026-05-22",
+      items: [
+        {
+          label: "Mobility reset",
+          kind: "recovery",
+          source: {
+            type: "weekly_focus",
+            id: "33333333-3333-4333-8333-333333333333",
+          },
+        },
+      ],
+    });
+
+    expect(payload.items[0]?.source?.type).toBe("weekly_focus");
+    expect(
+      resolveProposalItemSource(payload.items[0]!),
+    ).toEqual({
+      type: "weekly_focus",
+      id: "33333333-3333-4333-8333-333333333333",
+    });
+  });
+
+  it("rejects unsupported proposal source refs", () => {
+    expect(() =>
+      todayChecklistPayloadSchema.parse({
+        date: "2026-05-22",
+        items: [
+          {
+            label: "Workout",
+            kind: "workout",
+            source: {
+              type: "workout_session",
+              id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+            },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("falls back to ai_proposal when proposal source refs are omitted", () => {
+    expect(
+      resolveProposalItemSource({
+        label: "Stretch",
+        kind: "recovery",
+      }),
+    ).toEqual({ type: "ai_proposal" });
   });
 
   it("maps completed boolean and explicit status for proposal items", () => {
@@ -71,6 +123,47 @@ describe("phase 5 today contracts", () => {
 
     expect(item.source.type).toBe("habit");
     expect(item.source.id).toBe("5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81");
+  });
+
+  it("validates weekly focus and goal source refs for hierarchy-linked items", () => {
+    const weeklyFocusItem = todayChecklistItemSchema.parse({
+      id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+      label: "Ten minute mobility reset",
+      kind: "recovery",
+      status: "pending",
+      required: true,
+      source: {
+        type: "weekly_focus",
+        id: "33333333-3333-4333-8333-333333333333",
+      },
+    });
+    const quarterlyGoalItem = todayChecklistItemSchema.parse({
+      id: "88d40655-b4b5-47b3-b28e-470192e05f04",
+      label: "Walk after lunch",
+      kind: "habit",
+      status: "pending",
+      required: false,
+      source: {
+        type: "goal",
+        id: "44444444-4444-4444-8444-444444444444",
+      },
+    });
+
+    expect(weeklyFocusItem.source.type).toBe("weekly_focus");
+    expect(quarterlyGoalItem.source.type).toBe("goal");
+  });
+
+  it("rejects unsupported hierarchy source refs", () => {
+    expect(() =>
+      todayChecklistItemSchema.parse({
+        id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+        label: "Unknown linked task",
+        kind: "habit",
+        status: "pending",
+        required: true,
+        source: { type: "quarterly_objective" },
+      }),
+    ).toThrow();
   });
 
   it("rejects habit-linked items with invalid source ids", () => {
@@ -200,7 +293,7 @@ describe("phase 5 today contracts", () => {
     const checklistId = "78d40655-b4b5-47b3-b28e-470192e05f04";
 
     expect(() =>
-      todayDayResponseSchema.parse({
+      todayDayResponseBaseSchema.parse({
         id: checklistId,
         userId,
         date: "2026-05-22",

@@ -23,6 +23,7 @@ const baseProposal = {
   sourceMessageId: "34c29398-86c9-5b4f-ad21-7a2919585046",
   title: "Proposal",
   reason: "Review before applying.",
+  evidenceRefs: null,
   proposedChanges: workoutPayload,
   status: "pending" as const,
   validationStatus: "valid" as const,
@@ -139,15 +140,24 @@ describe("ProposalApplyService", () => {
     expect(workoutsCalled).toBe(true);
   });
 
-  it("routes accepted progress-derived workout proposals through the workouts service", async () => {
+  it("routes accepted progress-derived workout proposals through the workouts service with recovery metadata preserved", async () => {
     let workoutsCalled = false;
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
 
     const service = new ProposalApplyService(
       {} as never,
       {} as never,
       {
-        applyWorkoutPlanProposal: async () => {
+        applyWorkoutPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
           workoutsCalled = true;
+          capturedPayload = payload;
+          capturedIntent = intent;
           return "workout_revision:rev-progress";
         },
       } as never,
@@ -163,13 +173,48 @@ describe("ProposalApplyService", () => {
       intent: "adapt_workout_plan_from_progress",
       targetDomain: "workout",
       proposedChanges: {
-        plan: workoutPayload,
+        plan: {
+          ...workoutPayload,
+          adaptationMetadata: {
+            operations: [
+              {
+                operation: "reduce_load",
+                description: "Lower load after a tough recovery check-in.",
+              },
+            ],
+          },
+        },
         sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        recoverySourceRefs: [
+          {
+            date: "2026-05-25",
+            snapshotId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+          },
+        ],
+        allowVolumeIncrease: true,
       },
     });
 
     expect(reference).toBe("workout_revision:rev-progress");
     expect(workoutsCalled).toBe(true);
+    expect(capturedIntent).toBe("adapt_workout_plan");
+    expect(capturedPayload).toMatchObject({
+      adaptationMetadata: {
+        operations: [
+          {
+            operation: "reduce_load",
+            description: "Lower load after a tough recovery check-in.",
+          },
+        ],
+        recoverySourceRefs: [
+          {
+            date: "2026-05-25",
+            snapshotId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
+          },
+        ],
+        allowVolumeIncrease: true,
+      },
+    });
   });
 
   it("routes accepted nutrition proposals through the nutrition service", async () => {

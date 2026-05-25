@@ -1,4 +1,12 @@
-import type { ChatMessage, ChatThread } from "@health/types";
+import type {
+  ChatMessage,
+  ChatThread,
+  WellbeingCrisisSupportCopy,
+} from "@health/types";
+import {
+  WELLBEING_CRISIS_SUPPORT_COPY,
+  wellbeingCrisisEvaluationSchema,
+} from "@health/types";
 
 export type OptimisticChatMessage = {
   id: string;
@@ -67,4 +75,19 @@ export function formatChatTimestamp(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+export function resolveChatMessageCrisisSupport(
+  message: Pick<ChatMessage, "role" | "metadata">,
+): WellbeingCrisisSupportCopy | null {
+  if (message.role !== "assistant" || message.metadata.crisisBoundary !== true) {
+    return null;
+  }
+
+  const parsed = wellbeingCrisisEvaluationSchema.safeParse(message.metadata.crisisSupport);
+  if (parsed.success && parsed.data.shouldShowCrisisSupport && parsed.data.copy) {
+    return parsed.data.copy;
+  }
+
+  return WELLBEING_CRISIS_SUPPORT_COPY;
 }

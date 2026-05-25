@@ -110,6 +110,25 @@ describe("ai safety helpers", () => {
     ).toHaveLength(1);
   });
 
+  it("flags therapy and therapist wording", () => {
+    expect(containsUnsafeMedicalLanguage("A therapist can help you process this.")).toBe(
+      true,
+    );
+    expect(containsUnsafeMedicalLanguage("Try CBT exercises for anxiety.")).toBe(true);
+    expect(containsUnsafeMedicalLanguage("This may indicate mental illness.")).toBe(true);
+  });
+
+  it("allows normal wellness wording without therapy blocks", () => {
+    expect(
+      containsUnsafeMedicalLanguage(
+        "Your stress and motivation look lower this week, so recovery habits may help.",
+      ),
+    ).toBe(false);
+    expect(validateReplySafety("Recovery and stress check-ins can guide wellness habits.")).toEqual(
+      [],
+    );
+  });
+
   it("flags unsafe wording inside serialized proposed changes", () => {
     expect(
       validateProposalSafety({
@@ -436,5 +455,78 @@ describe("StubCoachAiProvider", () => {
 
     expect(result.proposals).toEqual([]);
     expect(result.reply).toContain("already have an active habit plan");
+  });
+
+  it("acknowledges sufficient wellbeing trends from coaching context", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "How is my stress and motivation lately?",
+      recentMessages: [],
+      coachingContext: {
+        wellbeingSummary: {
+          latestDate: "2026-05-25",
+          latestMoodScore: 4,
+          latestStressScore: 2,
+          windowDays: 7,
+          windowStart: "2026-05-19",
+          windowEnd: "2026-05-25",
+          checkInCount: 5,
+          moodAverage: 3.8,
+          stressAverage: 2.4,
+          moodTrendDirection: "up",
+          stressTrendDirection: "down",
+          currentStreak: 3,
+          dataSufficiency: "sufficient",
+          generatedAt: "2026-05-25T18:00:00.000Z",
+        },
+      },
+    });
+
+    expect(result.proposals).toEqual([]);
+    expect(result.reply).toContain("mood check-ins trend a bit higher");
+    expect(result.reply).toContain("stress check-ins trend a bit lower");
+    expect(result.reply.toLowerCase()).not.toContain("therapy");
+    expect(result.reply.toLowerCase()).not.toContain("diagnosis");
+  });
+
+  it("keeps partial wellbeing summaries conservative", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "My recovery feels off because of stress",
+      recentMessages: [],
+      coachingContext: {
+        wellbeingSummary: {
+          latestDate: "2026-05-25",
+          latestMoodScore: 3,
+          latestStressScore: 4,
+          windowDays: 7,
+          windowStart: "2026-05-24",
+          windowEnd: "2026-05-25",
+          checkInCount: 2,
+          moodAverage: 3,
+          stressAverage: 3.5,
+          moodTrendDirection: "stable",
+          stressTrendDirection: "unknown",
+          currentStreak: 2,
+          dataSufficiency: "partial",
+          generatedAt: "2026-05-25T18:00:00.000Z",
+        },
+      },
+    });
+
+    expect(result.reply).toContain("fairly steady");
+    expect(result.reply).toContain("Check-in data is still limited");
+  });
+
+  it("asks for a check-in when wellbeing data is insufficient", async () => {
+    const provider = new StubCoachAiProvider();
+    const result = await provider.generateCoachResponse({
+      userMessage: "My motivation and recovery are struggling with stress",
+      recentMessages: [],
+      coachingContext: {},
+    });
+
+    expect(result.reply).toContain("do not have recent wellbeing check-in data");
+    expect(result.proposals).toEqual([]);
   });
 });

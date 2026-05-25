@@ -1,4 +1,5 @@
-import type { DocumentType } from "@health/types";
+import type { DocumentType, SupportedHealthDocumentMimeType } from "@health/types";
+import { PDFParse } from "pdf-parse";
 
 export interface ParsedDocumentContent {
   plainText: string;
@@ -17,6 +18,50 @@ export class DevTextDocumentParser implements DocumentParser {
     return {
       plainText: input.content.toString("utf8"),
     };
+  }
+}
+
+export class LabDocumentParser implements DocumentParser {
+  async parse(input: { mimeType: string; content: Buffer }): Promise<ParsedDocumentContent> {
+    if (input.mimeType === "text/plain") {
+      return {
+        plainText: input.content.toString("utf8"),
+      };
+    }
+
+    if (input.mimeType === "application/pdf") {
+      return extractPdfPlainText(input.content);
+    }
+
+    throw new Error("Unsupported document mime type.");
+  }
+}
+
+async function extractPdfPlainText(content: Buffer): Promise<ParsedDocumentContent> {
+  const parser = new PDFParse({ data: content });
+
+  try {
+    const textResult = await parser.getText();
+    const plainText = textResult.text.trim();
+
+    if (plainText.length === 0) {
+      throw new Error("PDF did not contain extractable text.");
+    }
+
+    return { plainText };
+  } finally {
+    await parser.destroy();
+  }
+}
+
+export function resolveUploadExtension(mimeType: SupportedHealthDocumentMimeType): string {
+  switch (mimeType) {
+    case "text/plain":
+      return "txt";
+    case "application/pdf":
+      return "pdf";
+    default:
+      return "bin";
   }
 }
 

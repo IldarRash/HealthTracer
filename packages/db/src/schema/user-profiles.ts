@@ -25,6 +25,16 @@ export const trainingExperienceEnum = pgEnum("training_experience", [
   "advanced",
 ]);
 
+export type StoredLongevityDirection = {
+  statement: string;
+  tags: string[];
+};
+
+export type StoredCoachingNote = {
+  text: string;
+  category?: "preference" | "constraint" | "context" | "motivation";
+};
+
 export const userProfiles = pgTable(
   "user_profiles",
   {
@@ -43,6 +53,13 @@ export const userProfiles = pgTable(
     trainingExperience: trainingExperienceEnum("training_experience"),
     preferences: jsonb("preferences").$type<string[]>().notNull().default([]),
     constraints: jsonb("constraints").$type<string[]>().notNull().default([]),
+    longevityDirection: jsonb("longevity_direction").$type<StoredLongevityDirection | null>(),
+    longevityDirectionTags: jsonb("longevity_direction_tags")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    coachingNotes: jsonb("coaching_notes").$type<StoredCoachingNote[]>().notNull().default([]),
+    onboardingDraft: jsonb("onboarding_draft").$type<Record<string, unknown> | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

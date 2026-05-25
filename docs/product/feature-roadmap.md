@@ -86,45 +86,46 @@ Add weekly summaries, trend detection, adherence insights, and richer AI adaptat
 
 ## Current Implementation Snapshot
 
-As of the longevity expansion planning pass, the core coaching loop is partially implemented on web and backend:
+As of the completed longevity foundation pass, the core coaching loop is implemented on web and backend for the daily execution and structured-context paths:
 
 | Surface | Status | Notes |
 |---------|--------|-------|
-| Chat / Proposals | Partial | Full proposal pipeline; AI is stub-based |
-| Workouts / Today / Nutrition | Partial | Strong web + backend; mobile mostly placeholder except nutrition |
-| Metrics / Device Sync | Partial | API and consent exist; native HealthKit/Health Connect not live |
-| Documents / Labs | Partial | Dev text upload, summaries, keyword search; no lab extraction or correlations |
-| Progress / Adaptation | Partial | Workout-centric weekly summaries; cross-domain review deferred |
+| Chat / Proposals | Implemented foundation | Typed proposal pipeline, evidence refs, wellbeing/recovery context, and safety gates; AI is still stub-based |
+| Today / Workouts / Nutrition | Implemented web MVP | Current workout, checklist, wellbeing, recovery, nutrition-today, adherence, reflection, and secondary Training/Nutrition links |
+| Profile / Onboarding / Goals | Implemented web MVP | First-run onboarding, structured personal context, goal hierarchy, document consent, and profile hierarchy summary |
+| Metrics / Device Sync | Partial | API, consent, and aggregate support exist; native HealthKit/Health Connect ingestion is not live |
+| Documents / Labs | Implemented MVP | Text/PDF upload, structured signal extraction, signal approval/revocation, document-backed correlation preview, and proposal evidence refs |
+| Progress / Adaptation | Partial | Weekly progress includes workout and recovery context; broader cross-domain review is still planned |
 
-The backend already supports `Chat -> AIProposal -> approval -> structured state` for core domains. Longevity-specific layers below are planned but not yet implemented.
+The backend supports `Chat -> AIProposal -> approval -> structured state` for core domains. Completed feature briefs are removed once their MVP behavior is captured in this roadmap and architecture docs.
 
 ## Longevity Expansion
 
-These features extend the product toward AI-first coaching for a longer and healthier life. Each has a dedicated feature brief in `docs/product/features/`.
+These capabilities extend the product toward AI-first coaching for a longer and healthier life. Completed briefs are folded back into the canonical docs; remaining open feature briefs stay in `docs/product/features/`.
 
-### Recommended Sequence
+### Implemented Capabilities
 
-1. [Personal Context, Onboarding, and Goal Hierarchy](features/personal-context-onboarding-goal-hierarchy.md) — foundation for coherent coaching context before other longevity features.
-2. [Mental Wellbeing Check-ins](features/mental-wellbeing-check-ins.md) — structured mood/stress signals for daily and weekly coaching.
-3. [Recovery and Readiness](features/recovery-readiness.md) — recovery context and recovery-aware proposals.
-4. [Habit System and Daily Coaching](features/habit-system-daily-coaching.md) — durable habits materialized into Today.
-5. [Today Daily Execution](features/today-daily-execution.md) — unifies current workout, nutrition today, stress, wellbeing checkpoints, and habits.
-6. [Weekly Review and Cross-Domain Adaptation](features/weekly-review-cross-domain-adaptation.md) — extends Phase 10 beyond workout-only summaries and surfaces through Longevity + Chat.
-7. [Longevity Dashboard](features/longevity-dashboard.md) — consumer overview once enough structured signals exist.
-8. [Medical and Lab Data Wellness Correlations](features/medical-lab-data-wellness-correlations.md) — consent-first lab/document context and wellness correlations; depends on documents, metrics, and safety gates.
+| Capability | Status | Notes |
+|------------|--------|-------|
+| Onboarding and goal hierarchy | Implemented MVP | Web onboarding direct-writes visible structured context, creates an active quarterly goal, gates incomplete users, enriches coaching context, and validates weekly/quarterly hierarchy rules |
+| Mental wellbeing check-ins | Implemented MVP | Today mood/stress check-in, Longevity 7-day history, coaching `wellbeingSummary` without raw notes, static crisis support, and Chat crisis boundary |
+| Recovery and readiness | Implemented MVP | Manual recovery check-in, qualitative recovery band, Today recovery focus card, consent-filtered recovery context, weekly recovery aggregate, and recovery-aware workout proposal guards |
+| Today daily execution | Implemented MVP | Selected-date Today nutrition card, date-scoped adherence writes, no plan editing, and clear read-only links to Training, Nutrition, and Chat |
+| Medical/lab correlations | Implemented MVP | Consent-gated text/PDF document upload, structured signal extraction/review/revocation, document-backed correlation preview, and proposal evidence validation |
 
-### Feature Index
+### Remaining Recommended Sequence
+
+1. [Habit System and Daily Coaching](features/habit-system-daily-coaching.md) — durable habits materialized into Today.
+2. [Weekly Review and Cross-Domain Adaptation](features/weekly-review-cross-domain-adaptation.md) — extends Phase 10 beyond workout-only summaries and surfaces through Longevity + Chat.
+3. [Longevity Dashboard](features/longevity-dashboard.md) — consumer overview once enough structured signals exist.
+
+### Open Feature Brief Index
 
 | Feature | Brief | Depends on |
 |---------|-------|------------|
-| Onboarding and goal hierarchy | [personal-context-onboarding-goal-hierarchy.md](features/personal-context-onboarding-goal-hierarchy.md) | Phase 2 profile/goals |
-| Mental wellbeing check-ins | [mental-wellbeing-check-ins.md](features/mental-wellbeing-check-ins.md) | Today, coaching context |
-| Recovery and readiness | [recovery-readiness.md](features/recovery-readiness.md) | Metrics, Today, workouts |
 | Habit system | [habit-system-daily-coaching.md](features/habit-system-daily-coaching.md) | Today, proposals |
-| Today daily execution | [today-daily-execution.md](features/today-daily-execution.md) | Today, workouts, nutrition, wellbeing, habits |
 | Weekly cross-domain review | [weekly-review-cross-domain-adaptation.md](features/weekly-review-cross-domain-adaptation.md) | Progress, wellbeing, recovery, habits |
 | Longevity dashboard | [longevity-dashboard.md](features/longevity-dashboard.md) | Weekly review, metrics, goals |
-| Medical/lab correlations | [medical-lab-data-wellness-correlations.md](features/medical-lab-data-wellness-correlations.md) | Documents, metrics, consent, proposals |
 
 ## AI Safety and State Rules
 

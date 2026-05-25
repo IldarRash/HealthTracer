@@ -9,6 +9,7 @@ import {
   exercises,
   healthDocumentSummaries,
   healthDocuments,
+  documentSignals,
   goals,
   healthMetricAggregates,
   healthMetricSnapshots,
@@ -24,6 +25,7 @@ import {
   workoutPlanRevisions,
   workoutPlans,
   workoutSessions,
+  wellbeingCheckIns,
 } from "./schema/index.js";
 
 export const usersRelations = relations(users, ({ many, one }) => ({
@@ -45,6 +47,7 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   deviceConnections: many(deviceConnections),
   healthMetricSnapshots: many(healthMetricSnapshots),
   healthMetricAggregates: many(healthMetricAggregates),
+  wellbeingCheckIns: many(wellbeingCheckIns),
 }));
 
 export const userProfilesRelations = relations(userProfiles, ({ one }) => ({
@@ -58,6 +61,11 @@ export const goalsRelations = relations(goals, ({ one }) => ({
   user: one(users, {
     fields: [goals.userId],
     references: [users.id],
+  }),
+  parentGoal: one(goals, {
+    fields: [goals.parentGoalId],
+    references: [goals.id],
+    relationName: "goalHierarchy",
   }),
 }));
 
@@ -264,6 +272,18 @@ export const healthDocumentsRelations = relations(healthDocuments, ({ many, one 
     references: [users.id],
   }),
   summaries: many(healthDocumentSummaries),
+  signals: many(documentSignals),
+}));
+
+export const documentSignalsRelations = relations(documentSignals, ({ one }) => ({
+  user: one(users, {
+    fields: [documentSignals.userId],
+    references: [users.id],
+  }),
+  document: one(healthDocuments, {
+    fields: [documentSignals.healthDocumentId],
+    references: [healthDocuments.id],
+  }),
 }));
 
 export const healthDocumentSummariesRelations = relations(

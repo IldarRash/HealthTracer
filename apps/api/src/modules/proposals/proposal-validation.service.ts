@@ -2,10 +2,14 @@ import {
   adaptWorkoutPlanFromProgressChangesSchema,
   collectWorkoutPlanExerciseIds,
   createGoalProposalChangesSchema,
+  getGoalHierarchyValidationErrors,
   getHabitPlanDomainErrors,
   getNutritionPlanDomainErrors,
+  getRecoveryWorkoutAdaptationVolumeErrors,
+  getTodayIsoDateInTimezone,
   getWorkoutProposalDomainErrors,
   habitPlanPayloadSchema,
+  mergeGoalHierarchyState,
   nutritionPlanPayloadSchema,
   profileProposalChangesSchema,
   rawAiProposalSchema,
@@ -14,18 +18,37 @@ import {
   todayChecklistPayloadSchema,
   updateGoalProposalChangesSchema,
   workoutPlanProposalChangesSchema,
+  workoutAdaptationIncreasesVolumeOrLoad,
   type AdaptWorkoutPlanFromProgressChanges,
+  type CorrelationEvidenceRef,
+  type CreateGoalInput,
+  type Goal,
   type HabitPlanPayload,
   type NutritionPlanPayload,
   type ProposalIntent,
   type RawAiProposal,
+  type RecoveryContextSourceRef,
+  type RecoveryReadinessBand,
+  type TodayChecklistPayload,
+  type UpdateGoalInput,
   type WorkoutPlanProposalChanges,
+  buildHealthMetricAggregateEvidenceId,
+  parseHealthMetricAggregateEvidenceId,
+  VERIFIABLE_CORRELATION_EVIDENCE_REF_TYPES,
 } from "@health/types";
+import { containsUnsafeWellnessInsightLanguage } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { z } from "zod";
+import { DocumentSignalsRepository } from "../documents/document-signals.repository.js";
 import { ExercisesService } from "../exercises/exercises.service.js";
+import { GoalsRepository } from "../goals/goals.repository.js";
+import { toGoal } from "../goals/goal.mapper.js";
 import { HabitsService } from "../habits/habits.service.js";
+import { MetricsAiContextService } from "../health-metrics/metrics-ai-context.service.js";
 import { ProgressRepository } from "../progress/progress.repository.js";
+import { RecoveryContextService } from "../recovery/recovery-context.service.js";
+import { UsersRepository } from "../users/users.repository.js";
+import { WorkoutsRepository } from "../workouts/workouts.repository.js";
 
 export interface ProposalValidationResult {
   valid: boolean;
@@ -38,6 +61,12 @@ export class ProposalValidationService {
     private readonly progressRepository: ProgressRepository,
     private readonly exercisesService: ExercisesService,
     private readonly habitsService: HabitsService,
+    private readonly documentSignalsRepository: DocumentSignalsRepository,
+    private readonly metricsAiContextService: MetricsAiContextService,
+    private readonly goalsRepository: GoalsRepository,
+    private readonly recoveryContextService: RecoveryContextService,
+    private readonly workoutsRepository: WorkoutsRepository,
+    private readonly usersRepository: UsersRepository,
   ) {}
 
   validateRawProposal(proposal: RawAiProposal): ProposalValidationResult {
@@ -52,7 +81,118 @@ export class ProposalValidationService {
       };
     }
 
-    return this.validateStoredProposal(envelope.data.intent, envelope.data.proposedChanges);
+    const schemaValidation = this.validateStoredProposal(
+      envelope.data.intent,
+      envelope.data.proposedChanges,
+    );
+    const evidenceErrors = this.validateCorrelationEvidenceRefs(envelope.data.evidenceRefs);
+
+    if (schemaValidation.errors.length > 0 || evidenceErrors.length > 0) {
+      return {
+        valid: false,
+        errors: [...schemaValidation.errors, ...evidenceErrors],
+      };
+    }
+
+    return { valid: true, errors: [] };
+  }
+
+  validateCorrelationEvidenceRefs(
+    evidenceRefs: CorrelationEvidenceRef[] | undefined,
+  ): string[] {
+    if (!evidenceRefs || evidenceRefs.length === 0) {
+      return [];
+    }
+
+    const errors: string[] = [];
+
+    for (const [index, ref] of evidenceRefs.entries()) {
+      if (containsUnsafeWellnessInsightLanguage(ref.label)) {
+        errors.push(
+          `evidenceRefs[${index}].label: Evidence label contains unsafe medical wording.`,
+        );
+      }
+    }
+
+    return errors;
+  }
+
+  async validateCorrelationEvidenceOwnership(
+    userId: string,
+    evidenceRefs: CorrelationEvidenceRef[] | undefined,
+  ): Promise<string[]> {
+    if (!evidenceRefs || evidenceRefs.length === 0) {
+      return [];
+    }
+
+    const errors: string[] = [];
+    const metricSummary =
+      evidenceRefs.some((ref) => ref.type === "health_metric_aggregate")
+        ? await this.metricsAiContextService.buildSummaryForUser(userId)
+        : null;
+    const metricEvidenceIds = new Set(
+      metricSummary?.items.map((item) =>
+        buildHealthMetricAggregateEvidenceId({
+          metricType: item.metricType,
+          periodStart: item.periodStart,
+          periodEnd: item.periodEnd,
+        }),
+      ) ?? [],
+    );
+
+    for (const [index, ref] of evidenceRefs.entries()) {
+      if (ref.type === "document_signal") {
+        const owned = await this.documentSignalsRepository.findCorrelationEligibleSignalById(
+          userId,
+          ref.id,
+        );
+
+        if (!owned) {
+          errors.push(
+            `evidenceRefs[${index}].id: Approved document signal was not found for this user.`,
+          );
+        }
+
+        continue;
+      }
+
+      if (ref.type === "weekly_progress_summary") {
+        const exists = await this.progressRepository.summaryExistsForUser(userId, ref.id);
+
+        if (!exists) {
+          errors.push(
+            `evidenceRefs[${index}].id: Weekly progress summary was not found for this user.`,
+          );
+        }
+
+        continue;
+      }
+
+      if (ref.type === "health_metric_aggregate") {
+        const parsed = parseHealthMetricAggregateEvidenceId(ref.id);
+
+        if (!parsed || !metricEvidenceIds.has(ref.id)) {
+          errors.push(
+            `evidenceRefs[${index}].id: Health metric aggregate was not found for this user.`,
+          );
+        }
+
+        continue;
+      }
+
+      if (ref.type === "habit_adherence") {
+        errors.push(
+          `evidenceRefs[${index}].type: Habit adherence evidence refs cannot be verified yet.`,
+        );
+        continue;
+      }
+
+      if (!VERIFIABLE_CORRELATION_EVIDENCE_REF_TYPES.includes(ref.type)) {
+        errors.push(`evidenceRefs[${index}].type: Unsupported evidence reference type.`);
+      }
+    }
+
+    return errors;
   }
 
   validateStoredProposal(
@@ -119,7 +259,128 @@ export class ProposalValidationService {
       }
     }
 
+    if (intent === "create_goal") {
+      const domainErrors = getGoalProposalDomainErrors(
+        result.data as CreateGoalInput,
+        [],
+      );
+
+      if (domainErrors.length > 0) {
+        return { valid: false, errors: domainErrors };
+      }
+    }
+
+    if (intent === "update_goal") {
+      const parsed = result.data as z.infer<typeof updateGoalProposalChangesSchema>;
+      const domainErrors = getGoalUpdateProposalDomainErrors(parsed.changes);
+
+      if (domainErrors.length > 0) {
+        return { valid: false, errors: domainErrors };
+      }
+    }
+
     return { valid: true, errors: [] };
+  }
+
+  async validateGoalProposalHierarchy(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "create_goal" && intent !== "update_goal") {
+      return [];
+    }
+
+    const existingGoals = (await this.goalsRepository.listByUserId(userId)).map(toGoal);
+
+    if (intent === "create_goal") {
+      const parsed = createGoalProposalChangesSchema.safeParse(proposedChanges);
+
+      if (!parsed.success) {
+        return [];
+      }
+
+      return getGoalProposalDomainErrors(parsed.data, existingGoals);
+    }
+
+    const parsed = updateGoalProposalChangesSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    const existingGoal = existingGoals.find((goal) => goal.id === parsed.data.goalId);
+
+    if (!existingGoal) {
+      return ["proposedChanges.goalId: Goal was not found for this user."];
+    }
+
+    return getGoalProposalDomainErrors(parsed.data.changes, existingGoals, existingGoal);
+  }
+
+  async validateTodayChecklistGoalSourceRefs(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "create_today_checklist") {
+      return [];
+    }
+
+    const parsed = todayChecklistPayloadSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    return this.getTodayChecklistSourceRefErrors(userId, parsed.data);
+  }
+
+  private async getTodayChecklistSourceRefErrors(
+    userId: string,
+    payload: TodayChecklistPayload,
+  ): Promise<string[]> {
+    const errors: string[] = [];
+    const existingGoals = (await this.goalsRepository.listByUserId(userId)).map(toGoal);
+
+    for (const [index, item] of payload.items.entries()) {
+      const source = item.source;
+
+      if (!source) {
+        continue;
+      }
+
+      if (!source.id) {
+        continue;
+      }
+
+      const goal = existingGoals.find((entry) => entry.id === source.id);
+
+      if (!goal) {
+        errors.push(
+          `proposedChanges.items[${index}].source.id: Referenced goal was not found for this user.`,
+        );
+        continue;
+      }
+
+      if (source.type === "goal") {
+        if (goal.horizon !== "quarterly" || goal.status !== "active") {
+          errors.push(
+            `proposedChanges.items[${index}].source.id: Goal source refs must point to an active quarterly goal.`,
+          );
+        }
+      }
+
+      if (source.type === "weekly_focus") {
+        if (goal.horizon !== "weekly" || goal.status !== "active") {
+          errors.push(
+            `proposedChanges.items[${index}].source.id: weekly_focus source refs must point to an active weekly goal.`,
+          );
+        }
+      }
+    }
+
+    return errors;
   }
 
   async validateProvenanceOwnership(
@@ -181,6 +442,97 @@ export class ProposalValidationService {
     return this.habitsService.getHabitTemplateReferenceErrors(parsed.data);
   }
 
+  async validateRecoveryAwareWorkoutAdaptation(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "adapt_workout_plan" && intent !== "adapt_workout_plan_from_progress") {
+      return [];
+    }
+
+    const extracted = extractRecoveryAwareWorkoutAdaptation(proposedChanges, intent);
+
+    if (!extracted) {
+      return [];
+    }
+
+    const errors: string[] = [];
+
+    for (const [index, ref] of extracted.recoverySourceRefs.entries()) {
+      const snapshot = await this.recoveryContextService.computeAndPersistSnapshot(
+        userId,
+        ref.date,
+      );
+
+      if (ref.snapshotId && ref.snapshotId !== snapshot.id) {
+        errors.push(
+          `proposedChanges.recoverySourceRefs[${index}].snapshotId: Recovery context snapshot is stale for the cited date.`,
+        );
+      }
+    }
+
+    const recoveryBand = await this.resolveRecoveryBandForWorkoutAdaptation(
+      userId,
+      extracted.recoverySourceRefs,
+    );
+    const activePlan = await this.workoutsRepository.findActivePlanByUserId(userId);
+
+    if (!activePlan?.activeRevisionId) {
+      return errors;
+    }
+
+    const activeRevision = await this.workoutsRepository.findRevisionById(
+      activePlan.activeRevisionId,
+    );
+
+    if (!activeRevision) {
+      return errors;
+    }
+
+    const currentPlan = stripWorkoutPlanProposalExtras(
+      activeRevision.payload as WorkoutPlanProposalChanges,
+    );
+    const proposedPlan = stripWorkoutPlanProposalExtras(extracted.plan);
+    const increasesVolumeOrLoad = workoutAdaptationIncreasesVolumeOrLoad(
+      currentPlan,
+      proposedPlan,
+    );
+
+    errors.push(
+      ...getRecoveryWorkoutAdaptationVolumeErrors({
+        increasesVolumeOrLoad,
+        recoveryBand,
+        allowVolumeIncrease: extracted.allowVolumeIncrease,
+      }),
+    );
+
+    return errors;
+  }
+
+  private async resolveRecoveryBandForWorkoutAdaptation(
+    userId: string,
+    recoverySourceRefs: readonly RecoveryContextSourceRef[],
+  ): Promise<RecoveryReadinessBand | null> {
+    if (recoverySourceRefs.length > 0) {
+      const latestRef = recoverySourceRefs.reduce((latest, ref) =>
+        ref.date > latest.date ? ref : latest,
+      );
+      const snapshot = await this.recoveryContextService.computeAndPersistSnapshot(
+        userId,
+        latestRef.date,
+      );
+
+      return snapshot.band;
+    }
+
+    const user = await this.usersRepository.findByUserId(userId);
+    const today = getTodayIsoDateInTimezone(user?.timezone ?? "UTC");
+    const snapshot = await this.recoveryContextService.computeAndPersistSnapshot(userId, today);
+
+    return snapshot.band;
+  }
+
   private async getProgressProvenanceErrors(
     userId: string,
     payload: AdaptWorkoutPlanFromProgressChanges,
@@ -227,6 +579,114 @@ export class ProposalValidationService {
 
     return errors;
   }
+}
+
+function getGoalProposalDomainErrors(
+  input: CreateGoalInput | UpdateGoalInput,
+  existingGoals: Goal[],
+  existingGoal?: Goal,
+): string[] {
+  const merged = mergeGoalHierarchyState(
+    existingGoal
+      ? {
+          horizon: existingGoal.horizon,
+          parentGoalId: existingGoal.parentGoalId,
+          weekStart: existingGoal.weekStart,
+          status: existingGoal.status,
+        }
+      : {
+          horizon: null,
+          parentGoalId: null,
+          weekStart: null,
+          status: "active",
+        },
+    {
+      horizon: input.horizon,
+      parentGoalId: input.parentGoalId,
+      weekStart: input.weekStart,
+      status: "status" in input ? input.status : undefined,
+    },
+  );
+
+  const parentGoal = merged.parentGoalId
+    ? (existingGoals.find((goal) => goal.id === merged.parentGoalId) ?? null)
+    : null;
+
+  return getGoalHierarchyValidationErrors({
+    merged,
+    existingGoals,
+    goalId: existingGoal?.id,
+    parentGoal,
+  });
+}
+
+function getGoalUpdateProposalDomainErrors(changes: UpdateGoalInput): string[] {
+  const hasHierarchyFields =
+    changes.horizon !== undefined ||
+    changes.parentGoalId !== undefined ||
+    changes.weekStart !== undefined ||
+    changes.status !== undefined;
+
+  if (!hasHierarchyFields) {
+    return [];
+  }
+
+  return getGoalHierarchyValidationErrors({
+    merged: mergeGoalHierarchyState(
+      {
+        horizon: null,
+        parentGoalId: null,
+        weekStart: null,
+        status: "active",
+      },
+      {
+        horizon: changes.horizon,
+        parentGoalId: changes.parentGoalId,
+        weekStart: changes.weekStart,
+        status: changes.status,
+      },
+    ),
+    existingGoals: [],
+  });
+}
+
+function extractRecoveryAwareWorkoutAdaptation(
+  proposedChanges: unknown,
+  intent: ProposalIntent,
+): {
+  plan: WorkoutPlanProposalChanges;
+  recoverySourceRefs: RecoveryContextSourceRef[];
+  allowVolumeIncrease?: boolean;
+} | null {
+  if (intent === "adapt_workout_plan") {
+    const parsed = workoutPlanProposalChangesSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return null;
+    }
+
+    return {
+      plan: parsed.data,
+      recoverySourceRefs: parsed.data.adaptationMetadata?.recoverySourceRefs ?? [],
+      allowVolumeIncrease: parsed.data.adaptationMetadata?.allowVolumeIncrease,
+    };
+  }
+
+  const parsed = adaptWorkoutPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+  if (!parsed.success) {
+    return null;
+  }
+
+  return {
+    plan: parsed.data.plan,
+    recoverySourceRefs:
+      parsed.data.recoverySourceRefs ??
+      parsed.data.plan.adaptationMetadata?.recoverySourceRefs ??
+      [],
+    allowVolumeIncrease:
+      parsed.data.allowVolumeIncrease ?? parsed.data.plan.adaptationMetadata?.allowVolumeIncrease,
+  };
 }
 
 function extractWorkoutProposalChanges(

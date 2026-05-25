@@ -17,6 +17,7 @@ import {
   getProposalStatusLabel,
 } from "../../lib/proposal-ui-state";
 import { summarizeNutritionProposalChanges } from "../../lib/nutrition-ui-state";
+import { ProposalEvidenceList } from "./proposal-evidence-list";
 import { Badge, Button, ProposalConfirmation } from "../ui";
 
 type InlineProposalCardProps = {
@@ -149,6 +150,10 @@ export function InlineProposalCard({ proposal, onDecision }: InlineProposalCardP
             <li key={line}>{line}</li>
           ))}
         </ul>
+      ) : null}
+
+      {proposal.evidenceRefs && proposal.evidenceRefs.length > 0 ? (
+        <ProposalEvidenceList evidenceRefs={proposal.evidenceRefs} />
       ) : null}
 
       {showValidationNotice ? (

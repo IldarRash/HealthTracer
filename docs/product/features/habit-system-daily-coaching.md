@@ -195,4 +195,4 @@ Minimum revision payload per habit:
 
 ## Roadmap Fit
 
-Extends Phase 5 Daily Execution Loop and prepares Phase 10 Progress and Adaptation. It should land before the broader Today Daily Execution consolidation and before Weekly Review depends on habit adherence.
+Extends the implemented Today daily execution loop and prepares Phase 10 Progress and Adaptation. It should land before Weekly Review depends on habit adherence, using Today as the daily habit execution surface.

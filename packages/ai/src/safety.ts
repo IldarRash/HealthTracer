@@ -17,7 +17,15 @@ const UNSAFE_MEDICAL_PATTERNS = [
   /\bdisorder\b/i,
   /\bsymptom\b/i,
   /\bmedical advice\b/i,
+  /\btherap(?:y|ist|ies|eutic)\b/i,
+  /\bpsychotherap(?:y|ist)\b/i,
+  /\bmental illness\b/i,
+  /\bcbt\b/i,
+  /\bdbt\b/i,
 ];
+
+const UNSAFE_LANGUAGE_ERROR =
+  "Reply contains wording that may imply diagnosis, treatment, or therapy guidance.";
 
 const DOCUMENT_TYPE_PHRASES = [
   "lab report",
@@ -81,7 +89,7 @@ export function validateProposalSafety(proposal: ProposalSafetyInput): string[] 
   for (const text of collectProposalText(proposal)) {
     if (containsUnsafeMedicalLanguage(text)) {
       errors.push(
-        "Proposal contains wording that may imply diagnosis or treatment guidance.",
+        "Proposal contains wording that may imply diagnosis, treatment, or therapy guidance.",
       );
       break;
     }
@@ -92,9 +100,7 @@ export function validateProposalSafety(proposal: ProposalSafetyInput): string[] 
 
 export function validateReplySafety(reply: string): string[] {
   if (containsUnsafeMedicalLanguage(reply)) {
-    return [
-      "Reply contains wording that may imply diagnosis or treatment guidance.",
-    ];
+    return [UNSAFE_LANGUAGE_ERROR];
   }
 
   return [];

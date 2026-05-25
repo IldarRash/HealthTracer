@@ -30,6 +30,8 @@ export const todayChecklistItemSourceTypeSchema = z.enum([
   "ai_proposal",
   "custom",
   "generated",
+  "weekly_focus",
+  "goal",
 ]);
 
 export type TodayChecklistItemSourceType = z.infer<
@@ -56,13 +58,47 @@ export const todayChecklistItemSchema = z.object({
 
 export type TodayChecklistItem = z.infer<typeof todayChecklistItemSchema>;
 
-export const todayChecklistProposalItemSchema = z.object({
-  label: z.string().min(1).max(160),
-  kind: todayChecklistItemKindSchema,
-  completed: z.boolean().optional(),
-  status: todayChecklistItemStatusSchema.optional(),
-  required: z.boolean().optional(),
-});
+export const todayChecklistProposalSourceTypes = ["weekly_focus", "goal"] as const;
+
+export type TodayChecklistProposalSourceType =
+  (typeof todayChecklistProposalSourceTypes)[number];
+
+export const todayChecklistProposalItemSchema = z
+  .object({
+    label: z.string().min(1).max(160),
+    kind: todayChecklistItemKindSchema,
+    completed: z.boolean().optional(),
+    status: todayChecklistItemStatusSchema.optional(),
+    required: z.boolean().optional(),
+    source: todayChecklistItemSourceRefSchema.optional(),
+  })
+  .superRefine((item, ctx) => {
+    if (!item.source) {
+      return;
+    }
+
+    if (
+      !todayChecklistProposalSourceTypes.includes(
+        item.source.type as TodayChecklistProposalSourceType,
+      )
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["source", "type"],
+        message:
+          "Today checklist proposals only support weekly_focus or goal source refs; omit source to keep ai_proposal.",
+      });
+      return;
+    }
+
+    if (!item.source.id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["source", "id"],
+        message: "source.id is required when source.type is weekly_focus or goal.",
+      });
+    }
+  });
 
 export type TodayChecklistProposalItem = z.infer<
   typeof todayChecklistProposalItemSchema
@@ -123,11 +159,11 @@ export const todayWorkoutDetailSchema = z.object({
 
 export type TodayWorkoutDetail = z.infer<typeof todayWorkoutDetailSchema>;
 
-export const todayDayResponseSchema = todayChecklistRecordSchema.extend({
+export const todayDayResponseBaseSchema = todayChecklistRecordSchema.extend({
   workout: todayWorkoutDetailSchema.nullable(),
 });
 
-export type TodayDayResponse = z.infer<typeof todayDayResponseSchema>;
+export type TodayDayResponseBase = z.infer<typeof todayDayResponseBaseSchema>;
 
 export const updateTodayItemStatusSchema = z.object({
   status: todayChecklistItemStatusSchema.extract(["completed", "skipped"]),
@@ -159,6 +195,26 @@ export const todayHistoryQuerySchema = z.object({
 });
 
 export type TodayHistoryQuery = z.infer<typeof todayHistoryQuerySchema>;
+
+export function resolveProposalItemSource(
+  item: TodayChecklistProposalItem,
+): TodayChecklistItemSourceRef {
+  const source = item.source;
+
+  if (
+    (source?.type === "weekly_focus" || source?.type === "goal") &&
+    source.id
+  ) {
+    return {
+      type: source.type,
+      id: source.id,
+    };
+  }
+
+  return {
+    type: "ai_proposal",
+  };
+}
 
 export function resolveProposalItemStatus(
   item: TodayChecklistProposalItem,

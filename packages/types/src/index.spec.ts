@@ -12,6 +12,8 @@ import {
   scheduleWorkoutSessionSchema,
   sendChatMessageSchema,
   todayChecklistPayloadSchema,
+  todayDayResponseSchema,
+  todayNutritionDetailSchema,
   workoutSessionSchema,
   workoutPlanPayloadSchema,
   activeWorkoutPlanResponseSchema,
@@ -65,12 +67,24 @@ describe("phase 2 contracts", () => {
   it("requires at least one onboarding goal", () => {
     expect(() =>
       onboardingSchema.parse({
-        profile: {
-          birthDate: "1992-04-12",
+        user: {
+          displayName: "Alex",
+          timezone: "UTC",
         },
-        goals: [],
+        profile: {
+          longevityDirection: {
+            statement: "Build durable fitness habits.",
+            tags: [],
+          },
+        },
+        quarterlyGoal: {
+          type: "general_wellness",
+          title: "Move consistently this quarter",
+          startDate: "2026-05-01",
+          targetDate: "2026-07-31",
+        },
       }),
-    ).toThrow();
+    ).not.toThrow();
   });
 });
 
@@ -243,6 +257,95 @@ describe("phase 3 contracts", () => {
     ).toEqual(["Light day"]);
   });
 
+  it("validates today day response with selected-date nutrition detail", () => {
+    const timestamp = "2026-05-22T12:00:00.000Z";
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const checklistId = "78d40655-b4b5-47b3-b28e-470192e05f04";
+    const planId = "33333333-3333-4333-8333-333333333333";
+    const revisionId = "44444444-4444-4444-8444-444444444444";
+
+    const nutrition = todayNutritionDetailSchema.parse({
+      date: "2026-05-22",
+      plan: {
+        id: planId,
+        userId,
+        activeRevisionId: revisionId,
+        status: "active",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+      activeRevision: {
+        id: revisionId,
+        nutritionPlanId: planId,
+        revisionNumber: 1,
+        reason: "Initial plan",
+        source: "ai_proposal",
+        payload: {
+          title: "Balanced daily nutrition base",
+          summary: "A moderate starting point focused on consistency.",
+          caloriesPerDay: 2200,
+          proteinGrams: 140,
+          carbsGrams: 220,
+          fatGrams: 70,
+          hydrationLiters: 2.5,
+          mealStructure: [{ label: "Breakfast", timingHint: null }],
+          preferences: [],
+          restrictions: [],
+          allergies: [],
+          notes: [],
+        },
+        createdAt: timestamp,
+      },
+      adherence: null,
+    });
+
+    expect(
+      todayDayResponseSchema.parse({
+        id: checklistId,
+        userId,
+        date: "2026-05-22",
+        items: [],
+        source: "generated",
+        feedback: null,
+        adherence: {
+          score: null,
+          completedRequired: 0,
+          totalRequired: 0,
+          completedOptional: 0,
+          skippedRequired: 0,
+          skippedOptional: 0,
+        },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        workout: null,
+        nutrition,
+      }).nutrition?.plan?.id,
+    ).toBe(planId);
+
+    expect(
+      todayDayResponseSchema.parse({
+        id: checklistId,
+        userId,
+        date: "2026-05-22",
+        items: [],
+        source: "generated",
+        feedback: null,
+        adherence: {
+          score: null,
+          completedRequired: 0,
+          totalRequired: 0,
+          completedOptional: 0,
+          skippedRequired: 0,
+          skippedOptional: 0,
+        },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        workout: null,
+        nutrition: null,
+      }).nutrition,
+    ).toBeNull();
+  });
+
   it("accepts structured and legacy string workout exercises", () => {
     const plan = workoutPlanPayloadSchema.parse({
       title: "Strength base",
@@ -323,6 +426,19 @@ describe("phase 3 contracts", () => {
     });
 
     expect(proposal.status).toBe("pending");
+
+    const proposalWithEvidence = aiProposalSchema.parse({
+      ...proposal,
+      evidenceRefs: [
+        {
+          type: "document_signal",
+          id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+          label: "Vitamin D from recent lab review",
+        },
+      ],
+    });
+
+    expect(proposalWithEvidence.evidenceRefs).toHaveLength(1);
 
     expect(() =>
       chatTurnResponseSchema.parse({

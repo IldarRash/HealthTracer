@@ -27,6 +27,25 @@ const itemId = "880099c6-3b5f-4383-8246-97b72bf61818";
 const date = "2026-05-22";
 const timestamp = new Date("2026-05-22T12:00:00.000Z");
 
+const nutritionPlanPayload = {
+  title: "Balanced daily nutrition base",
+  summary: "A moderate starting point focused on consistency.",
+  caloriesPerDay: 2200,
+  proteinGrams: 140,
+  carbsGrams: 220,
+  fatGrams: 70,
+  hydrationLiters: 2.5,
+  mealStructure: [
+    { label: "Breakfast", timingHint: "Morning" },
+    { label: "Lunch", timingHint: null },
+    { label: "Dinner", timingHint: "Evening" },
+  ],
+  preferences: [],
+  restrictions: [],
+  allergies: [],
+  notes: [],
+};
+
 const workoutsService: {
   ensureTodayWorkoutSession: () => Promise<TodayWorkoutDetail | null>;
 } = {
@@ -87,6 +106,7 @@ function createService(
   workoutsRepository: unknown,
   workoutsServiceOverride: Partial<typeof workoutsService> = {},
   habitsRepository: unknown = {},
+  nutritionService: unknown = {},
 ) {
   const workoutsRepositoryWithDefaults = {
     findActivePlanByUserId: async () => null,
@@ -99,12 +119,18 @@ function createService(
     ...(habitsRepository as object),
   };
 
+  const nutritionServiceWithDefaults = {
+    getNutritionDayDetail: async () => null,
+    ...(nutritionService as object),
+  };
+
   return new TodayService(
     todayRepository as never,
     workoutsRepositoryWithDefaults as never,
     { ...workoutsService, ...workoutsServiceOverride } as never,
     usersService as never,
     habitsRepositoryWithDefaults as never,
+    nutritionServiceWithDefaults as never,
   );
 }
 
@@ -916,5 +942,81 @@ describe("TodayService", () => {
 
     expect(capturedStatus).toBe("skipped");
     expect(day.items[0]?.status).toBe("skipped");
+  });
+
+  it("includes selected-date nutrition detail when an active plan exists", async () => {
+    const nutritionPlanId = "a1000001-0000-4000-8000-000000000001";
+    const nutritionRevisionId = "b2000002-0000-4000-8000-000000000002";
+    let requestedDate: string | undefined;
+
+    const service = createService(
+      {
+        findByUserAndDate: async () => null,
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: Record<string, unknown>[],
+        ) => buildChecklistRow(items),
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {},
+      {
+        getNutritionDayDetail: async (_auth: unknown, resolvedDate: string) => {
+          requestedDate = resolvedDate;
+          return {
+            date: resolvedDate,
+            plan: {
+              id: nutritionPlanId,
+              userId,
+              activeRevisionId: nutritionRevisionId,
+              status: "active",
+              createdAt: timestamp.toISOString(),
+              updatedAt: timestamp.toISOString(),
+            },
+            activeRevision: {
+              id: nutritionRevisionId,
+              nutritionPlanId,
+              revisionNumber: 1,
+              reason: "Initial plan",
+              source: "ai_proposal",
+              payload: nutritionPlanPayload,
+              createdAt: timestamp.toISOString(),
+            },
+            adherence: null,
+          };
+        },
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(requestedDate).toBe(date);
+    expect(day.nutrition?.date).toBe(date);
+    expect(day.nutrition?.plan?.id).toBe(nutritionPlanId);
+    expect(day.nutrition?.activeRevision?.payload.mealStructure).toHaveLength(3);
+    expect(day.nutrition?.adherence).toBeNull();
+  });
+
+  it("returns null nutrition detail when no active nutrition plan exists", async () => {
+    const service = createService(
+      {
+        findByUserAndDate: async () => null,
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: Record<string, unknown>[],
+        ) => buildChecklistRow(items),
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(day.nutrition).toBeNull();
   });
 });

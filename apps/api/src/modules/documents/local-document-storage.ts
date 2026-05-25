@@ -1,5 +1,7 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { resolveUploadExtension } from "./document-processing.js";
+import type { SupportedHealthDocumentMimeType } from "@health/types";
 
 export interface DocumentStorageAdapter {
   store(userId: string, documentId: string, content: Buffer, mimeType: string): Promise<string>;
@@ -20,7 +22,7 @@ export class LocalDocumentStorageAdapter implements DocumentStorageAdapter {
     content: Buffer,
     mimeType: string,
   ): Promise<string> {
-    const extension = mimeType === "text/plain" ? "txt" : "bin";
+    const extension = resolveUploadExtension(mimeType as SupportedHealthDocumentMimeType);
     const storageReference = join(userId, `${documentId}.${extension}`);
     const absolutePath = this.resolvePath(storageReference);
 

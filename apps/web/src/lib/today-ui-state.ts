@@ -9,6 +9,7 @@ import type {
 } from "@health/types";
 import { isTerminalSessionStatus, sessionStatusLabel } from "./training-ui-state";
 
+export { formatTodayHierarchySourceRef } from "./onboarding-ui-state";
 export { formatLocalIsoDate } from "./training-ui-state";
 export { sessionStatusLabel } from "./training-ui-state";
 

@@ -1,0 +1,96 @@
+"use client";
+
+import { useAuth } from "@clerk/nextjs";
+import { useQuery } from "@tanstack/react-query";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, type ReactNode } from "react";
+import {
+  apiQueryKeys,
+  getCurrentUserState,
+} from "../../lib/api";
+import {
+  isOnboardingPath,
+  shouldRedirectFromOnboarding,
+  shouldRedirectToOnboarding,
+} from "../../lib/onboarding-ui-state";
+import { LoadingState } from "../ui";
+
+type OnboardingGateProps = {
+  children: ReactNode;
+};
+
+export function OnboardingGate({ children }: OnboardingGateProps) {
+  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const userStateQuery = useQuery({
+    queryKey: apiQueryKeys.currentUserState,
+    enabled: isLoaded && isSignedIn,
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Clerk session token is unavailable.");
+      }
+
+      const result = await getCurrentUserState(token);
+      if (result.error || !result.data) {
+        throw new Error(result.error ?? "Your account state could not be loaded.");
+      }
+
+      return result.data;
+    },
+  });
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || userStateQuery.isLoading || !userStateQuery.data) {
+      return;
+    }
+
+    const onboardingCompleted = userStateQuery.data.onboardingCompleted;
+
+    if (shouldRedirectToOnboarding(pathname, onboardingCompleted)) {
+      router.replace("/onboarding");
+      return;
+    }
+
+    if (shouldRedirectFromOnboarding(pathname, onboardingCompleted)) {
+      router.replace("/chat");
+    }
+  }, [
+    isLoaded,
+    isSignedIn,
+    pathname,
+    router,
+    userStateQuery.data,
+    userStateQuery.isLoading,
+  ]);
+
+  if (!isLoaded || !isSignedIn) {
+    return <>{children}</>;
+  }
+
+  if (userStateQuery.isLoading) {
+    return (
+      <LoadingState
+        title={isOnboardingPath(pathname) ? "Preparing onboarding…" : "Loading your coach…"}
+      />
+    );
+  }
+
+  if (userStateQuery.isError) {
+    return <>{children}</>;
+  }
+
+  const onboardingCompleted = userStateQuery.data?.onboardingCompleted ?? false;
+
+  if (shouldRedirectToOnboarding(pathname, onboardingCompleted)) {
+    return <LoadingState title="Redirecting to onboarding…" />;
+  }
+
+  if (shouldRedirectFromOnboarding(pathname, onboardingCompleted)) {
+    return <LoadingState title="Opening your coach…" />;
+  }
+
+  return <>{children}</>;
+}

@@ -81,27 +81,57 @@ import {
   type WorkoutPlanRevision,
   type WorkoutSession,
   createHealthDocumentSchema,
+  correlationInsightPreviewResponseSchema,
+  currentUserStateSchema,
   documentSearchResponseSchema,
+  documentSignalListResponseSchema,
+  documentSignalSchema,
   healthDocumentDetailSchema,
   healthDocumentListResponseSchema,
   healthDocumentSchema,
   healthDocumentSummarySchema,
+  onboardingSchema,
   todayDayResponseSchema,
   todayHistoryResponseSchema,
   updateDocumentConsentSchema,
   updateDocumentSummaryReviewSchema,
+  updateDocumentSignalReviewSchema,
   updateTodayFeedbackSchema,
   updateTodayItemStatusSchema,
+  upsertWellbeingCheckInSchema,
+  upsertRecoveryCheckInSchema,
+  recoveryContextResponseSchema,
+  recoveryWeeklyContextResponseSchema,
+  recoveryCheckInUpsertResponseSchema,
   userProfileSchema,
   userSchema,
   weeklyProgressSummaryResponseSchema,
+  wellbeingCheckInAggregatesResponseSchema,
+  wellbeingCheckInHistoryResponseSchema,
+  wellbeingCheckInResponseSchema,
+  wellbeingCheckInUpsertResponseSchema,
   type CreateHealthDocumentInput,
+  type CorrelationInsightPreviewResponse,
+  type CurrentUserState,
   type DocumentSearchResponse,
+  type OnboardingInput,
+  type DocumentSignal,
+  type DocumentSignalListResponse,
   type HealthDocument,
   type HealthDocumentDetail,
   type HealthDocumentSummary,
   type UpdateDocumentConsentInput,
   type UpdateDocumentSummaryReviewInput,
+  type UpdateDocumentSignalReviewInput,
+  type UpsertWellbeingCheckInInput,
+  type UpsertRecoveryCheckInInput,
+  type RecoveryContextResponse,
+  type RecoveryWeeklyContextResponse,
+  type RecoveryCheckInUpsertResponse,
+  type WellbeingCheckInAggregatesResponse,
+  type WellbeingCheckInHistoryResponse,
+  type WellbeingCheckInResponse,
+  type WellbeingCheckInUpsertResponse,
 } from "@health/types";
 import { z } from "zod";
 import { webEnv } from "../env";
@@ -125,9 +155,11 @@ export type ApiResult<T> = {
 
 export const apiQueryKeys = {
   currentUser: ["current-user"],
+  currentUserState: ["current-user-state"],
   profile: ["profile"],
   goals: ["goals"],
   dashboardState: ["dashboard-state"],
+  longevityState: ["longevity-state"],
   proposals: ["proposals"],
   workoutActive: ["workout-active"],
   workoutRevisions: ["workout-revisions"],
@@ -154,7 +186,17 @@ export const apiQueryKeys = {
   healthMetricsAiPreview: ["health-metrics-ai-preview"],
   documents: ["documents"] as const,
   documentDetail: (documentId: string) => ["document-detail", documentId] as const,
+  documentSignals: (documentId: string) => ["document-signals", documentId] as const,
   documentSearch: (query: string) => ["document-search", query] as const,
+  correlationPreview: ["correlation-preview"] as const,
+  wellbeingCheckIn: (date: string) => ["wellbeing-check-in", date] as const,
+  wellbeingCheckInPrefix: ["wellbeing-check-in"] as const,
+  wellbeingHistory: (limit = 7) => ["wellbeing-history", limit] as const,
+  wellbeingHistoryPrefix: ["wellbeing-history"] as const,
+  wellbeingAggregates: (limit = 7) => ["wellbeing-aggregates", limit] as const,
+  wellbeingAggregatesPrefix: ["wellbeing-aggregates"] as const,
+  recoveryContext: (date: string) => ["recovery-context", date] as const,
+  recoveryContextPrefix: ["recovery-context"] as const,
 } as const;
 
 const syncHealthMetricsResultSchema = z.object({
@@ -172,6 +214,34 @@ const chatThreadDetailSchema = z.object({
 
 export async function getCurrentUser(token: string): Promise<ApiResult<User>> {
   return apiFetch("/users/me", token, userSchema);
+}
+
+export async function getCurrentUserState(
+  token: string,
+): Promise<ApiResult<CurrentUserState>> {
+  return apiFetch("/users/me/state", token, currentUserStateSchema);
+}
+
+export async function completeOnboarding(
+  token: string,
+  input: OnboardingInput,
+): Promise<ApiResult<CurrentUserState>> {
+  const body = onboardingSchema.parse(input);
+  return apiFetch("/onboarding", token, currentUserStateSchema, {
+    method: "POST",
+    body,
+  });
+}
+
+export function getOnboardingRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    apiQueryKeys.currentUserState,
+    apiQueryKeys.currentUser,
+    apiQueryKeys.profile,
+    apiQueryKeys.goals,
+    apiQueryKeys.dashboardState,
+    apiQueryKeys.longevityState,
+  ];
 }
 
 export async function getCurrentProfile(
@@ -265,7 +335,11 @@ export function getAcceptedProposalRefreshQueryKeys(
     return [];
   }
 
-  const commonKeys = [apiQueryKeys.dashboardState, apiQueryKeys.proposals];
+  const commonKeys = [
+    apiQueryKeys.dashboardState,
+    apiQueryKeys.longevityState,
+    apiQueryKeys.proposals,
+  ];
 
   switch (proposal.targetDomain) {
     case "profile":
@@ -403,7 +477,148 @@ export function getWorkoutExecutionRefreshQueryKeys(): ReadonlyArray<readonly un
     apiQueryKeys.workoutActive,
     apiQueryKeys.progressWeeklyLatest,
     apiQueryKeys.progressWeeklyCurrent,
+    apiQueryKeys.longevityState,
+    apiQueryKeys.wellbeingCheckInPrefix,
+    apiQueryKeys.wellbeingHistoryPrefix,
+    apiQueryKeys.wellbeingAggregatesPrefix,
   ];
+}
+
+export function getWellbeingRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    apiQueryKeys.wellbeingCheckInPrefix,
+    apiQueryKeys.wellbeingHistoryPrefix,
+    apiQueryKeys.wellbeingAggregatesPrefix,
+    apiQueryKeys.longevityState,
+  ];
+}
+
+export function buildWellbeingHistoryQueryString(limit = 7): string {
+  return `?limit=${encodeURIComponent(String(limit))}`;
+}
+
+export function buildWellbeingAggregatesQueryString(limit = 7): string {
+  return `?periodType=daily&limit=${encodeURIComponent(String(limit))}`;
+}
+
+export async function getWellbeingCheckIn(
+  token: string,
+  date: string,
+): Promise<ApiResult<WellbeingCheckInResponse>> {
+  return apiFetch(
+    `/wellbeing-check-ins/${encodeURIComponent(date)}`,
+    token,
+    wellbeingCheckInResponseSchema,
+  );
+}
+
+export async function upsertWellbeingCheckIn(
+  token: string,
+  date: string,
+  input: UpsertWellbeingCheckInInput,
+): Promise<ApiResult<WellbeingCheckInUpsertResponse>> {
+  const body = upsertWellbeingCheckInSchema.parse(input);
+  return apiFetch(
+    `/wellbeing-check-ins/${encodeURIComponent(date)}`,
+    token,
+    wellbeingCheckInUpsertResponseSchema,
+    { method: "PUT", body },
+  );
+}
+
+export async function getWellbeingHistory(
+  token: string,
+  limit = 7,
+): Promise<ApiResult<WellbeingCheckInHistoryResponse>> {
+  const query = buildWellbeingHistoryQueryString(limit);
+  return apiFetch(
+    `/wellbeing-check-ins/history${query}`,
+    token,
+    wellbeingCheckInHistoryResponseSchema,
+  );
+}
+
+export async function getWellbeingAggregates(
+  token: string,
+  limit = 7,
+): Promise<ApiResult<WellbeingCheckInAggregatesResponse>> {
+  const query = buildWellbeingAggregatesQueryString(limit);
+  return apiFetch(
+    `/wellbeing-check-ins/aggregates${query}`,
+    token,
+    wellbeingCheckInAggregatesResponseSchema,
+  );
+}
+
+export function buildRecoveryContextQueryString(date: string): string {
+  return `?date=${encodeURIComponent(date)}`;
+}
+
+export function buildRecoveryWeeklyContextQueryString(weekStart: string): string {
+  return `?weekStart=${encodeURIComponent(weekStart)}`;
+}
+
+export function getRecoveryRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    apiQueryKeys.recoveryContextPrefix,
+    apiQueryKeys.longevityState,
+    apiQueryKeys.todayDayPrefix,
+  ];
+}
+
+export async function getRecoveryContext(
+  token: string,
+  date: string,
+): Promise<ApiResult<RecoveryContextResponse>> {
+  const query = buildRecoveryContextQueryString(date);
+  return apiFetch(`/recovery/context${query}`, token, recoveryContextResponseSchema);
+}
+
+export async function getRecoveryWeeklyContext(
+  token: string,
+  weekStart: string,
+): Promise<ApiResult<RecoveryWeeklyContextResponse>> {
+  const query = buildRecoveryWeeklyContextQueryString(weekStart);
+  return apiFetch(
+    `/recovery/context/weekly${query}`,
+    token,
+    recoveryWeeklyContextResponseSchema,
+  );
+}
+
+export async function upsertRecoveryCheckIn(
+  token: string,
+  input: UpsertRecoveryCheckInInput,
+): Promise<ApiResult<RecoveryCheckInUpsertResponse>> {
+  const body = upsertRecoveryCheckInSchema.parse(input);
+  return apiFetch("/recovery/check-in", token, recoveryCheckInUpsertResponseSchema, {
+    method: "POST",
+    body,
+  });
+}
+
+export function getNutritionAdherenceRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    apiQueryKeys.nutritionAdherenceToday,
+    apiQueryKeys.nutritionAdherencePrefix,
+    apiQueryKeys.todayDayPrefix,
+    apiQueryKeys.todayHistoryPrefix,
+    apiQueryKeys.longevityState,
+  ];
+}
+
+export function getMetricsRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    apiQueryKeys.deviceConnections,
+    apiQueryKeys.healthMetricSnapshots,
+    apiQueryKeys.healthMetricAggregates,
+    apiQueryKeys.healthMetricsAiPreview,
+    apiQueryKeys.longevityState,
+  ];
+}
+
+export function getDocumentsRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [apiQueryKeys.documents, apiQueryKeys.longevityState, apiQueryKeys.correlationPreview];
 }
 
 export async function getActiveNutritionPlan(
@@ -608,6 +823,10 @@ export async function generateWeeklyProgressSummary(
     method: "POST",
     body,
   });
+}
+
+export function getProgressSummaryRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [apiQueryKeys.dashboardState, apiQueryKeys.longevityState];
 }
 
 export async function getTodayDay(
@@ -832,6 +1051,54 @@ export async function deleteDocument(
     token,
     healthDocumentSchema,
     { method: "DELETE" },
+  );
+}
+
+export async function listDocumentSignals(
+  token: string,
+  documentId: string,
+): Promise<ApiResult<DocumentSignalListResponse>> {
+  return apiFetch(
+    `/documents/${encodeURIComponent(documentId)}/signals`,
+    token,
+    documentSignalListResponseSchema,
+  );
+}
+
+export async function extractDocumentSignals(
+  token: string,
+  documentId: string,
+): Promise<ApiResult<DocumentSignalListResponse>> {
+  return apiFetch(
+    `/documents/${encodeURIComponent(documentId)}/extract-signals`,
+    token,
+    documentSignalListResponseSchema,
+    { method: "POST" },
+  );
+}
+
+export async function reviewDocumentSignal(
+  token: string,
+  documentId: string,
+  signalId: string,
+  input: UpdateDocumentSignalReviewInput,
+): Promise<ApiResult<DocumentSignal>> {
+  const body = updateDocumentSignalReviewSchema.parse(input);
+  return apiFetch(
+    `/documents/${encodeURIComponent(documentId)}/signals/${encodeURIComponent(signalId)}/review`,
+    token,
+    documentSignalSchema,
+    { method: "PATCH", body },
+  );
+}
+
+export async function previewCorrelationInsights(
+  token: string,
+): Promise<ApiResult<CorrelationInsightPreviewResponse>> {
+  return apiFetch(
+    "/documents/correlations/preview",
+    token,
+    correlationInsightPreviewResponseSchema,
   );
 }
 

@@ -2,6 +2,7 @@ import type {
   TodayChecklistPayload,
   TodayDayResponse,
   TodayHistoryResponse,
+  TodayNutritionDetail,
   UpdateTodayFeedbackInput,
   UpdateTodayItemStatusInput,
   WorkoutSession,
@@ -15,6 +16,7 @@ import {
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { UsersService } from "../users/users.service.js";
 import { HabitsRepository } from "../habits/habits.repository.js";
+import { NutritionService } from "../nutrition/nutrition.service.js";
 import { WorkoutsService } from "../workouts/workouts.service.js";
 import { WorkoutsRepository } from "../workouts/workouts.repository.js";
 import {
@@ -43,12 +45,16 @@ export class TodayService {
     private readonly workoutsService: WorkoutsService,
     private readonly usersService: UsersService,
     private readonly habitsRepository: HabitsRepository,
+    private readonly nutritionService: NutritionService,
   ) {}
 
   async getOrGenerateDay(auth: ClerkAuthContext, dateInput: string): Promise<TodayDayResponse> {
     const date = this.parseDate(dateInput);
     const user = await this.usersService.resolveFromAuth(auth);
-    const workout = await this.workoutsService.ensureTodayWorkoutSession(auth, date);
+    const [workout, nutrition] = await Promise.all([
+      this.workoutsService.ensureTodayWorkoutSession(auth, date),
+      this.nutritionService.getNutritionDayDetail(auth, date),
+    ]);
     const sessions = await this.listChecklistWorkoutSessions(user.id, date);
     const scheduledHabits = await this.listScheduledHabitDefinitions(user.id, date);
 
@@ -68,7 +74,7 @@ export class TodayService {
         adherenceScoreValue(adherence),
       );
 
-      return this.buildDayResponse(checklist, workout);
+      return this.buildDayResponse(checklist, workout, nutrition);
     }
 
     const syncedItems = syncTodayChecklistHabitItems(
@@ -91,10 +97,10 @@ export class TodayService {
         throw new NotFoundException("Daily checklist not found.");
       }
 
-      return this.buildDayResponse(updated, workout);
+      return this.buildDayResponse(updated, workout, nutrition);
     }
 
-    return this.buildDayResponse(existing, workout);
+    return this.buildDayResponse(existing, workout, nutrition);
   }
 
   async updateItemStatus(
@@ -158,8 +164,9 @@ export class TodayService {
     }
 
     const workout = await this.workoutsService.ensureTodayWorkoutSession(auth, date);
+    const nutrition = await this.nutritionService.getNutritionDayDetail(auth, date);
 
-    return this.buildDayResponse(updated, workout);
+    return this.buildDayResponse(updated, workout, nutrition);
   }
 
   async updateFeedback(
@@ -176,7 +183,9 @@ export class TodayService {
       throw new NotFoundException("Daily checklist not found.");
     }
 
-    return this.buildDayResponse(updated, day.workout ?? null);
+    const nutrition = await this.nutritionService.getNutritionDayDetail(auth, date);
+
+    return this.buildDayResponse(updated, day.workout ?? null, nutrition);
   }
 
   async getRecentHistory(
@@ -258,10 +267,12 @@ export class TodayService {
   private buildDayResponse(
     row: Parameters<typeof toTodayChecklistRecord>[0],
     workout: TodayDayResponse["workout"],
+    nutrition: TodayNutritionDetail | null,
   ): TodayDayResponse {
     return {
       ...toTodayChecklistRecord(row),
       workout,
+      nutrition,
     };
   }
 

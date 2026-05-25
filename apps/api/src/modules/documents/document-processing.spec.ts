@@ -4,10 +4,37 @@ import {
   buildGovernedDocumentSummary,
   containsRawDocumentText,
   DevDocumentSummarizer,
+  LabDocumentParser,
 } from "./document-processing.js";
 
 const PRIVATE_SAMPLE =
   "CONFIDENTIAL_OCR_MARKER_9f3a: patient resting heart rate 42 bpm with unusual fatigue patterns.";
+
+/** Minimal PDF with extractable lab text for parser tests. */
+const MINIMAL_LAB_PDF = Buffer.from(
+  `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 55>>stream
+BT /F1 12 Tf 72 720 Td (Vitamin D: 22 ng/mL) Tj ET
+endstream
+endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+xref
+0 6
+0000000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+0000000266 00000 n
+0000000370 00000 n
+trailer<</Size 6/Root 1 0 R>>
+startxref
+441
+%%EOF`,
+  "binary",
+);
 
 describe("document processing", () => {
   it("does not persist raw sample text in summary or search fields", async () => {
@@ -72,5 +99,43 @@ describe("document processing", () => {
         "This summary confirms a diagnosis and prescribes treatment.",
       ),
     ).toBe(true);
+  });
+
+  it("parses plain text uploads and rejects unsupported mime types", async () => {
+    const parser = new LabDocumentParser();
+
+    await expect(
+      parser.parse({ mimeType: "application/msword", content: Buffer.from("doc") }),
+    ).rejects.toThrow("Unsupported document mime type.");
+
+    const parsed = await parser.parse({
+      mimeType: "text/plain",
+      content: Buffer.from("Energy level: 4/10 on rest days.", "utf8"),
+    });
+
+    expect(parsed.plainText).toContain("Energy level");
+  });
+
+  it("parses PDF uploads with extractable lab text", async () => {
+    const parser = new LabDocumentParser();
+
+    const parsed = await parser.parse({
+      mimeType: "application/pdf",
+      content: MINIMAL_LAB_PDF,
+    });
+
+    expect(parsed.plainText).toContain("Vitamin D");
+    expect(parsed.plainText).not.toContain("%PDF");
+  });
+
+  it("rejects PDF uploads without extractable text", async () => {
+    const parser = new LabDocumentParser();
+
+    await expect(
+      parser.parse({
+        mimeType: "application/pdf",
+        content: Buffer.from("%PDF-1.4\n% empty\n", "utf8"),
+      }),
+    ).rejects.toThrow();
   });
 });

@@ -17,6 +17,6 @@ import { MetricsAiContextService } from "./metrics-ai-context.service.js";
     MetricsAiContextService,
     HealthMetricsService,
   ],
-  exports: [HealthMetricsService, MetricsAiContextService],
+  exports: [HealthMetricsService, MetricsAiContextService, HealthMetricsRepository],
 })
 export class HealthMetricsModule {}

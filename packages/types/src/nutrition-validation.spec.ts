@@ -185,4 +185,56 @@ describe("nutrition adherence schemas", () => {
       }),
     ).toThrow();
   });
+
+  it("validates meal completion target completion and note boundaries", () => {
+    expect(
+      upsertNutritionAdherenceSchema.parse({
+        mealCompletion: [{ label: "Breakfast", completed: true }],
+        targetCompletion: {
+          proteinOnTarget: false,
+        },
+        notes: ["Felt steady."],
+      }),
+    ).toEqual({
+      mealCompletion: [{ label: "Breakfast", completed: true }],
+      targetCompletion: {
+        caloriesOnTarget: null,
+        proteinOnTarget: false,
+        carbsOnTarget: null,
+        fatOnTarget: null,
+      },
+      notes: ["Felt steady."],
+    });
+
+    expect(() =>
+      upsertNutritionAdherenceSchema.parse({
+        mealCompletion: [{ label: "", completed: true }],
+      }),
+    ).toThrow();
+    expect(() =>
+      upsertNutritionAdherenceSchema.parse({
+        mealCompletion: Array.from({ length: 9 }, (_, index) => ({
+          label: `Meal ${index}`,
+          completed: false,
+        })),
+      }),
+    ).toThrow();
+    expect(() =>
+      upsertNutritionAdherenceSchema.parse({
+        targetCompletion: {
+          caloriesOnTarget: "yes",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      upsertNutritionAdherenceSchema.parse({
+        notes: ["x".repeat(241)],
+      }),
+    ).toThrow();
+    expect(() =>
+      upsertNutritionAdherenceSchema.parse({
+        notes: Array.from({ length: 11 }, (_, index) => `Note ${index}`),
+      }),
+    ).toThrow();
+  });
 });

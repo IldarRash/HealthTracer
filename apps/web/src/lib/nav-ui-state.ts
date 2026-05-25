@@ -9,10 +9,10 @@ export type NavLink = {
 export const PRIMARY_NAV_LINKS: readonly NavLink[] = [
   { href: "/chat", label: "Chat", featured: true },
   { href: "/today", label: "Today" },
+  { href: "/longevity", label: "Longevity" },
   { href: "/training", label: "Workouts", aliases: ["/progress"] },
   { href: "/nutrition", label: "Nutrition", aliases: ["/recipes"] },
-  { href: "/metrics", label: "Metrics" },
-  { href: "/profile", label: "Profile", aliases: ["/goals", "/documents"] },
+  { href: "/profile", label: "Profile", aliases: ["/goals", "/documents", "/metrics"] },
 ] as const;
 
 export function isActivePath(

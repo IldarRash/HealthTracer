@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { OnboardingGate } from "./onboarding/onboarding-gate";
 import { AppNav } from "./app-nav";
 import { AppShell, AppShellHeader, AppShellMain } from "./ui";
 
@@ -16,7 +17,7 @@ export function AppLayout({ children, variant = "default" }: AppLayoutProps) {
           variant === "chat" ? "chat" : variant === "dashboard" ? "dashboard" : "default"
         }
       >
-        {children}
+        <OnboardingGate>{children}</OnboardingGate>
       </AppShellMain>
     </AppShell>
   );

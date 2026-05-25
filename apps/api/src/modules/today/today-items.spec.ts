@@ -120,6 +120,24 @@ describe("today-items merge and reconciliation", () => {
     expect(state.adherence.score).toBeGreaterThan(0);
   });
 
+  it("preserves supported goal source refs when normalizing proposal items", () => {
+    const [item] = normalizeProposalItems([
+      {
+        label: "Walk after lunch",
+        kind: "habit",
+        source: {
+          type: "goal",
+          id: "44444444-4444-4444-8444-444444444444",
+        },
+      },
+    ]);
+
+    expect(item?.source).toEqual({
+      type: "goal",
+      id: "44444444-4444-4444-8444-444444444444",
+    });
+  });
+
   it("defaults habit proposal items to optional", () => {
     const [habitItem, hydrationItem] = normalizeProposalItems([
       { label: "Evening walk", kind: "habit" },

@@ -8,6 +8,7 @@ export const users = pgTable(
     email: text("email").notNull(),
     displayName: text("display_name"),
     timezone: text("timezone").notNull().default("UTC"),
+    onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

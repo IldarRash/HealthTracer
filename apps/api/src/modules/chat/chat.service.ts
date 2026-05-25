@@ -6,6 +6,10 @@ import type {
   CreateChatThreadInput,
   SendChatMessageInput,
 } from "@health/types";
+import {
+  evaluateWellbeingCrisisFromText,
+  formatWellbeingCrisisSupportReply,
+} from "@health/types";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiService } from "../ai/ai.service.js";
@@ -81,6 +85,35 @@ export class ChatService {
       input.content,
     );
 
+    const crisisEvaluation = evaluateWellbeingCrisisFromText(input.content);
+
+    if (crisisEvaluation.shouldShowCrisisSupport && crisisEvaluation.copy) {
+      const assistantMessage = await this.chatRepository.createMessage(
+        threadId,
+        "assistant",
+        formatWellbeingCrisisSupportReply(crisisEvaluation.copy),
+        {
+          crisisBoundary: true,
+          crisisSupport: crisisEvaluation,
+        },
+      );
+
+      const title =
+        thread.title ??
+        (existingMessages.length === 0 ? truncateTitle(input.content) : undefined);
+
+      await this.chatRepository.touchThread(threadId, title);
+
+      const updatedThread = await this.chatRepository.findThreadById(user.id, threadId);
+
+      return {
+        thread: toChatThread(updatedThread ?? thread),
+        userMessage: toChatMessage(userMessage),
+        assistantMessage: toChatMessage(assistantMessage),
+        proposals: [],
+      };
+    }
+
     const generated = await this.aiService.generateCoachResponse({
       auth,
       userMessage: input.content,
@@ -107,7 +140,37 @@ export class ChatService {
     for (const rawProposal of generated.output.proposals) {
       const safetyErrors = validateProposalSafety(rawProposal);
       const validation = this.proposalValidationService.validateRawProposal(rawProposal);
-      const validationErrors = [...safetyErrors, ...validation.errors];
+      const ownershipErrors =
+        await this.proposalValidationService.validateCorrelationEvidenceOwnership(
+          user.id,
+          rawProposal.evidenceRefs,
+        );
+      const goalHierarchyErrors =
+        await this.proposalValidationService.validateGoalProposalHierarchy(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
+      const todaySourceRefErrors =
+        await this.proposalValidationService.validateTodayChecklistGoalSourceRefs(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
+      const recoveryAdaptationErrors =
+        await this.proposalValidationService.validateRecoveryAwareWorkoutAdaptation(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
+      const validationErrors = [
+        ...safetyErrors,
+        ...validation.errors,
+        ...ownershipErrors,
+        ...goalHierarchyErrors,
+        ...todaySourceRefErrors,
+        ...recoveryAdaptationErrors,
+      ];
       const validationStatus = validationErrors.length === 0 ? "valid" : "invalid";
 
       const record = await this.chatRepository.createProposal(

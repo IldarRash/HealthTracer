@@ -1,5 +1,5 @@
 import { validateProposalSafety } from "@health/ai";
-import type { AiProposal, ProposalDecisionInput } from "@health/types";
+import type { AiProposal, CorrelationEvidenceRef, ProposalDecisionInput } from "@health/types";
 import {
   BadRequestException,
   Injectable,
@@ -115,12 +115,44 @@ export class ProposalsService {
         proposal.intent,
         proposal.proposedChanges,
       );
+    const goalHierarchyErrors =
+      await this.proposalValidationService.validateGoalProposalHierarchy(
+        user.id,
+        proposal.intent,
+        proposal.proposedChanges,
+      );
+    const todaySourceRefErrors =
+      await this.proposalValidationService.validateTodayChecklistGoalSourceRefs(
+        user.id,
+        proposal.intent,
+        proposal.proposedChanges,
+      );
+    const recoveryAdaptationErrors =
+      await this.proposalValidationService.validateRecoveryAwareWorkoutAdaptation(
+        user.id,
+        proposal.intent,
+        proposal.proposedChanges,
+      );
+    const storedEvidenceRefs = proposal.evidenceRefs as CorrelationEvidenceRef[] | null;
+    const evidenceRefErrors = this.proposalValidationService.validateCorrelationEvidenceRefs(
+      storedEvidenceRefs ?? undefined,
+    );
+    const evidenceOwnershipErrors =
+      await this.proposalValidationService.validateCorrelationEvidenceOwnership(
+        user.id,
+        storedEvidenceRefs ?? undefined,
+      );
     const validationErrors = [
       ...safetyErrors,
       ...validation.errors,
       ...provenanceErrors,
       ...exerciseReferenceErrors,
       ...habitTemplateReferenceErrors,
+      ...goalHierarchyErrors,
+      ...todaySourceRefErrors,
+      ...recoveryAdaptationErrors,
+      ...evidenceRefErrors,
+      ...evidenceOwnershipErrors,
     ];
 
     if (validationErrors.length > 0) {

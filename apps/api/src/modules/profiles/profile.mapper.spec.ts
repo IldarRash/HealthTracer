@@ -15,6 +15,13 @@ describe("profile mapper", () => {
       trainingExperience: "intermediate",
       preferences: ["strength", 12] as never,
       constraints: null as never,
+      longevityDirection: {
+        statement: "Stay strong and mobile.",
+        tags: ["strength"],
+      },
+      longevityDirectionTags: ["strength"],
+      coachingNotes: [{ text: "Prefers short sessions." }],
+      onboardingDraft: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -22,6 +29,8 @@ describe("profile mapper", () => {
     expect(profile.birthDate).toBe("1990-01-02");
     expect(profile.preferences).toEqual(["strength"]);
     expect(profile.constraints).toEqual([]);
+    expect(profile.longevityDirection?.statement).toBe("Stay strong and mobile.");
+    expect(profile.coachingNotes).toHaveLength(1);
     expect(profile.createdAt).toBe("2026-05-22T12:00:00.000Z");
   });
 });

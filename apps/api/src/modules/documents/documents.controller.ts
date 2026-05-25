@@ -3,6 +3,7 @@ import {
   documentSearchQuerySchema,
   updateDocumentConsentSchema,
   updateDocumentSummaryReviewSchema,
+  updateDocumentSignalReviewSchema,
 } from "@health/types";
 import {
   Body,
@@ -20,11 +21,17 @@ import { ClerkAuthGuard } from "../../auth.guard.js";
 import { parseBody, parseQuery } from "../../common/zod.js";
 import { CurrentAuth } from "../../current-auth.decorator.js";
 import { DocumentsService } from "./documents.service.js";
+import { DocumentSignalsService } from "./document-signals.service.js";
+import { CorrelationsService } from "./correlations.service.js";
 
 @Controller("documents")
 @UseGuards(ClerkAuthGuard)
 export class DocumentsController {
-  constructor(private readonly documentsService: DocumentsService) {}
+  constructor(
+    private readonly documentsService: DocumentsService,
+    private readonly documentSignalsService: DocumentSignalsService,
+    private readonly correlationsService: CorrelationsService,
+  ) {}
 
   @Post()
   createDocument(@CurrentAuth() auth: ClerkAuthContext, @Body() body: unknown) {
@@ -41,6 +48,39 @@ export class DocumentsController {
     return this.documentsService.searchDocuments(
       auth,
       parseQuery(documentSearchQuerySchema, query),
+    );
+  }
+
+  @Get("correlations/preview")
+  previewCorrelations(@CurrentAuth() auth: ClerkAuthContext) {
+    return this.correlationsService.previewInsights(auth);
+  }
+
+  @Get(":documentId/signals")
+  listSignals(@CurrentAuth() auth: ClerkAuthContext, @Param("documentId") documentId: string) {
+    return this.documentSignalsService.listSignals(auth, documentId);
+  }
+
+  @Post(":documentId/extract-signals")
+  extractSignals(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Param("documentId") documentId: string,
+  ) {
+    return this.documentSignalsService.extractSignals(auth, documentId);
+  }
+
+  @Patch(":documentId/signals/:signalId/review")
+  reviewSignal(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Param("documentId") documentId: string,
+    @Param("signalId") signalId: string,
+    @Body() body: unknown,
+  ) {
+    return this.documentSignalsService.reviewSignal(
+      auth,
+      documentId,
+      signalId,
+      parseBody(updateDocumentSignalReviewSchema, body),
     );
   }
 

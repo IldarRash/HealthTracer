@@ -3,12 +3,13 @@
 import { useAuth } from "@clerk/nextjs";
 import type { DocumentConsentScope, DocumentType, HealthDocument, HealthDocumentDetail } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   apiQueryKeys,
   createDocument,
   deleteDocument,
   getDocument,
+  getDocumentsRefreshQueryKeys,
   listDocuments,
   parseDocument,
   reviewDocumentSummary,
@@ -32,7 +33,18 @@ import {
   parseStatusLabel,
   reviewStatusBadgeTone,
   reviewStatusLabel,
+  signalExtractionBadgeTone,
+  signalExtractionStatusLabel,
+  SAMPLE_LAB_DOCUMENT_TEXT,
 } from "../../lib/documents-ui-state";
+import {
+  buildCreateDocumentUploadPayload,
+  DOCUMENT_UPLOAD_ACCEPT,
+  formatDocumentFileSize,
+  validateSelectedDocumentFile,
+} from "../../lib/document-upload";
+import { CorrelationPreviewSection } from "./correlation-preview-section";
+import { DocumentSignalsPanel } from "./document-signals-panel";
 import {
   Badge,
   Button,
@@ -64,11 +76,14 @@ function toggleConsentScope(
 export function DocumentsWorkspace() {
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [documentType, setDocumentType] = useState<DocumentType>("other");
   const [sampleText, setSampleText] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileValidationError, setFileValidationError] = useState<string | null>(null);
   const [consentScopes, setConsentScopes] = useState<DocumentConsentScope[]>([
     ...DEFAULT_DOCUMENT_CONSENT_SCOPES,
   ]);
@@ -150,10 +165,14 @@ export function DocumentsWorkspace() {
   });
 
   const invalidateDocuments = async (documentId?: string) => {
-    await queryClient.invalidateQueries({ queryKey: apiQueryKeys.documents });
+    for (const queryKey of getDocumentsRefreshQueryKeys()) {
+      await queryClient.invalidateQueries({ queryKey });
+    }
     if (documentId) {
       await queryClient.invalidateQueries({ queryKey: apiQueryKeys.documentDetail(documentId) });
+      await queryClient.invalidateQueries({ queryKey: apiQueryKeys.documentSignals(documentId) });
     }
+    await queryClient.invalidateQueries({ queryKey: apiQueryKeys.correlationPreview });
     if (submittedSearchQuery.trim()) {
       await queryClient.invalidateQueries({
         queryKey: apiQueryKeys.documentSearch(submittedSearchQuery),
@@ -168,14 +187,20 @@ export function DocumentsWorkspace() {
         throw new Error("Clerk session token is unavailable.");
       }
 
-      const result = await createDocument(token, {
+      const payloadResult = await buildCreateDocumentUploadPayload({
         title: title.trim(),
         documentType,
         consentScopes: [...consentScopes],
         consentVersion: DOCUMENT_CONSENT_VERSION,
-        mimeType: "text/plain",
-        sampleText: sampleText.trim(),
+        sampleText,
+        selectedFile,
       });
+
+      if (!payloadResult.ok) {
+        throw new Error(payloadResult.message);
+      }
+
+      const result = await createDocument(token, payloadResult.payload);
 
       if (result.error || !result.data) {
         throw new Error(result.error ?? "Document upload failed.");
@@ -187,6 +212,13 @@ export function DocumentsWorkspace() {
       setUploadError(null);
     },
     onSuccess: async (detail) => {
+      setTitle("");
+      setSampleText("");
+      setSelectedFile(null);
+      setFileValidationError(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       setSelectedDocumentId(detail.id);
       await invalidateDocuments(detail.id);
     },
@@ -303,7 +335,13 @@ export function DocumentsWorkspace() {
     },
   });
 
-  const canUpload = canSubmitDocumentUpload({ title, sampleText, consentScopes });
+  const canUpload = canSubmitDocumentUpload({
+    title,
+    sampleText,
+    selectedFile,
+    consentScopes,
+    fileValidationError,
+  });
   const documents = documentsQuery.data ?? [];
   const selectedDetail = documentDetailQuery.data ?? null;
   const isDetailBusy =
@@ -336,25 +374,26 @@ export function DocumentsWorkspace() {
         <p className="section-label">Consent-first handling</p>
         <h2>Health documents stay under your control</h2>
         <p>
-          Uploads are used for wellness coaching context only. Summaries are cautious,
-          non-diagnostic, and never apply plan changes automatically. Any coaching updates
+          Uploads are used for wellness coaching context only. Summaries and extracted signals are
+          cautious, non-diagnostic, and never apply plan changes automatically. Any coaching updates
           derived from document context appear as proposals you must review and accept.
         </p>
       </section>
 
       <PrivacyBoundaryNote title="Document privacy boundary">
-        Raw document files are stored outside the database. The UI shows metadata, parse
-        status, and reviewed summaries—not full document text. Revoking consent or deleting a
-        document stops future search and coach context use for that source.
+        Raw document files are stored outside the database. The UI shows metadata, parse status,
+        reviewed summaries, and extracted wellness signals—not full document text. Revoking consent
+        or deleting a document stops future search, signal use, and coach context for that source.
       </PrivacyBoundaryNote>
 
       <div className="documents-layout">
         <section className="panel panel-prominent">
           <p className="section-label">Document upload</p>
-          <h2>Add document text</h2>
+          <h2>Upload health document</h2>
           <p className="muted-text">
-            Paste text only when you want it stored for wellness coaching context. You can revoke
-            consent or delete the document later.
+            Upload a PDF or plain text file for wellness coaching context. Text is extracted on
+            the server for review—raw document content is not shown here. You can revoke consent or
+            delete the document later.
           </p>
 
           <form
@@ -431,20 +470,94 @@ export function DocumentsWorkspace() {
               </ul>
             </fieldset>
 
-            <label className="form-field" htmlFor="document-sample-text">
-              Document text
-              <textarea
-                id="document-sample-text"
-                name="document-sample-text"
-                rows={6}
-                value={sampleText}
-                maxLength={5000}
-                onChange={(event) => setSampleText(event.target.value)}
+            <label className="form-field" htmlFor="document-file">
+              Document file
+              <input
+                ref={fileInputRef}
+                id="document-file"
+                name="document-file"
+                type="file"
+                accept={DOCUMENT_UPLOAD_ACCEPT}
+                disabled={sampleText.trim().length > 0}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  setSelectedFile(file);
+                  setUploadError(null);
+
+                  if (!file) {
+                    setFileValidationError(null);
+                    return;
+                  }
+
+                  setSampleText("");
+                  const validation = validateSelectedDocumentFile(file);
+                  setFileValidationError(validation.ok ? null : validation.message);
+                }}
               />
               <span className="form-help">
-                Keep only the portions you consent to store and summarize for coaching context.
+                Supported formats: PDF and plain text (.txt), up to 5 MB. PDF text is extracted on
+                the server for wellness-oriented review.
               </span>
             </label>
+
+            {selectedFile ? (
+              <p className="muted-text">
+                Selected: {selectedFile.name} · {formatDocumentFileSize(selectedFile.size)}
+              </p>
+            ) : null}
+
+            {fileValidationError ? (
+              <p className="form-error" role="alert">
+                {fileValidationError}
+              </p>
+            ) : null}
+
+            <fieldset className="form-field documents-sample-text-fieldset">
+              <legend>Development sample text (optional)</legend>
+              <p className="form-help">
+                For local testing without a file. Do not paste private health information. Choosing
+                a file clears sample text.
+              </p>
+              <label className="form-field" htmlFor="document-sample-text">
+                Sample text
+                <textarea
+                  id="document-sample-text"
+                  name="document-sample-text"
+                  rows={6}
+                  value={sampleText}
+                  maxLength={5000}
+                  disabled={selectedFile !== null}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setSampleText(nextValue);
+                    setUploadError(null);
+
+                    if (nextValue.trim().length > 0) {
+                      setSelectedFile(null);
+                      setFileValidationError(null);
+                      if (fileInputRef.current) {
+                        fileInputRef.current.value = "";
+                      }
+                    }
+                  }}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={selectedFile !== null}
+                onClick={() => {
+                  setSampleText(SAMPLE_LAB_DOCUMENT_TEXT);
+                  setSelectedFile(null);
+                  setFileValidationError(null);
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = "";
+                  }
+                }}
+              >
+                Fill lab sample text
+              </Button>
+            </fieldset>
 
             {uploadError ? (
               <p className="form-error" role="alert">
@@ -475,7 +588,7 @@ export function DocumentsWorkspace() {
           {documents.length === 0 ? (
             <EmptyState
               title="No documents yet"
-              description="Upload document text with consent to start parsing, review, and approved-summary search."
+              description="Upload a supported file or development sample text with consent to start parsing, review, and approved-summary search."
             />
           ) : (
             <ul className="documents-list">
@@ -515,6 +628,7 @@ export function DocumentsWorkspace() {
               reviewPending={reviewMutation.isPending}
               revokePending={revokeMutation.isPending}
               deletePending={deleteMutation.isPending}
+              onSignalsActionError={setActionError}
             />
           ) : documentDetailQuery.isLoading && selectedDocumentIdResolved ? (
             <LoadingState title="Loading document details…" />
@@ -613,6 +727,8 @@ export function DocumentsWorkspace() {
           )}
         </div>
       </section>
+
+      <CorrelationPreviewSection />
     </div>
   );
 }
@@ -633,9 +749,14 @@ function DocumentListItem({ document, selected, onSelect }: DocumentListItemProp
     >
       <div className="documents-list-item-header">
         <strong>{document.title}</strong>
-        <Badge tone={parseStatusBadgeTone(document.parseStatus)}>
-          {parseStatusLabel(document.parseStatus)}
-        </Badge>
+        <div className="documents-list-item-badges">
+          <Badge tone={parseStatusBadgeTone(document.parseStatus)}>
+            {parseStatusLabel(document.parseStatus)}
+          </Badge>
+          <Badge tone={signalExtractionBadgeTone(document.signalExtractionStatus)}>
+            {signalExtractionStatusLabel(document.signalExtractionStatus)}
+          </Badge>
+        </div>
       </div>
       <p className="muted-text">
         {documentTypeLabel(document.documentType)} · uploaded{" "}
@@ -664,6 +785,7 @@ type DocumentDetailPanelProps = {
   reviewPending: boolean;
   revokePending: boolean;
   deletePending: boolean;
+  onSignalsActionError: (message: string | null) => void;
 };
 
 function DocumentDetailPanel({
@@ -685,6 +807,7 @@ function DocumentDetailPanel({
   reviewPending,
   revokePending,
   deletePending,
+  onSignalsActionError,
 }: DocumentDetailPanelProps) {
   const revoked = isDocumentRevoked(detail);
   const canParse = canParseDocument(detail);
@@ -731,8 +854,8 @@ function DocumentDetailPanel({
           providerName={detail.title}
           revokedAt={detail.revokedAt ? formatDocumentTimestamp(detail.revokedAt) : undefined}
         >
-          This document is revoked. Future search and coach context use are stopped. Coaching
-          changes still require explicit proposal approval.
+          This document is revoked. Future search, signal extraction, and coach context use are
+          stopped. Coaching changes still require explicit proposal approval.
         </RevocationState>
       ) : null}
 
@@ -792,6 +915,8 @@ function DocumentDetailPanel({
         </article>
       ) : null}
 
+      <DocumentSignalsPanel detail={detail} onActionError={onSignalsActionError} />
+
       {actionError ? (
         <p className="form-error" role="alert">
           {actionError}
@@ -802,7 +927,7 @@ function DocumentDetailPanel({
         {confirmRevokeId === detail.id ? (
           <>
             <p className="form-help">
-              Revoke consent to stop future search and coach context use for this document.
+              Revoke consent to stop future search, signal use, and coach context for this document.
             </p>
             <Button type="button" variant="danger" onClick={onConfirmRevoke} disabled={revokePending}>
               Confirm revoke consent

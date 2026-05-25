@@ -20,6 +20,16 @@ export class UsersRepository {
     return user ?? null;
   }
 
+  async findByUserId(userId: string) {
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    return user ?? null;
+  }
+
   async upsertFromAuth(auth: ClerkAuthContext) {
     const [user] = await this.db
       .insert(users)

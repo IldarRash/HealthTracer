@@ -5,6 +5,7 @@ import {
   normalizeWorkoutPlanPayload,
   stripWorkoutPlanProposalExtras,
   summarizeWorkoutPlanForCoaching,
+  workoutAdaptationIncreasesVolumeOrLoad,
   workoutPlanExerciseSchema,
   workoutPlanPayloadSchema,
   workoutPlanProposalChangesSchema,
@@ -263,7 +264,10 @@ describe("workout proposal helpers", () => {
       },
     });
 
-    expect(stripWorkoutPlanProposalExtras(proposal)).toEqual(validStructuredPayload);
+    expect(stripWorkoutPlanProposalExtras(proposal)).toEqual({
+      ...validStructuredPayload,
+      adaptationMetadata: proposal.adaptationMetadata,
+    });
   });
 
   it("summarizes active workout plans for coaching context", () => {
@@ -300,5 +304,23 @@ describe("workout proposal helpers", () => {
     );
 
     expect(errors.some((error) => error.includes("pendingExercises"))).toBe(true);
+  });
+
+  it("detects workout adaptations that increase volume or load", () => {
+    const current = validStructuredPayload;
+    const increased = workoutPlanPayloadSchema.parse({
+      ...validStructuredPayload,
+      days: [
+        ...validStructuredPayload.days,
+        {
+          weekday: "friday",
+          focus: "Extra conditioning",
+          exercises: [catalogExercise],
+        },
+      ],
+    });
+
+    expect(workoutAdaptationIncreasesVolumeOrLoad(current, increased)).toBe(true);
+    expect(workoutAdaptationIncreasesVolumeOrLoad(current, current)).toBe(false);
   });
 });

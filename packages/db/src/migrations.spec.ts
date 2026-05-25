@@ -102,4 +102,36 @@ describe("drizzle migrations", () => {
     expect(content).not.toContain("CREATE TABLE");
     expect(content).not.toContain("CREATE TYPE");
   });
+
+  it("creates wellbeing check-ins table with user/date uniqueness", () => {
+    const content = readFileSync(join(drizzleDir, "0019_wellbeing_check_ins.sql"), "utf8");
+
+    expect(content).toContain('CREATE TABLE "wellbeing_check_ins"');
+    expect(content).toContain(
+      'CREATE UNIQUE INDEX "wellbeing_check_ins_user_date_unique"',
+    );
+  });
+
+  it("adds onboarding and goal hierarchy columns in dedicated migration", () => {
+    const content = readFileSync(
+      join(drizzleDir, "0020_onboarding_goal_hierarchy.sql"),
+      "utf8",
+    );
+
+    expect(content).toContain('"onboarding_completed_at"');
+    expect(content).toContain('"longevity_direction"');
+    expect(content).toContain('CREATE TYPE "public"."goal_horizon"');
+    expect(content).toContain('"parent_goal_id"');
+  });
+
+  it("adds a partial unique index for one active quarterly goal per user", () => {
+    const content = readFileSync(
+      join(drizzleDir, "0021_goals_active_quarterly_unique.sql"),
+      "utf8",
+    );
+
+    expect(content).toContain('CREATE UNIQUE INDEX IF NOT EXISTS "goals_user_active_quarterly_idx"');
+    expect(content).toContain('ON "goals" ("user_id")');
+    expect(content).toContain(`WHERE "status" = 'active' AND "horizon" = 'quarterly'`);
+  });
 });

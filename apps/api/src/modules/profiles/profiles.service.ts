@@ -1,7 +1,7 @@
 import type { UpsertUserProfileInput, UserProfile } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
-import { UsersService } from "../users/users.service.js";
+import { UsersRepository } from "../users/users.repository.js";
 import { toUserProfile } from "./profile.mapper.js";
 import { ProfilesRepository } from "./profiles.repository.js";
 
@@ -9,11 +9,11 @@ import { ProfilesRepository } from "./profiles.repository.js";
 export class ProfilesService {
   constructor(
     private readonly profilesRepository: ProfilesRepository,
-    private readonly usersService: UsersService,
+    private readonly usersRepository: UsersRepository,
   ) {}
 
   async getCurrentProfile(auth: ClerkAuthContext): Promise<UserProfile | null> {
-    const user = await this.usersService.resolveFromAuth(auth);
+    const user = await this.usersRepository.upsertFromAuth(auth);
     const profile = await this.profilesRepository.findByUserId(user.id);
 
     return profile ? toUserProfile(profile) : null;
@@ -23,7 +23,7 @@ export class ProfilesService {
     auth: ClerkAuthContext,
     input: UpsertUserProfileInput,
   ): Promise<UserProfile> {
-    const user = await this.usersService.resolveFromAuth(auth);
+    const user = await this.usersRepository.upsertFromAuth(auth);
     const profile = await this.profilesRepository.upsert(user.id, input);
 
     return toUserProfile(profile);

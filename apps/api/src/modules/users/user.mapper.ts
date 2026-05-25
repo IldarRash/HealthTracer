@@ -9,6 +9,7 @@ export function toUser(row: UserRow): User {
     email: row.email,
     displayName: row.displayName,
     timezone: row.timezone,
+    onboardingCompletedAt: row.onboardingCompletedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

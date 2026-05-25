@@ -1773,8 +1773,14 @@ dd {
   text-align: left;
 }
 
-.today-workout-panel {
+.today-workout-panel,
+.today-nutrition-panel {
   margin-top: var(--space-4);
+}
+
+.today-nutrition-links,
+.today-workout-links {
+  margin-top: var(--space-3);
 }
 
 .today-workout-start {
@@ -1877,6 +1883,10 @@ dd {
 .chat-bubble--coach,
 .chat-bubble--assistant .chat-bubble__meta strong {
   color: var(--color-coach-700);
+}
+
+.chat-bubble--crisis .wellbeing-crisis-panel {
+  margin-top: 0;
 }
 
 .chat-empty-state {
@@ -2336,6 +2346,127 @@ dd {
   margin-bottom: var(--space-2);
 }
 
+.documents-list-item-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.documents-signals-card {
+  margin: var(--space-4) 0;
+}
+
+.documents-signals-empty {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.documents-signals-retry {
+  margin-top: var(--space-4);
+}
+
+.documents-signal-group {
+  margin-top: var(--space-5);
+}
+
+.documents-signal-group h5 {
+  margin: 0 0 var(--space-2);
+}
+
+.documents-signal-list {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+
+.documents-signal-item {
+  padding: var(--space-3);
+}
+
+.documents-signal-item-header {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.documents-signal-meta {
+  margin-bottom: var(--space-3);
+}
+
+.documents-correlation-section {
+  margin-top: var(--space-6);
+}
+
+.documents-correlation-list {
+  display: grid;
+  gap: var(--space-4);
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+}
+
+.documents-correlation-card {
+  padding: var(--space-4);
+}
+
+.documents-correlation-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.documents-correlation-card-header h3 {
+  margin: var(--space-2) 0 0;
+}
+
+.documents-evidence-list {
+  margin-top: var(--space-4);
+}
+
+.documents-evidence-list ul {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.documents-evidence-list li {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.documents-evidence-type {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.proposal-evidence-list {
+  margin-top: var(--space-4);
+}
+
+.proposal-evidence-list ul {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.proposal-evidence-list li {
+  display: grid;
+  gap: var(--space-1);
+}
+
 /* ==========================================================================
    Form field and label standards (Visual Designer)
    ========================================================================== */
@@ -2380,4 +2511,343 @@ dd {
   font-size: var(--font-size-xs);
   font-weight: 400;
   line-height: 1.4;
+}
+
+.wellbeing-check-in-card h3 {
+  font-size: var(--font-size-lg);
+  margin: var(--space-2) 0;
+}
+
+.wellbeing-check-in-form {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.wellbeing-check-in-summary {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.wellbeing-check-in-summary__line {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  margin: 0;
+}
+
+.recovery-check-in-card h3 {
+  font-size: var(--font-size-lg);
+  margin: var(--space-2) 0;
+}
+
+.recovery-check-in-form {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.recovery-check-in-summary {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.recovery-check-in-summary__line {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  margin: 0;
+}
+
+.recovery-focus-panel {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.recovery-focus-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+
+.recovery-focus-title {
+  font-size: var(--font-size-base);
+}
+
+.recovery-focus-message {
+  margin: 0;
+}
+
+.recovery-focus-sufficiency {
+  margin: 0;
+}
+
+.recovery-focus-signals {
+  display: grid;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.recovery-band-badge {
+  flex-shrink: 0;
+}
+
+.wellbeing-scale-fieldset {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.wellbeing-scale-legend {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+  padding: 0;
+}
+
+.wellbeing-scale-options {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+}
+
+.wellbeing-scale-option {
+  align-items: center;
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: grid;
+  gap: var(--space-1);
+  justify-items: center;
+  padding: var(--space-2);
+  text-align: center;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.wellbeing-scale-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wellbeing-scale-option__score {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+
+.wellbeing-scale-option__label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.3;
+}
+
+.wellbeing-scale-option--selected {
+  border-color: var(--color-coach-500);
+  box-shadow: var(--shadow-focus);
+}
+
+.wellbeing-scale-option:focus-within {
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.wellbeing-crisis-panel {
+  margin-top: var(--space-3);
+}
+
+.wellbeing-crisis-panel h3 {
+  font-size: var(--font-size-base);
+  margin: 0 0 var(--space-2);
+}
+
+.wellbeing-crisis-panel p {
+  margin: 0 0 var(--space-2);
+}
+
+.wellbeing-crisis-resources {
+  display: grid;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wellbeing-history-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.wellbeing-trend-meta {
+  color: var(--color-text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-size-xs);
+  gap: var(--space-2);
+}
+
+.wellbeing-trend-chart {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.wellbeing-trend-row {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.wellbeing-trend-row__label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wellbeing-trend-strip {
+  align-items: end;
+}
+
+.wellbeing-trend-day {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.wellbeing-trend-bar {
+  height: 1.5rem;
+}
+
+.wellbeing-trend-day__label {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+  text-align: center;
+}
+
+.wellbeing-trend-fill--mood {
+  background: var(--color-coach-500);
+}
+
+.wellbeing-trend-fill--stress {
+  background: #c084fc;
+}
+
+/* Onboarding wizard */
+.onboarding-workspace {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 42rem;
+}
+
+.onboarding-workspace__header h1 {
+  margin: var(--space-2) 0;
+}
+
+.onboarding-progress {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.onboarding-progress__step {
+  align-items: center;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: auto 1fr;
+}
+
+.onboarding-progress__marker {
+  align-items: center;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  display: inline-flex;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  height: 2rem;
+  justify-content: center;
+  width: 2rem;
+}
+
+.onboarding-progress__step--current .onboarding-progress__marker {
+  background: rgb(20 184 166 / 16%);
+  border-color: var(--color-coach-400);
+  color: var(--color-coach-400);
+}
+
+.onboarding-progress__step--complete .onboarding-progress__marker {
+  background: rgb(20 184 166 / 24%);
+  border-color: var(--color-coach-500);
+  color: var(--color-coach-500);
+}
+
+.onboarding-progress__label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.onboarding-progress__step--current .onboarding-progress__label {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.onboarding-step-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.onboarding-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.onboarding-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.coaching-hierarchy {
+  width: 100%;
+}
+
+.coaching-hierarchy__card {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.coaching-hierarchy__section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.coaching-hierarchy__statement {
+  font-size: var(--font-size-lg);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.coaching-hierarchy__context dl {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.coaching-hierarchy__context dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-section-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coaching-hierarchy__context dd {
+  margin: 0;
 }

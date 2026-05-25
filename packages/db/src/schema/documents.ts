@@ -34,6 +34,14 @@ export const documentReviewStatusEnum = pgEnum("document_review_status", [
   "rejected",
 ]);
 
+export const documentSignalExtractionStatusEnum = pgEnum("document_signal_extraction_status", [
+  "not_started",
+  "processing",
+  "ready",
+  "failed",
+  "revoked",
+]);
+
 export const healthDocuments = pgTable(
   "health_documents",
   {
@@ -64,6 +72,11 @@ export const healthDocuments = pgTable(
       .defaultNow()
       .notNull(),
     parseFailureReason: text("parse_failure_reason"),
+    signalExtractionStatus: documentSignalExtractionStatusEnum("signal_extraction_status")
+      .notNull()
+      .default("not_started"),
+    signalExtractionFailureReason: text("signal_extraction_failure_reason"),
+    signalExtractedAt: timestamp("signal_extracted_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }).defaultNow().notNull(),

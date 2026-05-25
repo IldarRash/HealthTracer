@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { WELLBEING_CRISIS_SUPPORT_COPY } from "@health/types";
 import {
   createOptimisticUserMessage,
   isOptimisticMessage,
   mergeDisplayMessages,
+  resolveChatMessageCrisisSupport,
   resolvePrimaryThreadId,
 } from "./chat-ui-state.js";
 
@@ -57,6 +59,52 @@ describe("chat UI state", () => {
     expect(merged[1]).toMatchObject({ optimistic: true });
     expect(isOptimisticMessage(merged[1]!)).toBe(true);
     expect(isOptimisticMessage(merged[0]!)).toBe(false);
+  });
+
+  it("returns crisis support copy for assistant messages with crisis metadata", () => {
+    expect(
+      resolveChatMessageCrisisSupport({
+        role: "user",
+        metadata: {
+          crisisBoundary: true,
+          crisisSupport: {
+            shouldShowCrisisSupport: true,
+            reasons: ["keyword_match"],
+            copy: WELLBEING_CRISIS_SUPPORT_COPY,
+          },
+        },
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveChatMessageCrisisSupport({
+        role: "assistant",
+        metadata: {},
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveChatMessageCrisisSupport({
+        role: "assistant",
+        metadata: {
+          crisisBoundary: true,
+          crisisSupport: {
+            shouldShowCrisisSupport: true,
+            reasons: ["keyword_match"],
+            copy: WELLBEING_CRISIS_SUPPORT_COPY,
+          },
+        },
+      }),
+    ).toEqual(WELLBEING_CRISIS_SUPPORT_COPY);
+  });
+
+  it("falls back to default crisis copy when crisis metadata is incomplete", () => {
+    expect(
+      resolveChatMessageCrisisSupport({
+        role: "assistant",
+        metadata: { crisisBoundary: true },
+      }),
+    ).toEqual(WELLBEING_CRISIS_SUPPORT_COPY);
   });
 
   it("returns a fresh message list when no optimistic message is pending", () => {

@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
+import { sha256Hex } from "./sha256.js";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
 import {
   createExerciseInputSchema,
@@ -7,6 +7,7 @@ import {
   exerciseMuscleSchema,
   type CreateExerciseInput,
 } from "./exercises.js";
+import { recoveryContextSourceRefSchema } from "./recovery.js";
 
 export const workoutWeekdaySchema = z.enum([
   "monday",
@@ -136,11 +137,47 @@ export const workoutPlanDaySchema = z
 
 export type WorkoutPlanDay = z.infer<typeof workoutPlanDaySchema>;
 
+export const workoutAdaptationOperationSchema = z.enum([
+  "create",
+  "remove_exercise",
+  "swap_exercise",
+  "reduce_load",
+  "reduce_volume",
+  "adjust_rest",
+  "change_equipment",
+  "simplify",
+]);
+
+export type WorkoutAdaptationOperation = z.infer<typeof workoutAdaptationOperationSchema>;
+
+export const workoutAdaptationOperationRecordSchema = z.object({
+  operation: workoutAdaptationOperationSchema,
+  description: z.string().min(1).max(240),
+  weekday: workoutWeekdaySchema.optional(),
+  exerciseName: z.string().min(1).max(160).optional(),
+  replacementExerciseName: z.string().min(1).max(160).optional(),
+});
+
+export type WorkoutAdaptationOperationRecord = z.infer<
+  typeof workoutAdaptationOperationRecordSchema
+>;
+
+export const workoutPlanAdaptationMetadataSchema = z.object({
+  operations: z.array(workoutAdaptationOperationRecordSchema).min(1).max(20),
+  recoverySourceRefs: z.array(recoveryContextSourceRefSchema).max(5).optional(),
+  allowVolumeIncrease: z.boolean().optional(),
+});
+
+export type WorkoutPlanAdaptationMetadata = z.infer<
+  typeof workoutPlanAdaptationMetadataSchema
+>;
+
 export const workoutPlanPayloadSchema = z.object({
   title: z.string().min(1).max(160),
   summary: z.string().min(1).max(1000),
   days: z.array(workoutPlanDaySchema).min(1).max(14),
   notes: z.array(z.string().min(1).max(240)).max(20).default([]),
+  adaptationMetadata: workoutPlanAdaptationMetadataSchema.optional(),
 });
 
 export type WorkoutPlanPayload = z.infer<typeof workoutPlanPayloadSchema>;
@@ -331,39 +368,6 @@ export type UpdateWorkoutSessionExerciseInput = z.infer<
   typeof updateWorkoutSessionExerciseSchema
 >;
 
-export const workoutAdaptationOperationSchema = z.enum([
-  "create",
-  "remove_exercise",
-  "swap_exercise",
-  "reduce_load",
-  "reduce_volume",
-  "adjust_rest",
-  "change_equipment",
-  "simplify",
-]);
-
-export type WorkoutAdaptationOperation = z.infer<typeof workoutAdaptationOperationSchema>;
-
-export const workoutAdaptationOperationRecordSchema = z.object({
-  operation: workoutAdaptationOperationSchema,
-  description: z.string().min(1).max(240),
-  weekday: workoutWeekdaySchema.optional(),
-  exerciseName: z.string().min(1).max(160).optional(),
-  replacementExerciseName: z.string().min(1).max(160).optional(),
-});
-
-export type WorkoutAdaptationOperationRecord = z.infer<
-  typeof workoutAdaptationOperationRecordSchema
->;
-
-export const workoutPlanAdaptationMetadataSchema = z.object({
-  operations: z.array(workoutAdaptationOperationRecordSchema).min(1).max(20),
-});
-
-export type WorkoutPlanAdaptationMetadata = z.infer<
-  typeof workoutPlanAdaptationMetadataSchema
->;
-
 /** Catalog exercise definition keyed by pendingExerciseRef for AI proposal apply. */
 export const pendingExerciseDefinitionSchema = createExerciseInputSchema.extend({
   source: z.literal("ai_generated").default("ai_generated"),
@@ -372,7 +376,6 @@ export const pendingExerciseDefinitionSchema = createExerciseInputSchema.extend(
 export type PendingExerciseDefinition = z.infer<typeof pendingExerciseDefinitionSchema>;
 
 export const workoutPlanProposalExtrasSchema = z.object({
-  adaptationMetadata: workoutPlanAdaptationMetadataSchema.optional(),
   pendingExercises: z
     .record(z.string().min(1).max(80), pendingExerciseDefinitionSchema)
     .optional(),
@@ -390,6 +393,8 @@ export const adaptWorkoutPlanFromProgressChangesSchema = z.object({
   plan: workoutPlanProposalChangesSchema,
   sourceSummaryId: z.string().uuid().optional(),
   sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
+  recoverySourceRefs: z.array(recoveryContextSourceRefSchema).max(5).optional(),
+  allowVolumeIncrease: z.boolean().optional(),
 });
 
 export type AdaptWorkoutPlanFromProgressChanges = z.infer<
@@ -643,10 +648,87 @@ export function getWorkoutPlanDomainErrors(
 export function stripWorkoutPlanProposalExtras(
   changes: WorkoutPlanProposalChanges,
 ): WorkoutPlanPayload {
-  const { adaptationMetadata: _adaptationMetadata, pendingExercises: _pendingExercises, ...plan } =
-    changes;
+  const { pendingExercises: _pendingExercises, ...plan } = changes;
 
   return workoutPlanPayloadSchema.parse(plan);
+}
+
+export interface WorkoutPlanLoadMetrics {
+  trainingDayCount: number;
+  totalSets: number;
+  totalExercises: number;
+}
+
+export function estimateWorkoutPlanLoadMetrics(payload: WorkoutPlanPayload): WorkoutPlanLoadMetrics {
+  let trainingDayCount = 0;
+  let totalSets = 0;
+  let totalExercises = 0;
+
+  for (const day of payload.days) {
+    if (day.exercises.length === 0) {
+      continue;
+    }
+
+    trainingDayCount += 1;
+
+    for (const entry of day.exercises) {
+      totalExercises += 1;
+      const normalized = normalizeWorkoutPlanExerciseEntry(entry);
+      totalSets += normalized.sets ?? 1;
+    }
+  }
+
+  return { trainingDayCount, totalSets, totalExercises };
+}
+
+export function workoutAdaptationIncreasesVolumeOrLoad(
+  current: WorkoutPlanPayload,
+  proposed: WorkoutPlanPayload,
+): boolean {
+  const currentMetrics = estimateWorkoutPlanLoadMetrics(current);
+  const proposedMetrics = estimateWorkoutPlanLoadMetrics(proposed);
+
+  return (
+    proposedMetrics.trainingDayCount > currentMetrics.trainingDayCount ||
+    proposedMetrics.totalSets > currentMetrics.totalSets ||
+    proposedMetrics.totalExercises > currentMetrics.totalExercises
+  );
+}
+
+export function mergeRecoveryMetadataIntoWorkoutPlanProposal(
+  changes: WorkoutPlanProposalChanges,
+  envelope?: {
+    recoverySourceRefs?: z.infer<typeof recoveryContextSourceRefSchema>[];
+    allowVolumeIncrease?: boolean;
+  },
+): WorkoutPlanProposalChanges {
+  if (!envelope?.recoverySourceRefs?.length && envelope?.allowVolumeIncrease == null) {
+    return changes;
+  }
+
+  const existingMetadata = changes.adaptationMetadata;
+  const recoverySourceRefs =
+    envelope.recoverySourceRefs ?? existingMetadata?.recoverySourceRefs;
+  const allowVolumeIncrease =
+    envelope.allowVolumeIncrease ?? existingMetadata?.allowVolumeIncrease;
+
+  if (!existingMetadata && !recoverySourceRefs?.length && allowVolumeIncrease == null) {
+    return changes;
+  }
+
+  return {
+    ...changes,
+    adaptationMetadata: {
+      operations: existingMetadata?.operations ?? [
+        {
+          operation: "reduce_load",
+          description: "Recovery-aware workout adaptation.",
+        },
+      ],
+      recoverySourceRefs,
+      allowVolumeIncrease,
+    },
+  };
 }
 
 export function collectWorkoutPlanExerciseIds(payload: WorkoutPlanPayload): string[] {
@@ -809,7 +891,7 @@ export function deterministicWorkoutSessionExerciseId(
   sessionId: string,
   index: number,
 ): string {
-  const hash = createHash("sha256").update(`${sessionId}:${index}`).digest("hex");
+  const hash = sha256Hex(`${sessionId}:${index}`);
 
   return [
     hash.slice(0, 8),

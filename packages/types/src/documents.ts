@@ -41,6 +41,18 @@ export const documentReviewStatusSchema = z.enum([
 
 export type DocumentReviewStatus = z.infer<typeof documentReviewStatusSchema>;
 
+export const documentSignalExtractionStatusSchema = z.enum([
+  "not_started",
+  "processing",
+  "ready",
+  "failed",
+  "revoked",
+]);
+
+export type DocumentSignalExtractionStatus = z.infer<
+  typeof documentSignalExtractionStatusSchema
+>;
+
 export const healthDocumentSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
@@ -50,6 +62,9 @@ export const healthDocumentSchema = z.object({
   mimeType: z.string().min(1).max(120),
   fileSizeBytes: z.number().int().nonnegative().max(25_000_000),
   parseStatus: documentParseStatusSchema,
+  signalExtractionStatus: documentSignalExtractionStatusSchema,
+  signalExtractionFailureReason: z.string().min(1).max(240).nullable(),
+  signalExtractedAt: isoDateTimeSchema.nullable(),
   consentScopes: z.array(documentConsentScopeSchema).min(1),
   consentVersion: z.string().min(1).max(40),
   consentGrantedAt: isoDateTimeSchema,
@@ -85,14 +100,50 @@ export const healthDocumentDetailSchema = healthDocumentSchema.extend({
 
 export type HealthDocumentDetail = z.infer<typeof healthDocumentDetailSchema>;
 
-export const createHealthDocumentSchema = z.object({
-  documentType: documentTypeSchema,
-  title: z.string().min(1).max(160),
-  consentScopes: z.array(documentConsentScopeSchema).min(1).max(5),
-  consentVersion: z.string().min(1).max(40).default("v1"),
-  mimeType: z.literal("text/plain").default("text/plain"),
-  sampleText: z.string().min(1).max(5000).optional(),
-});
+export const SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES = [
+  "text/plain",
+  "application/pdf",
+] as const;
+
+export type SupportedHealthDocumentMimeType =
+  (typeof SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES)[number];
+
+export const MAX_HEALTH_DOCUMENT_UPLOAD_BYTES = 5_000_000;
+
+export const supportedHealthDocumentMimeTypeSchema = z.enum(
+  SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
+);
+
+export const createHealthDocumentSchema = z
+  .object({
+    documentType: documentTypeSchema,
+    title: z.string().min(1).max(160),
+    consentScopes: z.array(documentConsentScopeSchema).min(1).max(5),
+    consentVersion: z.string().min(1).max(40).default("v1"),
+    mimeType: supportedHealthDocumentMimeTypeSchema.default("text/plain"),
+    sampleText: z.string().min(1).max(5000).optional(),
+    fileContentBase64: z.string().min(1).optional(),
+  })
+  .superRefine((input, ctx) => {
+    const hasSampleText = Boolean(input.sampleText);
+    const hasFileContent = Boolean(input.fileContentBase64);
+
+    if (!hasSampleText && !hasFileContent) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Either sampleText or fileContentBase64 is required.",
+        path: ["sampleText"],
+      });
+    }
+
+    if (hasSampleText && hasFileContent) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Provide sampleText or fileContentBase64, not both.",
+        path: ["sampleText"],
+      });
+    }
+  });
 
 export type CreateHealthDocumentInput = z.infer<typeof createHealthDocumentSchema>;
 

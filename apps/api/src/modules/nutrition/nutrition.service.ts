@@ -3,6 +3,7 @@ import type {
   NutritionAdherenceResponse,
   NutritionPlanPayload,
   NutritionPlanRevision,
+  TodayNutritionDetail,
   UpsertNutritionAdherenceInput,
 } from "@health/types";
 import {
@@ -96,6 +97,35 @@ export class NutritionService {
 
     return {
       adherence: row ? toNutritionAdherenceRecord(row) : null,
+    };
+  }
+
+  async getNutritionDayDetail(
+    auth: ClerkAuthContext,
+    date: string,
+  ): Promise<TodayNutritionDetail | null> {
+    const parsedDate = parseAdherenceDate(date);
+    const user = await this.usersService.resolveFromAuth(auth);
+    const plan = await this.nutritionRepository.findActivePlanByUserId(user.id);
+
+    if (!plan?.activeRevisionId) {
+      return null;
+    }
+
+    const [activeRevision, adherenceRow] = await Promise.all([
+      this.nutritionRepository.findActiveRevisionByPlanId(plan.id, plan.activeRevisionId),
+      this.nutritionRepository.findAdherenceByUserIdAndDate(user.id, parsedDate),
+    ]);
+
+    if (!activeRevision) {
+      return null;
+    }
+
+    return {
+      date: parsedDate,
+      plan: toNutritionPlan(plan),
+      activeRevision: toNutritionPlanRevision(activeRevision),
+      adherence: adherenceRow ? toNutritionAdherenceRecord(adherenceRow) : null,
     };
   }
 
