@@ -2779,76 +2779,86 @@ describe("web api helpers", () => {
     );
   });
 
-  it("submits onboarding to POST /onboarding", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      text: async () =>
-        JSON.stringify({
-          user: {
-            id: "11111111-1111-4111-8111-111111111111",
-            clerkUserId: "user_123",
-            email: "alex@example.com",
-            displayName: "Alex",
-            timezone: "UTC",
-            onboardingCompletedAt: "2026-05-25T12:00:00.000Z",
-            updatedAt: "2026-05-25T12:00:00.000Z",
-            createdAt: "2026-05-25T12:00:00.000Z",
-          },
-          profile: {
-            id: "22222222-2222-4222-8222-222222222222",
-            userId: "11111111-1111-4111-8111-111111111111",
-            birthDate: null,
-            heightCm: null,
-            baselineWeightKg: null,
-            activityLevel: "moderately_active",
-            trainingExperience: "beginner",
-            preferences: [],
-            constraints: [],
-            longevityDirection: {
-              statement: "Stay strong and mobile.",
-              tags: ["strength"],
+  const validOnboardingInput = {
+    user: {
+      displayName: "Alex",
+      timezone: "UTC",
+    },
+    profile: {
+      birthDate: "1992-04-12",
+      heightCm: 180,
+      baselineWeightKg: 82.5,
+      activityLevel: "moderately_active" as const,
+      longevityDirection: {
+        statement: "Stay strong and mobile.",
+        tags: ["strength"],
+      },
+    },
+    quarterlyGoal: {
+      type: "general_wellness" as const,
+      title: "Complete 36 workouts this quarter",
+      startDate: "2026-04-01",
+      targetDate: "2026-06-30",
+      priority: "primary" as const,
+      horizon: "quarterly" as const,
+      target: {},
+    },
+  };
+
+  it("submits onboarding with required baseline profile fields to POST /onboarding", async () => {
+    const requestBodies: unknown[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBodies.push(JSON.parse(String(init?.body)));
+
+      return {
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            user: {
+              id: "11111111-1111-4111-8111-111111111111",
+              clerkUserId: "user_123",
+              email: "alex@example.com",
+              displayName: "Alex",
+              timezone: "UTC",
+              onboardingCompletedAt: "2026-05-25T12:00:00.000Z",
+              updatedAt: "2026-05-25T12:00:00.000Z",
+              createdAt: "2026-05-25T12:00:00.000Z",
             },
-            longevityDirectionTags: ["strength"],
-            coachingNotes: [],
-            createdAt: "2026-05-25T12:00:00.000Z",
-            updatedAt: "2026-05-25T12:00:00.000Z",
-          },
-          goals: [],
-          onboardingCompleted: true,
-          hierarchy: {
-            direction: {
-              statement: "Stay strong and mobile.",
-              tags: ["strength"],
+            profile: {
+              id: "22222222-2222-4222-8222-222222222222",
+              userId: "11111111-1111-4111-8111-111111111111",
+              birthDate: "1992-04-12",
+              heightCm: 180,
+              baselineWeightKg: 82.5,
+              activityLevel: "moderately_active",
+              trainingExperience: "beginner",
+              preferences: [],
+              constraints: [],
+              longevityDirection: {
+                statement: "Stay strong and mobile.",
+                tags: ["strength"],
+              },
+              longevityDirectionTags: ["strength"],
+              coachingNotes: [],
+              createdAt: "2026-05-25T12:00:00.000Z",
+              updatedAt: "2026-05-25T12:00:00.000Z",
             },
-            activeQuarterlyGoal: null,
-            weeklyFocus: [],
-          },
-        }),
+            goals: [],
+            onboardingCompleted: true,
+            hierarchy: {
+              direction: {
+                statement: "Stay strong and mobile.",
+                tags: ["strength"],
+              },
+              activeQuarterlyGoal: null,
+              weeklyFocus: [],
+            },
+          }),
+      };
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await completeOnboarding(token, {
-      user: {
-        displayName: "Alex",
-        timezone: "UTC",
-      },
-      profile: {
-        activityLevel: "moderately_active",
-        longevityDirection: {
-          statement: "Stay strong and mobile.",
-          tags: ["strength"],
-        },
-      },
-      quarterlyGoal: {
-        type: "general_wellness",
-        title: "Complete 36 workouts this quarter",
-        startDate: "2026-04-01",
-        targetDate: "2026-06-30",
-        priority: "primary",
-        horizon: "quarterly",
-        target: {},
-      },
-    });
+    const result = await completeOnboarding(token, validOnboardingInput);
 
     expect(result.error).toBeUndefined();
     expect(result.data?.onboardingCompleted).toBe(true);
@@ -2856,26 +2866,43 @@ describe("web api helpers", () => {
       expect.stringContaining("/onboarding"),
       expect.objectContaining({ method: "POST" }),
     );
+    expect(requestBodies[0]).toMatchObject({
+      profile: {
+        birthDate: "1992-04-12",
+        heightCm: 180,
+        baselineWeightKg: 82.5,
+      },
+    });
   });
 
-  it("rejects invalid onboarding payloads before calling the API", async () => {
+  it("rejects onboarding payloads missing baseline profile fields before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const incompleteProfilePayload = {
+      user: validOnboardingInput.user,
+      profile: {
+        activityLevel: "moderately_active" as const,
+        longevityDirection: validOnboardingInput.profile.longevityDirection,
+      },
+      quarterlyGoal: validOnboardingInput.quarterlyGoal,
+    };
+
+    await expect(completeOnboarding(token, incompleteProfilePayload as never)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects onboarding payloads missing birthDate before calling the API", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
       completeOnboarding(token, {
-        user: {
-          displayName: "Alex",
-          timezone: "UTC",
-        },
+        ...validOnboardingInput,
         profile: {
-          activityLevel: "moderately_active",
-        },
-        quarterlyGoal: {
-          type: "general_wellness",
-          title: "Complete 36 workouts this quarter",
-          startDate: "2026-04-01",
-          targetDate: "2026-06-30",
+          heightCm: 180,
+          baselineWeightKg: 82.5,
+          longevityDirection: validOnboardingInput.profile.longevityDirection,
         },
       } as never),
     ).rejects.toThrow();

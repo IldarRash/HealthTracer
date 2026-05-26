@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PRIMARY_NAV_LINKS } from "../lib/nav-ui-state.js";
+import { shouldHidePrimaryNavDuringOnboarding } from "../lib/onboarding-ui-state.js";
 
 const navSource = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "app-nav.tsx"),
@@ -34,5 +35,15 @@ describe("AppNav information architecture", () => {
     expect(navSource).not.toContain("/nutrition");
     expect(navSource).not.toContain("/recipes");
     expect(navSource).not.toContain("/progress");
+  });
+
+  it("hides primary navigation until onboarding is complete", () => {
+    expect(shouldHidePrimaryNavDuringOnboarding(false)).toBe(true);
+    expect(shouldHidePrimaryNavDuringOnboarding(undefined)).toBe(true);
+    expect(shouldHidePrimaryNavDuringOnboarding(true)).toBe(false);
+    expect(navSource).toContain("shouldHidePrimaryNavDuringOnboarding");
+    expect(navSource).toContain("Complete onboarding to unlock navigation");
+    expect(navSource).toContain("hidePrimaryNav ?");
+    expect(navSource).toContain("AppNavLinks pathname={pathname}");
   });
 });

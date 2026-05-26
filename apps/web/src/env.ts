@@ -6,3 +6,6 @@ export const webEnvSchema = z.object({
 });
 
 export const webEnv = validateEnv(webEnvSchema);
+
+/** Same-origin proxy path configured in next.config.mjs rewrites. */
+export const clientApiBaseUrl = "/api-proxy";

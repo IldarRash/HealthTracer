@@ -144,7 +144,7 @@ import {
   type WellbeingCheckInUpsertResponse,
 } from "@health/types";
 import { z } from "zod";
-import { webEnv } from "../env";
+import { clientApiBaseUrl } from "../env";
 
 export type InspectorState = {
   user: User | null;
@@ -1323,7 +1323,7 @@ async function apiFetch<TSchema extends z.ZodType>(
   const { method = "GET", body } = options;
 
   try {
-    const response = await fetch(`${webEnv.NEXT_PUBLIC_API_BASE_URL}${path}`, {
+    const response = await fetch(`${clientApiBaseUrl}${path}`, {
       cache: "no-store",
       method,
       headers: {

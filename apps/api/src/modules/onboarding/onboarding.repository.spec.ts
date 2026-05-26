@@ -21,5 +21,8 @@ describe("OnboardingRepository persistence boundary", () => {
     expect(repositorySource).toContain("onConflictDoUpdate");
     expect(repositorySource).toContain("existingQuarterlyGoal");
     expect(repositorySource).toContain("DuplicateActiveQuarterlyGoalError");
+    expect(repositorySource).toContain("birthDate: input.profile.birthDate");
+    expect(repositorySource).toContain("heightCm: input.profile.heightCm");
+    expect(repositorySource).toContain("baselineWeightKg: input.profile.baselineWeightKg");
   });
 });

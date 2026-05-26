@@ -344,6 +344,16 @@ export function buildCoachingHierarchySummary<TGoal extends HierarchyGoal>(
   };
 }
 
+export function hasCompletedOnboardingState<TGoal extends HierarchyGoal>(
+  profile: Pick<HierarchyProfile, "longevityDirection"> | null,
+  goals: TGoal[],
+): boolean {
+  return Boolean(
+    profile?.longevityDirection &&
+      goals.some((goal) => goal.status === "active" && goal.horizon === "quarterly"),
+  );
+}
+
 export const onboardingQuarterlyGoalSchema = z.object({
   type: z.enum([
     "fat_loss",

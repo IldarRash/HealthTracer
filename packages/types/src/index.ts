@@ -185,6 +185,9 @@ export const onboardingUserSchema = z.object({
 export const onboardingProfileSchema = upsertUserProfileSchema
   .omit({ longevityDirectionTags: true })
   .extend({
+    birthDate: isoDateSchema,
+    heightCm: z.number().int().positive().max(260),
+    baselineWeightKg: z.number().positive().max(500),
     longevityDirection: longevityDirectionSchema,
   });
 
@@ -1260,6 +1263,7 @@ export {
   getGoalHierarchyFieldErrors,
   getGoalHierarchyValidationErrors,
   getGoalParentReferenceErrors,
+  hasCompletedOnboardingState,
   mergeGoalHierarchyState,
   getWeekStartIsoDate,
   goalHorizonSchema,

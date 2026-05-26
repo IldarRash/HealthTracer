@@ -29,6 +29,7 @@ import {
   getUserContextSliceInputSchema,
   getWeekStartIsoDate,
   habitPlanPayloadSchema,
+  hasCompletedOnboardingState,
   INTENT_TO_SLICE_PURPOSE,
   normalizeContextSlicePlan,
   nutritionPlanPayloadSchema,
@@ -161,12 +162,15 @@ export class CoachingContextService {
     );
     const weekStart = getWeekStartIsoDate(getTodayIsoDateInTimezone(user.timezone));
 
+    const coachingHierarchy = buildCoachingHierarchySummary(profile, goals, weekStart);
+
     return {
       user,
       profile,
       goals,
-      onboardingCompleted: user.onboardingCompletedAt != null,
-      coachingHierarchy: buildCoachingHierarchySummary(profile, goals, weekStart),
+      onboardingCompleted:
+        user.onboardingCompletedAt != null || hasCompletedOnboardingState(profile, goals),
+      coachingHierarchy,
       personalContextSummary: summarizePersonalContext(profile),
       activeWorkoutRevisionId: workoutPlan?.activeRevisionId ?? null,
       activeWorkoutPlanSummary,

@@ -143,6 +143,7 @@ describe("ChatService", () => {
           title: "Strength base",
           summary: "Lighter session today.",
           days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          notes: [],
         },
       },
     };

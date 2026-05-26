@@ -7,10 +7,17 @@ import type {
   TodayChecklistItemSourceRef,
   TrainingExperience,
 } from "@health/types";
-import { getTodayIsoDateInTimezone } from "@health/types";
+import { getTodayIsoDateInTimezone, isCalendarValidIsoDate } from "@health/types";
 
 export const ONBOARDING_PATH = "/onboarding";
 export const ONBOARDING_DRAFT_STORAGE_KEY = "health-tracer-onboarding-draft";
+
+export const ONBOARDING_HEIGHT_CM_MIN = 50;
+export const ONBOARDING_HEIGHT_CM_MAX = 260;
+export const ONBOARDING_WEIGHT_KG_MIN = 20;
+export const ONBOARDING_WEIGHT_KG_MAX = 500;
+export const ONBOARDING_MIN_AGE_YEARS = 13;
+export const ONBOARDING_MAX_AGE_YEARS = 120;
 
 export type OnboardingWizardStep =
   | "account"
@@ -27,16 +34,95 @@ export const ONBOARDING_WIZARD_STEPS: readonly OnboardingWizardStep[] = [
   "preferences",
 ] as const;
 
+export type OnboardingGoalPresetKey =
+  | "stronger"
+  | "live_longer"
+  | "endurance"
+  | "lose_fat"
+  | "consistency"
+  | "custom";
+
+export type OnboardingGoalPreset = {
+  key: OnboardingGoalPresetKey;
+  label: string;
+  description: string;
+  quarterlyType: GoalType;
+  quarterlyTitle: string;
+  longevityStatement: string;
+  longevityTags: string;
+};
+
+export const ONBOARDING_GOAL_PRESETS: readonly OnboardingGoalPreset[] = [
+  {
+    key: "stronger",
+    label: "Become stronger",
+    description: "Build strength and power with structured training.",
+    quarterlyType: "muscle_gain",
+    quarterlyTitle: "Build consistent strength training three times per week",
+    longevityStatement: "Stay strong, capable, and energized as the years go by.",
+    longevityTags: "strength, mobility",
+  },
+  {
+    key: "live_longer",
+    label: "Live longer",
+    description: "Invest in habits that support long-term vitality.",
+    quarterlyType: "general_wellness",
+    quarterlyTitle: "Establish daily movement and recovery habits",
+    longevityStatement: "Stay active, resilient, and engaged for decades ahead.",
+    longevityTags: "longevity, movement, recovery",
+  },
+  {
+    key: "endurance",
+    label: "Improve endurance",
+    description: "Grow stamina for the activities you care about.",
+    quarterlyType: "endurance",
+    quarterlyTitle: "Build aerobic capacity with regular cardio sessions",
+    longevityStatement: "Keep my heart, lungs, and stamina ready for what I love.",
+    longevityTags: "endurance, cardio",
+  },
+  {
+    key: "lose_fat",
+    label: "Lose fat",
+    description: "Shape a sustainable routine focused on body composition.",
+    quarterlyType: "fat_loss",
+    quarterlyTitle: "Create a sustainable nutrition and training rhythm this quarter",
+    longevityStatement: "Feel lighter, move better, and keep energy steady.",
+    longevityTags: "nutrition, consistency",
+  },
+  {
+    key: "consistency",
+    label: "Build consistency",
+    description: "Make showing up the main win this quarter.",
+    quarterlyType: "general_wellness",
+    quarterlyTitle: "Show up for planned workouts at least eighty percent of weeks",
+    longevityStatement: "Make fitness a reliable part of my routine.",
+    longevityTags: "consistency, habits",
+  },
+  {
+    key: "custom",
+    label: "Custom goal",
+    description: "Define your own quarterly coaching objective.",
+    quarterlyType: "general_wellness",
+    quarterlyTitle: "",
+    longevityStatement: "",
+    longevityTags: "",
+  },
+] as const;
+
 export type OnboardingDraft = {
   step: OnboardingWizardStep;
   displayName: string;
   timezone: string;
+  birthDate: string;
+  heightCm: string;
+  baselineWeightKg: string;
   activityLevel: ActivityLevel | "";
   trainingExperience: TrainingExperience | "";
   longevityStatement: string;
   longevityTags: string;
   quarterlyTitle: string;
   quarterlyType: GoalType;
+  goalPresetKey: OnboardingGoalPresetKey | "";
   preferences: string;
   constraints: string;
 };
@@ -70,15 +156,54 @@ export function createDefaultOnboardingDraft(
     step: "account",
     displayName: "",
     timezone: detectDefaultTimezone(),
+    birthDate: "",
+    heightCm: "",
+    baselineWeightKg: "",
     activityLevel: "",
     trainingExperience: "",
     longevityStatement: "",
     longevityTags: "",
     quarterlyTitle: "",
     quarterlyType: "general_wellness",
+    goalPresetKey: "",
     preferences: "",
     constraints: "",
     ...overrides,
+  };
+}
+
+export function getOnboardingGoalPreset(
+  key: OnboardingGoalPresetKey,
+): OnboardingGoalPreset | undefined {
+  return ONBOARDING_GOAL_PRESETS.find((preset) => preset.key === key);
+}
+
+export function applyOnboardingGoalPreset(
+  draft: OnboardingDraft,
+  presetKey: OnboardingGoalPresetKey,
+): OnboardingDraft {
+  const preset = getOnboardingGoalPreset(presetKey);
+  if (!preset) {
+    return draft;
+  }
+
+  if (presetKey === "custom") {
+    return {
+      ...draft,
+      goalPresetKey: "custom",
+      quarterlyType: "general_wellness",
+    };
+  }
+
+  return {
+    ...draft,
+    goalPresetKey: presetKey,
+    quarterlyType: preset.quarterlyType,
+    quarterlyTitle: preset.quarterlyTitle,
+    longevityStatement: draft.longevityStatement.trim()
+      ? draft.longevityStatement
+      : preset.longevityStatement,
+    longevityTags: draft.longevityTags.trim() ? draft.longevityTags : preset.longevityTags,
   };
 }
 
@@ -126,6 +251,120 @@ export function joinCommaSeparatedList(values: readonly string[]): string {
   return values.join(", ");
 }
 
+export function parseOnboardingHeightCm(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!/^\d+$/.test(trimmed)) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < ONBOARDING_HEIGHT_CM_MIN ||
+    parsed > ONBOARDING_HEIGHT_CM_MAX
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+export function parseOnboardingBaselineWeightKg(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(trimmed);
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < ONBOARDING_WEIGHT_KG_MIN ||
+    parsed > ONBOARDING_WEIGHT_KG_MAX
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function getAgeFromBirthDate(birthDate: string, today = new Date()): number | null {
+  if (!isCalendarValidIsoDate(birthDate)) {
+    return null;
+  }
+
+  const [year, month, day] = birthDate.split("-").map((part) => Number.parseInt(part, 10));
+  const birthUtc = Date.UTC(year!, month! - 1, day!);
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+
+  if (birthUtc > todayUtc) {
+    return null;
+  }
+
+  let age = today.getUTCFullYear() - year!;
+  const monthDiff = today.getUTCMonth() - (month! - 1);
+  const dayDiff = today.getUTCDate() - day!;
+
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+    age -= 1;
+  }
+
+  return age;
+}
+
+export function validateOnboardingBirthDate(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "Date of birth is required.";
+  }
+
+  if (!isCalendarValidIsoDate(trimmed)) {
+    return "Enter a valid date of birth (YYYY-MM-DD).";
+  }
+
+  const age = getAgeFromBirthDate(trimmed);
+  if (age == null) {
+    return "Date of birth cannot be in the future.";
+  }
+
+  if (age < ONBOARDING_MIN_AGE_YEARS) {
+    return `You must be at least ${ONBOARDING_MIN_AGE_YEARS} years old to use this coach.`;
+  }
+
+  if (age > ONBOARDING_MAX_AGE_YEARS) {
+    return "Enter a valid date of birth.";
+  }
+
+  return null;
+}
+
+export function validateOnboardingHeightCm(value: string): string | null {
+  if (!value.trim()) {
+    return "Height is required.";
+  }
+
+  if (parseOnboardingHeightCm(value) == null) {
+    return `Enter height as a whole number between ${ONBOARDING_HEIGHT_CM_MIN} and ${ONBOARDING_HEIGHT_CM_MAX} cm.`;
+  }
+
+  return null;
+}
+
+export function validateOnboardingBaselineWeightKg(value: string): string | null {
+  if (!value.trim()) {
+    return "Weight is required.";
+  }
+
+  if (parseOnboardingBaselineWeightKg(value) == null) {
+    return `Enter weight between ${ONBOARDING_WEIGHT_KG_MIN} and ${ONBOARDING_WEIGHT_KG_MAX} kg.`;
+  }
+
+  return null;
+}
+
 export function getCurrentQuarterDateRange(
   timezone: string,
   now = new Date(),
@@ -163,8 +402,24 @@ export function validateOnboardingStep(
       }
       return errors;
     }
-    case "profile":
-      return [];
+    case "profile": {
+      const errors: string[] = [];
+      const birthDateError = validateOnboardingBirthDate(draft.birthDate);
+      const heightError = validateOnboardingHeightCm(draft.heightCm);
+      const weightError = validateOnboardingBaselineWeightKg(draft.baselineWeightKg);
+
+      if (birthDateError) {
+        errors.push(birthDateError);
+      }
+      if (heightError) {
+        errors.push(heightError);
+      }
+      if (weightError) {
+        errors.push(weightError);
+      }
+
+      return errors;
+    }
     case "direction":
       return draft.longevityStatement.trim()
         ? []
@@ -180,6 +435,17 @@ export function validateOnboardingStep(
 
 export function buildOnboardingPayload(draft: OnboardingDraft): OnboardingInput {
   const quarterDates = getCurrentQuarterDateRange(draft.timezone);
+  const heightCm = parseOnboardingHeightCm(draft.heightCm);
+  const baselineWeightKg = parseOnboardingBaselineWeightKg(draft.baselineWeightKg);
+
+  if (heightCm == null || baselineWeightKg == null) {
+    throw new Error("Profile baseline measurements are incomplete.");
+  }
+
+  const birthDateError = validateOnboardingBirthDate(draft.birthDate);
+  if (birthDateError) {
+    throw new Error(birthDateError);
+  }
 
   return {
     user: {
@@ -187,6 +453,9 @@ export function buildOnboardingPayload(draft: OnboardingDraft): OnboardingInput 
       timezone: draft.timezone.trim(),
     },
     profile: {
+      birthDate: draft.birthDate.trim(),
+      heightCm,
+      baselineWeightKg,
       activityLevel: draft.activityLevel || null,
       trainingExperience: draft.trainingExperience || null,
       preferences: parseCommaSeparatedList(draft.preferences),
@@ -224,6 +493,12 @@ export function shouldRedirectFromOnboarding(
   onboardingCompleted: boolean,
 ): boolean {
   return onboardingCompleted && isOnboardingPath(pathname);
+}
+
+export function shouldHidePrimaryNavDuringOnboarding(
+  onboardingCompleted: boolean | undefined,
+): boolean {
+  return onboardingCompleted !== true;
 }
 
 export function readOnboardingDraftFromStorage(): OnboardingDraft | null {
@@ -276,6 +551,15 @@ export function mergeOnboardingDraftWithUserState(
     timezone: hasUserEditedAccount
       ? draft.timezone
       : state.user.timezone || draft.timezone,
+    birthDate: draft.birthDate || state.profile?.birthDate || "",
+    heightCm:
+      draft.heightCm ||
+      (state.profile?.heightCm != null ? String(state.profile.heightCm) : ""),
+    baselineWeightKg:
+      draft.baselineWeightKg ||
+      (state.profile?.baselineWeightKg != null
+        ? String(state.profile.baselineWeightKg)
+        : ""),
     activityLevel: draft.activityLevel || state.profile?.activityLevel || "",
     trainingExperience: draft.trainingExperience || state.profile?.trainingExperience || "",
     longevityStatement:

@@ -3,7 +3,7 @@
 # Railway service: health-api
 # Build from repo root:
 #   docker build -f apps/api/Dockerfile .
-# Redeploy trigger: Safari CORS fix (2026-05-25)
+# Redeploy trigger: TS test fixture fix (2026-05-25)
 #
 # The API runs TypeScript source via @swc-node/register because workspace
 # packages export TS entrypoints. A compiled-only image can be added later.

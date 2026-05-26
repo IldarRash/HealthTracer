@@ -70,7 +70,33 @@ describe("phase 2 contracts", () => {
     expect(goal.target).toEqual({});
   });
 
-  it("requires at least one onboarding goal", () => {
+  it("accepts onboarding payloads with required baseline profile fields", () => {
+    expect(() =>
+      onboardingSchema.parse({
+        user: {
+          displayName: "Alex",
+          timezone: "UTC",
+        },
+        profile: {
+          birthDate: "1992-04-12",
+          heightCm: 180,
+          baselineWeightKg: 82.5,
+          longevityDirection: {
+            statement: "Build durable fitness habits.",
+            tags: [],
+          },
+        },
+        quarterlyGoal: {
+          type: "general_wellness",
+          title: "Move consistently this quarter",
+          startDate: "2026-05-01",
+          targetDate: "2026-07-31",
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects onboarding payloads missing baseline profile fields", () => {
     expect(() =>
       onboardingSchema.parse({
         user: {
@@ -90,7 +116,7 @@ describe("phase 2 contracts", () => {
           targetDate: "2026-07-31",
         },
       }),
-    ).not.toThrow();
+    ).toThrow();
   });
 });
 

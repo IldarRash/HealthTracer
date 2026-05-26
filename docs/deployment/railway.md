@@ -148,7 +148,7 @@ The Web Dockerfile uses Next.js `output: "standalone"`. The container runs `node
 ## Domains and CORS
 
 - Assign Railway public domains (or custom domains) to both services.
-- Set `NEXT_PUBLIC_API_BASE_URL` on `health-web` to the API public URL (no trailing slash), then **rebuild** the web service.
+- Set `NEXT_PUBLIC_API_BASE_URL` on `health-web` to the API public URL (no trailing slash), then **rebuild** the web service. The web app calls the API through a same-origin `/api-proxy` rewrite, which avoids Safari cross-origin `Authorization` issues.
 - Set `CORS_ORIGINS` on `health-api` to the web public URL (comma-separated if you have staging + production).
 - The API reflects the request `Origin` by default instead of returning `Access-Control-Allow-Origin: *`. This is required for Safari on iOS, which blocks cross-origin `fetch()` calls that send `Authorization: Bearer ...` when the API responds with a wildcard origin.
 - If mobile shows `... could not be loaded` while `GET /health` works in the phone browser, check both `NEXT_PUBLIC_API_BASE_URL` (web rebuild) and `CORS_ORIGINS` (api redeploy).

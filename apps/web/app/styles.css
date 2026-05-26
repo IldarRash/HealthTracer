@@ -4430,11 +4430,24 @@ span.confirmation-card__meta {
 .onboarding-workspace {
   display: grid;
   gap: var(--space-6);
+  margin-inline: auto;
   max-width: 42rem;
+  width: 100%;
+}
+
+.onboarding-workspace__header {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-5);
 }
 
 .onboarding-workspace__header h1 {
-  margin: var(--space-2) 0;
+  margin: 0;
+}
+
+.app-shell__main--structured .onboarding-workspace__header.dashboard-card--coach {
+  border-color: rgb(45 212 191 / 45%);
+  box-shadow: var(--shadow-brand-soft);
 }
 
 .onboarding-progress {
@@ -4443,6 +4456,22 @@ span.confirmation-card__meta {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+@media (width >= 640px) {
+  .onboarding-progress {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .onboarding-progress__step {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .onboarding-progress__label {
+    font-size: var(--font-size-xs);
+  }
 }
 
 .onboarding-progress__step {
@@ -4493,14 +4522,248 @@ span.confirmation-card__meta {
   gap: var(--space-4);
 }
 
+.app-shell__main--structured .onboarding-step-panel.panel-prominent {
+  background: var(--color-surface-content-elevated);
+  border-color: var(--color-border-subtle);
+  box-shadow: var(--shadow-card-light);
+}
+
+.onboarding-step-panel__intro {
+  color: var(--color-text-on-light-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  margin: 0;
+}
+
 .onboarding-form {
   display: grid;
   gap: var(--space-4);
 }
 
+.onboarding-baseline-grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (width >= 640px) {
+  .onboarding-baseline-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.onboarding-goal-presets {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.onboarding-goal-presets__grid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (width >= 640px) {
+  .onboarding-goal-presets__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.onboarding-goal-preset {
+  background: var(--color-surface-content-muted);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.onboarding-goal-preset:hover {
+  border-color: var(--color-coach-400);
+  box-shadow: var(--shadow-focus);
+}
+
+.onboarding-goal-preset:focus-visible {
+  border-color: var(--color-border-focus);
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.onboarding-goal-preset--selected {
+  background: rgb(20 184 166 / 10%);
+  border-color: var(--color-coach-500);
+  box-shadow: var(--shadow-brand-soft);
+}
+
+.onboarding-goal-preset__label {
+  color: var(--color-text-on-light);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.onboarding-goal-preset__description {
+  color: var(--color-text-on-light-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.onboarding-goal-summary {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+
+.onboarding-goal-summary__title {
+  color: var(--color-text-on-light);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  margin: 0;
+}
+
+.onboarding-goal-summary__meta {
+  color: var(--color-text-on-light-secondary);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
 .onboarding-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.app-nav__onboarding-hint {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  flex: 1 1 auto;
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  margin: 0;
+  min-width: 0;
+  padding: 0.45rem 0.95rem;
+}
+
+.app-nav__lock-icon {
+  flex-shrink: 0;
+  height: 1rem;
+  opacity: 0.6;
+  width: 1rem;
+}
+
+/* Light structured canvas: onboarding stepper readability */
+.app-shell__main--structured .onboarding-progress__label {
+  color: var(--color-text-on-light-secondary);
+}
+
+.app-shell__main--structured .onboarding-progress__step--current .onboarding-progress__label {
+  color: var(--color-text-on-light);
+  font-weight: 600;
+}
+
+.app-shell__main--structured .onboarding-progress__marker {
+  background: var(--color-surface-content-muted);
+  border-color: var(--color-border-subtle);
+  color: var(--color-text-on-light-secondary);
+}
+
+.app-shell__main--structured .onboarding-progress__step--current .onboarding-progress__marker {
+  background: var(--color-coach-100);
+  border-color: var(--color-coach-600);
+  color: var(--color-coach-700);
+}
+
+.app-shell__main--structured .onboarding-progress__step--complete .onboarding-progress__marker {
+  background: var(--color-coach-500);
+  border-color: var(--color-coach-500);
+  color: var(--color-surface-content-elevated);
+}
+
+/* Light structured canvas: onboarding form fields */
+.app-shell__main--structured .onboarding-step-panel .section-label,
+.app-shell__main--structured .onboarding-goal-summary .section-label {
+  color: var(--color-text-on-light-secondary);
+}
+
+.app-shell__main--structured .onboarding-step-panel h2 {
+  color: var(--color-text-on-light);
+}
+
+.app-shell__main--structured .onboarding-form .form-field {
+  color: var(--color-text-on-light);
+}
+
+.app-shell__main--structured .onboarding-form .form-help {
+  color: var(--color-text-on-light-secondary);
+}
+
+.app-shell__main--structured .onboarding-form .form-field input[type="text"],
+.app-shell__main--structured .onboarding-form .form-field input[type="number"],
+.app-shell__main--structured .onboarding-form .form-field input[type="date"],
+.app-shell__main--structured .onboarding-form .form-field select,
+.app-shell__main--structured .onboarding-form .form-field textarea {
+  background: var(--color-surface-content-elevated);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-on-light);
+}
+
+.app-shell__main--structured .onboarding-form .form-field input[type="text"]:hover,
+.app-shell__main--structured .onboarding-form .form-field input[type="number"]:hover,
+.app-shell__main--structured .onboarding-form .form-field input[type="date"]:hover,
+.app-shell__main--structured .onboarding-form .form-field select:hover,
+.app-shell__main--structured .onboarding-form .form-field textarea:hover {
+  border-color: var(--color-coach-400);
+}
+
+.app-shell__main--structured .onboarding-form .form-field input[type="text"]:focus-visible,
+.app-shell__main--structured .onboarding-form .form-field input[type="number"]:focus-visible,
+.app-shell__main--structured .onboarding-form .form-field input[type="date"]:focus-visible,
+.app-shell__main--structured .onboarding-form .form-field select:focus-visible,
+.app-shell__main--structured .onboarding-form .form-field textarea:focus-visible {
+  border-color: var(--color-coach-500);
+  box-shadow: var(--shadow-focus);
+}
+
+/* Light structured canvas: selected preset goal summary */
+.app-shell__main--structured .onboarding-goal-summary.panel-secondary {
+  background: var(--color-surface-content-muted);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+/* Compact horizontal mobile stepper (< 640px) */
+@media (max-width: 639px) {
+  .onboarding-progress {
+    align-items: center;
+    display: flex;
+    gap: var(--space-1);
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+  }
+
+  .onboarding-progress__step {
+    align-items: center;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-1);
+    text-align: center;
+  }
+
+  .onboarding-progress__label {
+    display: none;
+  }
+
+  .onboarding-progress__step--current .onboarding-progress__label {
+    display: block;
+    font-size: var(--font-size-xs);
+    margin-top: var(--space-1);
+    white-space: nowrap;
+  }
 }
 
 .coaching-hierarchy {

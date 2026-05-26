@@ -5,6 +5,7 @@
 #   docker build -f apps/web/Dockerfile .
 #
 # Uses Next.js standalone output (see apps/web/next.config.mjs).
+# Redeploy trigger: same-origin API proxy for Safari (2026-05-25)
 
 FROM node:22-bookworm-slim AS base
 

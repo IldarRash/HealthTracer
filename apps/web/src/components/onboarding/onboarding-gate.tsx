@@ -13,7 +13,7 @@ import {
   shouldRedirectFromOnboarding,
   shouldRedirectToOnboarding,
 } from "../../lib/onboarding-ui-state";
-import { LoadingState } from "../ui";
+import { ErrorState, LoadingState } from "../ui";
 
 type OnboardingGateProps = {
   children: ReactNode;
@@ -79,7 +79,16 @@ export function OnboardingGate({ children }: OnboardingGateProps) {
   }
 
   if (userStateQuery.isError) {
-    return <>{children}</>;
+    return (
+      <ErrorState
+        title="Unable to load your account"
+        description={
+          userStateQuery.error instanceof Error
+            ? userStateQuery.error.message
+            : "Your account state could not be loaded."
+        }
+      />
+    );
   }
 
   const onboardingCompleted = userStateQuery.data?.onboardingCompleted ?? false;

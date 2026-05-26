@@ -62,6 +62,7 @@ const activeHabitPayload = {
 };
 
 function createCoachingContextService(overrides: {
+  user?: { onboardingCompletedAt?: string | null };
   workoutsRepository?: Record<string, unknown>;
   habitsRepository?: Record<string, unknown>;
   habitsService?: Record<string, unknown>;
@@ -76,6 +77,7 @@ function createCoachingContextService(overrides: {
         onboardingCompletedAt: "2026-05-20T12:00:00.000Z",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        ...overrides.user,
       }),
     } as never,
     {
@@ -268,6 +270,16 @@ describe("CoachingContextService", () => {
         tags: ["strength"],
       },
     });
+  });
+
+  it("keeps onboarding complete in context when legacy users are missing the timestamp", async () => {
+    const service = createCoachingContextService({
+      user: { onboardingCompletedAt: null },
+    });
+
+    const snapshot = await service.buildSnapshot(auth);
+
+    expect(snapshot.onboardingCompleted).toBe(true);
   });
 
   it("includes wellbeing summary in snapshot and prompt context without notes", async () => {

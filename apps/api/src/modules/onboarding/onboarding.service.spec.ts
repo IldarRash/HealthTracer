@@ -24,6 +24,9 @@ const onboardingInput = {
     timezone: "UTC",
   },
   profile: {
+    birthDate: "1992-04-12",
+    heightCm: 180,
+    baselineWeightKg: 82.5,
     activityLevel: "moderately_active" as const,
     longevityDirection: {
       statement: "Stay active and resilient.",
@@ -53,9 +56,9 @@ describe("OnboardingService", () => {
           profile: {
             id: "profile-1",
             userId: user.id,
-            birthDate: null,
-            heightCm: null,
-            baselineWeightKg: null,
+            birthDate: "1992-04-12",
+            heightCm: 180,
+            baselineWeightKg: 82.5,
             activityLevel: "moderately_active",
             trainingExperience: null,
             preferences: [],

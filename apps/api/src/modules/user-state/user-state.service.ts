@@ -3,6 +3,7 @@ import {
   buildCoachingHierarchySummary,
   getTodayIsoDateInTimezone,
   getWeekStartIsoDate,
+  hasCompletedOnboardingState,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
@@ -26,12 +27,15 @@ export class UserStateService {
     ]);
     const weekStart = getWeekStartIsoDate(getTodayIsoDateInTimezone(user.timezone));
 
+    const hierarchy = buildCoachingHierarchySummary(profile, goals, weekStart);
+
     return {
       user,
       profile,
       goals,
-      onboardingCompleted: user.onboardingCompletedAt != null,
-      hierarchy: buildCoachingHierarchySummary(profile, goals, weekStart),
+      onboardingCompleted:
+        user.onboardingCompletedAt != null || hasCompletedOnboardingState(profile, goals),
+      hierarchy,
     };
   }
 }

@@ -6,6 +6,7 @@ import {
   getGoalHierarchyValidationErrors,
   getGoalParentReferenceErrors,
   getWeekStartIsoDate,
+  hasCompletedOnboardingState,
   mergeGoalHierarchyState,
   onboardingQuarterlyGoalSchema,
 } from "./goal-hierarchy.js";
@@ -159,41 +160,65 @@ describe("goal hierarchy helpers", () => {
     expect(summary.activeQuarterlyGoal?.id).toBe("q1");
     expect(summary.weeklyFocus).toHaveLength(1);
   });
-});
 
-describe("onboarding contracts", () => {
-  it("requires user, profile direction, and quarterly goal", () => {
-    expect(() =>
-      onboardingContractSchema.parse({
-        user: {
-          displayName: "Alex",
-          timezone: "UTC",
-        },
-        profile: {
-          activityLevel: "moderately_active",
+  it("detects completed onboarding from saved direction and active quarterly goal", () => {
+    expect(
+      hasCompletedOnboardingState(
+        {
           longevityDirection: {
-            statement: "Build durable fitness habits.",
-            tags: ["consistency"],
+            statement: "Stay strong and mobile for decades.",
+            tags: ["strength"],
           },
         },
-        quarterlyGoal: {
-          type: "general_wellness",
-          title: "Complete 36 workouts this quarter",
-          startDate: "2026-05-01",
-          targetDate: "2026-07-31",
-        },
-      }),
-    ).not.toThrow();
+        [{ id: "q1", status: "active", horizon: "quarterly", weekStart: null }],
+      ),
+    ).toBe(true);
+
+    expect(
+      hasCompletedOnboardingState(
+        { longevityDirection: null },
+        [{ id: "q1", status: "active", horizon: "quarterly", weekStart: null }],
+      ),
+    ).toBe(false);
+  });
+});
+
+const validOnboardingPayload = {
+  user: {
+    displayName: "Alex",
+    timezone: "UTC",
+  },
+  profile: {
+    birthDate: "1992-04-12",
+    heightCm: 180,
+    baselineWeightKg: 82.5,
+    activityLevel: "moderately_active" as const,
+    longevityDirection: {
+      statement: "Build durable fitness habits.",
+      tags: ["consistency"],
+    },
+  },
+  quarterlyGoal: {
+    type: "general_wellness" as const,
+    title: "Complete 36 workouts this quarter",
+    startDate: "2026-05-01",
+    targetDate: "2026-07-31",
+  },
+};
+
+describe("onboarding contracts", () => {
+  it("requires user, baseline profile fields, direction, and quarterly goal", () => {
+    expect(() => onboardingContractSchema.parse(validOnboardingPayload)).not.toThrow();
   });
 
   it("rejects onboarding payloads without longevity direction", () => {
     expect(() =>
       onboardingContractSchema.parse({
-        user: {
-          displayName: "Alex",
-          timezone: "UTC",
-        },
+        ...validOnboardingPayload,
         profile: {
+          birthDate: "1992-04-12",
+          heightCm: 180,
+          baselineWeightKg: 82.5,
           activityLevel: "moderately_active",
         },
         quarterlyGoal: onboardingQuarterlyGoalSchema.parse({
@@ -202,6 +227,45 @@ describe("onboarding contracts", () => {
           startDate: "2026-05-01",
           targetDate: "2026-07-31",
         }),
+      }),
+    ).toThrow();
+  });
+
+  it("rejects onboarding payloads missing birthDate", () => {
+    expect(() =>
+      onboardingContractSchema.parse({
+        ...validOnboardingPayload,
+        profile: {
+          heightCm: 180,
+          baselineWeightKg: 82.5,
+          longevityDirection: validOnboardingPayload.profile.longevityDirection,
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects onboarding payloads missing heightCm", () => {
+    expect(() =>
+      onboardingContractSchema.parse({
+        ...validOnboardingPayload,
+        profile: {
+          birthDate: "1992-04-12",
+          baselineWeightKg: 82.5,
+          longevityDirection: validOnboardingPayload.profile.longevityDirection,
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects onboarding payloads missing baselineWeightKg", () => {
+    expect(() =>
+      onboardingContractSchema.parse({
+        ...validOnboardingPayload,
+        profile: {
+          birthDate: "1992-04-12",
+          heightCm: 180,
+          longevityDirection: validOnboardingPayload.profile.longevityDirection,
+        },
       }),
     ).toThrow();
   });
