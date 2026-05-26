@@ -68,6 +68,7 @@ import {
   listHabitRevisions,
   listWorkoutRevisions,
   parseApiErrorBody,
+  getApiErrorMessage,
   reviewDocumentSummary,
   scheduleWorkoutSession,
   startTodayWorkout,
@@ -344,15 +345,68 @@ describe("web api helpers", () => {
   });
 
   it("returns API errors for non-OK proposal decisions", async () => {
+    const requestId = "11111111-1111-4111-8111-111111111111";
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response("forbidden", { status: 403 })),
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect((init?.headers as Record<string, string>)["x-request-id"]).toBeTruthy();
+
+        return new Response("forbidden", {
+          status: 403,
+          headers: { "x-request-id": requestId },
+        });
+      }),
     );
 
     const result = await decideProposal(token, "14a08176-64a7-4a2d-8a44-581807368394", "reject");
 
     expect(result.data).toBeUndefined();
+    expect(result.requestId).toBe(requestId);
     expect(result.error).toBe("forbidden");
+    expect(getApiErrorMessage(result)).toBe(
+      `forbidden (Request ID: ${requestId})`,
+    );
+  });
+
+  it("preserves request id when fetch fails before a response is received", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+
+    const result = await getActiveWorkoutPlan(token);
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toBe("/workouts/active could not be loaded");
+    expect(result.requestId).toMatch(
+      /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i,
+    );
+  });
+
+  it("sends x-request-id on every API call", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = init?.headers as Record<string, string>;
+        expect(headers["x-request-id"]).toMatch(
+          /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i,
+        );
+
+        return new Response(JSON.stringify({ plan: null, activeRevision: null, sessions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+
+    const result = await getActiveWorkoutPlan(token);
+
+    expect(result.error).toBeUndefined();
+    expect(result.requestId).toMatch(
+      /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i,
+    );
   });
 
   it("surfaces Nest validation errors from JSON error bodies", async () => {

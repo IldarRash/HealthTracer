@@ -2,6 +2,8 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module.js";
 import { env } from "./env.js";
+import { REQUEST_ID_HEADER } from "./observability/request-id.js";
+import { logListening, logStartupDiagnostics } from "./observability/startup-diagnostics.js";
 
 function resolveCorsOrigin():
   | boolean
@@ -23,14 +25,19 @@ function resolveCorsOrigin():
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: false,
+  });
   app.enableCors({
     origin: resolveCorsOrigin(),
     credentials: true,
-    allowedHeaders: ["Authorization", "Content-Type"],
+    allowedHeaders: ["Authorization", "Content-Type", REQUEST_ID_HEADER],
+    exposedHeaders: [REQUEST_ID_HEADER],
     methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
   });
   await app.listen(env.API_PORT, "0.0.0.0");
+  logListening(env.API_PORT);
+  logStartupDiagnostics(env.API_PORT);
 }
 
 void bootstrap();

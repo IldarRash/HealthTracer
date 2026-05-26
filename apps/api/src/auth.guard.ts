@@ -26,7 +26,13 @@ export class ClerkAuthGuard implements CanActivate {
       throw new UnauthorizedException("Bearer token is required.");
     }
 
-    const { payload } = await jwtVerify(token, this.jwks);
+    let payload: JWTPayload;
+    try {
+      ({ payload } = await jwtVerify(token, this.jwks));
+    } catch {
+      throw new UnauthorizedException("Invalid or expired bearer token.");
+    }
+
     const clerkUserId = payload.sub;
 
     if (!clerkUserId) {

@@ -74,13 +74,16 @@ Create a new service from the GitHub repo (or empty service + connect repo).
 
 Store secrets (`OPENAI_API_KEY`, `DATABASE_URL` if not referenced) in Railway **Variables** marked as secrets. Do not commit them.
 
-**Generate a public domain** for the API service (e.g. `https://health-api-production.up.railway.app`).
+**Generate a public domain** for the API service, then use it as `https://<api-domain>`.
 
 **Verify**
 
 ```bash
 curl -sS https://<api-domain>/health
 # Expected: {"service":"api","status":"ok"}
+
+curl -sS https://<api-domain>/health/ready
+# Expected: {"service":"api","status":"ok","checks":[...]}
 ```
 
 ### 3. Run database migrations (MVP: manual)
@@ -94,6 +97,12 @@ Link the project and run migrations with the production `DATABASE_URL`:
 ```bash
 railway link
 railway run --service health-api pnpm --dir packages/db db:migrate
+```
+
+If API runtime `DATABASE_URL` uses Railway private networking, keep it private and run migrations with an explicit one-off command that maps the public migration URL into `DATABASE_URL` only for that process:
+
+```bash
+railway.cmd run --service health-api powershell -NoProfile -Command '$env:DATABASE_URL=$env:MIGRATION_DATABASE_URL; pnpm --dir packages/db db:migrate'
 ```
 
 If migrations must run without the API service context, set `DATABASE_URL` on a shell service or use `railway variables` and run from a local machine with the remote URL (handle credentials securely).
@@ -135,7 +144,7 @@ Create a second service from the same repo.
 | Variable                              | Value                                      |
 |---------------------------------------|--------------------------------------------|
 | `PORT`                                | Railway (automatic)                        |
-| `NEXT_PUBLIC_API_BASE_URL`            | `https://<api-service-public-domain>`      | Example: `https://health-api-production-e6d8.up.railway.app` |
+| `NEXT_PUBLIC_API_BASE_URL`            | `https://<api-service-public-domain>`      | No trailing slash |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`   | Clerk publishable key                      |
 | `CLERK_SECRET_KEY`                    | Clerk secret (Railway secret)              |
 
@@ -148,7 +157,7 @@ The Web Dockerfile uses Next.js `output: "standalone"`. The container runs `node
 ## Domains and CORS
 
 - Assign Railway public domains (or custom domains) to both services.
-- Set `NEXT_PUBLIC_API_BASE_URL` on `health-web` to the API public URL (no trailing slash), then **rebuild** the web service. The web app calls the API through a same-origin `/api-proxy` rewrite, which avoids Safari cross-origin `Authorization` issues.
+- Set `NEXT_PUBLIC_API_BASE_URL` on `health-web` to the API public URL (no trailing slash), then **rebuild** the web service. The web app calls the API through a same-origin `/api-proxy` route handler proxy, which avoids Safari cross-origin `Authorization` issues.
 - Set `CORS_ORIGINS` on `health-api` to the web public URL (comma-separated if you have staging + production).
 - The API reflects the request `Origin` by default instead of returning `Access-Control-Allow-Origin: *`. This is required for Safari on iOS, which blocks cross-origin `fetch()` calls that send `Authorization: Bearer ...` when the API responds with a wildcard origin.
 - If mobile shows `... could not be loaded` while `GET /health` works in the phone browser, check both `NEXT_PUBLIC_API_BASE_URL` (web rebuild) and `CORS_ORIGINS` (api redeploy).
@@ -164,22 +173,68 @@ Railway container filesystem is **ephemeral** unless a volume is attached. Uploa
 
 For MVP, treat document persistence as a known limitation unless a volume is configured.
 
-## Logs
+## Logs and incident runbook
 
-Railway captures stdout/stderr from each service.
+Railway captures stdout/stderr from each service. `health-api` and `health-web` write structured JSON logs so support can filter by service, event, request id, route, status, and duration.
 
 | Channel              | How to view                                      |
 |----------------------|--------------------------------------------------|
 | Dashboard            | Service → Deployments / Observability / Logs     |
-| Build logs           | Deployment details or `railway logs --build`     |
-| Runtime logs         | `railway logs`                                   |
-| Recent tail          | `railway logs -n 100`                            |
+| Build logs           | Deployment details or `railway logs --service health-api --build` |
+| Runtime logs         | `railway logs --service health-api`              |
+| Recent JSON tail     | `railway logs --service health-api --json --lines 200` |
+| Web proxy logs       | `railway logs --service health-web --json --lines 200` |
+| HTTP/edge logs       | `railway logs --service health-api --lines 200 --filter "@httpStatus:500"` |
+| Metrics              | `railway metrics --service health-api --since 1h` |
 
-**Logging rules**
+Useful Railway HTTP edge log filters use Railway metadata such as `httpStatus`:
 
-- NestJS and Next log to stdout/stderr only.
-- Do not log API keys, raw AI prompts, document contents, or private health data.
-- For long-term retention, add a log drain (Axiom, Datadog, Logtail, etc.) later.
+```bash
+railway logs --service health-api --json --lines 200
+railway logs --service health-web --json --lines 200
+railway logs --service health-api --build --lines 200
+railway logs --service health-api --lines 200 --filter "@httpStatus:500 OR @httpStatus:502"
+railway metrics --service health-api --http --since 1h
+```
+
+Useful app JSON structured log filters use fields emitted by `health-api` and `health-web`, such as `requestId`, `path`, `statusCode`, `level`, `event`, and `errorCategory`:
+
+```bash
+railway logs --service health-api --json --lines 500 | rg '"requestId":"<request-id>"'
+railway logs --service health-api --json --lines 500 | rg '"path":"/health/ready"'
+railway logs --service health-api --json --lines 500 | rg '"event":"http.exception"|"level":"error"'
+railway logs --service health-api --json --lines 500 | rg '"statusCode":5|"errorCategory":"database"|"errorCategory":"auth_jwks"|"errorCategory":"ai_provider"'
+railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"statusCode":502'
+```
+
+**Implemented behavior**
+
+- `health-api` logs JSON entries with `service`, `environment`, `level`, `timestamp`, `event`, `requestId`, `method`, `path`, `statusCode`, `durationMs`, and safe error categories.
+- `health-api` accepts or generates `x-request-id`, returns it on responses, and includes it in request and exception logs.
+- `GET /health` is cheap liveness. `GET /health/ready` checks required config and database connectivity.
+- API startup diagnostics log whether integrations are configured, without printing secret values.
+- `health-web` logs startup diagnostics and `/api-proxy` route handler requests as JSON with `service: "health-web"`, `event: "api_proxy"`, `requestId`, route, status, and duration.
+- Web `ApiResult` includes `requestId`; UI error helpers can display it as `Request ID: ...` for support.
+
+**Trace a failing UI action**
+
+1. Reproduce the failure and copy the `Request ID` shown in the UI or network response header `x-request-id`.
+2. Search `health-web` logs for that id to see the `/api-proxy` status and duration.
+3. Search `health-api` logs for the same id to find the backend request, status, duration, and any `http.exception` entry.
+4. If the id appears only in web logs, check `NEXT_PUBLIC_API_BASE_URL`, upstream connectivity, API deploy status, and web proxy `502` logs.
+5. If the id appears in API logs with `5xx`, check `errorCategory`, startup diagnostics, `/health/ready`, and service metrics.
+
+**Privacy rules**
+
+- Do not log API keys, bearer tokens, raw AI prompts, document contents, private health payloads, or full request bodies.
+- Share request ids, status codes, sanitized paths, durations, safe error categories, and readiness check names instead.
+- Treat Railway variable output as sensitive; do not paste secret-bearing command output into tickets or chat.
+
+**Future observability**
+
+- Add a Railway log drain for retention and alerting (Axiom, Better Stack, Datadog, Logtail, etc.).
+- Add Sentry for frontend/backend exceptions once release/environment tags and privacy scrubbing are configured.
+- Consider OpenTelemetry/APM traces after request-id logging is stable.
 
 ## Rollback
 
@@ -196,10 +251,11 @@ Railway captures stdout/stderr from each service.
 - [ ] API env vars set (Clerk JWKS, DB, AI provider)
 - [ ] Migrations applied: `pnpm --dir packages/db db:migrate`
 - [ ] `GET /health` returns 200 on API public URL
+- [ ] `GET /health/ready` returns 200 with `status: "ok"`
 - [ ] `health-web` deployed from `apps/web/Dockerfile`
 - [ ] Web env vars set (`NEXT_PUBLIC_API_BASE_URL`, Clerk keys)
 - [ ] Web app loads on public URL
-- [ ] Authenticated flows reach API (check Railway logs for auth/DB errors, not sensitive payloads)
+- [ ] Authenticated flows reach API; request ids appear in both `health-web` and `health-api` logs
 - [ ] Document upload expectations documented (ephemeral storage unless volume added)
 
 ## Troubleshooting
@@ -210,6 +266,12 @@ Railway captures stdout/stderr from each service.
 | Web shows wrong API             | Stale build; `NEXT_PUBLIC_API_BASE_URL` needs rebuild |
 | Mobile Safari: content unavailable, desktop OK | API CORS wildcard or stale web build; set `CORS_ORIGINS`, rebuild web |
 | 502 / connection refused        | Service not listening on `PORT` or health check mismatch |
+| `/health` OK, `/health/ready` fails | API process is live, but DB or required config is not ready |
+| UI shows `Request ID: ...`      | Search web and API logs for the id to trace the failing request |
+| Request id only appears in web logs | API is unreachable from proxy, API base URL is wrong, or upstream returned no response |
+| `http.exception` with `auth_jwks` | Clerk JWKS config or token validation issue |
+| `http.exception` with `database` | Postgres connectivity, migration, or query failure |
+| `api_proxy` 502 in web logs     | `health-web` could not reach `health-api`; check API deploy and `NEXT_PUBLIC_API_BASE_URL` |
 | Migrations fail                 | Wrong `DATABASE_URL`, or migration order conflict |
 | Uploads disappear after deploy  | Ephemeral filesystem; add volume or object storage  |
 

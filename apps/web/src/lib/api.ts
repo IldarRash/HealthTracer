@@ -145,6 +145,12 @@ import {
 } from "@health/types";
 import { z } from "zod";
 import { clientApiBaseUrl } from "../env";
+import {
+  REQUEST_ID_HEADER,
+  createRequestId,
+  getApiErrorMessage,
+  normalizeRequestId,
+} from "./request-correlation";
 
 export type InspectorState = {
   user: User | null;
@@ -161,7 +167,10 @@ export type ChatThreadDetail = {
 export type ApiResult<T> = {
   data?: T;
   error?: string;
+  requestId?: string;
 };
+
+export { getApiErrorMessage };
 
 export const apiQueryKeys = {
   currentUser: ["current-user"],
@@ -750,10 +759,10 @@ export async function listHabitRevisions(
   );
 
   if (result.error) {
-    return { error: result.error };
+    return { error: result.error, requestId: result.requestId };
   }
 
-  return { data: result.data?.revisions ?? [] };
+  return { data: result.data?.revisions ?? [], requestId: result.requestId };
 }
 
 export function buildHabitAdherenceQueryString(window: HabitAdherenceWindow): string {
@@ -1082,10 +1091,10 @@ export async function previewHealthMetricsAiContext(
 export async function listDocuments(token: string): Promise<ApiResult<HealthDocument[]>> {
   const result = await apiFetch("/documents", token, healthDocumentListResponseSchema);
   if (result.error) {
-    return { error: result.error };
+    return { error: result.error, requestId: result.requestId };
   }
 
-  return { data: result.data?.documents ?? [] };
+  return { data: result.data?.documents ?? [], requestId: result.requestId };
 }
 
 export async function getDocument(
@@ -1314,6 +1323,22 @@ async function readResponseBody(response: Response): Promise<unknown> {
   }
 }
 
+function resolveResponseRequestId(
+  requestId: string,
+  response: Response,
+): string {
+  const headerValue =
+    typeof response.headers?.get === "function"
+      ? response.headers.get(REQUEST_ID_HEADER)
+      : null;
+
+  return normalizeRequestId(headerValue) ?? requestId;
+}
+
+function buildApiErrorResult(message: string, requestId: string): ApiResult<never> {
+  return { error: message, requestId };
+}
+
 async function apiFetch<TSchema extends z.ZodType>(
   path: string,
   token: string,
@@ -1321,6 +1346,7 @@ async function apiFetch<TSchema extends z.ZodType>(
   options: ApiFetchOptions = {},
 ): Promise<ApiResult<z.infer<TSchema>>> {
   const { method = "GET", body } = options;
+  const requestId = createRequestId();
 
   try {
     const response = await fetch(`${clientApiBaseUrl}${path}`, {
@@ -1328,20 +1354,26 @@ async function apiFetch<TSchema extends z.ZodType>(
       method,
       headers: {
         Authorization: `Bearer ${token}`,
+        [REQUEST_ID_HEADER]: requestId,
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
 
+    const responseRequestId = resolveResponseRequestId(requestId, response);
+
     if (!response.ok) {
       const errorBody = await readResponseBody(response);
-      return { error: parseApiErrorBody(path, response.status, errorBody) };
+      return buildApiErrorResult(
+        parseApiErrorBody(path, response.status, errorBody),
+        responseRequestId,
+      );
     }
 
     const responseBody = await readResponseBody(response);
-    return { data: schema.parse(responseBody) };
+    return { data: schema.parse(responseBody), requestId: responseRequestId };
   } catch {
-    return { error: `${path} could not be loaded` };
+    return buildApiErrorResult(`${path} could not be loaded`, requestId);
   }
 }
 

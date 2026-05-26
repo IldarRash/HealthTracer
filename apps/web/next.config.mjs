@@ -14,16 +14,6 @@ const nextConfig = {
   output: "standalone",
   outputFileTracingRoot: monorepoRoot,
   transpilePackages: ["@health/types", "@health/ui"],
-  async rewrites() {
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
-
-    return [
-      {
-        source: "/api-proxy/:path*",
-        destination: `${apiBase}/:path*`,
-      },
-    ];
-  },
   turbopack: {
     // Turbopack has no extensionAlias; rewrite relative ".js" specifiers in TS
     // sources so NodeNext-style workspace packages resolve during bundling.

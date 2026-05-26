@@ -1,6 +1,8 @@
-import { Module } from "@nestjs/common";
+import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { HealthController } from "./health.controller.js";
 import { DatabaseModule } from "./database/database.module.js";
+import { ObservabilityModule } from "./observability/observability.module.js";
+import { RequestIdMiddleware } from "./observability/request-id.middleware.js";
 import { AiModule } from "./modules/ai/ai.module.js";
 import { ChatModule } from "./modules/chat/chat.module.js";
 import { CoachingContextModule } from "./modules/coaching-context/coaching-context.module.js";
@@ -26,6 +28,7 @@ import { WorkoutsModule } from "./modules/workouts/workouts.module.js";
 @Module({
   imports: [
     DatabaseModule,
+    ObservabilityModule,
     UsersModule,
     UserStateModule,
     OnboardingModule,
@@ -50,4 +53,8 @@ import { WorkoutsModule } from "./modules/workouts/workouts.module.js";
   ],
   controllers: [HealthController],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes("*");
+  }
+}

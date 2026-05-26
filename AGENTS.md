@@ -28,7 +28,7 @@ Hard rule: the Feature Planner never writes implementation code for feature work
 1. The user describes the feature they want to build.
 2. Feature Planner launches Product Analyst as a subagent to clarify the problem, scope, acceptance criteria, risks, and an initial implementation plan.
 3. Product Analyst writes the analyzed feature brief to `docs/product/features/<feature-slug>.md`.
-4. Feature Planner reviews and refines the feature brief into the final implementation plan, breaks it into smaller role-specific tasks, then asks the user for approval before implementation starts.
+4. Feature Planner reviews and refines the feature brief into the final implementation plan, breaks it into smaller role-specific tasks, then asks the user for approval before implementation starts. If Product Analyst added to or changed the feature brief, those latest changes are authoritative planning input and must be considered by every implementation, testing, review, and runtime-verification subagent before source changes begin.
 5. After the plan is approved, Feature Planner explicitly asks the user to confirm which subagents should be used or skipped. The planner should propose a default subagent list and call out any roles that are unnecessary for the narrowed scope.
 6. After subagent confirmation, Feature Planner invokes the needed implementation, testing, and review subagents in order:
    - N Backend Implementer subagents build NestJS, Drizzle, Zod, repositories, services, and backend tests.
@@ -40,7 +40,8 @@ Hard rule: the Feature Planner never writes implementation code for feature work
    - Implementation Reviewer subagent checks correctness, architecture fit, security, tests, and docs impact.
 7. App Runner subagent starts the local stack from database dependencies through API and frontend, verifies the target routes or smoke flow, and returns running URLs, commands, status, screenshots or browser notes when useful, blockers, and the next required owner.
 8. If runtime, review, test, or live design verification fails, Feature Planner assigns the smallest corrective task to the right subagent and repeats the verification loop.
-9. Feature Planner integrates subagent outputs, keeps the main dialog coherent, and reports the final result only after App Runner reports `working` for the relevant flow, or after a specific blocker prevents runtime verification.
+9. After a feature is implemented and verified, Feature Planner updates the project knowledge base before final reporting. Use `agents-memory-updater` for durable agent knowledge and update relevant docs/rules when implementation changes product or architecture guidance.
+10. Feature Planner integrates subagent outputs, keeps the main dialog coherent, and reports the final result only after App Runner reports `working` for the relevant flow, or after a specific blocker prevents runtime verification.
 
 Role templates live in `.cursor/agents`.
 
