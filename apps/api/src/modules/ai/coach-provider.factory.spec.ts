@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  createCoachAiProvider,
+  OpenAiCoachProviderMissingKeyError,
+  resolveAiCoachProviderMode,
+} from "./coach-provider.factory.js";
 
 const mockEnv = vi.hoisted(() => ({
   AI_COACH_PROVIDER: "stub" as "stub" | "openai",
@@ -14,19 +19,15 @@ describe("coach provider factory", () => {
   afterEach(() => {
     mockEnv.AI_COACH_PROVIDER = "stub";
     mockEnv.OPENAI_API_KEY = undefined;
-    vi.resetModules();
   });
 
-  it("resolves the configured provider mode from env", async () => {
+  it("resolves the configured provider mode from env", () => {
     mockEnv.AI_COACH_PROVIDER = "openai";
-    const { resolveAiCoachProviderMode } = await import("./coach-provider.factory.js");
 
     expect(resolveAiCoachProviderMode()).toBe("openai");
   });
 
   it("returns the stub provider by default", async () => {
-    const { createCoachAiProvider } = await import("./coach-provider.factory.js");
-
     const provider = createCoachAiProvider();
 
     expect(provider.constructor.name).toBe("StubCoachAiProvider");
@@ -39,23 +40,17 @@ describe("coach provider factory", () => {
     });
   });
 
-  it("throws a clear error when openai is selected without an API key", async () => {
+  it("throws a clear error when openai is selected without an API key", () => {
     mockEnv.AI_COACH_PROVIDER = "openai";
     mockEnv.OPENAI_API_KEY = undefined;
-
-    const { createCoachAiProvider, OpenAiCoachProviderMissingKeyError } = await import(
-      "./coach-provider.factory.js"
-    );
 
     expect(() => createCoachAiProvider()).toThrow(OpenAiCoachProviderMissingKeyError);
     expect(() => createCoachAiProvider()).toThrow(/OPENAI_API_KEY is not configured/);
   });
 
-  it("returns the OpenAI provider when openai is selected with an API key", async () => {
+  it("returns the OpenAI provider when openai is selected with an API key", () => {
     mockEnv.AI_COACH_PROVIDER = "openai";
     mockEnv.OPENAI_API_KEY = "sk-test-key";
-
-    const { createCoachAiProvider } = await import("./coach-provider.factory.js");
 
     const provider = createCoachAiProvider();
 

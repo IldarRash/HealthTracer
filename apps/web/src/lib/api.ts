@@ -45,7 +45,6 @@ import {
   type AiMetricsContextSummary,
   type AiProposal,
   type ChatMessage,
-  type ChatProposalRevision,
   type ChatThread,
   type ChatTurnResponse,
   type SendChatMessageInput,

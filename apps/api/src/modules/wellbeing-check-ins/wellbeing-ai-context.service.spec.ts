@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getTodayIsoDateInTimezone, shiftIsoDate } from "@health/types";
 import { WellbeingAiContextService } from "./wellbeing-ai-context.service.js";
 
 const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
@@ -47,12 +48,13 @@ describe("WellbeingAiContextService", () => {
   });
 
   it("excludes raw notes and crisis text while preserving sufficiency and trends", async () => {
+    const today = getTodayIsoDateInTimezone("UTC");
     const service = new WellbeingAiContextService({
       listRecentByUserId: async () => [
         {
           id: checkInOneId,
           userId,
-          date: "2026-05-22",
+          date: shiftIsoDate(today, -3),
           moodScore: 2,
           stressScore: 5,
           tags: [],
@@ -65,7 +67,7 @@ describe("WellbeingAiContextService", () => {
         {
           id: checkInTwoId,
           userId,
-          date: "2026-05-23",
+          date: shiftIsoDate(today, -2),
           moodScore: 3,
           stressScore: 4,
           tags: [],
@@ -78,7 +80,7 @@ describe("WellbeingAiContextService", () => {
         {
           id: "a1000003-0000-4000-8000-000000000003",
           userId,
-          date: "2026-05-24",
+          date: shiftIsoDate(today, -1),
           moodScore: 4,
           stressScore: 3,
           tags: [],
@@ -91,7 +93,7 @@ describe("WellbeingAiContextService", () => {
         {
           id: "a1000004-0000-4000-8000-000000000004",
           userId,
-          date: "2026-05-25",
+          date: today,
           moodScore: 5,
           stressScore: 2,
           tags: [],
@@ -107,7 +109,7 @@ describe("WellbeingAiContextService", () => {
     const summary = await service.buildSummaryForUser(userId, "UTC");
 
     expect(summary).toMatchObject({
-      latestDate: "2026-05-25",
+      latestDate: today,
       latestMoodScore: 5,
       latestStressScore: 2,
       checkInCount: 4,
