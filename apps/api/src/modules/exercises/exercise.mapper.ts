@@ -2,11 +2,14 @@ import { exercises } from "@health/db";
 import {
   exerciseDifficultySchema,
   exerciseEquipmentSchema,
+  exerciseMediaSchema,
+  exerciseModalitySchema,
   exerciseMovementPatternSchema,
   exerciseMuscleSchema,
   exerciseSchema,
   exerciseSourceSchema,
   exerciseValidationStatusSchema,
+  inferExerciseModalitiesFromMovementPatterns,
   type CreateExerciseInput,
   type Exercise,
   type ExerciseListResponse,
@@ -29,9 +32,18 @@ export function toExercise(row: ExerciseRow): Exercise {
     movementPatterns: row.movementPatterns.map((pattern) =>
       exerciseMovementPatternSchema.parse(pattern),
     ),
+    modalities: (row.modalities?.length
+      ? row.modalities
+      : inferExerciseModalitiesFromMovementPatterns(
+          row.movementPatterns as Exercise["movementPatterns"],
+        )
+    ).map((modality) => exerciseModalitySchema.parse(modality)),
     difficulty: exerciseDifficultySchema.parse(row.difficulty),
     instructions: row.instructions,
     safetyNotes: row.safetyNotes,
+    media: exerciseMediaSchema.parse(
+      row.media ?? { refs: [], fallbackLabel: "Demonstration coming soon" },
+    ),
     source: exerciseSourceSchema.parse(row.source),
     validationStatus: exerciseValidationStatusSchema.parse(row.validationStatus),
     status: row.status as Exercise["status"],

@@ -25,6 +25,10 @@ describe("ProposalValidationService correlation evidence", () => {
         findActivePlanByUserId: async () => null,
         findActiveRevisionByPlanId: async () => null,
       } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { listByIdsForUser: async () => [] } as never,
     );
 
     const result = service.validateRawProposal({

@@ -1,4 +1,10 @@
-import type { RecipeIngredient, RecipeMacroEstimates, RecipeMealType } from "@health/types";
+import type {
+  RecipeConfidenceBand,
+  RecipeIngredient,
+  RecipeMacroEstimates,
+  RecipeMealType,
+  RecipeProvenance,
+} from "@health/types";
 
 export const THEMEALDB_PROVIDER = "themealdb" as const;
 
@@ -20,6 +26,8 @@ export interface ProviderRecipeDraft {
   prepMinutes: number | null;
   cookMinutes: number | null;
   source: string;
+  confidence: RecipeConfidenceBand;
+  provenance: RecipeProvenance;
 }
 
 export interface RecipeCatalogProvider {

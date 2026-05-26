@@ -294,6 +294,78 @@ describe("phase 3 contracts", () => {
     ).toThrow();
   });
 
+  it("parses wellbeing and nutrition incident raw AI proposals", () => {
+    expect(
+      rawAiProposalSchema.parse({
+        intent: "capture_wellbeing_checkin",
+        targetDomain: "general",
+        title: "Wellbeing check-in",
+        reason: "You mentioned feeling off today.",
+        proposedChanges: {
+          date: "2026-05-26",
+          moodScore: 2,
+          stressScore: 3,
+          energyLevel: 2,
+          note: null,
+          tags: [],
+          safetyFlags: [],
+        },
+      }).intent,
+    ).toBe("capture_wellbeing_checkin");
+
+    expect(
+      rawAiProposalSchema.parse({
+        intent: "log_nutrition_incident",
+        targetDomain: "nutrition",
+        title: "Log nutrition incident",
+        reason: "Review this estimate before confirming.",
+        proposedChanges: {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Pizza slice", calories: 280 }],
+          estimatedCalories: 280,
+          estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+          confidence: "medium",
+          provenance: { source: "text_estimate", providerId: "chat_trigger" },
+          imageRefs: [],
+        },
+      }).intent,
+    ).toBe("log_nutrition_incident");
+  });
+
+  it("rejects invalid wellbeing and nutrition incident raw AI proposals", () => {
+    expect(() =>
+      rawAiProposalSchema.parse({
+        intent: "capture_wellbeing_checkin",
+        targetDomain: "general",
+        title: "Wellbeing check-in",
+        reason: "Invalid payload.",
+        proposedChanges: {
+          date: "2026-05-26",
+          moodScore: 9,
+          stressScore: 3,
+        },
+      }),
+    ).toThrow();
+
+    expect(() =>
+      rawAiProposalSchema.parse({
+        intent: "log_nutrition_incident",
+        targetDomain: "nutrition",
+        title: "Log nutrition incident",
+        reason: "Invalid payload.",
+        proposedChanges: {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [],
+          estimatedCalories: 0,
+          estimatedMacros: { proteinGrams: 0, carbsGrams: 0, fatGrams: 0 },
+          confidence: "medium",
+          provenance: { source: "text_estimate" },
+          imageRefs: [],
+        },
+      }),
+    ).toThrow();
+  });
+
   it("validates minimal workout and today payloads", () => {
     expect(() =>
       workoutPlanPayloadSchema.parse({
@@ -325,6 +397,18 @@ describe("phase 3 contracts", () => {
     expect(() =>
       proposalDecisionSchema.parse({
         decision: "modify",
+      }),
+    ).toThrow();
+    expect(
+      proposalDecisionSchema.parse({
+        decision: "accept",
+        proposedChanges: { moodScore: 2, stressScore: 3, date: "2026-05-26" },
+      }).proposedChanges,
+    ).toEqual({ moodScore: 2, stressScore: 3, date: "2026-05-26" });
+    expect(() =>
+      proposalDecisionSchema.parse({
+        decision: "reject",
+        proposedChanges: { moodScore: 2 },
       }),
     ).toThrow();
   });
@@ -832,6 +916,10 @@ describe("phase 7 recipe contracts", () => {
         prepMinutes: 5,
         cookMinutes: 0,
         source: "health_tracer_seed",
+        confidence: "medium",
+        provenance: {
+          source: "seed_catalog",
+        },
         status: "active",
         createdAt: timestamp,
         updatedAt: timestamp,

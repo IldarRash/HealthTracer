@@ -1,5 +1,6 @@
 import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 export * from "./chat.js";
+export * from "./chat-attachments.js";
 export * from "./goals.js";
 export * from "./habits.js";
 export * from "./nutrition.js";

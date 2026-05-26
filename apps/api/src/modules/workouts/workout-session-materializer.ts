@@ -125,6 +125,9 @@ export function mergeExerciseExecutionUpdate(
     actualWeightKg?: number | null;
     actualReps?: string | null;
     loadAdjustmentNotes?: string | null;
+    perceivedEffort?: number | null;
+    perceivedDifficulty?: number | null;
+    discomfortFlag?: boolean | null;
   },
 ): WorkoutSessionExercise {
   return {
@@ -138,6 +141,11 @@ export function mergeExerciseExecutionUpdate(
       ...(input.loadAdjustmentNotes !== undefined
         ? { loadAdjustmentNotes: input.loadAdjustmentNotes }
         : {}),
+      ...(input.perceivedEffort !== undefined ? { perceivedEffort: input.perceivedEffort } : {}),
+      ...(input.perceivedDifficulty !== undefined
+        ? { perceivedDifficulty: input.perceivedDifficulty }
+        : {}),
+      ...(input.discomfortFlag !== undefined ? { discomfortFlag: input.discomfortFlag } : {}),
     },
   };
 }

@@ -112,21 +112,34 @@ function createProviderDraft(overrides: Partial<ProviderRecipeDraft> = {}): Prov
     prepMinutes: null,
     cookMinutes: null,
     source: APPROXIMATE_MACRO_SOURCE,
+    confidence: "low",
+    provenance: {
+      source: "external_provider",
+      providerId: "themealdb",
+      externalId: "52772",
+    },
     ...overrides,
   };
 }
+
+const threadId = "c4000001-0000-4000-8000-000000000001";
+const nutritionIncidentProposalId = "d5000001-0000-4000-8000-000000000001";
 
 function createService({
   recipesRepository = {},
   nutritionRepository = {},
   profilesRepository = {},
   usersService = {},
+  proposalsRepository = {},
+  proposalValidationService = {},
   recipeCatalogProvider = {},
 }: {
   recipesRepository?: Record<string, unknown>;
   nutritionRepository?: Record<string, unknown>;
   profilesRepository?: Record<string, unknown>;
   usersService?: Record<string, unknown>;
+  proposalsRepository?: Record<string, unknown>;
+  proposalValidationService?: Record<string, unknown>;
   recipeCatalogProvider?: Record<string, unknown>;
 } = {}) {
   const service = new RecipesService(
@@ -178,6 +191,49 @@ function createService({
     {
       resolveFromAuth: async () => user,
       ...usersService,
+    } as never,
+    {
+      findThreadById: async () => null,
+      createThreadForUser: async () => ({
+        id: threadId,
+        userId: user.id,
+        title: "Recipe food log",
+        createdAt: new Date("2026-05-22T12:00:00.000Z"),
+        updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+      }),
+      createPendingProposal: async (
+        proposalUserId: string,
+        proposalThreadId: string,
+        _sourceMessageId: string | null,
+        proposal: { intent: string; proposedChanges: unknown },
+        validationStatus: string,
+        validationErrors: string[],
+      ) => ({
+        id: nutritionIncidentProposalId,
+        userId: proposalUserId,
+        threadId: proposalThreadId,
+        sourceMessageId: null,
+        intent: proposal.intent,
+        targetDomain: "nutrition",
+        title: "Log Lentil power bowl",
+        reason: "Review estimate",
+        evidenceRefs: null,
+        proposedChanges: proposal.proposedChanges,
+        status: "pending",
+        validationStatus,
+        validationErrors,
+        userDecisionAt: null,
+        appliedReference: null,
+        createdAt: new Date("2026-05-26T18:00:00.000Z"),
+        updatedAt: new Date("2026-05-26T18:00:00.000Z"),
+      }),
+      ...proposalsRepository,
+    } as never,
+    {
+      validateRawProposal: () => ({ valid: true, errors: [] }),
+      validateNutritionIncidentImageRefOwnership: async () => [],
+      validateNutritionIncidentRecipeRecommendationContext: async () => [],
+      ...proposalValidationService,
     } as never,
     {
       providerName: "themealdb",
@@ -631,6 +687,11 @@ describe("RecipesService", () => {
     expect(result.recommendations).toHaveLength(1);
     expect(result.recommendations[0]?.recipeId).toBe(providerRecipeId);
     expect(result.recommendations[0]?.recipe?.source).toBe(APPROXIMATE_MACRO_SOURCE);
+    expect(result.recommendations[0]?.recipe?.confidence).toBe("low");
+    expect(result.recommendations[0]?.recipe?.provenance).toMatchObject({
+      source: "external_provider",
+      providerId: "themealdb",
+    });
   });
 
   it("uses only generic catalog categories for provider fetch and never user health data", async () => {
@@ -683,5 +744,426 @@ describe("RecipesService", () => {
     expect(result.limitedReason).toBeNull();
     expect(result.recommendations).toHaveLength(1);
     expect(result.recommendations[0]?.recipeId).toBe(compatibleRecipeId);
+  });
+
+  it("rejects recipe proposals tied to a stale nutrition revision", async () => {
+    const staleRevisionId = "ad000003-0000-4000-8000-000000000001";
+    const service = createService({
+      recipesRepository: {
+        findActiveRecipesByIds: async () => [createRecipeRow()],
+      },
+      nutritionRepository: {
+        findActivePlanByUserId: async () => ({
+          id: nutritionPlanId,
+          activeRevisionId: nutritionRevisionId,
+        }),
+        findRevisionOwnedByUser: async (_userId: string, revisionId: string) =>
+          revisionId === staleRevisionId
+            ? {
+                id: staleRevisionId,
+                nutritionPlanId,
+                revisionNumber: 1,
+                reason: "Old plan",
+                source: "ai_proposal",
+                payload: activeNutritionPayload,
+                createdAt: new Date("2026-05-20T12:00:00.000Z"),
+              }
+            : null,
+      },
+    });
+
+    await expect(
+      service.applyRecipeRecommendationProposal(
+        user.id,
+        {
+          relatedNutritionPlanRevisionId: staleRevisionId,
+          recommendations: [
+            {
+              recipeId: compatibleRecipeId,
+              reason: "Fits your plan.",
+              fitSummary: "Estimated macros fit.",
+            },
+          ],
+        },
+        "Review these recipe ideas.",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("packs chat recipe recommendation proposals from generated recommendations", async () => {
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async () => [createRecipeRow()],
+        createRecommendations: async (inputs: unknown[]) =>
+          inputs.map((input) => createRecommendationRow(input as Record<string, unknown>)),
+      },
+    });
+
+    const proposal = await service.packChatRecipeRecommendationProposal(auth);
+
+    expect(proposal?.intent).toBe("recommend_recipes");
+    expect(proposal?.proposedChanges).toMatchObject({
+      relatedNutritionPlanRevisionId: nutritionRevisionId,
+      recommendations: [
+        expect.objectContaining({
+          recipeId: compatibleRecipeId,
+        }),
+      ],
+    });
+  });
+
+  it("returns null chat recipe proposals when no active nutrition plan exists", async () => {
+    const service = createService({
+      nutritionRepository: {
+        findActivePlanByUserId: async () => null,
+      },
+    });
+
+    await expect(service.packChatRecipeRecommendationProposal(auth)).resolves.toBeNull();
+  });
+
+  it("creates pending nutrition incident proposals from saved recipe recommendations", async () => {
+    let createCalled = false;
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "accepted" }),
+          recipe: createRecipeRow(),
+        }),
+      },
+      proposalsRepository: {
+        createPendingProposal: async (
+          proposalUserId: string,
+          proposalThreadId: string,
+          _sourceMessageId: string | null,
+          proposal: { intent: string; proposedChanges: unknown },
+          validationStatus: string,
+          validationErrors: string[],
+        ) => {
+          createCalled = true;
+          return {
+            id: nutritionIncidentProposalId,
+            userId: proposalUserId,
+            threadId: proposalThreadId,
+            sourceMessageId: null,
+            intent: proposal.intent,
+            targetDomain: "nutrition",
+            title: "Log Lentil power bowl",
+            reason: "Review estimate",
+            evidenceRefs: null,
+            proposedChanges: proposal.proposedChanges,
+            status: "pending",
+            validationStatus,
+            validationErrors,
+            userDecisionAt: null,
+            appliedReference: null,
+            createdAt: new Date("2026-05-26T18:00:00.000Z"),
+            updatedAt: new Date("2026-05-26T18:00:00.000Z"),
+          };
+        },
+      },
+    });
+
+    const proposal = await service.createNutritionIncidentProposalFromRecommendation(
+      auth,
+      recommendationId,
+    );
+
+    expect(createCalled).toBe(true);
+    expect(proposal.status).toBe("pending");
+    expect(proposal.intent).toBe("log_nutrition_incident");
+    expect(proposal.proposedChanges).toMatchObject({
+      provenance: {
+        source: "recipe_recommendation",
+        providerId: recommendationId,
+      },
+      estimatedCalories: 690,
+      items: [expect.objectContaining({ name: "Lentil power bowl" })],
+    });
+    expect(proposal.appliedReference).toBeNull();
+  });
+
+  it("does not write nutrition incidents when creating recipe log proposals", async () => {
+    let incidentWriteCalled = false;
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "completed" }),
+          recipe: createRecipeRow(),
+        }),
+      },
+      nutritionRepository: {
+        createIncident: async () => {
+          incidentWriteCalled = true;
+          throw new Error("createIncident should not run before accept");
+        },
+      },
+    });
+
+    await service.createNutritionIncidentProposalFromRecommendation(auth, recommendationId);
+
+    expect(incidentWriteCalled).toBe(false);
+  });
+
+  it("rejects nutrition incident proposals from pending recommendations", async () => {
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "pending" }),
+          recipe: createRecipeRow(),
+        }),
+      },
+    });
+
+    await expect(
+      service.createNutritionIncidentProposalFromRecommendation(auth, recommendationId),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects invalid recipe recommendation status transitions", async () => {
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "dismissed" }),
+          recipe: createRecipeRow(),
+        }),
+      },
+    });
+
+    await expect(
+      service.updateCurrentRecommendationStatus(auth, recommendationId, {
+        status: "accepted",
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("updates owned recommendation status through allowed transitions", async () => {
+    let updatedStatus: string | undefined;
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "pending" }),
+          recipe: createRecipeRow(),
+        }),
+        updateRecommendationStatus: async (
+          _userId: string,
+          _recommendationId: string,
+          status: string,
+        ) => {
+          updatedStatus = status;
+          return createRecommendationRow({ status });
+        },
+      },
+    });
+
+    const result = await service.updateCurrentRecommendationStatus(auth, recommendationId, {
+      status: "accepted",
+    });
+
+    expect(updatedStatus).toBe("accepted");
+    expect(result.status).toBe("accepted");
+  });
+
+  it("rejects recipe proposals when the referenced revision is owned but no active plan exists", async () => {
+    const ownedRevisionId = "ad000002-0000-4000-8000-000000000001";
+    const service = createService({
+      recipesRepository: {
+        findActiveRecipesByIds: async () => [createRecipeRow()],
+      },
+      nutritionRepository: {
+        findActivePlanByUserId: async () => null,
+        findRevisionOwnedByUser: async (_userId: string, revisionId: string) =>
+          revisionId === ownedRevisionId
+            ? {
+                id: ownedRevisionId,
+                nutritionPlanId,
+                revisionNumber: 1,
+                reason: "Old plan",
+                source: "ai_proposal",
+                payload: activeNutritionPayload,
+                createdAt: new Date("2026-05-20T12:00:00.000Z"),
+              }
+            : null,
+      },
+    });
+
+    await expect(
+      service.applyRecipeRecommendationProposal(
+        user.id,
+        {
+          relatedNutritionPlanRevisionId: ownedRevisionId,
+          recommendations: [
+            {
+              recipeId: compatibleRecipeId,
+              reason: "Fits your plan.",
+              fitSummary: "Estimated macros fit.",
+            },
+          ],
+        },
+        "Review these recipe ideas.",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects recipe proposals when the referenced revision is not owned", async () => {
+    const missingRevisionId = "ad000004-0000-4000-8000-000000000001";
+    const service = createService({
+      recipesRepository: {
+        findActiveRecipesByIds: async () => [createRecipeRow()],
+      },
+      nutritionRepository: {
+        findRevisionOwnedByUser: async () => null,
+      },
+    });
+
+    await expect(
+      service.applyRecipeRecommendationProposal(
+        user.id,
+        {
+          relatedNutritionPlanRevisionId: missingRevisionId,
+          recommendations: [
+            {
+              recipeId: compatibleRecipeId,
+              reason: "Fits your plan.",
+              fitSummary: "Estimated macros fit.",
+            },
+          ],
+        },
+        "Review these recipe ideas.",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("marks low-confidence recipe log proposals invalid until accept-time userEdits", async () => {
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "accepted" }),
+          recipe: createRecipeRow({ confidence: "low" }),
+        }),
+      },
+      proposalValidationService: {
+        validateRawProposal: () => ({
+          valid: false,
+          errors: [
+            "proposedChanges: nutrition_incident: low-confidence estimates require userEdits before acceptance.",
+          ],
+        }),
+      },
+    });
+
+    const proposal = await service.createNutritionIncidentProposalFromRecommendation(
+      auth,
+      recommendationId,
+    );
+
+    expect(proposal.validationStatus).toBe("invalid");
+    expect((proposal.proposedChanges as { confidence?: string }).confidence).toBe("low");
+    expect(
+      (proposal.proposedChanges as { userEdits?: unknown }).userEdits,
+    ).toBeUndefined();
+  });
+
+  it("accepts edited payload overrides when provenance matches the recommendation", async () => {
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "accepted" }),
+          recipe: createRecipeRow(),
+        }),
+      },
+    });
+
+    const proposal = await service.createNutritionIncidentProposalFromRecommendation(
+      auth,
+      recommendationId,
+      {
+        proposedChanges: {
+          incidentDateTime: "2026-05-26T19:00:00.000Z",
+          items: [{ name: "Edited bowl", quantity: "2 servings", calories: 800 }],
+          estimatedCalories: 800,
+          estimatedMacros: { proteinGrams: 40, carbsGrams: 90, fatGrams: 20 },
+          confidence: "medium",
+          provenance: {
+            source: "recipe_recommendation",
+            providerId: recommendationId,
+          },
+          imageRefs: [],
+        },
+      },
+    );
+
+    expect((proposal.proposedChanges as { items: Array<{ name: string }> }).items[0]?.name).toBe(
+      "Edited bowl",
+    );
+  });
+
+  it("rejects proposedChanges overrides with mismatched recommendation provenance", async () => {
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "accepted" }),
+          recipe: createRecipeRow(),
+        }),
+      },
+    });
+
+    await expect(
+      service.createNutritionIncidentProposalFromRecommendation(auth, recommendationId, {
+        proposedChanges: {
+          incidentDateTime: "2026-05-26T19:00:00.000Z",
+          items: [{ name: "Edited bowl", calories: 800 }],
+          estimatedCalories: 800,
+          estimatedMacros: { proteinGrams: 40, carbsGrams: 90, fatGrams: 20 },
+          confidence: "medium",
+          provenance: {
+            source: "recipe_recommendation",
+            providerId: "other-recommendation-id",
+          },
+          imageRefs: [],
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects nutrition incident proposals from dismissed recommendations", async () => {
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "dismissed" }),
+          recipe: createRecipeRow(),
+        }),
+      },
+    });
+
+    await expect(
+      service.createNutritionIncidentProposalFromRecommendation(auth, recommendationId),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("does not create nutrition incident proposals for recommendations owned by another user", async () => {
+    let findUserId: string | undefined;
+    let createCalled = false;
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async (userId: string) => {
+          findUserId = userId;
+          return null;
+        },
+      },
+      proposalsRepository: {
+        createPendingProposal: async () => {
+          createCalled = true;
+          throw new Error("createPendingProposal should not run");
+        },
+      },
+    });
+
+    await expect(
+      service.createNutritionIncidentProposalFromRecommendation(auth, recommendationId),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(findUserId).toBe(user.id);
+    expect(createCalled).toBe(false);
   });
 });

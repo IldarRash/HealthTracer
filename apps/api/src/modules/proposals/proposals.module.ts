@@ -12,7 +12,9 @@ import { RecoveryModule } from "../recovery/recovery.module.js";
 import { RecipesModule } from "../recipes/recipes.module.js";
 import { TodayModule } from "../today/today.module.js";
 import { UsersModule } from "../users/users.module.js";
+import { WellbeingCheckInsModule } from "../wellbeing-check-ins/wellbeing-check-ins.module.js";
 import { WorkoutsModule } from "../workouts/workouts.module.js";
+import { ChatAttachmentsModule } from "../chat-attachments/chat-attachments.module.js";
 import { ProposalApplyService } from "./proposal-apply.service.js";
 import { ProposalValidationService } from "./proposal-validation.service.js";
 import { ProposalsController } from "./proposals.controller.js";
@@ -33,8 +35,10 @@ import { ProposalsService } from "./proposals.service.js";
     WorkoutsModule,
     NutritionModule,
     HabitsModule,
-    RecipesModule,
+    forwardRef(() => RecipesModule),
     TodayModule,
+    WellbeingCheckInsModule,
+    ChatAttachmentsModule,
   ],
   controllers: [ProposalsController],
   providers: [

@@ -1,5 +1,8 @@
 import type {
   ActiveNutritionPlanResponse,
+  FoodPhotoAnalysisRequest,
+  FoodPhotoAnalysisResult,
+  LogNutritionIncidentProposalPayload,
   NutritionAdherenceResponse,
   NutritionPlanPayload,
   NutritionPlanRevision,
@@ -7,11 +10,14 @@ import type {
   UpsertNutritionAdherenceInput,
 } from "@health/types";
 import {
+  getNutritionIncidentDomainErrors,
   getNutritionPlanDomainErrors,
   isoDateSchema,
+  logNutritionIncidentProposalPayloadSchema,
   nutritionPlanPayloadSchema,
 } from "@health/types";
 import { BadRequestException, Injectable } from "@nestjs/common";
+import type { HealthDatabaseTransaction } from "../../database/database.types.js";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { UsersService } from "../users/users.service.js";
 import {
@@ -20,12 +26,14 @@ import {
   toNutritionPlanRevision,
 } from "./nutrition.mapper.js";
 import { NutritionRepository } from "./nutrition.repository.js";
+import { FoodPhotoAnalysisService } from "./food-photo-analysis.service.js";
 
 @Injectable()
 export class NutritionService {
   constructor(
     private readonly nutritionRepository: NutritionRepository,
     private readonly usersService: UsersService,
+    private readonly foodPhotoAnalysisService: FoodPhotoAnalysisService,
   ) {}
 
   async getCurrentActivePlan(
@@ -184,6 +192,51 @@ export class NutritionService {
     );
 
     return `nutrition_revision:${revision.id}`;
+  }
+
+  async applyNutritionIncidentProposal(
+    userId: string,
+    sourceProposalId: string,
+    payload: LogNutritionIncidentProposalPayload,
+    tx?: HealthDatabaseTransaction,
+  ): Promise<string> {
+    const parsedPayload = logNutritionIncidentProposalPayloadSchema.parse(payload);
+    const domainErrors = getNutritionIncidentDomainErrors(parsedPayload);
+
+    if (domainErrors.length > 0) {
+      throw new BadRequestException({
+        message: "Nutrition incident payload failed domain validation.",
+        validationErrors: domainErrors,
+      });
+    }
+
+    const existingIncident = await this.nutritionRepository.findIncidentBySourceProposalId(
+      userId,
+      sourceProposalId,
+      tx,
+    );
+
+    if (existingIncident) {
+      return existingIncident.id;
+    }
+
+    const row = await this.nutritionRepository.createIncident(
+      userId,
+      sourceProposalId,
+      parsedPayload,
+      tx,
+    );
+
+    return row.id;
+  }
+
+  async analyzeFoodPhoto(
+    auth: ClerkAuthContext,
+    request: FoodPhotoAnalysisRequest,
+  ): Promise<FoodPhotoAnalysisResult> {
+    const user = await this.usersService.resolveFromAuth(auth);
+
+    return this.foodPhotoAnalysisService.analyzeOwnedPhoto(user.id, request);
   }
 }
 

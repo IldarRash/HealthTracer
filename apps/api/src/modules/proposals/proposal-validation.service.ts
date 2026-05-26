@@ -14,7 +14,6 @@ import {
   getProgressProvenanceFromProposal,
   getProgressLinkedProvenanceRequiredErrors,
   getRecoveryWorkoutAdaptationVolumeErrors,
-  getTodayIsoDateInTimezone,
   getWorkoutProposalDomainErrors,
   habitPlanPayloadSchema,
   mergeGoalHierarchyState,
@@ -56,7 +55,22 @@ import { MetricsAiContextService } from "../health-metrics/metrics-ai-context.se
 import { ProgressRepository } from "../progress/progress.repository.js";
 import { RecoveryContextService } from "../recovery/recovery-context.service.js";
 import { UsersRepository } from "../users/users.repository.js";
+import { WellbeingCheckInsRepository } from "../wellbeing-check-ins/wellbeing-check-ins.repository.js";
+import { NutritionRepository } from "../nutrition/nutrition.repository.js";
+import { RecipesRepository } from "../recipes/recipes.repository.js";
 import { WorkoutsRepository } from "../workouts/workouts.repository.js";
+import { ChatAttachmentsRepository } from "../chat-attachments/chat-attachments.repository.js";
+import { toOwnedChatAttachmentRef } from "../chat-attachments/chat-attachment.mapper.js";
+import {
+  captureWellbeingCheckinProposalPayloadSchema,
+  getNutritionIncidentDomainErrors,
+  getNutritionIncidentImageRefOwnershipErrors,
+  getRecipeRecommendationRevisionErrors,
+  getWellbeingCheckinProposalDomainErrors,
+  getTodayIsoDateInTimezone,
+  logNutritionIncidentProposalPayloadSchema,
+  getChatAttachmentProposalRefErrors,
+} from "@health/types";
 
 export interface ProposalValidationResult {
   valid: boolean;
@@ -76,6 +90,10 @@ export class ProposalValidationService {
     private readonly workoutsRepository: WorkoutsRepository,
     private readonly usersRepository: UsersRepository,
     private readonly habitsRepository: HabitsRepository,
+    private readonly wellbeingCheckInsRepository: WellbeingCheckInsRepository,
+    private readonly nutritionRepository: NutritionRepository,
+    private readonly recipesRepository: RecipesRepository,
+    private readonly chatAttachmentsRepository: ChatAttachmentsRepository,
   ) {}
 
   validateRawProposal(proposal: RawAiProposal): ProposalValidationResult {
@@ -104,6 +122,188 @@ export class ProposalValidationService {
     }
 
     return { valid: true, errors: [] };
+  }
+
+  async validateWellbeingCheckinProposalContext(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+    options?: { appliedReference?: string | null },
+  ): Promise<string[]> {
+    if (intent !== "capture_wellbeing_checkin") {
+      return [];
+    }
+
+    const parsed = captureWellbeingCheckinProposalPayloadSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    const user = await this.usersRepository.findByUserId(userId);
+    const today = getTodayIsoDateInTimezone(user?.timezone ?? "UTC");
+    const existingCheckIn = await this.wellbeingCheckInsRepository.findByUserAndDate(
+      userId,
+      parsed.data.date,
+    );
+
+    return getWellbeingCheckinProposalDomainErrors(parsed.data, today, {
+      existingCheckInId: existingCheckIn?.id ?? null,
+      appliedReference: options?.appliedReference ?? null,
+    });
+  }
+
+  async validateNutritionIncidentImageRefOwnership(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "log_nutrition_incident") {
+      return [];
+    }
+
+    const parsed = logNutritionIncidentProposalPayloadSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    const imageRefIds = parsed.data.imageRefs.map((ref) => ref.id);
+    const analysisIds = parsed.data.provenance.analysisId ? [parsed.data.provenance.analysisId] : [];
+    const ownedAnalyses = await this.nutritionRepository.listOwnedFoodPhotoAnalysesByImageRefIds(
+      userId,
+      imageRefIds,
+    );
+
+    if (analysisIds.length > 0) {
+      const ownedAnalysisIds = new Set(ownedAnalyses.map((analysis) => analysis.analysisId));
+
+      for (const analysisId of analysisIds) {
+        if (!ownedAnalysisIds.has(analysisId)) {
+          const analysisRecord = await this.nutritionRepository.findFoodPhotoAnalysisByIdForUser(
+            userId,
+            analysisId,
+          );
+
+          if (analysisRecord) {
+            ownedAnalyses.push({
+              analysisId: analysisRecord.id,
+              imageRefId: analysisRecord.imageRefId,
+            });
+          }
+        }
+      }
+    }
+
+    return getNutritionIncidentImageRefOwnershipErrors(parsed.data, ownedAnalyses);
+  }
+
+  async validateChatAttachmentProposalRefs(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    const attachmentRefId = extractAttachmentRefId(proposedChanges);
+
+    if (!attachmentRefId) {
+      return [];
+    }
+
+    const rows = await this.chatAttachmentsRepository.listByIdsForUser(userId, [attachmentRefId]);
+    const ownedAttachments = rows.map(toOwnedChatAttachmentRef);
+    const expectedCategory =
+      intent === "log_nutrition_incident"
+        ? "food_photo"
+        : intent === "create_workout_plan" || intent === "adapt_workout_plan"
+          ? "workout_attachment"
+          : undefined;
+
+    return getChatAttachmentProposalRefErrors({
+      attachmentRefId,
+      ownedAttachments,
+      expectedCategory,
+      requireReadyStatus: true,
+    });
+  }
+
+  async validateNutritionIncidentRecipeRecommendationContext(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "log_nutrition_incident") {
+      return [];
+    }
+
+    const parsed = logNutritionIncidentProposalPayloadSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    if (parsed.data.provenance.source !== "recipe_recommendation") {
+      return [];
+    }
+
+    const recommendationId = parsed.data.provenance.providerId;
+
+    if (!recommendationId) {
+      return [
+        "proposedChanges.provenance.providerId: Recipe recommendation id is required for recipe-backed nutrition incidents.",
+      ];
+    }
+
+    const existing = await this.recipesRepository.findRecommendationById(
+      userId,
+      recommendationId,
+    );
+
+    if (!existing) {
+      return [
+        "proposedChanges.provenance.providerId: Recipe recommendation was not found for this user.",
+      ];
+    }
+
+    const status = existing.recommendation.status;
+
+    if (status !== "accepted" && status !== "completed") {
+      return [
+        "proposedChanges.provenance.providerId: Only saved or completed recipe recommendations can be logged as nutrition incidents.",
+      ];
+    }
+
+    return [];
+  }
+
+  async validateRecipeRecommendationProposalContext(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "recommend_recipes") {
+      return [];
+    }
+
+    const parsed = recipeRecommendationProposalPayloadSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    const revisionId = parsed.data.relatedNutritionPlanRevisionId;
+
+    if (!revisionId) {
+      return [];
+    }
+
+    const activePlan = await this.nutritionRepository.findActivePlanByUserId(userId);
+    const activeRevisionId = activePlan?.activeRevisionId ?? null;
+    const owned = await this.nutritionRepository.findRevisionOwnedByUser(userId, revisionId);
+
+    return getRecipeRecommendationRevisionErrors(revisionId, {
+      activeRevisionId,
+      revisionOwned: owned != null,
+    });
   }
 
   validateCorrelationEvidenceRefs(
@@ -289,6 +489,19 @@ export class ProposalValidationService {
 
       if (domainErrors.length > 0) {
         return { valid: false, errors: domainErrors };
+      }
+    }
+
+    if (intent === "log_nutrition_incident") {
+      const domainErrors = getNutritionIncidentDomainErrors(
+        result.data as z.infer<typeof logNutritionIncidentProposalPayloadSchema>,
+      );
+
+      if (domainErrors.length > 0) {
+        return {
+          valid: false,
+          errors: domainErrors.map((error) => `proposedChanges: ${error}`),
+        };
       }
     }
 
@@ -844,7 +1057,21 @@ function getChangesSchemaForIntent(
       return habitPlanProposalChangesSchema;
     case "summarize_progress":
       return null;
+    case "capture_wellbeing_checkin":
+      return captureWellbeingCheckinProposalPayloadSchema;
+    case "log_nutrition_incident":
+      return logNutritionIncidentProposalPayloadSchema;
     default:
       return null;
   }
+}
+
+function extractAttachmentRefId(proposedChanges: unknown): string | undefined {
+  if (!proposedChanges || typeof proposedChanges !== "object") {
+    return undefined;
+  }
+
+  const attachmentRefId = (proposedChanges as { attachmentRefId?: unknown }).attachmentRefId;
+
+  return typeof attachmentRefId === "string" ? attachmentRefId : undefined;
 }

@@ -1,15 +1,45 @@
 import { recipes, userRecipeRecommendations } from "@health/db";
 import {
+  recipeConfidenceBandSchema,
   recipeIngredientSchema,
   recipeMacroEstimatesSchema,
   recipeMealTypeSchema,
+  recipeProvenanceSchema,
   type Recipe,
+  type RecipeConfidenceBand,
+  type RecipeProvenance,
   type UserRecipeRecommendation,
 } from "@health/types";
 import { InternalServerErrorException } from "@nestjs/common";
 
 type RecipeRow = typeof recipes.$inferSelect;
 type UserRecipeRecommendationRow = typeof userRecipeRecommendations.$inferSelect;
+
+function resolveRecipeConfidence(row: RecipeRow): RecipeConfidenceBand {
+  if (row.confidence) {
+    return recipeConfidenceBandSchema.parse(row.confidence);
+  }
+
+  return row.provider ? "low" : "medium";
+}
+
+function resolveRecipeProvenance(row: RecipeRow): RecipeProvenance {
+  if (row.provenance) {
+    return recipeProvenanceSchema.parse(row.provenance);
+  }
+
+  if (row.provider) {
+    return {
+      source: "external_provider",
+      providerId: row.provider,
+      externalId: row.externalId ?? undefined,
+    };
+  }
+
+  return {
+    source: row.source.includes("seed") || row.source.includes("Curated") ? "seed_catalog" : "curated",
+  };
+}
 
 export function toRecipe(row: RecipeRow): Recipe {
   const ingredients = row.ingredients.map((item) => recipeIngredientSchema.parse(item));
@@ -37,6 +67,10 @@ export function toRecipe(row: RecipeRow): Recipe {
     prepMinutes: row.prepMinutes,
     cookMinutes: row.cookMinutes,
     source: row.source,
+    provider: row.provider,
+    externalId: row.externalId,
+    confidence: resolveRecipeConfidence(row),
+    provenance: resolveRecipeProvenance(row),
     status: row.status as Recipe["status"],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

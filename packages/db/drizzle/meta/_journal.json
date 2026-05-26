@@ -162,6 +162,48 @@
       "when": 1779689000000,
       "tag": "0022_recovery_readiness",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1779690000000,
+      "tag": "0023_exercise_modalities_media",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1779691000000,
+      "tag": "0024_workout_session_materialization_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1779692000000,
+      "tag": "0025_wellbeing_nutrition_incident_proposals",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1779693000000,
+      "tag": "0026_food_photo_analyses",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1779694000000,
+      "tag": "0027_recipe_confidence_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1779695000000,
+      "tag": "0028_chat_attachments",
+      "breakpoints": true
     }
   ]
 }

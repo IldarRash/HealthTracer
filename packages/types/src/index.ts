@@ -20,6 +20,13 @@ import {
 } from "./progress-cross-domain.js";
 import { recoveryContextSourceRefSchema, recoveryProgressAggregateSchema } from "./recovery.js";
 import { todayChecklistPayloadSchema } from "./today.js";
+import { captureWellbeingCheckinProposalPayloadSchema } from "./chat-action-proposals.js";
+import { chatAttachmentOutcomeSchema } from "./chat-attachments.js";
+import { logNutritionIncidentProposalPayloadSchema } from "./nutrition-incidents.js";
+import {
+  recipeConfidenceBandSchema,
+  recipeProvenanceSchema,
+} from "./recipes.js";
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
   workoutPlanProposalChangesSchema,
@@ -248,10 +255,24 @@ export const createChatThreadSchema = z.object({
 
 export type CreateChatThreadInput = z.infer<typeof createChatThreadSchema>;
 
-export const sendChatMessageSchema = z.object({
-  content: z.string().min(1).max(4000),
-  proposalRevision: z.lazy(() => chatProposalRevisionSchema).optional(),
-});
+export const sendChatMessageSchema = z
+  .object({
+    content: z.string().max(4000).default(""),
+    proposalRevision: z.lazy(() => chatProposalRevisionSchema).optional(),
+    attachmentRefIds: z.array(z.string().uuid()).max(5).optional(),
+  })
+  .superRefine((input, ctx) => {
+    const hasContent = input.content.trim().length > 0;
+    const hasAttachments = Boolean(input.attachmentRefIds && input.attachmentRefIds.length > 0);
+
+    if (!hasContent && !hasAttachments) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Chat messages require content or at least one attachment reference.",
+        path: ["content"],
+      });
+    }
+  });
 
 export type SendChatMessageInput = z.infer<typeof sendChatMessageSchema>;
 
@@ -300,6 +321,8 @@ export const proposalIntentSchema = z.enum([
   "summarize_progress",
   "create_habit_plan",
   "adapt_habit_plan",
+  "capture_wellbeing_checkin",
+  "log_nutrition_incident",
 ]);
 
 export type ProposalIntent = z.infer<typeof proposalIntentSchema>;
@@ -317,6 +340,7 @@ export {
   findWorkoutPlanDayForWeekday,
   getWorkoutPlanDomainErrors,
   getWorkoutProposalDomainErrors,
+  getResolvedWorkoutPlanCatalogErrors,
   inferWeekdayFromDayLabel,
   isLegacyWorkoutPlanExerciseObject,
   isStructuredWorkoutPlanExercise,
@@ -746,6 +770,10 @@ export const recipeSchema = z.object({
   prepMinutes: z.number().int().nonnegative().max(600).nullable(),
   cookMinutes: z.number().int().nonnegative().max(600).nullable(),
   source: z.string().min(1).max(160),
+  provider: z.string().min(1).max(80).nullable().optional(),
+  externalId: z.string().min(1).max(80).nullable().optional(),
+  confidence: recipeConfidenceBandSchema,
+  provenance: recipeProvenanceSchema,
   status: recipeStatusSchema,
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -949,6 +977,10 @@ export function getProposedChangesSchemaForIntent(
       return habitPlanProposalChangesSchema;
     case "summarize_progress":
       return emptyProposalChangesSchema;
+    case "capture_wellbeing_checkin":
+      return captureWellbeingCheckinProposalPayloadSchema;
+    case "log_nutrition_incident":
+      return logNutritionIncidentProposalPayloadSchema;
     default: {
       const _exhaustive: never = intent;
       return _exhaustive;
@@ -1075,6 +1107,18 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
     ...proposalTitleReasonFields,
     proposedChanges: emptyProposalChangesSchema,
   }),
+  z.object({
+    intent: z.literal("capture_wellbeing_checkin"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: captureWellbeingCheckinProposalPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("log_nutrition_incident"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: logNutritionIncidentProposalPayloadSchema,
+  }),
 ]);
 
 export type RawAiProposal = z.infer<typeof rawAiProposalSchema>;
@@ -1130,6 +1174,7 @@ export const proposalDecisionSchema = z
   .object({
     decision: z.enum(["accept", "reject", "modify"]),
     modificationFeedback: z.string().min(1).max(2000).optional(),
+    proposedChanges: z.unknown().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.decision === "modify" && !value.modificationFeedback?.trim()) {
@@ -1137,6 +1182,14 @@ export const proposalDecisionSchema = z
         code: "custom",
         message: "modificationFeedback is required when decision is modify.",
         path: ["modificationFeedback"],
+      });
+    }
+
+    if (value.decision !== "accept" && value.proposedChanges !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "proposedChanges is only supported when decision is accept.",
+        path: ["proposedChanges"],
       });
     }
   });
@@ -1163,6 +1216,7 @@ export const chatTurnResponseSchema = z.object({
   userMessage: chatMessageSchema,
   assistantMessage: chatMessageSchema,
   proposals: z.array(aiProposalSchema),
+  attachmentOutcomes: z.array(z.lazy(() => chatAttachmentOutcomeSchema)).optional(),
 });
 
 export type ChatTurnResponse = z.infer<typeof chatTurnResponseSchema>;
@@ -1252,6 +1306,10 @@ export * from "./document-signals.js";
 export * from "./documents.js";
 export * from "./exercises.js";
 export * from "./wellbeing-check-ins.js";
+export * from "./nutrition-incidents.js";
+export * from "./recipes.js";
+export * from "./chat-action-proposals.js";
+export * from "./chat-attachments.js";
 export * from "./recovery.js";
 export {
   buildCoachingHierarchySummary,

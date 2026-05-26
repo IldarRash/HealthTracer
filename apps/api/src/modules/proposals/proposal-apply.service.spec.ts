@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR } from "@health/types";
 import { describe, expect, it } from "vitest";
 import { ProposalApplyService } from "./proposal-apply.service.js";
 
@@ -96,6 +97,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -122,6 +124,7 @@ describe("ProposalApplyService", () => {
           return "workout_revision:rev-1";
         },
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -161,6 +164,7 @@ describe("ProposalApplyService", () => {
           return "workout_revision:rev-progress";
         },
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -234,6 +238,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -268,6 +273,7 @@ describe("ProposalApplyService", () => {
           return "habit_revision:rev-create-1";
         },
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -309,6 +315,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -345,6 +352,7 @@ describe("ProposalApplyService", () => {
           return "nutrition_revision:rev-progress";
         },
       } as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,
@@ -397,6 +405,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -432,6 +441,7 @@ describe("ProposalApplyService", () => {
           return "recipe_recommendation:rec-1";
         },
       } as never,
+      {} as never,
       {} as never,
       {} as never,
     );
@@ -471,6 +481,7 @@ describe("ProposalApplyService", () => {
           return "daily_checklist:checklist-1";
         },
       } as never,
+      {} as never,
       {} as never,
     );
 
@@ -523,6 +534,7 @@ describe("ProposalApplyService", () => {
           };
         },
       } as never,
+      {} as never,
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -547,6 +559,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     await expect(
@@ -557,5 +570,262 @@ describe("ProposalApplyService", () => {
         proposedChanges: {},
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("routes accepted wellbeing check-in proposals through create-if-absent apply", async () => {
+    let wellbeingCalled = false;
+    let expectedExistingCheckInId: string | null | undefined;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        createCheckInForDateIfAbsent: async (
+          _auth: unknown,
+          _date: string,
+          _input: unknown,
+          options?: { expectedExistingCheckInId?: string | null },
+        ) => {
+          wellbeingCalled = true;
+          expectedExistingCheckInId = options?.expectedExistingCheckInId;
+          return {
+            checkIn: {
+              id: "checkin-1",
+              userId,
+              date: "2026-05-26",
+              moodScore: 2,
+              stressScore: 3,
+              tags: ["energy:2"],
+              note: null,
+              source: "user_entry",
+              crisisFlagReasons: [],
+              createdAt: "2026-05-26T18:00:00.000Z",
+              updatedAt: "2026-05-26T18:00:00.000Z",
+            },
+            crisisSupport: {
+              shouldShowCrisisSupport: false,
+              reasons: [],
+              copy: null,
+            },
+          };
+        },
+      } as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "capture_wellbeing_checkin",
+      targetDomain: "general",
+      proposedChanges: {
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+        energyLevel: 2,
+      },
+    });
+
+    expect(reference).toBe("wellbeing_checkin:checkin-1");
+    expect(wellbeingCalled).toBe(true);
+    expect(expectedExistingCheckInId).toBeNull();
+  });
+
+  it("rejects wellbeing apply when a check-in appears after validation", async () => {
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        createCheckInForDateIfAbsent: async () => {
+          throw new BadRequestException(WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR);
+        },
+      } as never,
+    );
+
+    await expect(
+      service.applyAcceptedProposal(auth, userId, {
+        ...baseProposal,
+        intent: "capture_wellbeing_checkin",
+        targetDomain: "general",
+        proposedChanges: {
+          date: "2026-05-26",
+          moodScore: 2,
+          stressScore: 3,
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: { message: WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR },
+    });
+  });
+
+  it("returns the same appliedReference idempotently when proposal already created the check-in", async () => {
+    let createCalled = false;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        createCheckInForDateIfAbsent: async (
+          _auth: unknown,
+          _date: string,
+          _input: unknown,
+          options?: { expectedExistingCheckInId?: string | null },
+        ) => {
+          createCalled = true;
+          expect(options?.expectedExistingCheckInId).toBe("checkin-1");
+          return {
+            checkIn: {
+              id: "checkin-1",
+              userId,
+              date: "2026-05-26",
+              moodScore: 4,
+              stressScore: 2,
+              tags: [],
+              note: null,
+              source: "user_entry",
+              crisisFlagReasons: [],
+              createdAt: "2026-05-26T18:00:00.000Z",
+              updatedAt: "2026-05-26T18:00:00.000Z",
+            },
+            crisisSupport: {
+              shouldShowCrisisSupport: false,
+              reasons: [],
+              copy: null,
+            },
+          };
+        },
+      } as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "capture_wellbeing_checkin",
+      targetDomain: "general",
+      appliedReference: "wellbeing_checkin:checkin-1",
+      proposedChanges: {
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+      },
+    });
+
+    expect(reference).toBe("wellbeing_checkin:checkin-1");
+    expect(createCalled).toBe(true);
+  });
+
+  it("routes accepted nutrition incident proposals without plan revision writes", async () => {
+    let nutritionPlanCalled = false;
+    let incidentCalled = false;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async () => {
+          nutritionPlanCalled = true;
+          return "nutrition_revision:rev-1";
+        },
+        applyNutritionIncidentProposal: async () => {
+          incidentCalled = true;
+          return "incident-1";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "log_nutrition_incident",
+      targetDomain: "nutrition",
+      proposedChanges: {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "medium",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      },
+    });
+
+    expect(reference).toBe("nutrition_incident:incident-1");
+    expect(incidentCalled).toBe(true);
+    expect(nutritionPlanCalled).toBe(false);
+  });
+
+  it("does not route nutrition incidents through workout or nutrition plan revision services", async () => {
+    let workoutPlanCalled = false;
+    let nutritionPlanCalled = false;
+    let incidentCalled = false;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {
+        applyWorkoutPlanProposal: async () => {
+          workoutPlanCalled = true;
+          return "workout_revision:rev-1";
+        },
+      } as never,
+      {
+        applyNutritionPlanProposal: async () => {
+          nutritionPlanCalled = true;
+          return "nutrition_revision:rev-1";
+        },
+        applyNutritionIncidentProposal: async () => {
+          incidentCalled = true;
+          return "incident-1";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "log_nutrition_incident",
+      targetDomain: "nutrition",
+      proposedChanges: {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "medium",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+        userEdits: {
+          editedAt: "2026-05-26T18:05:00.000Z",
+          items: [{ name: "Pizza slice", calories: 280 }],
+        },
+      },
+    });
+
+    expect(incidentCalled).toBe(true);
+    expect(workoutPlanCalled).toBe(false);
+    expect(nutritionPlanCalled).toBe(false);
   });
 });

@@ -60,14 +60,23 @@ export const SUGGESTED_CHAT_PROMPTS: readonly SuggestedChatPrompt[] = [
 export function createOptimisticUserMessage(
   threadId: string,
   content: string,
+  attachmentSummary = "",
 ): OptimisticChatMessage {
+  const trimmed = content.trim();
+  const displayContent =
+    trimmed.length > 0
+      ? attachmentSummary
+        ? `${trimmed}\n\n${attachmentSummary}`
+        : trimmed
+      : attachmentSummary;
+
   return {
     id: `optimistic-${Date.now()}`,
     threadId,
     role: "user",
-    content,
+    content: displayContent,
     createdAt: new Date().toISOString(),
-    metadata: {},
+    metadata: attachmentSummary ? { attachmentSummary } : {},
     optimistic: true,
   };
 }

@@ -198,6 +198,51 @@ describe("workout session materializer", () => {
     });
   });
 
+  it("persists bounded execution feedback without changing prescription", () => {
+    const exerciseId = "a1000001-0000-4000-8000-000000000001";
+    const updated = updateStructuredSessionExercise(
+      [
+        {
+          id: exerciseId,
+          exerciseId: "b1000001-0000-4000-8000-000000000016",
+          prescription: {
+            snapshot: { name: "Goblet Squat", primaryMuscles: ["quads"], equipment: ["dumbbell"] },
+            sets: 3,
+            reps: "8",
+          },
+          execution: { status: "planned" },
+        },
+      ],
+      exerciseId,
+      {
+        status: "completed",
+        perceivedEffort: 8,
+        perceivedDifficulty: 7,
+        discomfortFlag: false,
+        notes: "Felt controlled.",
+        actualReps: "8",
+        actualWeightKg: 24,
+      },
+    );
+
+    expect(updated[0]).toMatchObject({
+      prescription: {
+        snapshot: { name: "Goblet Squat" },
+        sets: 3,
+        reps: "8",
+      },
+      execution: {
+        status: "completed",
+        perceivedEffort: 8,
+        perceivedDifficulty: 7,
+        discomfortFlag: false,
+        notes: "Felt controlled.",
+        actualReps: "8",
+        actualWeightKg: 24,
+      },
+    });
+  });
+
   it("normalizes legacy session exercises for Today workout detail", () => {
     const sessionId = "78d40655-b4b5-47b3-b28e-470192e05f04";
     const detail = toTodayWorkoutDetail(

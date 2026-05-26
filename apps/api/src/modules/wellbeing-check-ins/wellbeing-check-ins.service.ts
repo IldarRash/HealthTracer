@@ -9,6 +9,7 @@ import type {
   WellbeingCheckInUpsertResponse,
 } from "@health/types";
 import {
+  WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR,
   buildWellbeingCoachingSummary,
   evaluateWellbeingCrisisFlags,
   getTodayIsoDateInTimezone,
@@ -77,6 +78,39 @@ export class WellbeingCheckInsService {
       input,
       crisisSupport.reasons,
     );
+
+    return {
+      checkIn: toWellbeingCheckInRecord(row),
+      crisisSupport,
+    };
+  }
+
+  async createCheckInForDateIfAbsent(
+    auth: ClerkAuthContext,
+    date: string,
+    input: UpsertWellbeingCheckInInput,
+    options?: { expectedExistingCheckInId?: string | null },
+  ): Promise<WellbeingCheckInUpsertResponse> {
+    const parsedDate = parseCheckInDate(date);
+    const user = await this.usersService.resolveFromAuth(auth);
+    const crisisSupport = evaluateWellbeingCrisisFlags({
+      moodScore: input.moodScore,
+      note: input.note,
+    });
+    const { row, created } = await this.wellbeingCheckInsRepository.insertByUserAndDateIfAbsent(
+      user.id,
+      parsedDate,
+      input,
+      crisisSupport.reasons,
+    );
+
+    if (!created) {
+      const expectedExistingCheckInId = options?.expectedExistingCheckInId ?? null;
+
+      if (!expectedExistingCheckInId || row.id !== expectedExistingCheckInId) {
+        throw new BadRequestException(WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR);
+      }
+    }
 
     return {
       checkIn: toWellbeingCheckInRecord(row),

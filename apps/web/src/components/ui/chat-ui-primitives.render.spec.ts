@@ -9,6 +9,8 @@ const chatBubbleSource = readFileSync(join(uiDir, "chat-bubble.tsx"), "utf8");
 const promptChipSource = readFileSync(join(uiDir, "prompt-chip.tsx"), "utf8");
 const metadataPanelSource = readFileSync(join(uiDir, "chat-metadata-panel.tsx"), "utf8");
 const proposalConfirmationSource = readFileSync(join(uiDir, "proposal-confirmation.tsx"), "utf8");
+const attachmentPreviewSource = readFileSync(join(uiDir, "attachment-preview.tsx"), "utf8");
+const privacySource = readFileSync(join(uiDir, "privacy.tsx"), "utf8");
 const stylesSource = readFileSync(join(uiDir, "../../../app/styles.css"), "utf8");
 
 describe("Chat UI primitive contracts", () => {
@@ -76,5 +78,14 @@ describe("Chat UI primitive contracts", () => {
   it("defines composer focus-visible polish in dark chat layout", () => {
     expect(stylesSource).toContain(".chat-composer textarea:focus-visible");
     expect(stylesSource).toContain(".chat-single .chat-composer textarea:focus-visible");
+  });
+
+  it("exports attachment and consent primitives for chat composer reuse", () => {
+    expect(attachmentPreviewSource).toContain("AttachmentPreviewThumb");
+    expect(attachmentPreviewSource).toContain("AttachmentStatusBadge");
+    expect(privacySource).toContain("FileInputTrigger");
+    expect(privacySource).toContain("ConsentScopeChecklist");
+    expect(stylesSource).toContain(".chat-composer-attachments");
+    expect(stylesSource).toContain(".chat-attachment-outcomes");
   });
 });

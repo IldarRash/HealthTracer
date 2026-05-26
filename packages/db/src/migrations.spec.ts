@@ -134,4 +134,16 @@ describe("drizzle migrations", () => {
     expect(content).toContain('ON "goals" ("user_id")');
     expect(content).toContain(`WHERE "status" = 'active' AND "horizon" = 'quarterly'`);
   });
+
+  it("adds wellbeing and nutrition incident proposal intents with incident persistence", () => {
+    const content = readFileSync(
+      join(drizzleDir, "0025_wellbeing_nutrition_incident_proposals.sql"),
+      "utf8",
+    );
+
+    expect(content).toContain("capture_wellbeing_checkin");
+    expect(content).toContain("log_nutrition_incident");
+    expect(content).toContain('CREATE TABLE "nutrition_incidents"');
+    expect(content).toContain('CREATE INDEX "nutrition_incidents_user_date_idx"');
+  });
 });

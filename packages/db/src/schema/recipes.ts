@@ -34,6 +34,8 @@ export const recipes = pgTable(
     source: text("source").notNull(),
     provider: text("provider"),
     externalId: text("external_id"),
+    confidence: text("confidence"),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>(),
     status: text("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

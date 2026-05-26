@@ -1,4 +1,5 @@
 import { NotFoundException } from "@nestjs/common";
+import type { WorkoutPlanProposalChanges } from "@health/types";
 import { describe, expect, it, vi } from "vitest";
 import { buildSessionCompletionUpdate } from "./workouts.repository.js";
 import { WorkoutsService } from "./workouts.service.js";
@@ -10,10 +11,23 @@ const auth = {
   displayName: "Test User",
 };
 
-const payload = {
+const structuredExercise = {
+  exerciseId: "b1000001-0000-4000-8000-000000000016",
+  snapshot: {
+    name: "Goblet Squat",
+    primaryMuscles: ["quads", "glutes"],
+    equipment: ["dumbbell", "kettlebell"],
+  },
+  sets: 3,
+  reps: "8-10",
+  recommendedLoadGuidance: "Choose a challenging but controlled weight.",
+  restBetweenSetsSeconds: 90,
+} satisfies WorkoutPlanProposalChanges["days"][number]["exercises"][number];
+
+const payload: WorkoutPlanProposalChanges = {
   title: "Strength base",
   summary: "Three repeatable training days.",
-  days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+  days: [{ weekday: "monday", focus: "Strength", exercises: [structuredExercise] }],
   notes: [],
 };
 
@@ -30,6 +44,7 @@ const usersService = {
 
 const exercisesService = {
   findInaccessibleExerciseIds: async () => [],
+  findExercisesByIds: async () => [],
   findOrCreateExercise: async (input: {
     name: string;
     userId: string | null;
@@ -42,9 +57,11 @@ const exercisesService = {
     secondaryMuscles: [],
     equipment: ["resistance_band"],
     movementPatterns: ["pull"],
+    modalities: ["strength"],
     difficulty: "beginner",
     instructions: ["Pull with control."],
     safetyNotes: ["Use a light band."],
+    media: { refs: [], fallbackLabel: "Demonstration coming soon" },
     source: "ai_generated",
     validationStatus: "pending_validation",
     status: "active",
@@ -203,7 +220,7 @@ describe("WorkoutsService", () => {
         {
           title: "Strength base",
           summary: "Empty plan.",
-          days: [{ day: "Day 1", focus: "Strength", exercises: [] }],
+          days: [{ weekday: "monday" as const, focus: "Strength", exercises: [] }],
           notes: [],
         },
         "Starting a new plan.",
@@ -211,7 +228,9 @@ describe("WorkoutsService", () => {
       ),
     ).rejects.toMatchObject({
       response: {
-        validationErrors: ["workout: At least one plan day must include exercises."],
+        validationErrors: expect.arrayContaining([
+          "workout: At least one plan day must include exercises.",
+        ]),
       },
     });
   });
@@ -368,6 +387,75 @@ describe("WorkoutsService", () => {
     expect(result.activeRevision?.revisionNumber).toBe(1);
     expect(result.sessions).toHaveLength(1);
     expect(result.sessions[0]?.status).toBe("planned");
+  });
+
+  it("enriches the active revision payload with catalog metadata", async () => {
+    const planRow = {
+      id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      userId,
+      activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      status: "active",
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+    const revisionRow = {
+      id: "880099c6-3b5f-4383-8246-97b72bf61818",
+      workoutPlanId: planRow.id,
+      revisionNumber: 1,
+      reason: "Starting plan",
+      source: "ai_proposal",
+      payload,
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+    };
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => planRow,
+        findActiveRevisionByPlanId: async () => revisionRow,
+        listSessionsByPlanId: async () => [],
+      } as never,
+      usersService as never,
+      {
+        findInaccessibleExerciseIds: async () => [],
+        findExercisesByIds: async (exerciseIds: string[]) =>
+          exerciseIds.includes(structuredExercise.exerciseId)
+            ? [
+                {
+                  id: structuredExercise.exerciseId,
+                  name: "Goblet Squat",
+                  normalizedName: "goblet squat",
+                  aliases: [],
+                  primaryMuscles: ["quads", "glutes"],
+                  secondaryMuscles: [],
+                  equipment: ["dumbbell", "kettlebell"],
+                  movementPatterns: ["squat"],
+                  modalities: ["strength"],
+                  difficulty: "intermediate",
+                  instructions: ["Keep chest tall."],
+                  safetyNotes: ["Stop if knee discomfort increases."],
+                  media: { refs: [], fallbackLabel: "Demonstration coming soon" },
+                  source: "system_seed",
+                  validationStatus: "validated",
+                  status: "active",
+                  userId: null,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                },
+              ]
+            : [],
+      } as never,
+    );
+
+    const result = await service.getCurrentActivePlan(auth);
+
+    expect(result.activeRevision?.payload.days[0]?.exercises[0]).toMatchObject({
+      catalog: {
+        source: "catalog",
+        name: "Goblet Squat",
+        instructions: ["Keep chest tall."],
+        safetyNotes: ["Stop if knee discomfort increases."],
+      },
+    });
   });
 
   it("lists revision history for the authenticated user", async () => {
@@ -598,9 +686,11 @@ describe("WorkoutsService", () => {
             secondaryMuscles: [],
             equipment: ["resistance_band"],
             movementPatterns: ["pull"],
+            modalities: ["strength"],
             difficulty: "beginner",
             instructions: ["Pull with control."],
             safetyNotes: ["Use a light band."],
+            media: { refs: [], fallbackLabel: "Demonstration coming soon" },
             source: "ai_generated",
             validationStatus: "pending_validation",
             status: "active",
@@ -644,6 +734,7 @@ describe("WorkoutsService", () => {
             secondaryMuscles: [],
             equipment: ["resistance_band"],
             movementPatterns: ["pull"],
+            modalities: ["strength"],
             difficulty: "beginner",
             instructions: ["Pull the band apart with control."],
             safetyNotes: ["Use a light band."],
@@ -718,6 +809,36 @@ describe("WorkoutsService", () => {
         validationErrors: [
           'proposedChanges: exerciseId "c1000001-0000-4000-8000-000000000099" was not found in the visible exercise catalog.',
         ],
+      },
+    });
+  });
+
+  it("rejects apply payloads with free-form string exercises", async () => {
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => null,
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    await expect(
+      service.applyWorkoutPlanProposal(
+        userId,
+        {
+          title: "Strength base",
+          summary: "Legacy string day.",
+          days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+          notes: [],
+        },
+        "Attempted free-form apply.",
+        "adapt_workout_plan",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        validationErrors: expect.arrayContaining([
+          expect.stringMatching(/structured catalog-backed exercises/),
+        ]),
       },
     });
   });
@@ -1033,6 +1154,117 @@ describe("WorkoutsService", () => {
     expect(workout?.exercises).toHaveLength(1);
   });
 
+  it("enriches Today workout exercises with catalog metadata", async () => {
+    const planRow = {
+      id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      userId,
+      activeRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      status: "active",
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+    const revisionRow = {
+      id: "880099c6-3b5f-4383-8246-97b72bf61818",
+      workoutPlanId: planRow.id,
+      revisionNumber: 1,
+      reason: "Starting plan",
+      source: "ai_proposal",
+      payload: {
+        title: "Strength base",
+        summary: "Three training days.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Lower body",
+            exercises: [structuredExercise],
+          },
+        ],
+        notes: [],
+      },
+      createdAt: new Date("2026-05-20T12:00:00.000Z"),
+    };
+    const materializedExercises = [
+      {
+        id: "a1000001-0000-4000-8000-000000000001",
+        exerciseId: structuredExercise.exerciseId,
+        prescription: {
+          snapshot: structuredExercise.snapshot,
+          sets: structuredExercise.sets,
+          reps: structuredExercise.reps,
+        },
+        execution: { status: "planned" },
+      },
+    ];
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => planRow,
+        findActiveRevisionByPlanId: async () => revisionRow,
+        listSessionsByUserAndPlannedDate: async () => [],
+        materializeSession: async (
+          _resolvedUserId: string,
+          _workoutPlanId: string,
+          _workoutPlanRevisionId: string,
+          plannedDate: string,
+          title: string,
+          exercises: unknown[],
+        ) => ({
+          id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+          userId,
+          workoutPlanId: planRow.id,
+          workoutPlanRevisionId: revisionRow.id,
+          plannedDate,
+          title,
+          status: "planned",
+          exercises,
+          feedback: {},
+          completedAt: null,
+          createdAt: new Date("2026-05-22T12:00:00.000Z"),
+          updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+        }),
+      } as never,
+      usersService as never,
+      {
+        findInaccessibleExerciseIds: async () => [],
+        findExercisesByIds: async (exerciseIds: string[]) =>
+          exerciseIds.includes(structuredExercise.exerciseId)
+            ? [
+                {
+                  id: structuredExercise.exerciseId,
+                  name: "Goblet Squat",
+                  normalizedName: "goblet squat",
+                  aliases: [],
+                  primaryMuscles: ["quads", "glutes"],
+                  secondaryMuscles: [],
+                  equipment: ["dumbbell", "kettlebell"],
+                  movementPatterns: ["squat"],
+                  modalities: ["strength"],
+                  difficulty: "intermediate",
+                  instructions: ["Keep chest tall."],
+                  safetyNotes: ["Stop if knee discomfort increases."],
+                  media: { refs: [], fallbackLabel: "Demonstration coming soon" },
+                  source: "system_seed",
+                  validationStatus: "validated",
+                  status: "active",
+                  userId: null,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                },
+              ]
+            : [],
+      } as never,
+    );
+
+    const workout = await service.ensureTodayWorkoutSession(auth, "2026-05-18");
+
+    expect(workout?.exercises[0]?.catalog).toMatchObject({
+      source: "catalog",
+      name: "Goblet Squat",
+      modalities: ["strength"],
+    });
+    expect(materializedExercises[0]?.prescription.snapshot.name).toBe("Goblet Squat");
+  });
+
   it("updates structured exercise execution and completes the session", async () => {
     const exerciseId = "a1000001-0000-4000-8000-000000000001";
     const sessionRow = {
@@ -1087,5 +1319,66 @@ describe("WorkoutsService", () => {
 
     expect(updatedStatus).toBe("completed");
     expect(session.status).toBe("completed");
+  });
+
+  it("updates session execution without creating workout plan revisions", async () => {
+    const exerciseId = "a1000001-0000-4000-8000-000000000001";
+    const sessionRow = {
+      id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+      userId,
+      workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
+      plannedDate: "2026-05-18",
+      title: "Strength base — Lower body",
+      status: "planned",
+      exercises: [
+        {
+          id: exerciseId,
+          prescription: { snapshot: { name: "Squat" }, sets: 3, reps: "8" },
+          execution: { status: "planned" },
+        },
+      ],
+      feedback: {},
+      completedAt: null,
+      createdAt: new Date("2026-05-22T12:00:00.000Z"),
+      updatedAt: new Date("2026-05-22T12:00:00.000Z"),
+    };
+
+    let appendRevisionCalled = false;
+    let createPlanCalled = false;
+
+    const service = new WorkoutsService(
+      {
+        findSessionByUserId: async () => sessionRow,
+        updateSessionState: async (
+          _resolvedUserId: string,
+          _sessionId: string,
+          input: { status?: string; exercises?: unknown[] },
+        ) => ({
+          ...sessionRow,
+          status: input.status ?? sessionRow.status,
+          exercises: input.exercises ?? sessionRow.exercises,
+        }),
+        appendRevision: async () => {
+          appendRevisionCalled = true;
+          return { id: "should-not-run" };
+        },
+        createPlanWithRevision: async () => {
+          createPlanCalled = true;
+          return { revision: { id: "should-not-run" } };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    await service.updateSessionExercise(auth, sessionRow.id, exerciseId, {
+      status: "completed",
+      perceivedEffort: 7,
+      notes: "Solid set.",
+    });
+
+    expect(appendRevisionCalled).toBe(false);
+    expect(createPlanCalled).toBe(false);
   });
 });

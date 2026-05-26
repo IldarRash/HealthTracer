@@ -1,10 +1,14 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { aiProposalSchema, type AiProposal, type UpdateRecipeRecommendationStatusInput } from "@health/types";
+import { aiProposalSchema, logNutritionIncidentProposalPayloadSchema, type AiProposal, type UpdateRecipeRecommendationStatusInput } from "@health/types";
 import {
   completeWorkoutSession,
   completeOnboarding,
   decideProposal,
   sendChatMessage,
+  uploadChatAttachment,
+  getChatAttachment,
+  grantChatAttachmentConsent,
+  recognizeChatAttachment,
   apiQueryKeys,
   getAcceptedProposalRefreshQueryKeys,
   getProposalDecisionRefreshQueryKeys,
@@ -47,6 +51,7 @@ import {
   getTodayDay,
   getTodayHistory,
   buildRecipeListQueryString,
+  buildRecipeNutritionIncidentProposal,
   createDocument,
   deleteDocument,
   extractDocumentSignals,
@@ -342,6 +347,233 @@ describe("web api helpers", () => {
       content: "Can you adapt my workout this week?",
     });
     expect(requestBodies[0]).not.toHaveProperty("proposalRevision");
+  });
+
+  it("sends chat messages with attachmentRefIds and parses attachmentOutcomes", async () => {
+    const threadId = "24b19287-75b8-4a3e-9c10-691908479405";
+    const attachmentRefId = "a1000001-0000-4000-8000-000000000001";
+    const requestBodies: unknown[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method ?? "GET";
+
+        if (method === "POST" && path.includes(`/chat/threads/${threadId}/messages`)) {
+          requestBodies.push(JSON.parse(String(init?.body)));
+
+          return new Response(
+            JSON.stringify({
+              thread: {
+                id: threadId,
+                userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+                title: "Coaching",
+                createdAt: "2026-05-22T12:00:00.000Z",
+                updatedAt: "2026-05-22T12:00:00.000Z",
+              },
+              userMessage: {
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                threadId,
+                role: "user",
+                content: "[Attachment: Food photo — meal.jpg]",
+                metadata: {},
+                createdAt: "2026-05-22T12:00:00.000Z",
+              },
+              assistantMessage: {
+                id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                threadId,
+                role: "assistant",
+                content: "I reviewed your meal photo.",
+                metadata: {},
+                createdAt: "2026-05-22T12:00:01.000Z",
+              },
+              proposals: [],
+              attachmentOutcomes: [
+                {
+                  attachmentRefId,
+                  category: "food_photo",
+                  status: "ready",
+                  recognition: null,
+                  proposalCandidateCount: 1,
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    const result = await sendChatMessage(token, threadId, "", {
+      attachmentRefIds: [attachmentRefId],
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(requestBodies[0]).toEqual({
+      content: "",
+      attachmentRefIds: [attachmentRefId],
+    });
+    expect(result.data?.attachmentOutcomes?.[0]?.category).toBe("food_photo");
+  });
+
+  it("uploads, fetches, grants consent, and recognizes chat attachments", async () => {
+    const attachmentId = "a1000001-0000-4000-8000-000000000001";
+    const requestLog: Array<{ method: string; path: string; body?: unknown }> = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        const method = init?.method ?? "GET";
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        requestLog.push({ method, path, body });
+
+        if (method === "POST" && path.endsWith("/chat/attachments")) {
+          return new Response(
+            JSON.stringify({
+              id: attachmentId,
+              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+              threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+              messageId: null,
+              category: "food_photo",
+              status: "queued",
+              filename: "meal.jpg",
+              mimeType: "image/jpeg",
+              fileSizeBytes: 4,
+              storageKey: "local://attachments/meal.jpg",
+              linkedDocumentId: null,
+              linkedImageRefId: attachmentId,
+              consent: null,
+              recognition: null,
+              failureReason: null,
+              retentionPolicy: "ephemeral_recognition",
+              expiresAt: null,
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-22T12:00:00.000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        if (method === "GET" && path.endsWith(`/chat/attachments/${attachmentId}`)) {
+          return new Response(
+            JSON.stringify({
+              id: attachmentId,
+              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+              threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+              messageId: null,
+              category: "food_photo",
+              status: "ready",
+              filename: "meal.jpg",
+              mimeType: "image/jpeg",
+              fileSizeBytes: 4,
+              storageKey: "local://attachments/meal.jpg",
+              linkedDocumentId: null,
+              linkedImageRefId: attachmentId,
+              consent: null,
+              recognition: null,
+              failureReason: null,
+              retentionPolicy: "ephemeral_recognition",
+              expiresAt: null,
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-22T12:00:01.000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        if (method === "POST" && path.endsWith(`/chat/attachments/${attachmentId}/consent`)) {
+          return new Response(
+            JSON.stringify({
+              id: attachmentId,
+              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+              threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+              messageId: null,
+              category: "medical_document",
+              status: "queued",
+              filename: "lab.pdf",
+              mimeType: "application/pdf",
+              fileSizeBytes: 4,
+              storageKey: "local://attachments/lab.pdf",
+              linkedDocumentId: null,
+              linkedImageRefId: null,
+              consent: {
+                consentScopes: ["upload_storage"],
+                consentVersion: "v1",
+                consentGrantedAt: "2026-05-22T12:00:00.000Z",
+                documentType: "lab_report",
+                documentTitle: "Lab report",
+              },
+              recognition: null,
+              failureReason: null,
+              retentionPolicy: "document_consent_rules",
+              expiresAt: null,
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-22T12:00:01.000Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        if (method === "POST" && path.endsWith(`/chat/attachments/${attachmentId}/recognize`)) {
+          return new Response(
+            JSON.stringify({
+              attachment: {
+                id: attachmentId,
+                userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+                threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+                messageId: null,
+                category: "food_photo",
+                status: "ready",
+                filename: "meal.jpg",
+                mimeType: "image/jpeg",
+                fileSizeBytes: 4,
+                storageKey: "local://attachments/meal.jpg",
+                linkedDocumentId: null,
+                linkedImageRefId: attachmentId,
+                consent: null,
+                recognition: null,
+                failureReason: null,
+                retentionPolicy: "ephemeral_recognition",
+                expiresAt: null,
+                createdAt: "2026-05-22T12:00:00.000Z",
+                updatedAt: "2026-05-22T12:00:02.000Z",
+              },
+              proposalCandidates: [],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    const uploadResult = await uploadChatAttachment(token, {
+      category: "food_photo",
+      filename: "meal.jpg",
+      mimeType: "image/jpeg",
+      fileContentBase64: "aGVsbG8=",
+      consentVersion: "v1",
+    });
+    expect(uploadResult.data?.id).toBe(attachmentId);
+
+    const getResult = await getChatAttachment(token, attachmentId);
+    expect(getResult.data?.status).toBe("ready");
+
+    const consentResult = await grantChatAttachmentConsent(token, attachmentId, {
+      consentScopes: ["upload_storage"],
+      consentVersion: "v1",
+    });
+    expect(consentResult.data?.consent?.consentScopes).toContain("upload_storage");
+
+    const recognizeResult = await recognizeChatAttachment(token, attachmentId, {});
+    expect(recognizeResult.data?.attachment.status).toBe("ready");
+
+    expect(requestLog.map((entry) => entry.method)).toEqual(["POST", "GET", "POST", "POST"]);
   });
 
   it("returns API errors for non-OK proposal decisions", async () => {
@@ -1134,6 +1366,113 @@ describe("web api helpers", () => {
     ).toEqual([]);
   });
 
+  it("returns wellbeing and nutrition incident refresh keys without plan revision keys", () => {
+    expect(
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("capture_wellbeing_checkin", "general", {
+          date: "2026-05-26",
+          moodScore: 2,
+          stressScore: 3,
+        }),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.proposals,
+        apiQueryKeys.todayDayPrefix,
+        apiQueryKeys.todayHistoryPrefix,
+        ...getWellbeingRefreshQueryKeys(),
+      ]),
+    );
+    expect(
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("capture_wellbeing_checkin", "general", {
+          date: "2026-05-26",
+          moodScore: 2,
+          stressScore: 3,
+        }),
+      ),
+    ).not.toEqual(expect.arrayContaining([apiQueryKeys.nutritionRevisions]));
+
+    expect(
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("log_nutrition_incident", "nutrition", {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Pizza slice", calories: 280 }],
+          estimatedCalories: 280,
+          estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+          confidence: "medium",
+          provenance: { source: "text_estimate", providerId: "chat_trigger" },
+          imageRefs: [],
+        }),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.proposals,
+        apiQueryKeys.nutritionAdherenceToday,
+        apiQueryKeys.nutritionAdherencePrefix,
+        apiQueryKeys.todayDayPrefix,
+        apiQueryKeys.todayHistoryPrefix,
+      ]),
+    );
+    expect(
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("log_nutrition_incident", "nutrition", {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Pizza slice", calories: 280 }],
+          estimatedCalories: 280,
+          estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+          confidence: "medium",
+          provenance: { source: "text_estimate", providerId: "chat_trigger" },
+          imageRefs: [],
+        }),
+      ),
+    ).not.toEqual(expect.arrayContaining([apiQueryKeys.nutritionRevisions]));
+
+    expect(
+      getAcceptedProposalRefreshQueryKeys(
+        createAcceptedProposal("log_nutrition_incident", "nutrition", {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Lentil power bowl", calories: 690 }],
+          estimatedCalories: 690,
+          estimatedMacros: { proteinGrams: 28, carbsGrams: 72, fatGrams: 22 },
+          confidence: "medium",
+          provenance: {
+            source: "recipe_recommendation",
+            providerId: "b2000001-0000-4000-8000-000000000001",
+          },
+          imageRefs: [],
+        }),
+      ),
+    ).toEqual(expect.arrayContaining([apiQueryKeys.recipeRecommendations]));
+  });
+
+  it("returns recipe recommendation refresh keys for inline recipe log accept decisions", () => {
+    const recipeBackedProposal = createAcceptedProposal("log_nutrition_incident", "nutrition", {
+      incidentDateTime: "2026-05-26T18:00:00.000Z",
+      items: [{ name: "Lentil power bowl", calories: 690 }],
+      estimatedCalories: 690,
+      estimatedMacros: { proteinGrams: 28, carbsGrams: 72, fatGrams: 22 },
+      confidence: "medium",
+      provenance: {
+        source: "recipe_recommendation",
+        providerId: "b2000001-0000-4000-8000-000000000001",
+      },
+      imageRefs: [],
+    });
+
+    expect(getProposalDecisionRefreshQueryKeys(recipeBackedProposal)).toEqual(
+      expect.arrayContaining([
+        apiQueryKeys.proposals,
+        apiQueryKeys.recipeRecommendations,
+        apiQueryKeys.nutritionAdherenceToday,
+        apiQueryKeys.todayDayPrefix,
+      ]),
+    );
+    expect(getProposalDecisionRefreshQueryKeys(recipeBackedProposal)).not.toEqual(
+      expect.arrayContaining([apiQueryKeys.nutritionRevisions]),
+    );
+  });
+
   it("returns shared habit-dependent refresh keys", () => {
     expect(getHabitDependentRefreshQueryKeys()).toEqual([
       apiQueryKeys.habitActive,
@@ -1659,6 +1998,10 @@ describe("web api helpers", () => {
       prepMinutes: 5,
       cookMinutes: null,
       source: "Curated catalog",
+      confidence: "medium",
+      provenance: {
+        source: "seed_catalog",
+      },
       status: "active",
       createdAt: "2026-05-22T12:00:00.000Z",
       updatedAt: "2026-05-22T12:00:00.000Z",
@@ -1715,6 +2058,82 @@ describe("web api helpers", () => {
     ).rejects.toThrow();
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("builds recipe nutrition incident proposal payloads from the recommendations API", async () => {
+    const recommendationId = "a1000001-0000-4000-8000-000000000002";
+    const proposalId = "d5000001-0000-4000-8000-000000000001";
+    const threadId = "c4000001-0000-4000-8000-000000000001";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        expect(String(input)).toContain("/recipes/recommendations/");
+        expect(String(input)).toContain("/nutrition-incident-proposal");
+
+        return new Response(
+          JSON.stringify({
+            id: proposalId,
+            userId: acceptedProposalFixtureIds.userId,
+            threadId,
+            sourceMessageId: null,
+            intent: "log_nutrition_incident",
+            targetDomain: "nutrition",
+            title: "Log Lentil power bowl",
+            reason: "Review this approximate recipe estimate before logging.",
+            proposedChanges: {
+              incidentDateTime: "2026-05-26T18:00:00.000Z",
+              items: [
+                {
+                  name: "Lentil power bowl",
+                  quantity: "1 serving",
+                  calories: 690,
+                  proteinGrams: 28,
+                  carbsGrams: 72,
+                  fatGrams: 22,
+                },
+              ],
+              estimatedCalories: 690,
+              estimatedMacros: {
+                proteinGrams: 28,
+                carbsGrams: 72,
+                fatGrams: 22,
+              },
+              confidence: "medium",
+              provenance: {
+                source: "recipe_recommendation",
+                providerId: recommendationId,
+              },
+              imageRefs: [],
+            },
+            status: "pending",
+            validationStatus: "valid",
+            validationErrors: [],
+            userDecisionAt: null,
+            appliedReference: null,
+            createdAt: "2026-05-26T18:00:00.000Z",
+            updatedAt: "2026-05-26T18:00:00.000Z",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const result = await buildRecipeNutritionIncidentProposal(token, recommendationId);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.id).toBe(proposalId);
+    expect(result.data?.intent).toBe("log_nutrition_incident");
+    expect(result.data?.status).toBe("pending");
+    const parsedPayload = logNutritionIncidentProposalPayloadSchema.safeParse(
+      result.data?.proposedChanges,
+    );
+    expect(parsedPayload.success).toBe(true);
+    expect(parsedPayload.data?.provenance.source).toBe("recipe_recommendation");
+    expect(parsedPayload.data?.items[0]?.name).toBe("Lentil power bowl");
   });
 
   it("parses device connection list responses", async () => {

@@ -97,57 +97,85 @@ export class ProposalsService {
       throw new BadRequestException("Only pending proposals can be decided.");
     }
 
+    const effectiveProposedChanges =
+      input.proposedChanges !== undefined ? input.proposedChanges : proposal.proposedChanges;
+
     const safetyErrors = validateProposalSafety({
       intent: proposal.intent,
       targetDomain: proposal.targetDomain,
       title: proposal.title,
       reason: proposal.reason,
-      proposedChanges: proposal.proposedChanges,
+      proposedChanges: effectiveProposedChanges,
     });
     const validation = this.proposalValidationService.validateStoredProposal(
       proposal.intent,
-      proposal.proposedChanges,
+      effectiveProposedChanges,
     );
     const provenanceErrors =
       await this.proposalValidationService.validateProvenanceOwnership(
         user.id,
         proposal.intent,
-        proposal.proposedChanges,
+        effectiveProposedChanges,
       );
     const progressLinkedProvenanceErrors =
       this.proposalValidationService.validateProgressLinkedProvenanceRequired(
         proposal.intent,
-        proposal.proposedChanges,
+        effectiveProposedChanges,
       );
     const exerciseReferenceErrors =
       await this.proposalValidationService.validateExerciseReferences(
         user.id,
         proposal.intent,
-        proposal.proposedChanges,
+        effectiveProposedChanges,
       );
     const habitProposalContextErrors =
       await this.proposalValidationService.validateHabitProposalContext(
         user.id,
         proposal.intent,
-        proposal.proposedChanges,
+        effectiveProposedChanges,
       );
     const goalHierarchyErrors =
       await this.proposalValidationService.validateGoalProposalHierarchy(
         user.id,
         proposal.intent,
-        proposal.proposedChanges,
+        effectiveProposedChanges,
       );
     const todaySourceRefErrors =
       await this.proposalValidationService.validateTodayChecklistGoalSourceRefs(
         user.id,
         proposal.intent,
-        proposal.proposedChanges,
+        effectiveProposedChanges,
       );
     const recoveryAdaptationErrors =
       await this.proposalValidationService.validateRecoveryAwareWorkoutAdaptation(
         user.id,
         proposal.intent,
-        proposal.proposedChanges,
+        effectiveProposedChanges,
+      );
+    const wellbeingProposalContextErrors =
+      await this.proposalValidationService.validateWellbeingCheckinProposalContext(
+        user.id,
+        proposal.intent,
+        effectiveProposedChanges,
+        { appliedReference: proposal.appliedReference },
+      );
+    const nutritionIncidentImageRefErrors =
+      await this.proposalValidationService.validateNutritionIncidentImageRefOwnership(
+        user.id,
+        proposal.intent,
+        effectiveProposedChanges,
+      );
+    const nutritionIncidentRecipeRecommendationErrors =
+      await this.proposalValidationService.validateNutritionIncidentRecipeRecommendationContext(
+        user.id,
+        proposal.intent,
+        effectiveProposedChanges,
+      );
+    const chatAttachmentProposalRefErrors =
+      await this.proposalValidationService.validateChatAttachmentProposalRefs(
+        user.id,
+        proposal.intent,
+        effectiveProposedChanges,
       );
     const storedEvidenceRefs = proposal.evidenceRefs as CorrelationEvidenceRef[] | null;
     const evidenceRefErrors = this.proposalValidationService.validateCorrelationEvidenceRefs(
@@ -168,6 +196,10 @@ export class ProposalsService {
       ...goalHierarchyErrors,
       ...todaySourceRefErrors,
       ...recoveryAdaptationErrors,
+      ...wellbeingProposalContextErrors,
+      ...nutritionIncidentImageRefErrors,
+      ...nutritionIncidentRecipeRecommendationErrors,
+      ...chatAttachmentProposalRefErrors,
       ...evidenceRefErrors,
       ...evidenceOwnershipErrors,
     ];
@@ -184,8 +216,13 @@ export class ProposalsService {
     const acceptedProposal = await this.proposalsRepository.acceptPendingProposal(
       proposalId,
       user.id,
-      (lockedProposal) =>
-        this.proposalApplyService.applyAcceptedProposal(auth, user.id, lockedProposal),
+      (lockedProposal, tx) =>
+        this.proposalApplyService.applyAcceptedProposal(auth, user.id, lockedProposal, tx),
+      input.proposedChanges !== undefined
+        ? {
+            proposedChangesOverride: effectiveProposedChanges as Record<string, unknown>,
+          }
+        : undefined,
     );
 
     if (!acceptedProposal) {

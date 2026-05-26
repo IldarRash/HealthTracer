@@ -37,6 +37,7 @@ import {
   RevisionHistoryItem,
   RevisionHistoryList,
 } from "../ui";
+import { RecipeRecommendationsPanel } from "../recipes/recipe-recommendations-panel";
 
 function formatList(values: readonly string[], emptyLabel: string): string {
   return values.length > 0 ? values.join(", ") : emptyLabel;
@@ -269,6 +270,15 @@ export function NutritionWorkspace() {
               </p>
             </>
           ) : null}
+        </PlanViewPanel>
+
+        <PlanViewPanel
+          label="Meal ideas"
+          title="Recipe recommendations"
+          titleId="nutrition-recipe-recommendations"
+          intro="Plan-fit meal ideas with approximate nutrition estimates. Saving or logging recipes does not change your targets."
+        >
+          <RecipeRecommendationsPanel activeRevision={activeRevision} embedded />
         </PlanViewPanel>
 
         <PlanViewPanel

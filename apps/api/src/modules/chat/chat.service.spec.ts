@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { BadRequestException } from "@nestjs/common";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
 import { WELLBEING_CRISIS_SUPPORT_COPY, WEEKLY_REVIEW_CHAT_PROMPT } from "@health/types";
 import { ChatService } from "./chat.service.js";
@@ -32,12 +33,34 @@ const noopWeeklyReviewService = {
   },
 } as never;
 
+const noopWellbeingCheckInsService = {
+  getCheckInForDate: async () => ({ checkIn: null }),
+} as never;
+
+const noopRecipesService = {
+  packChatRecipeRecommendationProposal: async () => null,
+} as never;
+
+const noopChatAttachmentsService = {
+  assertOwnedAttachmentRefs: async () => [],
+  linkAttachmentsToMessage: async () => undefined,
+} as never;
+
+const noopChatAttachmentRecognitionService = {
+  buildProposalCandidates: () => [],
+  mergeAttachmentProposals: <T>(aiProposals: T[]) => aiProposals,
+} as never;
+
 function createChatService(deps: {
   chatRepository: unknown;
   usersService: unknown;
   aiService: unknown;
   proposalValidationService: unknown;
   progressWeeklyReviewService?: unknown;
+  wellbeingCheckInsService?: unknown;
+  recipesService?: unknown;
+  chatAttachmentsService?: unknown;
+  chatAttachmentRecognitionService?: unknown;
 }) {
   return new ChatService(
     deps.chatRepository as never,
@@ -45,6 +68,10 @@ function createChatService(deps: {
     deps.aiService as never,
     deps.proposalValidationService as never,
     (deps.progressWeeklyReviewService ?? noopWeeklyReviewService) as never,
+    (deps.wellbeingCheckInsService ?? noopWellbeingCheckInsService) as never,
+    (deps.recipesService ?? noopRecipesService) as never,
+    (deps.chatAttachmentsService ?? noopChatAttachmentsService) as never,
+    (deps.chatAttachmentRecognitionService ?? noopChatAttachmentRecognitionService) as never,
   );
 }
 
@@ -117,6 +144,10 @@ describe("ChatService", () => {
         validateTodayChecklistGoalSourceRefs: async () => [],
         validateRecoveryAwareWorkoutAdaptation: async () => [],
         validateHabitProposalContext: async () => [],
+        validateWellbeingCheckinProposalContext: async () => [],
+        validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+        validateRecipeRecommendationProposalContext: async () => [],
       },
     });
 
@@ -209,6 +240,10 @@ describe("ChatService", () => {
         validateTodayChecklistGoalSourceRefs: async () => [],
         validateRecoveryAwareWorkoutAdaptation: async () => [],
         validateHabitProposalContext: async () => [],
+        validateWellbeingCheckinProposalContext: async () => [],
+        validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+        validateRecipeRecommendationProposalContext: async () => [],
       },
     });
 
@@ -296,6 +331,10 @@ describe("ChatService", () => {
         validateTodayChecklistGoalSourceRefs: async () => [],
         validateRecoveryAwareWorkoutAdaptation: async () => [],
         validateHabitProposalContext: async () => [],
+        validateWellbeingCheckinProposalContext: async () => [],
+        validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+        validateRecipeRecommendationProposalContext: async () => [],
       },
     });
 
@@ -425,6 +464,10 @@ describe("ChatService", () => {
           findActivePlanByUserId: async () => null,
           findActiveRevisionByPlanId: async () => null,
         } as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        { listByIdsForUser: async () => [] } as never,
       ),
     });
 
@@ -527,6 +570,10 @@ describe("ChatService", () => {
         validateTodayChecklistGoalSourceRefs: async () => [],
         validateRecoveryAwareWorkoutAdaptation: async () => [],
         validateHabitProposalContext: async () => [],
+        validateWellbeingCheckinProposalContext: async () => [],
+        validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+        validateRecipeRecommendationProposalContext: async () => [],
       },
     });
 
@@ -598,6 +645,10 @@ describe("ChatService", () => {
         validateTodayChecklistGoalSourceRefs: async () => [],
         validateRecoveryAwareWorkoutAdaptation: async () => [],
         validateHabitProposalContext: async () => [],
+        validateWellbeingCheckinProposalContext: async () => [],
+        validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+        validateRecipeRecommendationProposalContext: async () => [],
       },
     });
 
@@ -766,6 +817,10 @@ describe("ChatService", () => {
           findActiveRevisionByPlanId: async () => null,
           ...habitsRepository,
         } as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        { listByIdsForUser: async () => [] } as never,
       );
     }
 
@@ -1023,6 +1078,10 @@ describe("ChatService", () => {
           validateTodayChecklistGoalSourceRefs: async () => [],
           validateRecoveryAwareWorkoutAdaptation: async () => [],
           validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
         },
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => ({
@@ -1136,6 +1195,10 @@ describe("ChatService", () => {
           validateTodayChecklistGoalSourceRefs: async () => [],
           validateRecoveryAwareWorkoutAdaptation: async () => [],
           validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
         },
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => {
@@ -1250,6 +1313,10 @@ describe("ChatService", () => {
             findActivePlanByUserId: async () => null,
             findActiveRevisionByPlanId: async () => null,
           } as never,
+          {} as never,
+          {} as never,
+          {} as never,
+          { listByIdsForUser: async () => [] } as never,
         ),
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => ({
@@ -1281,6 +1348,579 @@ describe("ChatService", () => {
 
       expect(captured[0]?.validationStatus).toBe("invalid");
       expect(captured[0]?.validationErrors).toContain(missingProvenanceError);
+    });
+  });
+
+  describe("deterministic wellbeing and nutrition proposals", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function createDeterministicProposalChatService(options: {
+      hasTodayCheckIn?: boolean;
+      aiProposals?: Array<Record<string, unknown>>;
+      recipesService?: unknown;
+    } = {}) {
+      const capturedProposals: Array<{ intent: string; proposedChanges: unknown }> = [];
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata: {},
+            createdAt: new Date("2026-05-26T12:00:00.000Z"),
+          }),
+          createProposal: async (
+            _userId: string,
+            _threadId: string,
+            _sourceMessageId: string | null,
+            proposal: { intent: string; proposedChanges: unknown },
+            validationStatus: "valid" | "invalid" | "pending_validation",
+            validationErrors: string[],
+          ) => {
+            capturedProposals.push(proposal);
+
+            return {
+              id: `proposal-${capturedProposals.length}`,
+              userId: user.id,
+              threadId: thread.id,
+              sourceMessageId: "assistant-message-id",
+              targetDomain: proposal.intent === "log_nutrition_incident" ? "nutrition" : "general",
+              title: "Deterministic proposal",
+              reason: "Deterministic trigger",
+              ...proposal,
+              status: "pending" as const,
+              validationStatus,
+              validationErrors,
+              userDecisionAt: null,
+              appliedReference: null,
+              createdAt: new Date("2026-05-26T12:00:00.000Z"),
+              updatedAt: new Date("2026-05-26T12:00:00.000Z"),
+            };
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: {
+              reply: "Coaching reply.",
+              proposals: options.aiProposals ?? [],
+            },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        wellbeingCheckInsService: {
+          getCheckInForDate: async () => ({
+            checkIn: options.hasTodayCheckIn
+              ? {
+                  id: "checkin-1",
+                  userId: user.id,
+                  date: "2026-05-26",
+                  moodScore: 4,
+                  stressScore: 2,
+                  tags: [],
+                  note: null,
+                  source: "user_entry",
+                  crisisFlagReasons: [],
+                  createdAt: "2026-05-26T08:00:00.000Z",
+                  updatedAt: "2026-05-26T08:00:00.000Z",
+                }
+              : null,
+          }),
+        },
+        ...(options.recipesService ? { recipesService: options.recipesService } : {}),
+      });
+
+      return { service, capturedProposals };
+    }
+
+    it("adds wellbeing check-in proposal when low mood is reported and today check-in is missing", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
+
+      const { service, capturedProposals } = createDeterministicProposalChatService();
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "I feel bad today",
+      });
+
+      expect(capturedProposals.map((proposal) => proposal.intent)).toEqual([
+        "capture_wellbeing_checkin",
+      ]);
+      expect(capturedProposals[0]?.proposedChanges).toMatchObject({
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+      });
+      expect(result.proposals).toHaveLength(1);
+    });
+
+    it("skips wellbeing check-in proposal when today's check-in already exists", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
+
+      const { service, capturedProposals } = createDeterministicProposalChatService({
+        hasTodayCheckIn: true,
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "I feel bad today",
+      });
+
+      expect(capturedProposals).toEqual([]);
+    });
+
+    it("adds nutrition incident proposal for cheat meal phrases", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-26T18:00:00.000Z"));
+
+      const { service, capturedProposals } = createDeterministicProposalChatService();
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "I had a cheat meal tonight",
+      });
+
+      expect(capturedProposals.map((proposal) => proposal.intent)).toEqual([
+        "log_nutrition_incident",
+      ]);
+      expect(capturedProposals[0]?.proposedChanges).toMatchObject({
+        confidence: "medium",
+        provenance: { source: "text_estimate" },
+      });
+      expect(result.proposals).toHaveLength(1);
+    });
+
+    it("does not add deterministic proposals when crisis language is present", async () => {
+      let aiCalled = false;
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-05-26T12:00:00.000Z"),
+          }),
+          createProposal: async () => {
+            throw new Error("createProposal should not be called for crisis boundary turns");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => {
+            aiCalled = true;
+            return {
+              output: { reply: "Unsafe coaching reply", proposals: [] },
+              parseErrors: [],
+              replySafetyErrors: [],
+            };
+          },
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "I feel bad and want to die",
+      });
+
+      expect(aiCalled).toBe(false);
+      expect(result.proposals).toEqual([]);
+    });
+
+    it("adds recipe recommendation proposal when meal ideas are requested", async () => {
+      const recipeProposal = {
+        intent: "recommend_recipes",
+        targetDomain: "recipe",
+        title: "Recipe ideas for your plan",
+        reason: "These recipe ideas were selected to fit your active nutrition plan.",
+        proposedChanges: {
+          relatedNutritionPlanRevisionId: "ad000002-0000-4000-8000-000000000001",
+          recommendations: [
+            {
+              recipeId: "a1000001-0000-4000-8000-000000000001",
+              reason: "Fits your active plan.",
+              fitSummary: "Estimated macros are a reasonable fit.",
+            },
+          ],
+        },
+      };
+
+      const { service, capturedProposals } = createDeterministicProposalChatService({
+        recipesService: {
+          packChatRecipeRecommendationProposal: async () => recipeProposal,
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Can you suggest some dinner ideas?",
+      });
+
+      expect(capturedProposals.map((proposal) => proposal.intent)).toEqual(["recommend_recipes"]);
+      expect(result.proposals).toHaveLength(1);
+    });
+
+    it("links owned attachment refs and merges attachment proposal candidates on send", async () => {
+      const attachmentId = "a1000001-0000-4000-8000-000000000001";
+      let userMessageMetadata: Record<string, unknown> = {};
+      let linkCalled = false;
+
+      const attachmentRecord = {
+        id: attachmentId,
+        userId: user.id,
+        threadId: thread.id,
+        messageId: null,
+        category: "food_photo" as const,
+        status: "ready" as const,
+        filename: "meal.jpg",
+        mimeType: "image/jpeg",
+        fileSizeBytes: 1024,
+        storageKey: "local://attachments/meal.jpg",
+        linkedDocumentId: null,
+        linkedImageRefId: attachmentId,
+        consent: null,
+        recognition: {
+          category: "food_photo" as const,
+          attachmentRefId: attachmentId,
+          analysis: {
+            candidates: [
+              {
+                items: [{ name: "Salad", calories: 320 }],
+                estimatedCalories: 320,
+                estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
+                confidence: "medium" as const,
+                provenance: {
+                  source: "dev_stub",
+                  providerId: "dev_food_photo",
+                  analysisId: "b1000001-0000-4000-8000-000000000002",
+                },
+              },
+            ],
+            lowConfidenceNotice: null,
+          },
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            recognitionId: "b1000001-0000-4000-8000-000000000002",
+            confidence: "medium" as const,
+          },
+        },
+        failureReason: null,
+        retentionPolicy: "ephemeral_recognition" as const,
+        expiresAt: null,
+        createdAt: "2026-05-26T12:00:00.000Z",
+        updatedAt: "2026-05-26T12:00:00.000Z",
+      };
+
+      const capturedProposals: Array<{ intent: string; proposedChanges: unknown }> = [];
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "user") {
+              userMessageMetadata = metadata;
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-05-26T12:00:00.000Z"),
+            };
+          },
+          createProposal: async (
+            _userId: string,
+            _threadId: string,
+            _sourceMessageId: string | null,
+            proposal: { intent: string; proposedChanges: unknown },
+            validationStatus: "valid" | "invalid" | "pending_validation",
+            validationErrors: string[],
+          ) => {
+            capturedProposals.push(proposal);
+
+            return {
+              id: `proposal-${capturedProposals.length}`,
+              userId: user.id,
+              threadId: thread.id,
+              sourceMessageId: "assistant-message-id",
+              targetDomain: "nutrition",
+              title: "Attachment proposal",
+              reason: "From attachment",
+              ...proposal,
+              status: "pending" as const,
+              validationStatus,
+              validationErrors,
+              userDecisionAt: null,
+              appliedReference: null,
+              createdAt: new Date("2026-05-26T12:00:00.000Z"),
+              updatedAt: new Date("2026-05-26T12:00:00.000Z"),
+            };
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "I reviewed your attachment.", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        chatAttachmentsService: {
+          assertOwnedAttachmentRefs: async () => [attachmentRecord],
+          linkAttachmentsToMessage: async () => {
+            linkCalled = true;
+          },
+        },
+        chatAttachmentRecognitionService: {
+          buildProposalCandidates: () => [
+            {
+              intent: "log_nutrition_incident",
+              targetDomain: "nutrition",
+              title: "Log meal from photo",
+              reason: "Review meal estimate",
+              proposedChanges: { attachmentRefId: attachmentId },
+              attachmentRefId: attachmentId,
+            },
+          ],
+          mergeAttachmentProposals: (aiProposals, attachmentProposals) => [
+            ...aiProposals,
+            ...attachmentProposals.map(({ intent, targetDomain, title, reason, proposedChanges }) => ({
+              intent,
+              targetDomain,
+              title,
+              reason,
+              proposedChanges,
+            })),
+          ],
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "",
+        attachmentRefIds: [attachmentId],
+      });
+
+      expect(userMessageMetadata.attachmentRefIds).toEqual([attachmentId]);
+      expect(linkCalled).toBe(true);
+      expect(capturedProposals.map((proposal) => proposal.intent)).toContain(
+        "log_nutrition_incident",
+      );
+      expect(result.attachmentOutcomes?.[0]?.proposalCandidateCount).toBe(1);
+    });
+
+    it("rejects chat send when attachment refs are queued or still processing", async () => {
+      const attachmentId = "a1000001-0000-4000-8000-000000000001";
+      let createMessageCalled = false;
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async () => {
+            createMessageCalled = true;
+            throw new Error("createMessage should not be called");
+          },
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "Should not run", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        chatAttachmentsService: {
+          assertOwnedAttachmentRefs: async () => [
+            {
+              id: attachmentId,
+              userId: user.id,
+              threadId: thread.id,
+              messageId: null,
+              category: "food_photo",
+              status: "queued",
+              filename: "meal.jpg",
+              mimeType: "image/jpeg",
+              fileSizeBytes: 1024,
+              storageKey: "local://attachments/meal.jpg",
+              linkedDocumentId: null,
+              linkedImageRefId: attachmentId,
+              consent: null,
+              recognition: null,
+              failureReason: null,
+              retentionPolicy: "ephemeral_recognition",
+              expiresAt: null,
+              createdAt: "2026-05-26T12:00:00.000Z",
+              updatedAt: "2026-05-26T12:00:00.000Z",
+            },
+          ],
+        },
+      });
+
+      await expect(
+        service.sendMessage(auth, thread.id, {
+          content: "",
+          attachmentRefIds: [attachmentId],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(createMessageCalled).toBe(false);
+    });
+
+    it("allows text-only chat send without attachment refs", async () => {
+      let createMessageCalled = false;
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "user") {
+              createMessageCalled = true;
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-05-26T12:00:00.000Z"),
+            };
+          },
+          createProposal: async () => {
+            throw new Error("createProposal should not be called");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "Hi there.", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "Hello coach",
+      });
+
+      expect(createMessageCalled).toBe(true);
     });
   });
 });

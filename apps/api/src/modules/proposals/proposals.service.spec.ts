@@ -106,6 +106,9 @@ function createValidationServiceMock(overrides: Record<string, unknown> = {}) {
     validateGoalProposalHierarchy: async () => [],
     validateTodayChecklistGoalSourceRefs: async () => [],
     validateRecoveryAwareWorkoutAdaptation: async () => [],
+    validateWellbeingCheckinProposalContext: async () => [],
+    validateNutritionIncidentImageRefOwnership: async () => [],
+    validateNutritionIncidentRecipeRecommendationContext: async () => [],
     ...overrides,
   };
 }
@@ -1124,6 +1127,498 @@ describe("ProposalsService", () => {
 
     await expect(
       service.decideProposal(auth, progressNutritionProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+  });
+
+  it("accepts wellbeing check-in with edited proposedChanges override", async () => {
+    let appliedChanges: unknown;
+    const wellbeingProposal = {
+      ...pendingProposal,
+      intent: "capture_wellbeing_checkin" as const,
+      targetDomain: "general" as const,
+      title: "Wellbeing check-in",
+      reason: "You mentioned feeling off today.",
+      proposedChanges: {
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+        energyLevel: 2,
+        note: null,
+        tags: [],
+      },
+    };
+    const editedChanges = {
+      date: "2026-05-26",
+      moodScore: 4,
+      stressScore: 2,
+      energyLevel: 3,
+      note: "Feeling better after rest.",
+      tags: [],
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => wellbeingProposal,
+        acceptPendingProposal: async (
+          _proposalId: string,
+          _userId: string,
+          applyFn: (proposal: typeof wellbeingProposal) => Promise<string>,
+          options?: { proposedChangesOverride?: Record<string, unknown> },
+        ) => {
+          expect(options?.proposedChangesOverride).toEqual(editedChanges);
+          const appliedReference = await applyFn({
+            ...wellbeingProposal,
+            proposedChanges: (options?.proposedChangesOverride ??
+              wellbeingProposal.proposedChanges) as typeof wellbeingProposal.proposedChanges,
+          });
+          return {
+            ...wellbeingProposal,
+            proposedChanges: (options?.proposedChangesOverride ??
+              wellbeingProposal.proposedChanges) as typeof wellbeingProposal.proposedChanges,
+            status: "accepted" as const,
+            appliedReference,
+            userDecisionAt: new Date(),
+          };
+        },
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateWellbeingCheckinProposalContext: async (
+          _userId: string,
+          intent: typeof wellbeingProposal.intent,
+          changes: unknown,
+        ) => {
+          if (intent !== "capture_wellbeing_checkin") {
+            return [];
+          }
+          if ((changes as { date?: string }).date !== "2026-05-26") {
+            return [
+              "proposedChanges.date: Wellbeing check-in date must match the user's current day.",
+            ];
+          }
+          return [];
+        },
+      }) as never,
+      {
+        applyAcceptedProposal: async (
+          _auth: typeof auth,
+          _userId: string,
+          proposal: typeof wellbeingProposal,
+        ) => {
+          appliedChanges = proposal.proposedChanges;
+          return "wellbeing_checkin:checkin-1";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, wellbeingProposal.id, {
+      decision: "accept",
+      proposedChanges: editedChanges,
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.proposedChanges).toEqual(editedChanges);
+    expect(appliedChanges).toEqual(editedChanges);
+  });
+
+  it("rejects stale wellbeing proposals when today's check-in already exists", async () => {
+    let applyCalled = false;
+    const staleError =
+      "proposedChanges.date: A wellbeing check-in already exists for this day and cannot be overwritten by a stale proposal.";
+    const wellbeingProposal = {
+      ...pendingProposal,
+      intent: "capture_wellbeing_checkin" as const,
+      targetDomain: "general" as const,
+      title: "Wellbeing check-in",
+      reason: "You mentioned feeling off today.",
+      proposedChanges: {
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => wellbeingProposal,
+        markValidation: async (
+          _id: string,
+          status: "invalid" | "valid" | "pending_validation",
+          errors: string[],
+        ) => ({
+          ...wellbeingProposal,
+          validationStatus: status,
+          validationErrors: errors,
+        }),
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateWellbeingCheckinProposalContext: async () => [staleError],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "wellbeing_checkin:checkin-1";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, wellbeingProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+  });
+
+  it("rejects nutrition incident accept when image refs are not user-owned analyses", async () => {
+    let applyCalled = false;
+    const imageRefError =
+      "proposedChanges.imageRefs[0].id: Image reference was not analyzed for this user.";
+    const nutritionIncidentProposal = {
+      ...pendingProposal,
+      intent: "log_nutrition_incident" as const,
+      targetDomain: "nutrition" as const,
+      title: "Log nutrition incident",
+      reason: "Review this estimate before confirming.",
+      proposedChanges: {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "medium",
+        provenance: {
+          source: "dev_stub",
+          providerId: "dev_food_photo",
+          analysisId: "b1000001-0000-4000-8000-000000000002",
+        },
+        imageRefs: [{ id: "a1000001-0000-4000-8000-000000000001" }],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => nutritionIncidentProposal,
+        markValidation: async (
+          _id: string,
+          status: "invalid" | "valid" | "pending_validation",
+          errors: string[],
+        ) => ({
+          ...nutritionIncidentProposal,
+          validationStatus: status,
+          validationErrors: errors,
+        }),
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateNutritionIncidentImageRefOwnership: async () => [imageRefError],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "nutrition_incident:incident-1";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, nutritionIncidentProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+  });
+
+  it("rejects invalid wellbeing proposedChanges override at accept time", async () => {
+    let applyCalled = false;
+    const wellbeingProposal = {
+      ...pendingProposal,
+      intent: "capture_wellbeing_checkin" as const,
+      targetDomain: "general" as const,
+      title: "Wellbeing check-in",
+      reason: "You mentioned feeling off today.",
+      proposedChanges: {
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => wellbeingProposal,
+        markValidation: async (
+          _id: string,
+          status: "invalid" | "valid" | "pending_validation",
+          errors: string[],
+        ) => ({
+          ...wellbeingProposal,
+          validationStatus: status,
+          validationErrors: errors,
+        }),
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateStoredProposal: () => ({
+          valid: false,
+          errors: ["moodScore: Number must be less than or equal to 5"],
+        }),
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "wellbeing_checkin:checkin-1";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, wellbeingProposal.id, {
+        decision: "accept",
+        proposedChanges: {
+          date: "2026-05-26",
+          moodScore: 99,
+          stressScore: 3,
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+  });
+
+  it("blocks nutrition incident accept when low-confidence override lacks userEdits", async () => {
+    let applyCalled = false;
+    const nutritionIncidentProposal = {
+      ...pendingProposal,
+      intent: "log_nutrition_incident" as const,
+      targetDomain: "nutrition" as const,
+      title: "Log nutrition incident",
+      reason: "Review this estimate before confirming.",
+      proposedChanges: {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "medium",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => nutritionIncidentProposal,
+        markValidation: async (
+          _id: string,
+          status: "invalid" | "valid" | "pending_validation",
+          errors: string[],
+        ) => ({
+          ...nutritionIncidentProposal,
+          validationStatus: status,
+          validationErrors: errors,
+        }),
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock({
+        validateStoredProposal: () => ({
+          valid: false,
+          errors: [
+            "proposedChanges: nutrition_incident: low-confidence estimates require userEdits before acceptance.",
+          ],
+        }),
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "nutrition_incident:incident-1";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, nutritionIncidentProposal.id, {
+        decision: "accept",
+        proposedChanges: {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Pizza slice", calories: 280 }],
+          estimatedCalories: 280,
+          estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+          confidence: "low",
+          provenance: { source: "text_estimate", providerId: "chat_trigger" },
+          imageRefs: [],
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+  });
+
+  it("does not write structured state when rejecting wellbeing check-in proposal", async () => {
+    let applyCalled = false;
+    const wellbeingProposal = {
+      ...pendingProposal,
+      intent: "capture_wellbeing_checkin" as const,
+      targetDomain: "general" as const,
+      title: "Wellbeing check-in",
+      reason: "You mentioned feeling off today.",
+      proposedChanges: {
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => wellbeingProposal,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock() as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "wellbeing_checkin:checkin-1";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, wellbeingProposal.id, {
+      decision: "reject",
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(applyCalled).toBe(false);
+  });
+
+  it("accepts nutrition incident with edited low-confidence override and userEdits", async () => {
+    let appliedChanges: unknown;
+    const nutritionIncidentProposal = {
+      ...pendingProposal,
+      intent: "log_nutrition_incident" as const,
+      targetDomain: "nutrition" as const,
+      title: "Log nutrition incident",
+      reason: "Review this estimate before confirming.",
+      proposedChanges: {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "medium",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      },
+    };
+    const editedChanges = {
+      incidentDateTime: "2026-05-26T18:00:00.000Z",
+      items: [{ name: "Two pizza slices", calories: 560 }],
+      estimatedCalories: 560,
+      estimatedMacros: { proteinGrams: 24, carbsGrams: 60, fatGrams: 20 },
+      confidence: "low",
+      provenance: { source: "user_manual", providerId: "chat_card" },
+      imageRefs: [],
+      userEdits: {
+        editedAt: "2026-05-26T18:10:00.000Z",
+        items: [{ name: "Two pizza slices", calories: 560 }],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => nutritionIncidentProposal,
+        acceptPendingProposal: async (
+          _proposalId: string,
+          _userId: string,
+          applyFn: (proposal: typeof nutritionIncidentProposal) => Promise<string>,
+          options?: { proposedChangesOverride?: Record<string, unknown> },
+        ) => {
+          expect(options?.proposedChangesOverride).toEqual(editedChanges);
+          const appliedReference = await applyFn({
+            ...nutritionIncidentProposal,
+            proposedChanges: (options?.proposedChangesOverride ??
+              nutritionIncidentProposal.proposedChanges) as typeof nutritionIncidentProposal.proposedChanges,
+          });
+          return {
+            ...nutritionIncidentProposal,
+            proposedChanges: (options?.proposedChangesOverride ??
+              nutritionIncidentProposal.proposedChanges) as typeof nutritionIncidentProposal.proposedChanges,
+            status: "accepted" as const,
+            appliedReference,
+            userDecisionAt: new Date(),
+          };
+        },
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock() as never,
+      {
+        applyAcceptedProposal: async (
+          _auth: typeof auth,
+          _userId: string,
+          proposal: typeof nutritionIncidentProposal,
+        ) => {
+          appliedChanges = proposal.proposedChanges;
+          return "nutrition_incident:incident-1";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, nutritionIncidentProposal.id, {
+      decision: "accept",
+      proposedChanges: editedChanges,
+    });
+
+    expect(result.status).toBe("accepted");
+    expect(result.proposedChanges).toEqual(editedChanges);
+    expect(appliedChanges).toEqual(editedChanges);
+  });
+
+  it("blocks accept on superseded wellbeing proposal", async () => {
+    let applyCalled = false;
+    const supersededProposal = {
+      ...pendingProposal,
+      intent: "capture_wellbeing_checkin" as const,
+      status: "superseded" as const,
+      proposedChanges: {
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({
+        findById: async () => supersededProposal,
+        acceptPendingProposal: async () => null,
+      }) as never,
+      {
+        resolveFromAuth: async () => user,
+      } as never,
+      createValidationServiceMock() as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "wellbeing_checkin:checkin-1";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, supersededProposal.id, {
+        decision: "accept",
+        proposedChanges: {
+          date: "2026-05-26",
+          moodScore: 4,
+          stressScore: 2,
+        },
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(applyCalled).toBe(false);
   });

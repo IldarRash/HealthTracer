@@ -14,6 +14,6 @@ import { WellbeingCheckInsService } from "./wellbeing-check-ins.service.js";
     WellbeingCheckInsService,
     WellbeingAiContextService,
   ],
-  exports: [WellbeingCheckInsService, WellbeingAiContextService],
+  exports: [WellbeingCheckInsService, WellbeingAiContextService, WellbeingCheckInsRepository],
 })
 export class WellbeingCheckInsModule {}

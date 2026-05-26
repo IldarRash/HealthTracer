@@ -49,8 +49,14 @@ export class TheMealDbCatalogProvider implements RecipeCatalogProvider {
           continue;
         }
 
+        const draft = mapTheMealDbMealToProviderDraft(meal);
+
+        if (!draft) {
+          continue;
+        }
+
         seenExternalIds.add(mealId);
-        drafts.push(mapTheMealDbMealToProviderDraft(meal));
+        drafts.push(draft);
       }
     }
 

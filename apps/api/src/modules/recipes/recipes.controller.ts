@@ -1,4 +1,5 @@
 import {
+  createRecipeNutritionIncidentProposalInputSchema,
   recipeListQuerySchema,
   updateRecipeRecommendationStatusSchema,
 } from "@health/types";
@@ -60,6 +61,19 @@ export class RecipesController {
       auth,
       recommendationId,
       parseBody(updateRecipeRecommendationStatusSchema, body),
+    );
+  }
+
+  @Post("recommendations/:recommendationId/nutrition-incident-proposal")
+  createNutritionIncidentProposal(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Param("recommendationId") recommendationId: string,
+    @Body() body: unknown,
+  ) {
+    return this.recipesService.createNutritionIncidentProposalFromRecommendation(
+      auth,
+      recommendationId,
+      parseBody(createRecipeNutritionIncidentProposalInputSchema, body ?? {}),
     );
   }
 

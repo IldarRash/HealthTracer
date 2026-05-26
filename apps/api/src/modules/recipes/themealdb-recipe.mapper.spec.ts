@@ -28,6 +28,12 @@ describe("TheMealDB recipe mapper", () => {
     expect(draft.name).toBe("Teriyaki Chicken Casserole");
     expect(draft.macroEstimates).toEqual(APPROXIMATE_PROVIDER_MACRO_ESTIMATES);
     expect(draft.source).toBe(APPROXIMATE_MACRO_SOURCE);
+    expect(draft.confidence).toBe("low");
+    expect(draft.provenance).toMatchObject({
+      source: "external_provider",
+      providerId: "themealdb",
+      externalId: "52772",
+    });
     expect(draft.description).toContain("approximate estimates");
     expect(draft.ingredients).toEqual([
       { name: "soy sauce", unit: "3/4 cup", quantity: null },
@@ -57,5 +63,27 @@ describe("TheMealDB recipe mapper", () => {
       "Bake.",
       "Serve.",
     ]);
+  });
+
+  it("returns null for malformed provider meals missing required identifiers", () => {
+    expect(
+      mapTheMealDbMealToProviderDraft({
+        idMeal: "",
+        strMeal: "Broken meal",
+        strCategory: null,
+        strArea: null,
+        strInstructions: null,
+      }),
+    ).toBeNull();
+
+    expect(
+      mapTheMealDbMealToProviderDraft({
+        idMeal: "52772",
+        strMeal: "",
+        strCategory: null,
+        strArea: null,
+        strInstructions: null,
+      }),
+    ).toBeNull();
   });
 });

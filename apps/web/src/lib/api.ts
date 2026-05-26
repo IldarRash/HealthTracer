@@ -4,9 +4,14 @@ import {
   activeWorkoutPlanResponseSchema,
   aiMetricsContextSummarySchema,
   aiProposalSchema,
+  chatAttachmentRecordSchema,
+  chatAttachmentRecognitionResponseSchema,
   chatMessageSchema,
   chatThreadSchema,
   chatTurnResponseSchema,
+  createChatAttachmentSchema,
+  grantChatAttachmentConsentSchema,
+  recognizeChatAttachmentSchema,
   sendChatMessageSchema,
   completeWorkoutSessionSchema,
   connectDeviceSchema,
@@ -24,12 +29,15 @@ import {
   habitPlanRevisionsResponseSchema,
   nutritionAdherenceResponseSchema,
   nutritionPlanRevisionSchema,
+  foodPhotoAnalysisRequestSchema,
+  foodPhotoAnalysisResultSchema,
   proposalDecisionSchema,
   proposalModifyResponseSchema,
   upsertNutritionAdherenceSchema,
   recipeListQuerySchema,
   recipeListResponseSchema,
   recipeSchema,
+  logNutritionIncidentProposalPayloadSchema,
   syncHealthMetricsSchema,
   scheduleWorkoutSessionSchema,
   todayWorkoutDetailSchema,
@@ -44,9 +52,14 @@ import {
   type ActiveWorkoutPlanResponse,
   type AiMetricsContextSummary,
   type AiProposal,
+  type ChatAttachmentRecord,
+  type ChatAttachmentRecognitionResponse,
   type ChatMessage,
   type ChatThread,
   type ChatTurnResponse,
+  type CreateChatAttachmentInput,
+  type GrantChatAttachmentConsentInput,
+  type RecognizeChatAttachmentInput,
   type SendChatMessageInput,
   type ConnectDeviceInput,
   type DeviceConnection,
@@ -62,6 +75,8 @@ import {
   type HealthMetricSnapshot,
   type ListHealthMetricAggregatesQuery,
   type ListHealthMetricSnapshotsQuery,
+  type FoodPhotoAnalysisRequest,
+  type FoodPhotoAnalysisResult,
   type NutritionAdherenceResponse,
   type NutritionPlanRevision,
   type UpsertNutritionAdherenceInput,
@@ -198,6 +213,7 @@ export const apiQueryKeys = {
   progressWeeklyCurrent: ["progress-weekly-current"],
   progressWeeklyReview: ["progress-weekly-review"],
   recipesCatalog: ["recipes-catalog"],
+  recipeDetail: (recipeId: string) => ["recipe-detail", recipeId] as const,
   recipeRecommendations: ["recipe-recommendations"],
   deviceConnections: ["device-connections"],
   healthMetricSnapshots: ["health-metric-snapshots"],
@@ -309,7 +325,10 @@ export async function getChatThread(
   return apiFetch(`/chat/threads/${threadId}`, token, chatThreadDetailSchema);
 }
 
-export type SendChatMessageOptions = Pick<SendChatMessageInput, "proposalRevision">;
+export type SendChatMessageOptions = Pick<
+  SendChatMessageInput,
+  "proposalRevision" | "attachmentRefIds"
+>;
 
 export async function sendChatMessage(
   token: string,
@@ -320,12 +339,65 @@ export async function sendChatMessage(
   const body = sendChatMessageSchema.parse({
     content,
     ...(options?.proposalRevision ? { proposalRevision: options.proposalRevision } : {}),
+    ...(options?.attachmentRefIds?.length
+      ? { attachmentRefIds: options.attachmentRefIds }
+      : {}),
   });
 
   return apiFetch(`/chat/threads/${threadId}/messages`, token, chatTurnResponseSchema, {
     method: "POST",
     body,
   });
+}
+
+export async function uploadChatAttachment(
+  token: string,
+  input: CreateChatAttachmentInput,
+): Promise<ApiResult<ChatAttachmentRecord>> {
+  const body = createChatAttachmentSchema.parse(input);
+  return apiFetch("/chat/attachments", token, chatAttachmentRecordSchema, {
+    method: "POST",
+    body,
+  });
+}
+
+export async function getChatAttachment(
+  token: string,
+  attachmentId: string,
+): Promise<ApiResult<ChatAttachmentRecord>> {
+  return apiFetch(
+    `/chat/attachments/${encodeURIComponent(attachmentId)}`,
+    token,
+    chatAttachmentRecordSchema,
+  );
+}
+
+export async function grantChatAttachmentConsent(
+  token: string,
+  attachmentId: string,
+  input: GrantChatAttachmentConsentInput,
+): Promise<ApiResult<ChatAttachmentRecord>> {
+  const body = grantChatAttachmentConsentSchema.parse(input);
+  return apiFetch(
+    `/chat/attachments/${encodeURIComponent(attachmentId)}/consent`,
+    token,
+    chatAttachmentRecordSchema,
+    { method: "POST", body },
+  );
+}
+
+export async function recognizeChatAttachment(
+  token: string,
+  attachmentId: string,
+  input: RecognizeChatAttachmentInput = {},
+): Promise<ApiResult<ChatAttachmentRecognitionResponse>> {
+  const body = recognizeChatAttachmentSchema.parse(input);
+  return apiFetch(
+    `/chat/attachments/${encodeURIComponent(attachmentId)}/recognize`,
+    token,
+    chatAttachmentRecognitionResponseSchema,
+    { method: "POST", body },
+  );
 }
 
 export async function listProposals(
@@ -347,9 +419,26 @@ export async function decideProposal(
   token: string,
   proposalId: string,
   decision: "accept" | "reject",
+  options?: { proposedChanges?: unknown },
 ): Promise<ApiResult<AiProposal>> {
-  const body = proposalDecisionSchema.parse({ decision });
+  const body = proposalDecisionSchema.parse({
+    decision,
+    ...(options?.proposedChanges !== undefined
+      ? { proposedChanges: options.proposedChanges }
+      : {}),
+  });
   return apiFetch(`/proposals/${proposalId}/decision`, token, aiProposalSchema, {
+    method: "POST",
+    body,
+  });
+}
+
+export async function analyzeFoodPhoto(
+  token: string,
+  input: FoodPhotoAnalysisRequest,
+): Promise<ApiResult<FoodPhotoAnalysisResult>> {
+  const body = foodPhotoAnalysisRequestSchema.parse(input);
+  return apiFetch("/nutrition/food-photo/analyze", token, foodPhotoAnalysisResultSchema, {
     method: "POST",
     body,
   });
@@ -415,6 +504,35 @@ export function getAcceptedProposalRefreshQueryKeys(
       ...getHabitDependentRefreshQueryKeys(),
       ...getProgressLinkedProposalRefreshQueryKeys(proposal),
     ];
+  }
+
+  if (proposal.intent === "capture_wellbeing_checkin") {
+    return [
+      ...commonKeys,
+      ...getWellbeingRefreshQueryKeys(),
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
+    ];
+  }
+
+  if (proposal.intent === "log_nutrition_incident") {
+    const keys: Array<readonly unknown[]> = [
+      ...commonKeys,
+      apiQueryKeys.nutritionAdherenceToday,
+      apiQueryKeys.nutritionAdherencePrefix,
+      apiQueryKeys.todayDayPrefix,
+      apiQueryKeys.todayHistoryPrefix,
+    ];
+    const parsedIncident = logNutritionIncidentProposalPayloadSchema.safeParse(
+      proposal.proposedChanges,
+    );
+    if (
+      parsedIncident.success &&
+      parsedIncident.data.provenance.source === "recipe_recommendation"
+    ) {
+      keys.push(apiQueryKeys.recipeRecommendations);
+    }
+    return keys;
   }
 
   switch (proposal.targetDomain) {
@@ -866,6 +984,18 @@ export async function updateRecipeRecommendationStatus(
     token,
     userRecipeRecommendationSchema,
     { method: "PATCH", body },
+  );
+}
+
+export async function buildRecipeNutritionIncidentProposal(
+  token: string,
+  recommendationId: string,
+): Promise<ApiResult<AiProposal>> {
+  return apiFetch(
+    `/recipes/recommendations/${recommendationId}/nutrition-incident-proposal`,
+    token,
+    aiProposalSchema,
+    { method: "POST", body: {} },
   );
 }
 

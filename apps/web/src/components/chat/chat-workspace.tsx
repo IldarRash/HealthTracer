@@ -1,17 +1,32 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { AiProposal, ProposalModifyResponse } from "@health/types";
+import type { AiProposal, ChatAttachmentOutcome, ProposalModifyResponse } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   apiQueryKeys,
   createChatThread,
   getChatThread,
+  grantChatAttachmentConsent,
   listChatThreads,
   listProposals,
+  recognizeChatAttachment,
   sendChatMessage,
+  uploadChatAttachment,
 } from "../../lib/api";
+import {
+  buildOptimisticAttachmentSummary,
+  canSendChatComposer,
+  isChatAttachmentSendEligible,
+  revokeChatAttachmentPreviewUrl,
+  type ChatComposerAttachmentDraft,
+} from "../../lib/chat-attachment-ui-state";
+import {
+  buildChatAttachmentUploadPayload,
+  resolveRecognizeConsentScopes,
+} from "../../lib/chat-attachment-upload";
+import { DOCUMENT_CONSENT_VERSION } from "../../lib/documents-ui-state";
 import {
   createOptimisticUserMessage,
   formatChatTimestamp,
@@ -25,6 +40,8 @@ import {
   type OptimisticChatMessage,
 } from "../../lib/chat-ui-state";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
+import { ChatAttachmentOutcomePanel } from "./chat-attachment-outcome-panel";
+import { ChatComposerAttachments } from "./chat-composer-attachments";
 import { WeeklyReviewChatSummary } from "./weekly-review-chat-summary";
 import { mergeProposalsById } from "../../lib/proposal-ui-state";
 import {
@@ -48,6 +65,14 @@ import {
   PromptChipList,
 } from "../ui";
 
+type ChatSendMutationInput =
+  | string
+  | ProposalRevisionChatSend
+  | {
+      content: string;
+      attachmentRefIds: string[];
+    };
+
 export function ChatWorkspace() {
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
@@ -58,6 +83,12 @@ export function ChatWorkspace() {
   );
   const [pendingRevisionSend, setPendingRevisionSend] =
     useState<ProposalRevisionChatSend | null>(null);
+  const [composerAttachments, setComposerAttachments] = useState<ChatComposerAttachmentDraft[]>(
+    [],
+  );
+  const [attachmentOutcomesByMessageId, setAttachmentOutcomesByMessageId] = useState<
+    Record<string, ChatAttachmentOutcome[]>
+  >({});
 
   const threadsQuery = useQuery({
     queryKey: ["chat-threads"],
@@ -156,13 +187,194 @@ export function ChatWorkspace() {
     setLocalProposals([]);
     setOptimisticMessage(null);
     setPendingRevisionSend(null);
+    setComposerAttachments((current) => {
+      for (const attachment of current) {
+        revokeChatAttachmentPreviewUrl(attachment);
+      }
+      return [];
+    });
   }, [primaryThreadId]);
 
+  const updateComposerAttachment = useCallback(
+    (localId: string, updater: (draft: ChatComposerAttachmentDraft) => ChatComposerAttachmentDraft) => {
+      setComposerAttachments((attachments) =>
+        attachments.map((attachment) =>
+          attachment.localId === localId ? updater(attachment) : attachment,
+        ),
+      );
+    },
+    [],
+  );
+
+  const processAttachmentDraft = useCallback(
+    async (draftInput: ChatComposerAttachmentDraft) => {
+      if (!primaryThreadId) {
+        return;
+      }
+
+      updateComposerAttachment(draftInput.localId, (current) => ({
+        ...current,
+        phase: "uploading",
+        error: null,
+      }));
+
+      try {
+        const token = await getToken();
+        if (!token) {
+          throw new Error("Clerk session token is unavailable.");
+        }
+
+        const payloadResult = await buildChatAttachmentUploadPayload({
+          draft: draftInput,
+          threadId: primaryThreadId,
+        });
+
+        if (!payloadResult.ok) {
+          updateComposerAttachment(draftInput.localId, (current) => ({
+            ...current,
+            phase: "error",
+            error: payloadResult.message,
+          }));
+          return;
+        }
+
+        const uploadResult = await uploadChatAttachment(token, payloadResult.payload);
+        if (uploadResult.error || !uploadResult.data) {
+          updateComposerAttachment(draftInput.localId, (current) => ({
+            ...current,
+            phase: "error",
+            error: uploadResult.error ?? "Attachment could not be uploaded.",
+          }));
+          return;
+        }
+
+        if (uploadResult.data.status === "needs_consent") {
+          updateComposerAttachment(draftInput.localId, (current) => ({
+            ...current,
+            attachmentId: uploadResult.data!.id,
+            record: uploadResult.data!,
+            phase: "needs_consent",
+          }));
+          return;
+        }
+
+        updateComposerAttachment(draftInput.localId, (current) => ({
+          ...current,
+          attachmentId: uploadResult.data!.id,
+          record: uploadResult.data!,
+          phase: "recognizing",
+        }));
+
+        const recognizeResult = await recognizeChatAttachment(token, uploadResult.data.id, {
+          consentScopes: resolveRecognizeConsentScopes(
+            draftInput.category,
+            draftInput.consentScopes,
+          ),
+          consentVersion: DOCUMENT_CONSENT_VERSION,
+        });
+
+        if (recognizeResult.error || !recognizeResult.data) {
+          updateComposerAttachment(draftInput.localId, (current) => ({
+            ...current,
+            phase: "error",
+            error: recognizeResult.error ?? "Attachment could not be recognized.",
+          }));
+          return;
+        }
+
+        updateComposerAttachment(draftInput.localId, (current) => ({
+          ...current,
+          record: recognizeResult.data!.attachment,
+          phase: "ready",
+          proposalCandidateCount: recognizeResult.data!.proposalCandidates.length,
+        }));
+      } catch (error) {
+        updateComposerAttachment(draftInput.localId, (current) => ({
+          ...current,
+          phase: "error",
+          error: error instanceof Error ? error.message : "Attachment processing failed.",
+        }));
+      }
+    },
+    [getToken, primaryThreadId, updateComposerAttachment],
+  );
+
+  const grantConsentAndRecognize = useCallback(
+    async (localId: string) => {
+      const draft = composerAttachments.find((attachment) => attachment.localId === localId);
+      if (!draft) {
+        return;
+      }
+
+      if (!draft.attachmentId) {
+        await processAttachmentDraft(draft);
+        return;
+      }
+
+      updateComposerAttachment(localId, (current) => ({
+        ...current,
+        phase: "recognizing",
+        error: null,
+      }));
+
+      try {
+        const token = await getToken();
+        if (!token) {
+          throw new Error("Clerk session token is unavailable.");
+        }
+
+        await grantChatAttachmentConsent(token, draft.attachmentId, {
+          consentScopes: [...draft.consentScopes],
+          consentVersion: DOCUMENT_CONSENT_VERSION,
+        });
+
+        const recognizeResult = await recognizeChatAttachment(token, draft.attachmentId, {
+          consentScopes: [...draft.consentScopes],
+          consentVersion: DOCUMENT_CONSENT_VERSION,
+        });
+
+        if (recognizeResult.error || !recognizeResult.data) {
+          updateComposerAttachment(localId, (current) => ({
+            ...current,
+            phase: "error",
+            error: recognizeResult.error ?? "Attachment could not be recognized.",
+          }));
+          return;
+        }
+
+        updateComposerAttachment(localId, (current) => ({
+          ...current,
+          record: recognizeResult.data!.attachment,
+          phase: "ready",
+          proposalCandidateCount: recognizeResult.data!.proposalCandidates.length,
+        }));
+      } catch (error) {
+        updateComposerAttachment(localId, (current) => ({
+          ...current,
+          phase: "error",
+          error: error instanceof Error ? error.message : "Consent or recognition failed.",
+        }));
+      }
+    },
+    [composerAttachments, getToken, processAttachmentDraft, updateComposerAttachment],
+  );
+
   const sendMessageMutation = useMutation({
-    mutationFn: async (input: string | ProposalRevisionChatSend) => {
+    mutationFn: async (input: ChatSendMutationInput) => {
       const token = await getToken();
       if (!token || !primaryThreadId) {
         throw new Error("Your coaching conversation is not ready yet.");
+      }
+
+      if (typeof input === "object" && "attachmentRefIds" in input) {
+        const result = await sendChatMessage(token, primaryThreadId, input.content, {
+          attachmentRefIds: input.attachmentRefIds,
+        });
+        if (result.error || !result.data) {
+          throw new Error(result.error ?? "Message could not be sent.");
+        }
+
+        return result.data;
       }
 
       const content = isProposalRevisionChatSend(input) ? input.message : input;
@@ -184,6 +396,14 @@ export function ChatWorkspace() {
         return;
       }
 
+      if (typeof input === "object" && "attachmentRefIds" in input) {
+        const attachmentSummary = buildOptimisticAttachmentSummary(composerAttachments);
+        setOptimisticMessage(
+          createOptimisticUserMessage(primaryThreadId, input.content, attachmentSummary),
+        );
+        return;
+      }
+
       const content = isProposalRevisionChatSend(input) ? input.message : input;
       setOptimisticMessage(createOptimisticUserMessage(primaryThreadId, content));
     },
@@ -191,7 +411,19 @@ export function ChatWorkspace() {
       setDraft("");
       setOptimisticMessage(null);
       setPendingRevisionSend(null);
+      setComposerAttachments((current) => {
+        for (const attachment of current) {
+          revokeChatAttachmentPreviewUrl(attachment);
+        }
+        return [];
+      });
       setLocalProposals(turn.proposals);
+      if (turn.attachmentOutcomes?.length) {
+        setAttachmentOutcomesByMessageId((current) => ({
+          ...current,
+          [turn.assistantMessage.id]: turn.attachmentOutcomes ?? [],
+        }));
+      }
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
       void queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
       void queryClient.invalidateQueries({ queryKey: ["proposals", turn.thread.id] });
@@ -223,12 +455,39 @@ export function ChatWorkspace() {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || sendMessageMutation.isPending || !primaryThreadId) {
+    const attachmentRefIds = composerAttachments
+      .filter((attachment) => isChatAttachmentSendEligible(attachment.record, attachment))
+      .map((attachment) => attachment.attachmentId)
+      .filter((attachmentId): attachmentId is string => Boolean(attachmentId));
+
+    if (
+      !canSendChatComposer({
+        draftText: draft,
+        attachments: composerAttachments,
+        isSendPending: sendMessageMutation.isPending,
+      }) ||
+      !primaryThreadId
+    ) {
+      return;
+    }
+
+    if (attachmentRefIds.length > 0) {
+      sendMessageMutation.mutate({ content, attachmentRefIds });
+      return;
+    }
+
+    if (!content) {
       return;
     }
 
     sendMessageMutation.mutate(content);
   };
+
+  const sendDisabled = !canSendChatComposer({
+    draftText: draft,
+    attachments: composerAttachments,
+    isSendPending: sendMessageMutation.isPending,
+  });
 
   const handlePromptSelect = (prompt: string) => {
     if (sendMessageMutation.isPending || !primaryThreadId) {
@@ -367,6 +626,13 @@ export function ChatWorkspace() {
                     />
                   ) : null}
 
+                  {attachmentOutcomesByMessageId[message.id]?.length ? (
+                    <ChatAttachmentOutcomePanel
+                      outcomes={attachmentOutcomesByMessageId[message.id] ?? []}
+                      titleId={`chat-attachment-outcomes-${message.id}`}
+                    />
+                  ) : null}
+
                   {linkedProposals.length > 0 ? (
                     <div className="message-proposals">
                       {linkedProposals.map((proposal) => (
@@ -415,6 +681,17 @@ export function ChatWorkspace() {
                   </div>
                 </div>
               ) : null}
+              <ChatComposerAttachments
+                attachments={composerAttachments}
+                disabled={sendMessageMutation.isPending}
+                onAttachmentsChange={setComposerAttachments}
+                onProcessDraft={(draft) => {
+                  void processAttachmentDraft(draft);
+                }}
+                onGrantConsentAndRecognize={(localId) => {
+                  void grantConsentAndRecognize(localId);
+                }}
+              />
               <label className="sr-only" htmlFor="chat-message">
                 Message your coach
               </label>
@@ -431,7 +708,7 @@ export function ChatWorkspace() {
                 <Button
                   type="submit"
                   className="button-coach"
-                  disabled={!draft.trim() || sendMessageMutation.isPending}
+                  disabled={sendDisabled || !primaryThreadId}
                 >
                   {sendMessageMutation.isPending ? "Sending…" : "Send"}
                 </Button>

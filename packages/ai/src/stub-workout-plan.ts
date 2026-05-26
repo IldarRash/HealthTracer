@@ -273,6 +273,7 @@ export const stubSwapExerciseWorkoutPlan = {
       secondaryMuscles: ["traps"],
       equipment: ["resistance_band"],
       movementPatterns: ["pull"],
+      modalities: ["strength"],
       difficulty: "beginner",
       instructions: [
         "Hold a resistance band at shoulder width with arms extended.",

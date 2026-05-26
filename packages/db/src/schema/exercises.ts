@@ -21,9 +21,14 @@ export const exercises = pgTable(
     secondaryMuscles: jsonb("secondary_muscles").$type<string[]>().notNull().default([]),
     equipment: jsonb("equipment").$type<string[]>().notNull(),
     movementPatterns: jsonb("movement_patterns").$type<string[]>().notNull(),
+    modalities: jsonb("modalities").$type<string[]>().notNull().default(["strength"]),
     difficulty: text("difficulty").notNull(),
     instructions: jsonb("instructions").$type<string[]>().notNull(),
     safetyNotes: jsonb("safety_notes").$type<string[]>().notNull().default([]),
+    media: jsonb("media")
+      .$type<{ refs: Array<{ kind: string; url?: string; label?: string }>; fallbackLabel?: string | null }>()
+      .notNull()
+      .default({ refs: [], fallbackLabel: null }),
     source: text("source").notNull(),
     validationStatus: text("validation_status").notNull().default("validated"),
     status: text("status").notNull().default("active"),

@@ -1,5 +1,6 @@
 import { upsertNutritionAdherenceSchema } from "@health/types";
-import { Body, Controller, Get, Param, Put, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, UseGuards } from "@nestjs/common";
+import { foodPhotoAnalysisRequestSchema } from "@health/types";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { ClerkAuthGuard } from "../../auth.guard.js";
 import { parseBody } from "../../common/zod.js";
@@ -55,6 +56,14 @@ export class NutritionController {
       auth,
       date,
       parseBody(upsertNutritionAdherenceSchema, body),
+    );
+  }
+
+  @Post("food-photo/analyze")
+  analyzeFoodPhoto(@CurrentAuth() auth: ClerkAuthContext, @Body() body: unknown) {
+    return this.nutritionService.analyzeFoodPhoto(
+      auth,
+      parseBody(foodPhotoAnalysisRequestSchema, body),
     );
   }
 }

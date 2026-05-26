@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR } from "@health/types";
 import { describe, expect, it } from "vitest";
 import { WellbeingCheckInsService } from "./wellbeing-check-ins.service.js";
 
@@ -37,6 +38,10 @@ const usersService = {
 function createRepositoryMock(overrides: Record<string, unknown> = {}) {
   return {
     findByUserAndDate: async () => null,
+    insertByUserAndDateIfAbsent: async () => ({
+      row: createCheckInRow(),
+      created: true,
+    }),
     upsertByUserAndDate: async () => createCheckInRow(),
     listRecentByUserId: async () => [],
     listByUserAndDateRange: async () => [],
@@ -109,6 +114,70 @@ describe("WellbeingCheckInsService", () => {
     expect(response.crisisSupport.shouldShowCrisisSupport).toBe(true);
     expect(response.crisisSupport.reasons).toEqual(["lowest_mood"]);
     expect(response.crisisSupport.copy?.title).toBe("Support is available");
+  });
+
+  it("creates check-ins only when absent for proposal apply", async () => {
+    const service = createService(
+      createRepositoryMock({
+        insertByUserAndDateIfAbsent: async () => ({
+          row: createCheckInRow({ moodScore: 2, stressScore: 3 }),
+          created: true,
+        }),
+      }),
+    );
+
+    const response = await service.createCheckInForDateIfAbsent(auth as never, "2026-05-25", {
+      moodScore: 2,
+      stressScore: 3,
+    });
+
+    expect(response.checkIn.moodScore).toBe(2);
+  });
+
+  it("rejects create-if-absent when a different check-in already exists", async () => {
+    const service = createService(
+      createRepositoryMock({
+        insertByUserAndDateIfAbsent: async () => ({
+          row: createCheckInRow({
+            id: "a1000002-0000-4000-8000-000000000002",
+            moodScore: 5,
+            stressScore: 1,
+          }),
+          created: false,
+        }),
+      }),
+    );
+
+    await expect(
+      service.createCheckInForDateIfAbsent(auth as never, "2026-05-25", {
+        moodScore: 2,
+        stressScore: 3,
+      }),
+    ).rejects.toMatchObject({
+      response: { message: WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR },
+    });
+  });
+
+  it("returns the existing check-in idempotently when expectedExistingCheckInId matches", async () => {
+    const existingId = "a1000002-0000-4000-8000-000000000002";
+    const service = createService(
+      createRepositoryMock({
+        insertByUserAndDateIfAbsent: async () => ({
+          row: createCheckInRow({ id: existingId, moodScore: 5, stressScore: 1 }),
+          created: false,
+        }),
+      }),
+    );
+
+    const response = await service.createCheckInForDateIfAbsent(
+      auth as never,
+      "2026-05-25",
+      { moodScore: 2, stressScore: 3 },
+      { expectedExistingCheckInId: existingId },
+    );
+
+    expect(response.checkIn.id).toBe(existingId);
+    expect(response.checkIn.moodScore).toBe(5);
   });
 
   it("uses the same user/date upsert path when a check-in is resubmitted", async () => {

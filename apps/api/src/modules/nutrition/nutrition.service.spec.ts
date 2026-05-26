@@ -77,6 +77,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      {} as never,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -103,6 +104,7 @@ describe("NutritionService", () => {
         appendRevision: async () => ({ id: "rev-append-2" }),
       }) as never,
       usersService as never,
+      {} as never,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -117,7 +119,11 @@ describe("NutritionService", () => {
   });
 
   it("rejects nutrition proposals that fail domain validation", async () => {
-    const service = new NutritionService(createRepositoryMock() as never, usersService as never);
+    const service = new NutritionService(
+      createRepositoryMock() as never,
+      usersService as never,
+      {} as never,
+    );
 
     await expect(
       service.applyNutritionPlanProposal(
@@ -130,7 +136,11 @@ describe("NutritionService", () => {
   });
 
   it("returns an empty active plan response when no nutrition plan exists", async () => {
-    const service = new NutritionService(createRepositoryMock() as never, usersService as never);
+    const service = new NutritionService(
+      createRepositoryMock() as never,
+      usersService as never,
+      {} as never,
+    );
 
     await expect(service.getCurrentActivePlan(auth as never)).resolves.toEqual({
       plan: null,
@@ -139,7 +149,11 @@ describe("NutritionService", () => {
   });
 
   it("returns null adherence when no record exists for the date", async () => {
-    const service = new NutritionService(createRepositoryMock() as never, usersService as never);
+    const service = new NutritionService(
+      createRepositoryMock() as never,
+      usersService as never,
+      {} as never,
+    );
 
     await expect(service.getAdherenceForDate(auth as never, "2026-05-22")).resolves.toEqual({
       adherence: null,
@@ -167,6 +181,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      {} as never,
     );
 
     const first = await service.upsertAdherenceForDate(auth as never, "2026-05-22", {
@@ -183,7 +198,11 @@ describe("NutritionService", () => {
   });
 
   it("rejects invalid adherence dates", async () => {
-    const service = new NutritionService(createRepositoryMock() as never, usersService as never);
+    const service = new NutritionService(
+      createRepositoryMock() as never,
+      usersService as never,
+      {} as never,
+    );
 
     await expect(
       service.getAdherenceForDate(auth as never, "05-22-2026"),
@@ -216,6 +235,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      {} as never,
     );
 
     await service.getAdherenceForDate(auth as never, "2026-05-22");
@@ -260,6 +280,7 @@ describe("NutritionService", () => {
           updatedAt: "2026-05-22T12:00:00.000Z",
         }),
       } as never,
+      {} as never,
     );
 
     const response = await service.upsertAdherenceForToday(auth as never, {
@@ -308,6 +329,7 @@ describe("NutritionService", () => {
           updatedAt: "2026-05-22T12:00:00.000Z",
         }),
       } as never,
+      {} as never,
     );
 
     await service.getAdherenceForToday(auth as never);
@@ -317,7 +339,11 @@ describe("NutritionService", () => {
   });
 
   it("returns null nutrition day detail when no active plan exists", async () => {
-    const service = new NutritionService(createRepositoryMock() as never, usersService as never);
+    const service = new NutritionService(
+      createRepositoryMock() as never,
+      usersService as never,
+      {} as never,
+    );
 
     await expect(service.getNutritionDayDetail(auth as never, "2026-05-22")).resolves.toBeNull();
   });
@@ -335,6 +361,7 @@ describe("NutritionService", () => {
         }),
       }) as never,
       usersService as never,
+      {} as never,
     );
 
     await expect(service.getNutritionDayDetail(auth as never, "2026-05-22")).resolves.toBeNull();
@@ -403,6 +430,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      {} as never,
     );
 
     const detail = await service.getNutritionDayDetail(auth as never, "2026-05-22");
@@ -418,7 +446,11 @@ describe("NutritionService", () => {
   });
 
   it("rejects invalid dates when building nutrition day detail", async () => {
-    const service = new NutritionService(createRepositoryMock() as never, usersService as never);
+    const service = new NutritionService(
+      createRepositoryMock() as never,
+      usersService as never,
+      {} as never,
+    );
 
     await expect(
       service.getNutritionDayDetail(auth as never, "05-22-2026"),
@@ -441,6 +473,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      {} as never,
     );
 
     await service.upsertAdherenceForDate(auth as never, "2026-05-22", {
@@ -451,6 +484,111 @@ describe("NutritionService", () => {
     });
 
     expect(appendCalled).toBe(false);
+    expect(createCalled).toBe(false);
+  });
+
+  it("creates a nutrition incident using the provided transaction client", async () => {
+    const tx = { insert: "tx-client" };
+    let createDb: unknown;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findIncidentBySourceProposalId: async () => null,
+        createIncident: async (
+          _userId: string,
+          _sourceProposalId: string,
+          _payload: unknown,
+          db?: unknown,
+        ) => {
+          createDb = db;
+          return { id: "incident-1" };
+        },
+      }) as never,
+      usersService as never,
+      {} as never,
+    );
+
+    const incidentId = await service.applyNutritionIncidentProposal(
+      userId,
+      "14a08176-64a7-4a2d-8a44-581807368394",
+      {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "medium",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      },
+      tx as never,
+    );
+
+    expect(incidentId).toBe("incident-1");
+    expect(createDb).toBe(tx);
+  });
+
+  it("returns an existing incident id for idempotent proposal retries", async () => {
+    let createCalled = false;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findIncidentBySourceProposalId: async () => ({
+          id: "incident-existing",
+          userId,
+          sourceProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+        }),
+        createIncident: async () => {
+          createCalled = true;
+          return { id: "incident-new" };
+        },
+      }) as never,
+      usersService as never,
+      {} as never,
+    );
+
+    const incidentId = await service.applyNutritionIncidentProposal(
+      userId,
+      "14a08176-64a7-4a2d-8a44-581807368394",
+      {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "medium",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      },
+    );
+
+    expect(incidentId).toBe("incident-existing");
+    expect(createCalled).toBe(false);
+  });
+
+  it("rejects nutrition incident payloads that fail domain validation before writes", async () => {
+    let createCalled = false;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        createIncident: async () => {
+          createCalled = true;
+          return { id: "incident-1" };
+        },
+      }) as never,
+      usersService as never,
+      {} as never,
+    );
+
+    await expect(
+      service.applyNutritionIncidentProposal(userId, "14a08176-64a7-4a2d-8a44-581807368394", {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "low",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(createCalled).toBe(false);
   });
 });

@@ -111,4 +111,20 @@ export class ExercisesService {
 
     return uniqueIds.filter((exerciseId) => !accessibleIds.has(exerciseId));
   }
+
+  async findExercisesByIds(
+    exerciseIds: readonly string[],
+    userId: string,
+  ): Promise<Exercise[]> {
+    if (exerciseIds.length === 0) {
+      return [];
+    }
+
+    const rows = await this.exercisesRepository.findActiveExercisesByIds(
+      [...new Set(exerciseIds)],
+      userId,
+    );
+
+    return rows.map(toExercise);
+  }
 }

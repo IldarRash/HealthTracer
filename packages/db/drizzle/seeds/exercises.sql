@@ -828,3 +828,362 @@ INSERT INTO exercises (
   'step up::bench|dumbbell::glutes|quads'
 )
 ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO exercises (
+  id,
+  name,
+  normalized_name,
+  aliases,
+  primary_muscles,
+  secondary_muscles,
+  equipment,
+  movement_patterns,
+  modalities,
+  difficulty,
+  instructions,
+  safety_notes,
+  media,
+  source,
+  validation_status,
+  status,
+  user_id,
+  dedupe_key
+) VALUES
+(
+  'b1000001-0000-4000-8000-000000000046',
+  'Downward Dog',
+  'downward dog',
+  '["adho mukha svanasana"]',
+  '["shoulders","hamstrings","calves"]',
+  '["core"]',
+  '["bodyweight","yoga_mat"]',
+  '["mobility","flexibility"]',
+  '["yoga","mobility"]',
+  'beginner',
+  '["Start on hands and knees.","Lift hips up and back to form an inverted V.","Press heels toward floor while lengthening spine."]',
+  '["Bend knees if hamstrings feel tight.","Avoid this pose if you have wrist discomfort."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'downward dog::bodyweight|yoga_mat::calves|hamstrings|shoulders'
+),
+(
+  'b1000001-0000-4000-8000-000000000047',
+  'Warrior II',
+  'warrior ii',
+  '["virabhadrasana ii"]',
+  '["quads","glutes"]',
+  '["core","shoulders"]',
+  '["bodyweight","yoga_mat"]',
+  '["lunge","balance"]',
+  '["yoga","mobility"]',
+  'beginner',
+  '["Step one foot back into a wide stance.","Bend front knee over ankle and extend arms parallel to floor.","Hold steady gaze over front hand."]',
+  '["Keep front knee tracking over toes.","Reduce depth if balance is unstable."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'warrior ii::bodyweight|yoga_mat::glutes|quads'
+),
+(
+  'b1000001-0000-4000-8000-000000000048',
+  'Cat-Cow',
+  'cat cow',
+  '["cat cow stretch"]',
+  '["core","back"]',
+  '["shoulders"]',
+  '["bodyweight","yoga_mat"]',
+  '["mobility","flexibility"]',
+  '["mobility","wellness"]',
+  'beginner',
+  '["Start on hands and knees with neutral spine.","Inhale and arch back while lifting chest (cow).","Exhale and round spine while tucking chin (cat)."]',
+  '["Move slowly and stay within comfortable range."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'cat cow::bodyweight|yoga_mat::back|core'
+),
+(
+  'b1000001-0000-4000-8000-000000000049',
+  'World''s Greatest Stretch',
+  'world greatest stretch',
+  '["worlds greatest stretch"]',
+  '["hip_flexors","glutes"]',
+  '["hamstrings","core"]',
+  '["bodyweight"]',
+  '["lunge","mobility"]',
+  '["mobility","athletic_performance"]',
+  'intermediate',
+  '["Step into a deep lunge with back knee down.","Place inside hand on floor and rotate open with other arm.","Hold briefly then switch sides."]',
+  '["Use padding under back knee if needed.","Stop if sharp hip or knee discomfort appears."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'world greatest stretch::bodyweight::glutes|hip_flexors'
+),
+(
+  'b1000001-0000-4000-8000-000000000050',
+  '90/90 Hip Switch',
+  '90 90 hip switch',
+  '["90-90 hip switch"]',
+  '["glutes","hip_flexors"]',
+  '["core"]',
+  '["bodyweight","yoga_mat"]',
+  '["mobility","rotation"]',
+  '["mobility"]',
+  'beginner',
+  '["Sit with front and back legs at roughly 90 degrees.","Rotate hips to switch sides with control.","Keep torso tall throughout."]',
+  '["Use hands on floor for support if needed.","Avoid forcing range of motion."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  '90 90 hip switch::bodyweight|yoga_mat::glutes|hip_flexors'
+),
+(
+  'b1000001-0000-4000-8000-000000000051',
+  'Box Jump',
+  'box jump',
+  '[]',
+  '["quads","glutes","calves"]',
+  '["core"]',
+  '["box","bodyweight"]',
+  '["plyometric","squat"]',
+  '["plyometrics","athletic_performance"]',
+  'intermediate',
+  '["Stand arm''s length from box with feet hip-width.","Swing arms and jump onto box landing softly.","Step down under control and reset."]',
+  '["Choose a box height you can land on safely.","Step down instead of jumping down if needed."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'box jump::bodyweight|box::calves|glutes|quads'
+),
+(
+  'b1000001-0000-4000-8000-000000000052',
+  'Broad Jump',
+  'broad jump',
+  '["standing long jump"]',
+  '["quads","glutes","calves"]',
+  '["core"]',
+  '["bodyweight"]',
+  '["plyometric","squat"]',
+  '["plyometrics","athletic_performance"]',
+  'intermediate',
+  '["Swing arms back then forward while loading hips.","Jump forward for distance with soft landing.","Reset fully between reps."]',
+  '["Land with knees tracking over toes.","Reduce jump distance if landing feels unstable."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'broad jump::bodyweight::calves|glutes|quads'
+),
+(
+  'b1000001-0000-4000-8000-000000000053',
+  'Depth Jump',
+  'depth jump',
+  '[]',
+  '["quads","glutes","calves"]',
+  '["core"]',
+  '["box","bodyweight"]',
+  '["plyometric","squat"]',
+  '["plyometrics","athletic_performance"]',
+  'advanced',
+  '["Step off low box and land softly on both feet.","Immediately jump vertically or horizontally.","Focus on quick ground contact."]',
+  '["Use low box height only.","Skip if you feel knee or ankle discomfort."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'depth jump::bodyweight|box::calves|glutes|quads'
+),
+(
+  'b1000001-0000-4000-8000-000000000054',
+  'Skater Hop',
+  'skater hop',
+  '["lateral bound"]',
+  '["glutes","quads"]',
+  '["calves","core"]',
+  '["bodyweight"]',
+  '["plyometric","lunge"]',
+  '["plyometrics","athletic_performance"]',
+  'intermediate',
+  '["Jump laterally from one leg to the other.","Land softly and pause briefly for balance.","Use arms for counterbalance."]',
+  '["Reduce jump distance if balance is lost.","Stop if ankle or knee discomfort increases."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'skater hop::bodyweight::glutes|quads'
+),
+(
+  'b1000001-0000-4000-8000-000000000055',
+  'Medicine Ball Slam',
+  'medicine ball slam',
+  '[]',
+  '["core","shoulders"]',
+  '["lats","traps"]',
+  '["medicine_ball"]',
+  '["rotation","plyometric"]',
+  '["athletic_performance","conditioning"]',
+  'intermediate',
+  '["Lift medicine ball overhead with extended hips.","Slam ball down in front while bracing core.","Pick up and repeat with controlled breathing."]',
+  '["Use a non-bounce slam ball on a safe surface.","Avoid overhead slam if shoulder discomfort is present."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'medicine ball slam::medicine_ball::core|shoulders'
+),
+(
+  'b1000001-0000-4000-8000-000000000056',
+  'Agility Ladder Drill',
+  'agility ladder drill',
+  '["ladder drill"]',
+  '["calves","quads"]',
+  '["core","hip_flexors"]',
+  '["bodyweight"]',
+  '["plyometric","cardio"]',
+  '["athletic_performance","conditioning"]',
+  'intermediate',
+  '["Place one foot in each ladder square with quick steps.","Stay on balls of feet with upright posture.","Maintain rhythm for the prescribed duration."]',
+  '["Start slow before increasing speed.","Stop if foot catches in ladder rungs."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'agility ladder drill::bodyweight::calves|quads'
+),
+(
+  'b1000001-0000-4000-8000-000000000057',
+  'Diaphragmatic Breathing',
+  'diaphragmatic breathing',
+  '["belly breathing"]',
+  '["core"]',
+  '[]',
+  '["bodyweight","yoga_mat"]',
+  '["mobility"]',
+  '["wellness","mobility"]',
+  'beginner',
+  '["Lie or sit comfortably with one hand on belly.","Inhale through nose and expand belly.","Exhale slowly through mouth and relax shoulders."]',
+  '["Keep breathing smooth and unforced.","Stop if lightheadedness occurs."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'diaphragmatic breathing::bodyweight|yoga_mat::core'
+),
+(
+  'b1000001-0000-4000-8000-000000000058',
+  'Gentle Neck Mobility',
+  'gentle neck mobility',
+  '["neck circles"]',
+  '["traps"]',
+  '[]',
+  '["bodyweight"]',
+  '["mobility","flexibility"]',
+  '["wellness","mobility"]',
+  'beginner',
+  '["Sit tall with shoulders relaxed.","Slowly turn head left and right within comfortable range.","Optional: gentle side bends without forcing stretch."]',
+  '["Avoid rapid or forced neck movements.","Stop if numbness, tingling, or sharp discomfort appears."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'gentle neck mobility::bodyweight::traps'
+),
+(
+  'b1000001-0000-4000-8000-000000000059',
+  'Child''s Pose',
+  'child pose',
+  '["balasana"]',
+  '["back"]',
+  '["shoulders","hip_flexors"]',
+  '["bodyweight","yoga_mat"]',
+  '["mobility","flexibility"]',
+  '["yoga","wellness"]',
+  'beginner',
+  '["Kneel and sit hips back toward heels.","Reach arms forward and rest forehead toward floor.","Breathe slowly and relax shoulders."]',
+  '["Place cushion under knees if needed.","Skip deep knee flexion if uncomfortable."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'child pose::bodyweight|yoga_mat::back'
+),
+(
+  'b1000001-0000-4000-8000-000000000060',
+  'Foam Roll Quads',
+  'foam roll quads',
+  '["quad foam rolling"]',
+  '["quads"]',
+  '[]',
+  '["foam_roller","bodyweight"]',
+  '["mobility"]',
+  '["mobility","wellness"]',
+  'beginner',
+  '["Lie face down with foam roller under thighs.","Roll slowly from hip to knee pausing on tender spots.","Keep core lightly engaged."]',
+  '["Avoid rolling directly on knee joint.","Reduce pressure if discomfort is sharp."]',
+  '{"refs":[],"fallbackLabel":"Demonstration coming soon"}',
+  'system_seed',
+  'validated',
+  'active',
+  NULL,
+  'foam roll quads::bodyweight|foam_roller::quads'
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Idempotent taxonomy/media defaults for legacy seed rows missing explicit columns.
+UPDATE exercises
+SET modalities = '["conditioning"]'::jsonb
+WHERE source = 'system_seed'
+  AND movement_patterns @> '["cardio"]'::jsonb
+  AND modalities = '["strength"]'::jsonb;
+
+UPDATE exercises
+SET modalities = '["mobility","wellness"]'::jsonb
+WHERE source = 'system_seed'
+  AND normalized_name IN ('cat cow', 'world greatest stretch', '90 90 hip switch', 'foam roll quads');
+
+UPDATE exercises
+SET modalities = '["yoga","mobility"]'::jsonb
+WHERE source = 'system_seed'
+  AND normalized_name IN ('downward dog', 'warrior ii', 'child pose');
+
+UPDATE exercises
+SET modalities = '["plyometrics","athletic_performance"]'::jsonb
+WHERE source = 'system_seed'
+  AND normalized_name IN ('box jump', 'broad jump', 'depth jump', 'skater hop');
+
+UPDATE exercises
+SET modalities = '["athletic_performance","conditioning"]'::jsonb
+WHERE source = 'system_seed'
+  AND normalized_name IN ('medicine ball slam', 'agility ladder drill');
+
+UPDATE exercises
+SET modalities = '["wellness","mobility"]'::jsonb
+WHERE source = 'system_seed'
+  AND normalized_name IN ('diaphragmatic breathing', 'gentle neck mobility');
+
+UPDATE exercises
+SET media = '{"refs":[],"fallbackLabel":"Demonstration coming soon"}'::jsonb
+WHERE source = 'system_seed'
+  AND media = '{"refs":[],"fallbackLabel":null}'::jsonb;

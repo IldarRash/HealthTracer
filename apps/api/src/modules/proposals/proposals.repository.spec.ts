@@ -16,6 +16,50 @@ const pendingRow = {
 
 describe("ProposalsRepository", () => {
   describe("acceptPendingProposal", () => {
+    it("passes the proposal acceptance transaction to applyFn", async () => {
+      let receivedTx: unknown;
+
+      const db = {
+        transaction: vi.fn(async (callback: (innerTx: unknown) => Promise<unknown>) => {
+          const innerTx = {
+            marker: "acceptance-tx",
+            select: vi.fn(() => ({
+              from: vi.fn(() => ({
+                where: vi.fn(() => ({
+                  for: vi.fn(async () => [pendingRow]),
+                })),
+              })),
+            })),
+            update: vi.fn(() => ({
+              set: vi.fn(() => ({
+                where: vi.fn(() => ({
+                  returning: vi.fn(async () => [
+                    {
+                      ...pendingRow,
+                      status: "accepted",
+                      appliedReference,
+                      userDecisionAt: new Date(),
+                    },
+                  ]),
+                })),
+              })),
+            })),
+          };
+
+          return callback(innerTx);
+        }),
+      };
+
+      const repository = new ProposalsRepository(db as never);
+
+      await repository.acceptPendingProposal(proposalId, userId, async (_proposal, innerTx) => {
+        receivedTx = innerTx;
+        return appliedReference;
+      });
+
+      expect(receivedTx).toEqual(expect.objectContaining({ marker: "acceptance-tx" }));
+    });
+
     it("persists appliedReference when finalize throws an arbitrary DB error after apply", async () => {
       let applyCount = 0;
       let completePendingCalls = 0;
@@ -80,10 +124,11 @@ describe("ProposalsRepository", () => {
 
     it("rethrows when finalize fails and recovery cannot persist appliedReference", async () => {
       let applyCount = 0;
+      const tx = { marker: "acceptance-tx" };
 
       const db = {
-        transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
-          const tx = {
+        transaction: vi.fn(async (callback: (innerTx: unknown) => Promise<unknown>) => {
+          const innerTx = {
             select: vi.fn(() => ({
               from: vi.fn(() => ({
                 where: vi.fn(() => ({
@@ -100,9 +145,10 @@ describe("ProposalsRepository", () => {
                 })),
               })),
             })),
+            ...tx,
           };
 
-          return callback(tx);
+          return callback(innerTx);
         }),
         update: vi.fn(() => ({
           set: vi.fn(() => ({

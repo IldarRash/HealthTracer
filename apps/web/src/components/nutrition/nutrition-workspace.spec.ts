@@ -68,6 +68,13 @@ describe("NutritionWorkspace read-only contracts", () => {
     expect(workspaceSource).not.toContain("mutate(");
   });
 
+  it("embeds nested recipe recommendations without mutating nutrition plan state", () => {
+    expect(workspaceSource).toContain("RecipeRecommendationsPanel");
+    expect(workspaceSource).toContain('title="Recipe recommendations"');
+    expect(workspaceSource).not.toContain("upsertNutritionAdherence");
+    expect(workspaceSource).not.toContain("adjust_nutrition_plan");
+  });
+
   it("uses shared plan view layout classes for structured canvas styling", () => {
     expect(workspaceSource).toContain("PlanViewLayout");
     expect(workspaceSource).toContain("PlanViewGrid");

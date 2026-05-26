@@ -27,6 +27,12 @@ export function getProposalIntentLabel(
       return "New daily habit plan";
     case "adapt_habit_plan":
       return "Habit plan adjustment";
+    case "capture_wellbeing_checkin":
+      return "Wellbeing check-in";
+    case "log_nutrition_incident":
+      return "Nutrition incident log";
+    case "recommend_recipes":
+      return "Recipe recommendations";
     default:
       return null;
   }
@@ -73,6 +79,14 @@ export function getProposalDomainRoute(domain: ProposalTargetDomain): string | n
 export function getProposalIntentRoute(intent: ProposalIntent): string | null {
   if (isHabitPlanProposalIntent(intent)) {
     return "/today";
+  }
+
+  if (intent === "capture_wellbeing_checkin") {
+    return "/today";
+  }
+
+  if (intent === "log_nutrition_incident") {
+    return "/nutrition";
   }
 
   return null;
@@ -192,6 +206,18 @@ export function getProposalRejectedMessage(
 
   if (isHabitPlanProposalIntent(proposal.intent)) {
     return "No changes were made. Your current habit plan stays as is.";
+  }
+
+  if (proposal.intent === "capture_wellbeing_checkin") {
+    return "No changes were made. Today's wellbeing check-in was not saved.";
+  }
+
+  if (proposal.intent === "log_nutrition_incident") {
+    return "No changes were made. This nutrition incident was not logged.";
+  }
+
+  if (proposal.intent === "recommend_recipes") {
+    return "No changes were made. Recipe recommendations were not saved.";
   }
 
   if (proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition") {

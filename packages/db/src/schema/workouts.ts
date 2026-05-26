@@ -93,5 +93,13 @@ export const workoutSessions = pgTable(
     planRevisionIdx: index("workout_sessions_plan_revision_idx").on(
       table.workoutPlanRevisionId,
     ),
+    userPlanRevisionDateUnique: uniqueIndex(
+      "workout_sessions_user_plan_revision_date_unique",
+    ).on(
+      table.userId,
+      table.workoutPlanId,
+      table.workoutPlanRevisionId,
+      table.plannedDate,
+    ),
   }),
 );

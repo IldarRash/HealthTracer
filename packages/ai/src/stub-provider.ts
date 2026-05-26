@@ -371,6 +371,18 @@ export class StubCoachAiProvider implements CoachAiProvider {
       });
     }
 
+    if (
+      normalized.includes("cheat meal") ||
+      normalized.includes("forgot to log") ||
+      normalized.includes("i ate this")
+    ) {
+      return stubCoachOutput({
+        reply:
+          "I can help you log this as a nutrition incident with editable estimates. Review the proposal, adjust items, or add a food photo before confirming.",
+        proposals: [],
+      });
+    }
+
     return stubCoachOutput({
       reply: SAFE_DEFAULT_REPLY,
       proposals: [],

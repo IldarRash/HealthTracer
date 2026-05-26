@@ -9,12 +9,12 @@ import {
 } from "../../lib/api";
 import {
   buildTrainingWeekStripView,
-  formatExerciseLabel,
   formatLocalIsoDate,
   getWorkoutPlanDayKey,
   getWorkoutPlanDayLabel,
   hasActiveWorkoutPlan,
 } from "../../lib/training-ui-state";
+import { TrainingPlanExerciseItem } from "./training-plan-exercise-item";
 import {
   formatPlanRevisionSource,
   formatPlanRevisionTimestamp,
@@ -202,9 +202,10 @@ export function TrainingWorkspace() {
                   {day.exercises.length > 0 ? (
                     <ul className="training-exercise-list">
                       {day.exercises.map((exercise, index) => (
-                        <li key={getWorkoutPlanDayKey(day, index)}>
-                          {formatExerciseLabel(exercise)}
-                        </li>
+                        <TrainingPlanExerciseItem
+                          key={getWorkoutPlanDayKey(day, index)}
+                          exercise={exercise}
+                        />
                       ))}
                     </ul>
                   ) : (

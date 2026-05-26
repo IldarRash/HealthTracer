@@ -1,6 +1,11 @@
+import { validateProposalSafety } from "@health/ai";
 import type {
+  AiProposal,
+  CreateRecipeNutritionIncidentProposalInput,
   GenerateRecipeRecommendationsResponse,
+  LogNutritionIncidentProposalPayload,
   NutritionPlanPayload,
+  RawAiProposal,
   Recipe,
   RecipeListQuery,
   RecipeListResponse,
@@ -9,6 +14,10 @@ import type {
   UserRecipeRecommendationListResponse,
 } from "@health/types";
 import {
+  buildRecipeRecommendationProposal,
+  createRecipeNutritionIncidentProposalInputSchema,
+  getRecipeRecommendationRevisionErrors,
+  logNutritionIncidentProposalPayloadSchema,
   nutritionPlanPayloadSchema,
   recipeRecommendationProposalPayloadSchema,
 } from "@health/types";
@@ -20,6 +29,9 @@ import {
 } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { NutritionRepository } from "../nutrition/nutrition.repository.js";
+import { toAiProposal } from "../proposals/proposal.mapper.js";
+import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
+import { ProposalsRepository } from "../proposals/proposals.repository.js";
 import { ProfilesRepository } from "../profiles/profiles.repository.js";
 import { UsersService } from "../users/users.service.js";
 import {
@@ -45,6 +57,8 @@ export class RecipesService {
     private readonly nutritionRepository: NutritionRepository,
     private readonly profilesRepository: ProfilesRepository,
     private readonly usersService: UsersService,
+    private readonly proposalsRepository: ProposalsRepository,
+    private readonly proposalValidationService: ProposalValidationService,
     @Inject(RECIPE_CATALOG_PROVIDER)
     private readonly recipeCatalogProvider: RecipeCatalogProvider,
   ) {}
@@ -192,6 +206,187 @@ export class RecipesService {
     return toUserRecipeRecommendation(updated, toRecipe(existing.recipe));
   }
 
+  async packChatRecipeRecommendationProposal(auth: ClerkAuthContext) {
+    const generated = await this.generateCurrentRecommendations(auth);
+
+    if (generated.limitedReason || generated.recommendations.length === 0) {
+      return null;
+    }
+
+    return buildRecipeRecommendationProposal({
+      relatedNutritionPlanRevisionId: generated.relatedNutritionPlanRevisionId,
+      recommendations: generated.recommendations.map((recommendation) => ({
+        recipeId: recommendation.recipeId,
+        reason: recommendation.reason,
+        fitSummary: recommendation.fitSummary,
+      })),
+    });
+  }
+
+  async createNutritionIncidentProposalFromRecommendation(
+    auth: ClerkAuthContext,
+    recommendationId: string,
+    input: CreateRecipeNutritionIncidentProposalInput = {},
+  ): Promise<AiProposal> {
+    const parsedInput = createRecipeNutritionIncidentProposalInputSchema.parse(input);
+    const user = await this.usersService.resolveFromAuth(auth);
+    const existing = await this.recipesRepository.findRecommendationById(
+      user.id,
+      recommendationId,
+    );
+
+    if (!existing) {
+      throw new NotFoundException("Recipe recommendation not found.");
+    }
+
+    const status = existing.recommendation.status;
+
+    if (status !== "accepted" && status !== "completed") {
+      throw new BadRequestException(
+        "Only saved or completed recipe recommendations can be logged as nutrition incidents.",
+      );
+    }
+
+    const recipe = toRecipe(existing.recipe);
+    const builtPayload = this.buildNutritionIncidentPayloadFromRecipe(
+      recipe,
+      recommendationId,
+    );
+    const proposedChanges = this.resolveNutritionIncidentProposedChanges(
+      builtPayload,
+      recommendationId,
+      parsedInput.proposedChanges,
+    );
+    const threadId = await this.resolveNutritionIncidentProposalThread(
+      user.id,
+      parsedInput.threadId,
+    );
+    const rawProposal: RawAiProposal = {
+      intent: "log_nutrition_incident",
+      targetDomain: "nutrition",
+      title: `Log ${recipe.name}`,
+      reason:
+        "Review this approximate recipe estimate, edit items or quantities if needed, then confirm to add a food log entry. Your nutrition targets stay unchanged.",
+      proposedChanges,
+    };
+    const safetyErrors = validateProposalSafety({
+      intent: rawProposal.intent,
+      targetDomain: rawProposal.targetDomain,
+      title: rawProposal.title,
+      reason: rawProposal.reason,
+      proposedChanges: rawProposal.proposedChanges,
+    });
+    const validation = this.proposalValidationService.validateRawProposal(rawProposal);
+    const nutritionIncidentImageRefErrors =
+      await this.proposalValidationService.validateNutritionIncidentImageRefOwnership(
+        user.id,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const nutritionIncidentRecipeRecommendationErrors =
+      await this.proposalValidationService.validateNutritionIncidentRecipeRecommendationContext(
+        user.id,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const validationErrors = [
+      ...safetyErrors,
+      ...validation.errors,
+      ...nutritionIncidentImageRefErrors,
+      ...nutritionIncidentRecipeRecommendationErrors,
+    ];
+    const validationStatus = validationErrors.length === 0 ? "valid" : "invalid";
+    const record = await this.proposalsRepository.createPendingProposal(
+      user.id,
+      threadId,
+      null,
+      rawProposal,
+      validationStatus,
+      validationErrors,
+    );
+
+    return toAiProposal(record);
+  }
+
+  private buildNutritionIncidentPayloadFromRecipe(
+    recipe: Recipe,
+    recommendationId: string,
+  ): LogNutritionIncidentProposalPayload {
+    return logNutritionIncidentProposalPayloadSchema.parse({
+      incidentDateTime: new Date().toISOString(),
+      items: [
+        {
+          name: recipe.name,
+          quantity: `${recipe.servings} serving${recipe.servings === 1 ? "" : "s"}`,
+          calories: recipe.macroEstimates.estimatedCalories,
+          proteinGrams: recipe.macroEstimates.proteinGrams,
+          carbsGrams: recipe.macroEstimates.carbsGrams,
+          fatGrams: recipe.macroEstimates.fatGrams,
+        },
+      ],
+      estimatedCalories: recipe.macroEstimates.estimatedCalories,
+      estimatedMacros: {
+        proteinGrams: recipe.macroEstimates.proteinGrams,
+        carbsGrams: recipe.macroEstimates.carbsGrams,
+        fatGrams: recipe.macroEstimates.fatGrams,
+      },
+      confidence: recipe.confidence,
+      provenance: {
+        source: "recipe_recommendation",
+        providerId: recommendationId,
+      },
+      imageRefs: [],
+    });
+  }
+
+  private resolveNutritionIncidentProposedChanges(
+    builtPayload: LogNutritionIncidentProposalPayload,
+    recommendationId: string,
+    override?: LogNutritionIncidentProposalPayload,
+  ): LogNutritionIncidentProposalPayload {
+    if (!override) {
+      return builtPayload;
+    }
+
+    const proposedChanges = logNutritionIncidentProposalPayloadSchema.parse(override);
+
+    if (proposedChanges.provenance.source !== "recipe_recommendation") {
+      throw new BadRequestException(
+        "Recipe nutrition incident proposals must use recipe_recommendation provenance.",
+      );
+    }
+
+    if (proposedChanges.provenance.providerId !== recommendationId) {
+      throw new BadRequestException(
+        "proposedChanges.provenance.providerId must match the recipe recommendation id.",
+      );
+    }
+
+    return proposedChanges;
+  }
+
+  private async resolveNutritionIncidentProposalThread(
+    userId: string,
+    requestedThreadId?: string,
+  ): Promise<string> {
+    if (requestedThreadId) {
+      const thread = await this.proposalsRepository.findThreadById(userId, requestedThreadId);
+
+      if (!thread) {
+        throw new NotFoundException("Chat thread not found.");
+      }
+
+      return thread.id;
+    }
+
+    const thread = await this.proposalsRepository.createThreadForUser(
+      userId,
+      "Recipe food log",
+    );
+
+    return thread.id;
+  }
+
   async applyRecipeRecommendationProposal(
     userId: string,
     payloadInput: unknown,
@@ -201,6 +396,17 @@ export class RecipesService {
     const activeContext = await this.resolveActiveNutritionContext(userId);
     const revisionId =
       payload.relatedNutritionPlanRevisionId ?? activeContext?.revisionId ?? null;
+
+    if (payload.relatedNutritionPlanRevisionId) {
+      const revisionErrors = await this.validateRelatedRevisionContext(
+        userId,
+        payload.relatedNutritionPlanRevisionId,
+      );
+
+      if (revisionErrors.length > 0) {
+        throw new BadRequestException(revisionErrors[0]);
+      }
+    }
 
     let filterPayload: NutritionPlanPayload | undefined = activeContext?.payload;
 
@@ -261,6 +467,16 @@ export class RecipesService {
     }
 
     return `recipe_recommendation:${created[0]?.id}`;
+  }
+
+  private async validateRelatedRevisionContext(userId: string, revisionId: string) {
+    const activeContext = await this.resolveActiveNutritionContext(userId);
+    const owned = await this.nutritionRepository.findRevisionOwnedByUser(userId, revisionId);
+
+    return getRecipeRecommendationRevisionErrors(revisionId, {
+      activeRevisionId: activeContext?.revisionId ?? null,
+      revisionOwned: owned != null,
+    });
   }
 
   private async ensureProviderCatalogLoaded(): Promise<void> {

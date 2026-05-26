@@ -24,6 +24,42 @@ export class WellbeingCheckInsRepository {
     return row ?? null;
   }
 
+  async insertByUserAndDateIfAbsent(
+    userId: string,
+    date: string,
+    input: UpsertWellbeingCheckInInput,
+    crisisFlagReasons: WellbeingCrisisFlagReason[],
+  ) {
+    const [inserted] = await this.db
+      .insert(wellbeingCheckIns)
+      .values({
+        userId,
+        date,
+        moodScore: input.moodScore,
+        stressScore: input.stressScore,
+        tags: normalizeWellbeingTags(input.tags),
+        note: normalizeWellbeingNote(input.note),
+        source: input.source ?? "user_entry",
+        crisisFlagReasons: serializeCrisisFlagReasons(crisisFlagReasons),
+      })
+      .onConflictDoNothing({
+        target: [wellbeingCheckIns.userId, wellbeingCheckIns.date],
+      })
+      .returning();
+
+    if (inserted) {
+      return { row: inserted, created: true as const };
+    }
+
+    const existing = await this.findByUserAndDate(userId, date);
+
+    if (!existing) {
+      throw new Error("Failed to resolve wellbeing check-in after insert conflict.");
+    }
+
+    return { row: existing, created: false as const };
+  }
+
   async upsertByUserAndDate(
     userId: string,
     date: string,

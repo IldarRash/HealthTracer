@@ -17,9 +17,11 @@ const createInput: CreateExerciseInput = {
   secondaryMuscles: ["hamstrings"],
   equipment: ["dumbbell", "bench"],
   movementPatterns: ["lunge"],
+  modalities: ["strength"],
   difficulty: "intermediate",
   instructions: ["Lower under control for three seconds."],
   safetyNotes: ["Stop if knee discomfort increases."],
+  media: { refs: [], fallbackLabel: "Demonstration coming soon" },
   source: "ai_generated",
 };
 
@@ -32,9 +34,11 @@ const existingRow = {
   secondaryMuscles: ["hamstrings"],
   equipment: ["bench", "dumbbell"],
   movementPatterns: ["lunge"],
+  modalities: ["strength"],
   difficulty: "intermediate",
   instructions: ["Lower under control for three seconds."],
   safetyNotes: ["Stop if knee discomfort increases."],
+  media: { refs: [], fallbackLabel: "Demonstration coming soon" },
   source: "ai_generated",
   validationStatus: "pending_validation",
   status: "active",

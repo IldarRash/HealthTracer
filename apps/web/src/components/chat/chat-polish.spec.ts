@@ -20,8 +20,20 @@ const chatDir = dirname(fileURLToPath(import.meta.url));
 const webSrcDir = join(chatDir, "../..");
 
 const chatWorkspaceSource = readFileSync(join(chatDir, "chat-workspace.tsx"), "utf8");
-const inlineProposalSource = readFileSync(
+const inlineProposalRouterSource = readFileSync(
   join(webSrcDir, "components/proposals/inline-proposal-card.tsx"),
+  "utf8",
+);
+const genericInlineProposalSource = readFileSync(
+  join(webSrcDir, "components/proposals/inline-proposal-card-generic.tsx"),
+  "utf8",
+);
+const wellbeingProposalSource = readFileSync(
+  join(webSrcDir, "components/proposals/wellbeing-checkin-proposal-card.tsx"),
+  "utf8",
+);
+const nutritionProposalSource = readFileSync(
+  join(webSrcDir, "components/proposals/nutrition-incident-proposal-card.tsx"),
   "utf8",
 );
 const weeklyReviewSummarySource = readFileSync(
@@ -44,10 +56,15 @@ const stylesSource = readFileSync(join(webSrcDir, "../app/styles.css"), "utf8");
 
 const CHAT_USER_VISIBLE_SOURCES = [
   chatWorkspaceSource,
-  inlineProposalSource,
+  inlineProposalRouterSource,
+  genericInlineProposalSource,
+  wellbeingProposalSource,
+  nutritionProposalSource,
   weeklyReviewSummarySource,
   crisisPanelSource,
   chatBubbleSource,
+  readFileSync(join(chatDir, "chat-composer-attachments.tsx"), "utf8"),
+  readFileSync(join(chatDir, "chat-attachment-outcome-panel.tsx"), "utf8"),
   JSON.stringify(SUGGESTED_CHAT_PROMPTS),
   CHAT_EMPTY_STATE_TITLE,
   CHAT_EMPTY_STATE_DESCRIPTION,
@@ -108,20 +125,34 @@ describe("Chat polish copy and labels", () => {
     expect(CHAT_EMPTY_STATE_DESCRIPTION).toContain("week");
   });
 
-  it("avoids raw intent and domain labels in inline proposal metadata", () => {
-    const metaBlock = inlineProposalSource.slice(
-      inlineProposalSource.indexOf("meta={"),
-      inlineProposalSource.indexOf("badges={"),
+  it("routes inline proposals through specialized or generic cards", () => {
+    expect(inlineProposalRouterSource).toContain(
+      'props.proposal.intent === "capture_wellbeing_checkin"',
+    );
+    expect(inlineProposalRouterSource).toContain(
+      'props.proposal.intent === "log_nutrition_incident"',
+    );
+    expect(inlineProposalRouterSource).toContain("WellbeingCheckinProposalCard");
+    expect(inlineProposalRouterSource).toContain("NutritionIncidentProposalCard");
+    expect(inlineProposalRouterSource).toContain("GenericInlineProposalCard");
+  });
+
+  it("avoids raw intent and domain labels in generic inline proposal metadata", () => {
+    const metaBlock = genericInlineProposalSource.slice(
+      genericInlineProposalSource.indexOf("meta={"),
+      genericInlineProposalSource.indexOf("badges={"),
     );
 
-    expect(inlineProposalSource).not.toContain("proposal.intent.replaceAll");
+    expect(genericInlineProposalSource).not.toContain("proposal.intent.replaceAll");
     expect(metaBlock).not.toMatch(/\{proposal\.targetDomain\}/);
-    expect(inlineProposalSource).not.toContain("validationStatus");
-    expect(inlineProposalSource).not.toContain("accept only if");
-    expect(inlineProposalSource).not.toContain("Validation issues");
-    expect(inlineProposalSource).toContain("INLINE_PROPOSAL_VALIDATION_HEADING");
+    expect(genericInlineProposalSource).not.toContain("validationStatus");
+    expect(genericInlineProposalSource).not.toContain("accept only if");
+    expect(genericInlineProposalSource).not.toContain("Validation issues");
+    expect(genericInlineProposalSource).toContain("INLINE_PROPOSAL_VALIDATION_HEADING");
     expect(metaBlock).toContain("{domainLabel}");
-    expect(inlineProposalSource).toContain("proposal.reason");
+    expect(genericInlineProposalSource).toContain("proposal.reason");
+    expect(wellbeingProposalSource).not.toContain("proposal.intent.replaceAll");
+    expect(nutritionProposalSource).not.toContain("validationStatus");
   });
 
   it("shows progress-linked intent labels only when mapped to user-facing copy", () => {
@@ -146,24 +177,33 @@ describe("Chat polish copy and labels", () => {
     expect(weeklyReviewSummarySource).toContain("WEEKLY_REVIEW_CHAT_ACTION_NOTICE");
   });
 
-  it("preserves post-accept deep links in inline proposals", () => {
-    expect(inlineProposalSource).toContain("View updated plan →");
-    expect(inlineProposalSource).toContain("Open Today →");
-    expect(inlineProposalSource).toContain("getProposalNavigationRoute");
+  it("preserves post-accept deep links in generic inline proposals", () => {
+    expect(genericInlineProposalSource).toContain("View updated plan →");
+    expect(genericInlineProposalSource).toContain("Open Today →");
+    expect(genericInlineProposalSource).toContain("getProposalNavigationRoute");
   });
 
   it("exposes Apply, Modify, and Reject affordances with decision accessibility", () => {
-    expect(inlineProposalSource).toContain('"Apply"');
-    expect(inlineProposalSource).toContain("\n              Modify\n");
-    expect(inlineProposalSource).toContain("\n              Reject\n");
-    expect(inlineProposalSource).toContain('decisionMutation.mutate("accept")');
-    expect(inlineProposalSource).toContain('decisionMutation.mutate("reject")');
-    expect(inlineProposalSource).toContain("modifyProposal");
-    expect(inlineProposalSource).toContain("aria-busy={isActionPending");
-    expect(inlineProposalSource).toContain('aria-live="polite"');
-    expect(inlineProposalSource).toContain("proposal-accept-hint-");
-    expect(inlineProposalSource).toContain("canDecideProposal");
-    expect(inlineProposalSource).toContain("canAcceptProposal");
+    for (const source of [
+      genericInlineProposalSource,
+      wellbeingProposalSource,
+      nutritionProposalSource,
+    ]) {
+      expect(source).toContain('"Apply"');
+      expect(source).toContain("\n              Modify\n");
+      expect(source).toContain("\n              Reject\n");
+      expect(source).toContain('decisionMutation.mutate("accept")');
+      expect(source).toContain('decisionMutation.mutate("reject")');
+      expect(source).toContain("aria-busy={isActionPending");
+      expect(source).toContain('aria-live="polite"');
+    }
+
+    expect(genericInlineProposalSource).toContain("modifyProposal");
+    expect(genericInlineProposalSource).toContain("proposal-accept-hint-");
+    expect(genericInlineProposalSource).toContain("canDecideProposal");
+    expect(genericInlineProposalSource).toContain("canAcceptProposal");
+    expect(wellbeingProposalSource).toContain("Nothing is saved until you apply");
+    expect(nutritionProposalSource).toContain("nutrition plan targets are unchanged");
   });
 
   it("keeps weekly review lane lists labelled inside collapsed details", () => {

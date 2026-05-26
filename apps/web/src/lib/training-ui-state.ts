@@ -12,6 +12,9 @@ import {
   type WorkoutSession,
   type WorkoutSessionStatus,
 } from "@health/types";
+import { formatExerciseFeedbackSummary, formatRestDuration } from "./exercise-catalog-ui-state.js";
+
+export { formatRestDuration };
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -326,21 +329,6 @@ export function canSubmitScheduleForm(input: {
   );
 }
 
-export function formatRestDuration(seconds: number): string {
-  if (seconds < 60) {
-    return `${seconds}s rest`;
-  }
-
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-
-  if (remainder === 0) {
-    return `${minutes} min rest`;
-  }
-
-  return `${minutes}m ${remainder}s rest`;
-}
-
 export function formatSessionExercisePrescription(
   exercise: WorkoutSessionExercise,
 ): string {
@@ -443,24 +431,5 @@ export function canUpdateSessionExercise(
 export function formatSessionExerciseExecutionSummary(
   exercise: WorkoutSessionExercise,
 ): string | null {
-  const { execution } = exercise;
-  const parts: string[] = [];
-
-  if (execution.actualReps) {
-    parts.push(execution.actualReps);
-  }
-
-  if (execution.actualWeightKg != null) {
-    parts.push(`${execution.actualWeightKg} kg`);
-  }
-
-  if (execution.loadAdjustmentNotes) {
-    parts.push(execution.loadAdjustmentNotes);
-  }
-
-  if (execution.notes) {
-    parts.push(execution.notes);
-  }
-
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return formatExerciseFeedbackSummary(exercise.execution);
 }

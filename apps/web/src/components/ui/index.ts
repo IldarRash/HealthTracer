@@ -1,8 +1,11 @@
 export { AppShell, AppShellHeader, AppShellMain, PageContent, PageHeader } from "./app-shell";
 export { RouteWayfinding } from "./route-wayfinding";
+export { AttachmentPreviewThumb, AttachmentStatusBadge } from "./attachment-preview";
 export { Badge, badgeVariants, type BadgeProps } from "./badge";
 export { Button, buttonVariants, type ButtonProps } from "./button";
 export { Card, cardVariants, type CardProps } from "./card";
+export { DetailLineList } from "./detail-line-list";
+export { ExerciseCatalogDetails } from "./exercise-catalog-details";
 export {
   ChatBubble,
   ChatComposer,
@@ -28,8 +31,10 @@ export {
   TrendStripDay,
 } from "./overview-cards";
 export {
+  ConsentScopeChecklist,
   ConsentScopeList,
   ConsentStatusBadge,
+  FileInputTrigger,
   PrivacyBoundaryNote,
   RevocationState,
   type ConsentScopeItem,

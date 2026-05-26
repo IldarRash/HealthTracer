@@ -1,11 +1,20 @@
+"use client";
+
 import {
   privacyStatusLabel,
   privacyStatusTone,
   type PrivacyStatus,
 } from "@health/ui";
-import { type HTMLAttributes, type ReactNode } from "react";
+import {
+  type ChangeEvent,
+  type HTMLAttributes,
+  type ReactNode,
+  type RefObject,
+  useRef,
+} from "react";
 import { cn } from "../../lib/utils";
 import { Badge } from "./badge";
+import { Button } from "./button";
 
 type ConsentStatusBadgeProps = HTMLAttributes<HTMLSpanElement> & {
   status: PrivacyStatus;
@@ -41,6 +50,129 @@ type ConsentScopeListProps = HTMLAttributes<HTMLUListElement> & {
   scopes: ConsentScopeItem[];
   emptyMessage?: string;
 };
+
+type ConsentScopeChecklistProps = HTMLAttributes<HTMLFieldSetElement> & {
+  legend: string;
+  helpText?: string;
+  scopes: ConsentScopeItem[];
+  idPrefix: string;
+  disabled?: boolean;
+  onToggle: (scopeId: string) => void;
+  listClassName?: string;
+};
+
+export function ConsentScopeChecklist({
+  legend,
+  helpText,
+  scopes,
+  idPrefix,
+  disabled = false,
+  onToggle,
+  className,
+  listClassName,
+  ...props
+}: ConsentScopeChecklistProps) {
+  return (
+    <fieldset className={cn("form-field consent-scope-fieldset", className)} {...props}>
+      <legend className="form-label">{legend}</legend>
+      {helpText ? <p className="form-help">{helpText}</p> : null}
+      <ul className={cn("consent-scope-checklist", listClassName)}>
+        {scopes.map((scope) => {
+          const inputId = `${idPrefix}-consent-${scope.id}`;
+          const isDisabled = disabled || (scope.required ?? false);
+
+          return (
+            <li key={scope.id}>
+              <label htmlFor={inputId} className="consent-scope-checklist__label">
+                <input
+                  id={inputId}
+                  name={inputId}
+                  type="checkbox"
+                  checked={scope.enabled ?? false}
+                  disabled={isDisabled}
+                  onChange={() => onToggle(scope.id)}
+                />
+                <span>
+                  <strong>{scope.label}</strong>
+                  {scope.required ? " (required)" : null}
+                  {scope.description ? (
+                    <span className="form-help">{scope.description}</span>
+                  ) : null}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </fieldset>
+  );
+}
+
+type FileInputTriggerProps = {
+  inputId: string;
+  accept?: string;
+  multiple?: boolean;
+  disabled?: boolean;
+  labelText: string;
+  buttonLabel: string;
+  hintText?: string;
+  inputRef?: RefObject<HTMLInputElement | null>;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  className?: string;
+  buttonVariant?: "primary" | "secondary";
+};
+
+export function FileInputTrigger({
+  inputId,
+  accept,
+  multiple = false,
+  disabled = false,
+  labelText,
+  buttonLabel,
+  hintText,
+  inputRef,
+  onChange,
+  className,
+  buttonVariant = "secondary",
+}: FileInputTriggerProps) {
+  const hintId = hintText ? `${inputId}-hint` : undefined;
+  const internalInputRef = useRef<HTMLInputElement>(null);
+  const resolvedInputRef = inputRef ?? internalInputRef;
+
+  return (
+    <div className={cn("file-input-trigger", className)}>
+      <label className="sr-only" htmlFor={inputId}>
+        {labelText}
+      </label>
+      <input
+        ref={resolvedInputRef}
+        id={inputId}
+        className="sr-only"
+        type="file"
+        accept={accept}
+        multiple={multiple}
+        disabled={disabled}
+        aria-describedby={hintId}
+        onChange={onChange}
+      />
+      <Button
+        type="button"
+        variant={buttonVariant}
+        disabled={disabled}
+        aria-controls={inputId}
+        aria-describedby={hintId}
+        onClick={() => resolvedInputRef.current?.click()}
+      >
+        {buttonLabel}
+      </Button>
+      {hintText ? (
+        <p id={hintId} className="file-input-trigger__hint">
+          {hintText}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export function ConsentScopeList({
   scopes,

@@ -3,6 +3,7 @@ import { sha256Hex } from "./sha256.js";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
 import {
   createExerciseInputSchema,
+  exerciseCatalogMetadataSchema,
   exerciseEquipmentSchema,
   exerciseMuscleSchema,
   type CreateExerciseInput,
@@ -111,6 +112,8 @@ export const workoutPlanExerciseSchema = z.object({
     .nullable()
     .optional(),
   notes: z.string().min(1).max(500).nullable().optional(),
+  /** Populated at read/materialization time; not persisted on revisions. */
+  catalog: exerciseCatalogMetadataSchema.optional(),
 });
 
 export type WorkoutPlanExercise = z.infer<typeof workoutPlanExerciseSchema>;
@@ -196,6 +199,9 @@ export type WorkoutSessionStatus = z.infer<typeof workoutSessionStatusSchema>;
 
 export const workoutCompletionFeedbackSchema = z.object({
   fatigue: z.number().int().min(1).max(10).nullable().optional(),
+  perceivedEffort: z.number().int().min(1).max(10).nullable().optional(),
+  perceivedDifficulty: z.number().int().min(1).max(10).nullable().optional(),
+  discomfortFlag: z.boolean().nullable().optional(),
   notes: z.string().max(1000).nullable().optional(),
 });
 
@@ -220,6 +226,9 @@ export const workoutSessionExerciseExecutionSchema = z.object({
   actualWeightKg: z.number().positive().max(500).nullable().optional(),
   actualReps: z.string().min(1).max(80).nullable().optional(),
   loadAdjustmentNotes: z.string().min(1).max(240).nullable().optional(),
+  perceivedEffort: z.number().int().min(1).max(10).nullable().optional(),
+  perceivedDifficulty: z.number().int().min(1).max(10).nullable().optional(),
+  discomfortFlag: z.boolean().nullable().optional(),
 });
 
 export type WorkoutSessionExerciseExecution = z.infer<
@@ -257,6 +266,8 @@ export const workoutSessionExerciseSchema = z.object({
   exerciseId: z.string().uuid().nullable().optional(),
   prescription: workoutSessionExercisePrescriptionSchema,
   execution: workoutSessionExerciseExecutionSchema.default({ status: "planned" }),
+  /** Populated at read/materialization time; not persisted on sessions. */
+  catalog: exerciseCatalogMetadataSchema.optional(),
 });
 
 export type WorkoutSessionExercise = z.infer<typeof workoutSessionExerciseSchema>;
@@ -351,6 +362,9 @@ export const updateWorkoutSessionExerciseSchema = z
     actualWeightKg: z.number().positive().max(500).nullable().optional(),
     actualReps: z.string().min(1).max(80).nullable().optional(),
     loadAdjustmentNotes: z.string().min(1).max(240).nullable().optional(),
+    perceivedEffort: z.number().int().min(1).max(10).nullable().optional(),
+    perceivedDifficulty: z.number().int().min(1).max(10).nullable().optional(),
+    discomfortFlag: z.boolean().nullable().optional(),
   })
   .refine(
     (value) =>
@@ -358,7 +372,10 @@ export const updateWorkoutSessionExerciseSchema = z
       value.notes !== undefined ||
       value.actualWeightKg !== undefined ||
       value.actualReps !== undefined ||
-      value.loadAdjustmentNotes !== undefined,
+      value.loadAdjustmentNotes !== undefined ||
+      value.perceivedEffort !== undefined ||
+      value.perceivedDifficulty !== undefined ||
+      value.discomfortFlag !== undefined,
     {
       message: "At least one exercise execution field must be provided.",
     },
@@ -379,6 +396,8 @@ export const workoutPlanProposalExtrasSchema = z.object({
   pendingExercises: z
     .record(z.string().min(1).max(80), pendingExerciseDefinitionSchema)
     .optional(),
+  /** Chat attachment that sourced this proposal; validated for ownership separately. */
+  attachmentRefId: z.string().uuid().optional(),
 });
 
 export type WorkoutPlanProposalExtras = z.infer<typeof workoutPlanProposalExtrasSchema>;
@@ -641,6 +660,29 @@ export function getWorkoutPlanDomainErrors(
       break;
     }
   }
+
+  return errors;
+}
+
+export function getResolvedWorkoutPlanCatalogErrors(payload: WorkoutPlanPayload): string[] {
+  const errors: string[] = [];
+
+  payload.days.forEach((day, dayIndex) => {
+    day.exercises.forEach((entry, exerciseIndex) => {
+      if (!isStructuredWorkoutPlanExercise(entry)) {
+        errors.push(
+          `workout: days[${dayIndex}].exercises[${exerciseIndex}] must use structured catalog-backed exercises.`,
+        );
+        return;
+      }
+
+      if (!entry.exerciseId) {
+        errors.push(
+          `workout: days[${dayIndex}].exercises[${exerciseIndex}] must resolve to exerciseId before apply.`,
+        );
+      }
+    });
+  });
 
   return errors;
 }

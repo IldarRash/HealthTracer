@@ -72,6 +72,35 @@ function createService(
       activeRevisionId: string,
     ) => Promise<{ payload: unknown } | null>;
   } = {},
+  wellbeingCheckInsRepository: {
+    findByUserAndDate?: (userId: string, date: string) => Promise<{ id: string } | null>;
+  } = {},
+  nutritionRepository: {
+    listOwnedFoodPhotoAnalysesByImageRefIds?: (
+      userId: string,
+      imageRefIds: readonly string[],
+    ) => Promise<Array<{ analysisId: string; imageRefId: string }>>;
+    findFoodPhotoAnalysisByIdForUser?: (
+      userId: string,
+      analysisId: string,
+    ) => Promise<{ id: string; imageRefId: string } | null>;
+    findActivePlanByUserId?: (
+      userId: string,
+    ) => Promise<{ activeRevisionId: string | null } | null>;
+    findRevisionOwnedByUser?: (
+      userId: string,
+      revisionId: string,
+    ) => Promise<{ id: string } | null>;
+  } = {},
+  recipesRepository: {
+    findRecommendationById?: (
+      userId: string,
+      recommendationId: string,
+    ) => Promise<{
+      recommendation: { status: string };
+      recipe: unknown;
+    } | null>;
+  } = {},
 ) {
   return new ProposalValidationService(
     {
@@ -121,6 +150,24 @@ function createService(
       findActiveRevisionByPlanId: async () => null,
       ...habitsRepository,
     } as never,
+    {
+      findByUserAndDate: async () => null,
+      ...wellbeingCheckInsRepository,
+    } as never,
+    {
+      listOwnedFoodPhotoAnalysesByImageRefIds: async () => [],
+      findFoodPhotoAnalysisByIdForUser: async () => null,
+      findActivePlanByUserId: async () => null,
+      findRevisionOwnedByUser: async () => null,
+      ...nutritionRepository,
+    } as never,
+    {
+      findRecommendationById: async () => null,
+      ...recipesRepository,
+    } as never,
+    {
+      listByIdsForUser: async () => [],
+    } as never,
   );
 }
 
@@ -159,6 +206,18 @@ describe("ProposalValidationService", () => {
 
     expect(result.valid).toBe(false);
     expect(result.errors.some((error) => error.includes("medical wording"))).toBe(true);
+  });
+
+  it("rejects workout proposals with free-form string exercises", () => {
+    const result = service.validateStoredProposal("adapt_workout_plan", {
+      ...workoutPlan,
+      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((error) => error.includes("structured catalog-backed exercises"))).toBe(
+      true,
+    );
   });
 
   it("rejects workout proposals without training days", () => {
@@ -563,6 +622,94 @@ describe("ProposalValidationService", () => {
 
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it("flags stale nutrition revision references for recommend_recipes proposals", async () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const staleRevisionId = "ad000002-0000-4000-8000-000000000001";
+    const activeRevisionId = "ad000003-0000-4000-8000-000000000001";
+    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+      findActivePlanByUserId: async () => ({ activeRevisionId }),
+      findRevisionOwnedByUser: async (_userId, revisionId) =>
+        revisionId === staleRevisionId ? { id: staleRevisionId } : null,
+    });
+
+    const errors = await validationService.validateRecipeRecommendationProposalContext(
+      userId,
+      "recommend_recipes",
+      {
+        relatedNutritionPlanRevisionId: staleRevisionId,
+        recommendations: [
+          {
+            recipeId: "a1000001-0000-4000-8000-000000000001",
+            reason: "Fits your plan.",
+            fitSummary: "Estimated macros fit.",
+          },
+        ],
+      },
+    );
+
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]).toContain("no longer active");
+  });
+
+  it("flags owned revision references when no active nutrition plan exists", async () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const ownedRevisionId = "ad000002-0000-4000-8000-000000000001";
+    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+      findActivePlanByUserId: async () => null,
+      findRevisionOwnedByUser: async (_userId, revisionId) =>
+        revisionId === ownedRevisionId ? { id: ownedRevisionId } : null,
+    });
+
+    const errors = await validationService.validateRecipeRecommendationProposalContext(
+      userId,
+      "recommend_recipes",
+      {
+        relatedNutritionPlanRevisionId: ownedRevisionId,
+        recommendations: [
+          {
+            recipeId: "a1000001-0000-4000-8000-000000000001",
+            reason: "Fits your plan.",
+            fitSummary: "Estimated macros fit.",
+          },
+        ],
+      },
+    );
+
+    expect(errors).toContain(
+      "proposedChanges.relatedNutritionPlanRevisionId: Related nutrition plan revision is no longer active.",
+    );
+  });
+
+  it("flags missing nutrition revision ownership for recommend_recipes proposals", async () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const missingRevisionId = "ad000004-0000-4000-8000-000000000001";
+    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+      findActivePlanByUserId: async () => ({
+        activeRevisionId: "ad000003-0000-4000-8000-000000000001",
+      }),
+      findRevisionOwnedByUser: async () => null,
+    });
+
+    const errors = await validationService.validateRecipeRecommendationProposalContext(
+      userId,
+      "recommend_recipes",
+      {
+        relatedNutritionPlanRevisionId: missingRevisionId,
+        recommendations: [
+          {
+            recipeId: "a1000001-0000-4000-8000-000000000001",
+            reason: "Fits your plan.",
+            fitSummary: "Estimated macros fit.",
+          },
+        ],
+      },
+    );
+
+    expect(errors).toContain(
+      "proposedChanges.relatedNutritionPlanRevisionId: Related nutrition plan revision was not found for this user.",
+    );
   });
 
   it("allows summarize_progress without domain payload schema", () => {
@@ -1034,6 +1181,7 @@ describe("ProposalValidationService", () => {
             secondaryMuscles: [],
             equipment: ["resistance_band"],
             movementPatterns: ["pull"],
+            modalities: ["strength"],
             difficulty: "beginner",
             instructions: ["Pull the band apart with control."],
             safetyNotes: ["Use a light band."],
@@ -1643,6 +1791,319 @@ describe("ProposalValidationService", () => {
       expect(errors).toEqual([
         "proposedChanges.recoverySourceRefs[0].snapshotId: Recovery context snapshot is stale for the cited date.",
       ]);
+    });
+  });
+
+  describe("action proposal validation", () => {
+    it("validates bounded wellbeing check-in payloads", () => {
+      const service = createService();
+
+      const result = service.validateStoredProposal("capture_wellbeing_checkin", {
+        date: "2026-05-26",
+        moodScore: 2,
+        stressScore: 3,
+        energyLevel: 2,
+        note: "Rough day.",
+        tags: [],
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("rejects wellbeing check-in payloads with out-of-range scores", () => {
+      const service = createService();
+
+      const result = service.validateStoredProposal("capture_wellbeing_checkin", {
+        date: "2026-05-26",
+        moodScore: 6,
+        stressScore: 3,
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it("validates nutrition incident payloads with confidence and provenance", () => {
+      const service = createService();
+
+      const result = service.validateStoredProposal("log_nutrition_incident", {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "medium",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("rejects low-confidence nutrition incident payloads without userEdits", () => {
+      const service = createService();
+
+      const result = service.validateStoredProposal("log_nutrition_incident", {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Pizza slice", calories: 280 }],
+        estimatedCalories: 280,
+        estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+        confidence: "low",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain(
+        "proposedChanges: nutrition_incident: low-confidence estimates require userEdits before acceptance.",
+      );
+    });
+
+    it("requires saved or completed recipe recommendations for recipe-backed nutrition incidents", async () => {
+      const recommendationId = "b2000001-0000-4000-8000-000000000001";
+      const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+        findRecommendationById: async () => ({
+          recommendation: { status: "pending" },
+          recipe: {},
+        }),
+      });
+
+      const errors = await validationService.validateNutritionIncidentRecipeRecommendationContext(
+        "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+        "log_nutrition_incident",
+        {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Lentil power bowl", quantity: "1 serving", calories: 690 }],
+          estimatedCalories: 690,
+          estimatedMacros: { proteinGrams: 48, carbsGrams: 82, fatGrams: 18 },
+          confidence: "medium",
+          provenance: {
+            source: "recipe_recommendation",
+            providerId: recommendationId,
+          },
+          imageRefs: [],
+        },
+      );
+
+      expect(errors).toContain(
+        "proposedChanges.provenance.providerId: Only saved or completed recipe recommendations can be logged as nutrition incidents.",
+      );
+    });
+
+    it("validates recipe recommendation provenance for nutrition incident payloads", () => {
+      const service = createService();
+
+      const result = service.validateStoredProposal("log_nutrition_incident", {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Lentil power bowl", quantity: "1 serving", calories: 690 }],
+        estimatedCalories: 690,
+        estimatedMacros: { proteinGrams: 48, carbsGrams: 82, fatGrams: 18 },
+        confidence: "medium",
+        provenance: {
+          source: "recipe_recommendation",
+          providerId: "b2000001-0000-4000-8000-000000000001",
+        },
+        imageRefs: [],
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it("validates wellbeing check-in date against user timezone", async () => {
+      const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+      const service = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          findByUserId: async () => ({ timezone: "UTC" }),
+        },
+      );
+
+      const errors = await service.validateWellbeingCheckinProposalContext(
+        testUserId,
+        "capture_wellbeing_checkin",
+        {
+          date: "2026-05-25",
+          moodScore: 2,
+          stressScore: 3,
+        },
+      );
+
+      expect(errors).toEqual([
+        "proposedChanges.date: Wellbeing check-in date must match the user's current day.",
+      ]);
+    });
+
+    it("rejects stale wellbeing proposals when today's check-in already exists", async () => {
+      const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+      const service = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          findByUserId: async () => ({ timezone: "UTC" }),
+        },
+        {},
+        {
+          findByUserAndDate: async () => ({ id: "checkin-existing-1" }),
+        },
+      );
+
+      const errors = await service.validateWellbeingCheckinProposalContext(
+        testUserId,
+        "capture_wellbeing_checkin",
+        {
+          date: "2026-05-26",
+          moodScore: 2,
+          stressScore: 3,
+        },
+      );
+
+      expect(errors).toContain(
+        "proposedChanges.date: A wellbeing check-in already exists for this day and cannot be overwritten by a stale proposal.",
+      );
+    });
+
+    it("allows idempotent wellbeing accept when appliedReference matches existing check-in", async () => {
+      const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+      const service = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          findByUserId: async () => ({ timezone: "UTC" }),
+        },
+        {},
+        {
+          findByUserAndDate: async () => ({ id: "checkin-existing-1" }),
+        },
+      );
+
+      const errors = await service.validateWellbeingCheckinProposalContext(
+        testUserId,
+        "capture_wellbeing_checkin",
+        {
+          date: "2026-05-26",
+          moodScore: 2,
+          stressScore: 3,
+        },
+        { appliedReference: "wellbeing_checkin:checkin-existing-1" },
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects nutrition incident payloads with unowned image references", async () => {
+      const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+      const service = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          listOwnedFoodPhotoAnalysesByImageRefIds: async () => [],
+          findFoodPhotoAnalysisByIdForUser: async () => null,
+        },
+      );
+
+      const errors = await service.validateNutritionIncidentImageRefOwnership(
+        testUserId,
+        "log_nutrition_incident",
+        {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Pizza slice", calories: 280 }],
+          estimatedCalories: 280,
+          estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+          confidence: "medium",
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            analysisId: "b1000001-0000-4000-8000-000000000002",
+          },
+          imageRefs: [{ id: "a1000001-0000-4000-8000-000000000001" }],
+        },
+      );
+
+      expect(errors).toContain(
+        "proposedChanges.provenance.analysisId: Food photo analysis was not found for this user.",
+      );
+      expect(errors).toContain(
+        "proposedChanges.imageRefs[0].id: Image reference was not analyzed for this user.",
+      );
+    });
+
+    it("accepts nutrition incident payloads when image refs are owned analyses", async () => {
+      const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+      const service = createService(
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+          listOwnedFoodPhotoAnalysesByImageRefIds: async () => [
+            {
+              analysisId: "b1000001-0000-4000-8000-000000000002",
+              imageRefId: "a1000001-0000-4000-8000-000000000001",
+            },
+          ],
+          findFoodPhotoAnalysisByIdForUser: async () => ({
+            id: "b1000001-0000-4000-8000-000000000002",
+            imageRefId: "a1000001-0000-4000-8000-000000000001",
+          }),
+        },
+      );
+
+      const errors = await service.validateNutritionIncidentImageRefOwnership(
+        testUserId,
+        "log_nutrition_incident",
+        {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Pizza slice", calories: 280 }],
+          estimatedCalories: 280,
+          estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+          confidence: "medium",
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            analysisId: "b1000001-0000-4000-8000-000000000002",
+          },
+          imageRefs: [{ id: "a1000001-0000-4000-8000-000000000001" }],
+        },
+      );
+
+      expect(errors).toEqual([]);
     });
   });
 });

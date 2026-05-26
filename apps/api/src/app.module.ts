@@ -5,6 +5,7 @@ import { ObservabilityModule } from "./observability/observability.module.js";
 import { RequestIdMiddleware } from "./observability/request-id.middleware.js";
 import { AiModule } from "./modules/ai/ai.module.js";
 import { ChatModule } from "./modules/chat/chat.module.js";
+import { ChatAttachmentsModule } from "./modules/chat-attachments/chat-attachments.module.js";
 import { CoachingContextModule } from "./modules/coaching-context/coaching-context.module.js";
 import { DeviceConnectionsModule } from "./modules/device-connections/device-connections.module.js";
 import { DocumentsModule } from "./modules/documents/documents.module.js";
@@ -47,6 +48,7 @@ import { WorkoutsModule } from "./modules/workouts/workouts.module.js";
     CoachingContextModule,
     AiModule,
     ChatModule,
+    ChatAttachmentsModule,
     ProposalsModule,
     DeviceConnectionsModule,
     HealthMetricsModule,

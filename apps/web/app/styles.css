@@ -2323,6 +2323,84 @@ span.confirmation-card__meta {
   color: var(--color-text-secondary);
 }
 
+.training-plan-exercise {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.training-plan-exercise-title {
+  display: block;
+}
+
+.training-exercise-prescription-details {
+  margin: 0;
+}
+
+.today-workout-exercise-details {
+  margin: var(--space-2) 0 0;
+}
+
+.today-workout-exercise-feedback {
+  border: 0;
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  min-width: 0;
+  padding: 0;
+}
+
+.today-workout-exercise-feedback legend {
+  margin-bottom: 0;
+  padding: 0;
+}
+
+.exercise-catalog-details {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.exercise-catalog-meta-list {
+  margin: 0;
+}
+
+.detail-line-list {
+  display: grid;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.exercise-catalog-instructions ol,
+.exercise-catalog-safety ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+}
+
+.exercise-catalog-safety {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.exercise-catalog-snapshot-note,
+.exercise-catalog-media-fallback {
+  margin: 0;
+}
+
+.today-workout-discomfort-flag {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.today-workout-exercise-catalog {
+  margin-top: var(--space-2);
+}
+
 .training-schedule-form {
   display: grid;
   gap: var(--space-4);
@@ -2880,11 +2958,7 @@ span.confirmation-card__meta {
 }
 
 .today-workout-exercise-details {
-  display: grid;
-  gap: var(--space-1);
-  list-style: none;
   margin: var(--space-2) 0 0;
-  padding: 0;
 }
 
 .today-workout-exercise-log {
@@ -3308,6 +3382,117 @@ span.confirmation-card__meta {
 .chat-single .chat-composer textarea:focus-visible {
   background: var(--color-surface-card);
   border-color: var(--color-border-focus);
+}
+
+.chat-composer-attachments {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.chat-composer-attachments__toolbar {
+  display: block;
+}
+
+.chat-composer-attachments__list {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chat-composer-attachments__item {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.chat-composer-attachments__preview-row {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-3);
+}
+
+.chat-composer-attachments__thumb {
+  border-radius: var(--radius-sm);
+  height: 4rem;
+  object-fit: cover;
+  width: 4rem;
+}
+
+.chat-composer-attachments__file-icon {
+  align-items: center;
+  background: var(--color-surface-card);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  font-size: 1.5rem;
+  height: 4rem;
+  justify-content: center;
+  width: 4rem;
+}
+
+.chat-composer-attachments__details {
+  display: grid;
+  flex: 1;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.chat-composer-attachments__filename {
+  font-weight: 600;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-composer-attachments__meta {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.chat-composer-attachments__medical {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.chat-attachment-outcomes {
+  margin-top: var(--space-2);
+}
+
+.chat-attachment-outcomes__list {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+
+.chat-attachment-outcomes__item {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.chat-attachment-outcomes__header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chat-attachment-outcomes__category {
+  font-weight: 600;
+}
+
+.chat-attachment-outcomes__snippet,
+.chat-attachment-outcomes__fallback {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin: 0;
 }
 
 .chat-bubble--coach,
@@ -3925,7 +4110,8 @@ span.confirmation-card__meta {
   margin-top: var(--space-4);
 }
 
-.documents-consent-options {
+.documents-consent-options,
+.consent-scope-checklist {
   display: grid;
   gap: var(--space-3);
   list-style: none;
@@ -3933,16 +4119,38 @@ span.confirmation-card__meta {
   padding: 0;
 }
 
-.documents-consent-options label {
+.documents-consent-options label,
+.consent-scope-checklist__label {
   align-items: flex-start;
   cursor: pointer;
   display: flex;
   gap: var(--space-3);
 }
 
-.documents-consent-options input[type="checkbox"] {
+.documents-consent-options input[type="checkbox"],
+.consent-scope-checklist input[type="checkbox"] {
   flex: 0 0 auto;
   margin-top: 0.25rem;
+}
+
+.consent-scope-fieldset {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.file-input-trigger {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.file-input-trigger__hint {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin: 0;
 }
 
 .documents-list {
@@ -4209,6 +4417,32 @@ span.confirmation-card__meta {
   display: grid;
   gap: var(--space-4);
   margin-top: var(--space-3);
+}
+
+.action-proposal-form {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.nutrition-incident-proposal-form {
+  margin-top: var(--space-3);
+}
+
+.nutrition-incident-photo-row,
+.nutrition-incident-estimate-meta,
+.nutrition-incident-items {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.nutrition-incident-item-row {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
 }
 
 .wellbeing-check-in-summary {

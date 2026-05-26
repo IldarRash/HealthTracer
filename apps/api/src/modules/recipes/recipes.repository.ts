@@ -129,6 +129,8 @@ export class RecipesRepository {
         prepMinutes: input.prepMinutes,
         cookMinutes: input.cookMinutes,
         source: input.source,
+        confidence: input.confidence,
+        provenance: input.provenance,
         status: "active" as const,
         updatedAt: new Date(),
       };

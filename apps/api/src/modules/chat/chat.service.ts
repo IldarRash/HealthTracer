@@ -1,5 +1,6 @@
 import { validateProposalSafety } from "@health/ai";
 import type {
+  ChatAttachmentOutcome,
   ChatMessage,
   ChatThread,
   ChatTurnResponse,
@@ -10,14 +11,23 @@ import type {
 import {
   evaluateWellbeingCrisisFromText,
   formatWellbeingCrisisSupportReply,
+  getChatAttachmentOwnershipErrors,
+  getChatAttachmentSendEligibilityErrors,
+  getTodayIsoDateInTimezone,
   isWeeklyReviewChatMessage,
+  mergeDeterministicChatProposals,
+  shouldTriggerRecipeRecommendationRequest,
 } from "@health/types";
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiService } from "../ai/ai.service.js";
+import { ChatAttachmentRecognitionService } from "../chat-attachments/chat-attachment-recognition.service.js";
+import { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { ProgressWeeklyReviewService } from "../progress/progress-weekly-review.service.js";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
+import { RecipesService } from "../recipes/recipes.service.js";
 import { UsersService } from "../users/users.service.js";
+import { WellbeingCheckInsService } from "../wellbeing-check-ins/wellbeing-check-ins.service.js";
 import { toChatMessage, toChatThread } from "./chat.mapper.js";
 import { ChatRepository } from "./chat.repository.js";
 import { toAiProposal } from "../proposals/proposal.mapper.js";
@@ -32,6 +42,10 @@ export class ChatService {
     private readonly aiService: AiService,
     private readonly proposalValidationService: ProposalValidationService,
     private readonly progressWeeklyReviewService: ProgressWeeklyReviewService,
+    private readonly wellbeingCheckInsService: WellbeingCheckInsService,
+    private readonly recipesService: RecipesService,
+    private readonly chatAttachmentsService: ChatAttachmentsService,
+    private readonly chatAttachmentRecognitionService: ChatAttachmentRecognitionService,
   ) {}
 
   async listThreads(auth: ClerkAuthContext): Promise<ChatThread[]> {
@@ -83,13 +97,60 @@ export class ChatService {
     }
 
     const existingMessages = await this.chatRepository.listMessagesByThreadId(threadId);
+    const attachmentRefIds = input.attachmentRefIds ?? [];
+    let ownedAttachments = [];
+
+    if (attachmentRefIds.length > 0) {
+      const attachmentRecords =
+        await this.chatAttachmentsService.assertOwnedAttachmentRefs(user.id, attachmentRefIds);
+      ownedAttachments = attachmentRecords.map((attachment) => ({
+        id: attachment.id,
+        userId: attachment.userId,
+        category: attachment.category,
+        status: attachment.status,
+        linkedDocumentId: attachment.linkedDocumentId,
+        linkedImageRefId: attachment.linkedImageRefId,
+        retentionPolicy: attachment.retentionPolicy,
+        expiresAt: attachment.expiresAt,
+      }));
+
+      const attachmentRefValidationErrors = [
+        ...getChatAttachmentOwnershipErrors(attachmentRefIds, ownedAttachments),
+        ...getChatAttachmentSendEligibilityErrors(attachmentRefIds, ownedAttachments),
+      ];
+
+      if (attachmentRefValidationErrors.length > 0) {
+        throw new BadRequestException({
+          message: "Attachment references failed validation.",
+          validationErrors: attachmentRefValidationErrors,
+        });
+      }
+    }
+
+    const messageContent =
+      input.content.trim().length > 0 ? input.content : "Shared attachment(s) for coaching review.";
+
     const userMessage = await this.chatRepository.createMessage(
       threadId,
       "user",
-      input.content,
+      messageContent,
+      attachmentRefIds.length > 0
+        ? {
+            attachmentRefIds,
+          }
+        : {},
     );
 
-    const crisisEvaluation = evaluateWellbeingCrisisFromText(input.content);
+    if (attachmentRefIds.length > 0) {
+      await this.chatAttachmentsService.linkAttachmentsToMessage(
+        user.id,
+        attachmentRefIds,
+        userMessage.id,
+        threadId,
+      );
+    }
+
+    const crisisEvaluation = evaluateWellbeingCrisisFromText(messageContent);
 
     if (crisisEvaluation.shouldShowCrisisSupport && crisisEvaluation.copy) {
       const assistantMessage = await this.chatRepository.createMessage(
@@ -104,7 +165,7 @@ export class ChatService {
 
       const title =
         thread.title ??
-        (existingMessages.length === 0 ? truncateTitle(input.content) : undefined);
+        (existingMessages.length === 0 ? truncateTitle(messageContent) : undefined);
 
       await this.chatRepository.touchThread(threadId, title);
 
@@ -119,10 +180,15 @@ export class ChatService {
     }
 
     const isWeeklyReviewTurn = isWeeklyReviewChatMessage(input.content);
+    const todayIsoDate = getTodayIsoDateInTimezone(user.timezone);
+    const todayCheckIn = await this.wellbeingCheckInsService.getCheckInForDate(
+      auth,
+      todayIsoDate,
+    );
 
     const generated = await this.aiService.generateCoachResponse({
       auth,
-      userMessage: input.content,
+      userMessage: messageContent,
       recentMessages: [...existingMessages, userMessage]
         .slice(-AI_RECENT_MESSAGE_LIMIT)
         .map((message) => ({
@@ -149,6 +215,50 @@ export class ChatService {
           packMeta: packed.packMeta,
         },
       };
+    }
+
+    proposalsToPersist = mergeDeterministicChatProposals({
+      userMessage: messageContent,
+      todayIsoDate,
+      hasTodayWellbeingCheckIn: todayCheckIn.checkIn != null,
+      aiProposals: proposalsToPersist,
+    }) as RawAiProposal[];
+
+    const attachmentOutcomes: ChatAttachmentOutcome[] = [];
+    const attachmentProposalCandidates = [];
+
+    for (const attachment of ownedAttachments.length > 0
+      ? await this.chatAttachmentsService.assertOwnedAttachmentRefs(user.id, attachmentRefIds)
+      : []) {
+      const candidates = this.chatAttachmentRecognitionService.buildProposalCandidates({
+        attachment,
+        incidentDateTime: new Date().toISOString(),
+      });
+
+      attachmentProposalCandidates.push(...candidates);
+      attachmentOutcomes.push({
+        attachmentRefId: attachment.id,
+        category: attachment.category,
+        status: attachment.status,
+        recognition: attachment.recognition,
+        proposalCandidateCount: candidates.length,
+      });
+    }
+
+    proposalsToPersist = this.chatAttachmentRecognitionService.mergeAttachmentProposals(
+      proposalsToPersist,
+      attachmentProposalCandidates,
+    );
+
+    if (
+      shouldTriggerRecipeRecommendationRequest(messageContent) &&
+      !proposalsToPersist.some((proposal) => proposal.intent === "recommend_recipes")
+    ) {
+      const recipeProposal = await this.recipesService.packChatRecipeRecommendationProposal(auth);
+
+      if (recipeProposal) {
+        proposalsToPersist.push(recipeProposal as RawAiProposal);
+      }
     }
 
     const assistantMessage = await this.chatRepository.createMessage(
@@ -208,6 +318,30 @@ export class ChatService {
           rawProposal.intent,
           rawProposal.proposedChanges,
         );
+      const wellbeingProposalContextErrors =
+        await this.proposalValidationService.validateWellbeingCheckinProposalContext(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
+      const nutritionIncidentImageRefErrors =
+        await this.proposalValidationService.validateNutritionIncidentImageRefOwnership(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
+      const recipeRecommendationContextErrors =
+        await this.proposalValidationService.validateRecipeRecommendationProposalContext(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
+      const chatAttachmentProposalRefErrors =
+        await this.proposalValidationService.validateChatAttachmentProposalRefs(
+          user.id,
+          rawProposal.intent,
+          rawProposal.proposedChanges,
+        );
       const validationErrors = [
         ...safetyErrors,
         ...validation.errors,
@@ -218,6 +352,10 @@ export class ChatService {
         ...todaySourceRefErrors,
         ...recoveryAdaptationErrors,
         ...habitProposalContextErrors,
+        ...wellbeingProposalContextErrors,
+        ...nutritionIncidentImageRefErrors,
+        ...recipeRecommendationContextErrors,
+        ...chatAttachmentProposalRefErrors,
       ];
       const validationStatus = validationErrors.length === 0 ? "valid" : "invalid";
 
@@ -246,6 +384,7 @@ export class ChatService {
       userMessage: toChatMessage(userMessage),
       assistantMessage: toChatMessage(assistantMessage),
       proposals: createdProposals,
+      ...(attachmentOutcomes.length > 0 ? { attachmentOutcomes } : {}),
     };
   }
 }

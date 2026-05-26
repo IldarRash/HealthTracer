@@ -350,10 +350,11 @@ describe("training UI state", () => {
             actualReps: "10",
             actualWeightKg: 40,
             loadAdjustmentNotes: "Used lighter load.",
+            perceivedEffort: 6,
           },
         }),
       ),
-    ).toBe("10 · 40 kg · Used lighter load.");
+    ).toBe("10 · 40 kg · Used lighter load. · Effort 6/10");
 
     expect(
       toWorkoutSessionExercisePayload({

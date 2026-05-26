@@ -1,6 +1,7 @@
 import {
   collectWorkoutPlanExerciseIds,
   deriveWorkoutSessionStatusFromExercises,
+  getResolvedWorkoutPlanCatalogErrors,
   getWorkoutPlanDomainErrors,
   normalizeWorkoutSessionExercises,
   workoutPlanPayloadSchema,
@@ -18,6 +19,12 @@ import type { ClerkAuthContext } from "../../auth.types.js";
 import { ExercisesService } from "../exercises/exercises.service.js";
 import { UsersService } from "../users/users.service.js";
 import { resolveWorkoutPlanProposalForApply } from "./workout-plan-resolver.js";
+import {
+  collectExerciseIdsFromSessionExercises,
+  enrichWorkoutPlanPayload,
+  enrichWorkoutSessionExercises,
+  indexExercisesById,
+} from "./workout-catalog-enrichment.js";
 import {
   resolveTodayWorkoutFromPlan,
   toTodayWorkoutDetail,
@@ -58,9 +65,14 @@ export class WorkoutsService {
       this.workoutsRepository.listSessionsByPlanId(user.id, plan.id),
     ]);
 
+    const mappedRevision = activeRevision ? toWorkoutPlanRevision(activeRevision) : null;
+    const enrichedRevision = mappedRevision
+      ? await this.enrichRevisionPayload(user.id, mappedRevision)
+      : null;
+
     return {
       plan: toWorkoutPlan(plan),
-      activeRevision: activeRevision ? toWorkoutPlanRevision(activeRevision) : null,
+      activeRevision: enrichedRevision,
       sessions: sessions.map(toWorkoutSession),
     };
   }
@@ -128,7 +140,8 @@ export class WorkoutsService {
     }
 
     if (context.reusableSession) {
-      return toTodayWorkoutDetail(
+      return this.buildTodayWorkoutDetail(
+        user.id,
         context.reusableSession,
         context.weekday,
         context.planDay.focus,
@@ -148,7 +161,8 @@ export class WorkoutsService {
       context.sessionExercises,
     );
 
-    return toTodayWorkoutDetail(
+    return this.buildTodayWorkoutDetail(
+      user.id,
       toWorkoutSession(sessionRow),
       context.weekday,
       context.planDay.focus,
@@ -249,7 +263,10 @@ export class WorkoutsService {
     }
 
     const parsedPayload = workoutPlanPayloadSchema.parse(resolvedPayload);
-    const domainErrors = getWorkoutPlanDomainErrors(parsedPayload);
+    const domainErrors = [
+      ...getWorkoutPlanDomainErrors(parsedPayload, { requireStructuredPlan: true }),
+      ...getResolvedWorkoutPlanCatalogErrors(parsedPayload),
+    ];
 
     if (domainErrors.length > 0) {
       throw new BadRequestException({
@@ -327,6 +344,43 @@ export class WorkoutsService {
       activeRevision,
       existingSessions,
       ...resolved,
+    };
+  }
+
+  private async enrichRevisionPayload(
+    userId: string,
+    revision: WorkoutPlanRevision,
+  ): Promise<WorkoutPlanRevision> {
+    const exerciseIds = collectWorkoutPlanExerciseIds(revision.payload);
+    const catalogExercises = await this.exercisesService.findExercisesByIds(exerciseIds, userId);
+
+    return {
+      ...revision,
+      payload: enrichWorkoutPlanPayload(
+        revision.payload,
+        indexExercisesById(catalogExercises),
+      ),
+    };
+  }
+
+  private async buildTodayWorkoutDetail(
+    userId: string,
+    session: WorkoutSession,
+    weekday: TodayWorkoutDetail["weekday"],
+    focus: string,
+  ): Promise<TodayWorkoutDetail> {
+    const normalizedExercises = normalizeWorkoutSessionExercises(session.id, session.exercises);
+    const exerciseIds = collectExerciseIdsFromSessionExercises(normalizedExercises);
+    const catalogExercises = await this.exercisesService.findExercisesByIds(exerciseIds, userId);
+    const enrichedExercises = enrichWorkoutSessionExercises(
+      session.id,
+      session.exercises,
+      indexExercisesById(catalogExercises),
+    );
+
+    return {
+      ...toTodayWorkoutDetail(session, weekday, focus),
+      exercises: enrichedExercises,
     };
   }
 }

@@ -41,6 +41,12 @@ export class ExercisesRepository {
       );
     }
 
+    if (filters.modality) {
+      conditions.push(
+        sql`${exercises.modalities} @> ${JSON.stringify([filters.modality])}::jsonb`,
+      );
+    }
+
     if (filters.equipment?.length) {
       for (const item of filters.equipment) {
         conditions.push(
@@ -181,9 +187,11 @@ export class ExercisesRepository {
         secondaryMuscles: input.secondaryMuscles,
         equipment: input.equipment,
         movementPatterns: input.movementPatterns,
+        modalities: input.modalities,
         difficulty: input.difficulty,
         instructions: input.instructions,
         safetyNotes: input.safetyNotes,
+        media: input.media ?? { refs: [], fallbackLabel: "Demonstration coming soon" },
         source: input.source,
         validationStatus:
           input.validationStatus ??

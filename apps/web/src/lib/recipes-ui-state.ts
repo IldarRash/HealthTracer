@@ -1,11 +1,54 @@
 import type {
   Recipe,
+  RecipeConfidenceBand,
   RecipeIngredient,
   RecipeMealType,
+  RecipeProvenanceLabel,
   RecipeRecommendationLimitedReason,
   UserRecipeRecommendation,
   UserRecipeRecommendationStatus,
 } from "@health/types";
+
+export const RECIPE_CONFIDENCE_LABELS: Record<RecipeConfidenceBand, string> = {
+  high: "High confidence estimate",
+  medium: "Medium confidence estimate",
+  low: "Low confidence estimate",
+};
+
+export const RECIPE_PROVENANCE_LABELS: Record<RecipeProvenanceLabel, string> = {
+  seed_catalog: "Curated catalog",
+  external_provider: "External provider",
+  curated: "Curated source",
+};
+
+export function formatRecipeProviderLabel(recipe: Pick<Recipe, "provider" | "source">): string {
+  if (recipe.provider) {
+    return `${recipe.source} · ${recipe.provider}`;
+  }
+
+  return recipe.source;
+}
+
+export function formatRecipeProvenanceMeta(recipe: Pick<Recipe, "provenance">): string {
+  const label = RECIPE_PROVENANCE_LABELS[recipe.provenance.source];
+  const externalId = recipe.provenance.externalId;
+
+  return externalId ? `${label} · ID ${externalId}` : label;
+}
+
+export function recipeConfidenceNotice(confidence: RecipeConfidenceBand): string | null {
+  if (confidence === "low") {
+    return "This recipe uses a low-confidence nutrition estimate. Review and edit items before logging as a food entry.";
+  }
+
+  return null;
+}
+
+export function canLogRecommendation(
+  recommendation: Pick<UserRecipeRecommendation, "status">,
+): boolean {
+  return recommendation.status === "accepted" || recommendation.status === "completed";
+}
 
 export function formatMealTypeLabel(mealType: RecipeMealType): string {
   switch (mealType) {

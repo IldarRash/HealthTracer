@@ -38,4 +38,22 @@ describe("TheMealDbCatalogProvider privacy-safe queries", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("propagates fetch abort failures for upstream fallback handling", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    try {
+      const provider = new TheMealDbCatalogProvider();
+
+      await expect(provider.fetchByGenericCategories(["Vegetarian"])).rejects.toThrow(
+        /aborted/i,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

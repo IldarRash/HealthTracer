@@ -51,15 +51,10 @@ import {
 } from "../../lib/today-ui-state";
 import { wellbeingCheckInIndicatesCrisisSupport } from "../../lib/wellbeing-ui-state";
 import {
-  canUpdateSessionExercise,
-  formatSessionExerciseDetailLines,
-  formatSessionExerciseExecutionSummary,
-  formatSessionExercisePrescription,
-  groupSessionExercisesByCircuit,
-  isTerminalSessionStatus,
-  sessionExerciseStatusBadgeClass,
-  sessionExerciseStatusLabel,
-} from "../../lib/training-ui-state";
+  buildExerciseExecutionUpdatePayload,
+  type ExerciseFeedbackFormState,
+} from "../../lib/exercise-catalog-ui-state";
+import { groupSessionExercisesByCircuit, isTerminalSessionStatus } from "../../lib/training-ui-state";
 import {
   ActionPriorityCard,
   CanvasEmptyState,
@@ -74,6 +69,7 @@ import {
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
 import { RecoveryCheckInCard } from "./recovery-check-in-card";
 import { TodayNutritionCard } from "./today-nutrition-card";
+import { TodayWorkoutExerciseCard } from "./today-workout-exercise-card";
 import { WellbeingCheckInCard } from "./wellbeing-check-in-card";
 
 const HISTORY_LIMIT = 7;
@@ -145,20 +141,27 @@ function TodayWorkoutPanel({
     mutationFn: async ({
       exerciseId,
       status,
+      feedbackForm,
     }: {
       exerciseId: string;
       status: "completed" | "skipped" | "adjusted";
+      feedbackForm: ExerciseFeedbackFormState;
     }) => {
       const token = await getToken();
       if (!token) {
         throw new Error("Clerk session token is unavailable.");
       }
 
+      const body = buildExerciseExecutionUpdatePayload({ form: feedbackForm, status });
+      if (!body) {
+        throw new Error("Exercise feedback could not be prepared.");
+      }
+
       const result = await updateWorkoutSessionExercise(
         token,
         workout.sessionId,
         exerciseId,
-        { status },
+        body,
       );
       if (result.error || !result.data) {
         throw new Error(result.error ?? "Exercise could not be updated.");
@@ -186,12 +189,13 @@ function TodayWorkoutPanel({
   const handleExerciseStatus = (
     exerciseId: string,
     status: "completed" | "skipped" | "adjusted",
+    feedbackForm: ExerciseFeedbackFormState,
   ) => {
     if (updateExerciseMutation.isPending) {
       return;
     }
 
-    updateExerciseMutation.mutate({ exerciseId, status });
+    updateExerciseMutation.mutate({ exerciseId, status, feedbackForm });
   };
 
   return (
@@ -243,73 +247,17 @@ function TodayWorkoutPanel({
                 <p className="section-label today-workout-circuit-label">{group.circuitLabel}</p>
               ) : null}
               <ul className="training-exercise-list today-workout-exercise-list">
-                {group.exercises.map((exercise) => {
-                  const executionSummary = formatSessionExerciseExecutionSummary(exercise);
-                  const detailLines = formatSessionExerciseDetailLines(exercise);
-
-                  return (
-                    <li
-                      key={exercise.id}
-                      className={`today-workout-exercise nested-card training-session-card--${exercise.execution.status === "adjusted" ? "planned" : exercise.execution.status}`}
-                    >
-                      <div className="today-workout-exercise-header">
-                        <strong>{formatSessionExercisePrescription(exercise)}</strong>
-                        <StatusBadge
-                          className={sessionExerciseStatusBadgeClass(exercise.execution.status)}
-                        >
-                          {sessionExerciseStatusLabel(exercise.execution.status)}
-                        </StatusBadge>
-                      </div>
-
-                      {detailLines.length > 0 ? (
-                        <ul className="today-workout-exercise-details">
-                          {detailLines.map((line) => (
-                            <li key={line} className="muted-text">
-                              {line}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-
-                      {executionSummary ? (
-                        <p className="muted-text today-workout-exercise-log">{executionSummary}</p>
-                      ) : null}
-
-                      {canUpdateSessionExercise(exercise) ? (
-                        <div className="action-row proposal-actions today-item-actions">
-                          <button
-                            type="button"
-                            className="button button-primary"
-                            disabled={workoutBusy}
-                            onClick={() => handleExerciseStatus(exercise.id, "completed")}
-                          >
-                            {updatingExerciseId === exercise.id && updateExerciseMutation.isPending
-                              ? "Saving…"
-                              : "Complete"}
-                          </button>
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            disabled={workoutBusy}
-                            onClick={() => handleExerciseStatus(exercise.id, "skipped")}
-                          >
-                            Skip
-                          </button>
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            disabled={workoutBusy}
-                            onClick={() => handleExerciseStatus(exercise.id, "adjusted")}
-                          >
-                            Adjusted
-                          </button>
-                        </div>
-                      ) : (
-                        <p className="muted-text">Exercise logged for this session.</p>
-                      )}
-                    </li>
-                  );
-                })}
+                {group.exercises.map((exercise) => (
+                  <TodayWorkoutExerciseCard
+                    key={exercise.id}
+                    exercise={exercise}
+                    disabled={workoutBusy}
+                    isUpdating={
+                      updatingExerciseId === exercise.id && updateExerciseMutation.isPending
+                    }
+                    onStatusChange={handleExerciseStatus}
+                  />
+                ))}
               </ul>
             </div>
           ))}

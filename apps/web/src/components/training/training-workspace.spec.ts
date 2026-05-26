@@ -37,6 +37,7 @@ describe("TrainingWorkspace read-only contracts", () => {
   it("preserves read-only plan display and collapsible revision history", () => {
     expect(workspaceSource).toContain('label="Active plan"');
     expect(workspaceSource).toContain("Training days");
+    expect(workspaceSource).toContain("TrainingPlanExerciseItem");
     expect(workspaceSource).toContain("RevisionHistoryCollapsible");
     expect(workspaceSource).toContain("RevisionHistoryItem");
     expect(workspaceSource).toContain("revisionNumber={activeRevision.revisionNumber}");
@@ -58,6 +59,12 @@ describe("TrainingWorkspace read-only contracts", () => {
     expect(workspaceSource).toContain("PlanViewLayout");
     expect(workspaceSource).toContain("PlanViewGrid");
     expect(workspaceSource).toContain('variant="prominent"');
+  });
+
+  it("renders catalog-backed exercise metadata through plan exercise items", () => {
+    expect(workspaceSource).toContain("TrainingPlanExerciseItem");
+    expect(workspaceSource).not.toContain("useMutation");
+    expect(workspaceSource).not.toContain('type="submit"');
   });
 });
 

@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildExerciseCatalogMetadataFromExercise,
+  buildExerciseCatalogMetadataFromSnapshot,
+  exerciseModalitySchema,
+  inferExerciseModalitiesFromMovementPatterns,
+  normalizeExerciseName,
+} from "./exercises.js";
+import {
+  getResolvedWorkoutPlanCatalogErrors,
   getWorkoutPlanDomainErrors,
   getWorkoutProposalDomainErrors,
   normalizeWorkoutPlanPayload,
   stripWorkoutPlanProposalExtras,
   summarizeWorkoutPlanForCoaching,
   workoutAdaptationIncreasesVolumeOrLoad,
+  updateWorkoutSessionExerciseSchema,
   workoutPlanExerciseSchema,
   workoutPlanPayloadSchema,
   workoutPlanProposalChangesSchema,
@@ -256,6 +265,7 @@ describe("workout proposal helpers", () => {
           secondaryMuscles: [],
           equipment: ["resistance_band"],
           movementPatterns: ["pull"],
+          modalities: ["strength"],
           difficulty: "beginner",
           instructions: ["Pull with control."],
           safetyNotes: ["Use a light band."],
@@ -322,5 +332,132 @@ describe("workout proposal helpers", () => {
 
     expect(workoutAdaptationIncreasesVolumeOrLoad(current, increased)).toBe(true);
     expect(workoutAdaptationIncreasesVolumeOrLoad(current, current)).toBe(false);
+  });
+
+  it("requires resolved exercise ids before plan apply", () => {
+    const errors = getResolvedWorkoutPlanCatalogErrors({
+      ...validStructuredPayload,
+      days: [
+        {
+          weekday: "monday",
+          focus: "Strength",
+          exercises: [
+            {
+              snapshot: { name: "Missing id" },
+              sets: 3,
+              reps: "8",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(errors.some((error) => error.includes("must resolve to exerciseId"))).toBe(true);
+  });
+});
+
+describe("updateWorkoutSessionExerciseSchema", () => {
+  it("accepts bounded execution feedback fields", () => {
+    expect(
+      updateWorkoutSessionExerciseSchema.parse({
+        status: "completed",
+        perceivedEffort: 7,
+        perceivedDifficulty: 6,
+        discomfortFlag: true,
+        notes: "Stable tempo.",
+        actualReps: "8",
+        actualWeightKg: 60,
+        loadAdjustmentNotes: "Dropped 5 kg.",
+      }),
+    ).toMatchObject({
+      status: "completed",
+      perceivedEffort: 7,
+      perceivedDifficulty: 6,
+      discomfortFlag: true,
+    });
+  });
+
+  it("rejects out-of-range effort and difficulty values", () => {
+    expect(() =>
+      updateWorkoutSessionExerciseSchema.parse({
+        perceivedEffort: 11,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      updateWorkoutSessionExerciseSchema.parse({
+        perceivedDifficulty: 0,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects empty update payloads", () => {
+    expect(() => updateWorkoutSessionExerciseSchema.parse({})).toThrow(
+      /At least one exercise execution field must be provided/,
+    );
+  });
+
+  it("rejects notes and actuals that exceed bounded limits", () => {
+    expect(() =>
+      updateWorkoutSessionExerciseSchema.parse({
+        notes: "x".repeat(501),
+      }),
+    ).toThrow();
+
+    expect(() =>
+      updateWorkoutSessionExerciseSchema.parse({
+        actualWeightKg: 501,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("exercise catalog metadata helpers", () => {
+  it("infers conditioning modality from cardio movement patterns", () => {
+    expect(inferExerciseModalitiesFromMovementPatterns(["cardio"])).toEqual(["conditioning"]);
+    expect(exerciseModalitySchema.options).toContain("yoga");
+  });
+
+  it("builds snapshot fallback metadata with media placeholder", () => {
+    expect(
+      buildExerciseCatalogMetadataFromSnapshot({
+        name: "Legacy Squat",
+        primaryMuscles: ["quads"],
+        equipment: ["barbell"],
+      }),
+    ).toMatchObject({
+      source: "snapshot",
+      media: { fallbackLabel: "Demonstration coming soon" },
+    });
+  });
+
+  it("builds full catalog metadata from exercise records", () => {
+    expect(
+      buildExerciseCatalogMetadataFromExercise({
+        id: "b1000001-0000-4000-8000-000000000047",
+        name: "Warrior II",
+        normalizedName: normalizeExerciseName("Warrior II"),
+        aliases: [],
+        primaryMuscles: ["quads", "glutes"],
+        secondaryMuscles: ["core"],
+        equipment: ["bodyweight", "yoga_mat"],
+        movementPatterns: ["lunge", "balance"],
+        modalities: ["yoga", "mobility"],
+        difficulty: "beginner",
+        instructions: ["Hold steady gaze over front hand."],
+        safetyNotes: ["Reduce depth if balance is unstable."],
+        media: { refs: [], fallbackLabel: "Demonstration coming soon" },
+        source: "system_seed",
+        validationStatus: "validated",
+        status: "active",
+        userId: null,
+        createdAt: "2026-05-22T12:00:00.000Z",
+        updatedAt: "2026-05-22T12:00:00.000Z",
+      }),
+    ).toMatchObject({
+      source: "catalog",
+      modalities: ["yoga", "mobility"],
+      instructions: ["Hold steady gaze over front hand."],
+    });
   });
 });

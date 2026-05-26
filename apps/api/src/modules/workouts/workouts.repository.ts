@@ -178,23 +178,42 @@ export class WorkoutsRepository {
     title: string,
     exercises: unknown[],
   ) {
-    const [session] = await this.db
-      .insert(workoutSessions)
-      .values({
+    try {
+      const [session] = await this.db
+        .insert(workoutSessions)
+        .values({
+          userId,
+          workoutPlanId,
+          workoutPlanRevisionId,
+          plannedDate,
+          title,
+          exercises,
+        })
+        .returning();
+
+      if (!session) {
+        throw new Error("Failed to materialize workout session.");
+      }
+
+      return session;
+    } catch (error) {
+      if (!isPostgresUniqueViolation(error)) {
+        throw error;
+      }
+
+      const existingSession = await this.findSessionByUserPlanRevisionAndDate(
         userId,
         workoutPlanId,
         workoutPlanRevisionId,
         plannedDate,
-        title,
-        exercises,
-      })
-      .returning();
+      );
 
-    if (!session) {
-      throw new Error("Failed to materialize workout session.");
+      if (!existingSession) {
+        throw error;
+      }
+
+      return existingSession;
     }
-
-    return session;
   }
 
   async updateSessionState(

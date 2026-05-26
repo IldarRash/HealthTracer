@@ -97,7 +97,11 @@ export function mapTheMealDbCategoryToMealTypes(category: string | null): Recipe
   return ["lunch", "dinner"];
 }
 
-export function mapTheMealDbMealToProviderDraft(meal: TheMealDbMeal): ProviderRecipeDraft {
+export function mapTheMealDbMealToProviderDraft(meal: TheMealDbMeal): ProviderRecipeDraft | null {
+  if (!meal.idMeal?.trim() || !meal.strMeal?.trim()) {
+    return null;
+  }
+
   const ingredients = parseTheMealDbIngredients(meal);
   const category = meal.strCategory?.trim() ?? "General";
   const area = meal.strArea?.trim();
@@ -130,5 +134,11 @@ export function mapTheMealDbMealToProviderDraft(meal: TheMealDbMeal): ProviderRe
     prepMinutes: null,
     cookMinutes: null,
     source: APPROXIMATE_MACRO_SOURCE,
+    confidence: "low",
+    provenance: {
+      source: "external_provider",
+      providerId: THEMEALDB_PROVIDER,
+      externalId: meal.idMeal,
+    },
   };
 }

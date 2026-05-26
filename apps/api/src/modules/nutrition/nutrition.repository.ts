@@ -1,7 +1,12 @@
-import { nutritionAdherence, nutritionPlanRevisions, nutritionPlans } from "@health/db";
-import type { NutritionPlanPayload, UpsertNutritionAdherenceInput } from "@health/types";
+import { foodPhotoAnalyses, nutritionAdherence, nutritionIncidents, nutritionPlanRevisions, nutritionPlans } from "@health/db";
+import type {
+  LogNutritionIncidentProposalPayload,
+  NutritionImageRef,
+  NutritionPlanPayload,
+  UpsertNutritionAdherenceInput,
+} from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
@@ -9,6 +14,8 @@ import {
   adherenceStateToRowValues,
   mergeAdherenceInput,
 } from "./nutrition.mapper.js";
+
+type NutritionDbClient = Pick<HealthDatabase, "insert" | "select">;
 
 @Injectable()
 export class NutritionRepository {
@@ -210,6 +217,135 @@ export class NutritionRepository {
 
       return revision;
     });
+  }
+
+  async findIncidentBySourceProposalId(
+    userId: string,
+    sourceProposalId: string,
+    db: NutritionDbClient = this.db,
+  ) {
+    const [row] = await db
+      .select()
+      .from(nutritionIncidents)
+      .where(
+        and(
+          eq(nutritionIncidents.userId, userId),
+          eq(nutritionIncidents.sourceProposalId, sourceProposalId),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async createIncident(
+    userId: string,
+    sourceProposalId: string,
+    payload: LogNutritionIncidentProposalPayload,
+    db: Pick<HealthDatabase, "insert"> = this.db,
+  ) {
+    const incidentDate = payload.incidentDateTime.slice(0, 10);
+    const [row] = await db
+      .insert(nutritionIncidents)
+      .values({
+        userId,
+        incidentDateTime: new Date(payload.incidentDateTime),
+        date: incidentDate,
+        items: payload.items,
+        estimatedCalories: payload.estimatedCalories,
+        estimatedMacros: payload.estimatedMacros,
+        confidence: payload.confidence,
+        provenance: payload.provenance,
+        imageRefs: payload.imageRefs,
+        userEdits: payload.userEdits ?? null,
+        sourceProposalId,
+        source: "ai_proposal",
+      })
+      .returning();
+
+    if (!row) {
+      throw new Error("Failed to create nutrition incident.");
+    }
+
+    return row;
+  }
+
+  async findFoodPhotoAnalysisByImageRefForUser(userId: string, imageRefId: string) {
+    const [row] = await this.db
+      .select()
+      .from(foodPhotoAnalyses)
+      .where(
+        and(eq(foodPhotoAnalyses.userId, userId), eq(foodPhotoAnalyses.imageRefId, imageRefId)),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async findFoodPhotoAnalysisByIdForUser(userId: string, analysisId: string) {
+    const [row] = await this.db
+      .select()
+      .from(foodPhotoAnalyses)
+      .where(and(eq(foodPhotoAnalyses.userId, userId), eq(foodPhotoAnalyses.id, analysisId)))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async listOwnedFoodPhotoAnalysesByImageRefIds(userId: string, imageRefIds: readonly string[]) {
+    if (imageRefIds.length === 0) {
+      return [];
+    }
+
+    return this.db
+      .select({
+        analysisId: foodPhotoAnalyses.id,
+        imageRefId: foodPhotoAnalyses.imageRefId,
+      })
+      .from(foodPhotoAnalyses)
+      .where(
+        and(
+          eq(foodPhotoAnalyses.userId, userId),
+          inArray(foodPhotoAnalyses.imageRefId, [...imageRefIds]),
+        ),
+      );
+  }
+
+  async persistFoodPhotoAnalysis(input: {
+    analysisId: string;
+    userId: string;
+    imageRef: NutritionImageRef;
+    provenanceSource: string;
+    providerId?: string;
+  }) {
+    const [row] = await this.db
+      .insert(foodPhotoAnalyses)
+      .values({
+        id: input.analysisId,
+        userId: input.userId,
+        imageRefId: input.imageRef.id,
+        mimeType: input.imageRef.mimeType ?? null,
+        storageKey: input.imageRef.storageKey ?? null,
+        provenanceSource: input.provenanceSource,
+        providerId: input.providerId ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [foodPhotoAnalyses.userId, foodPhotoAnalyses.imageRefId],
+        set: {
+          id: input.analysisId,
+          mimeType: input.imageRef.mimeType ?? null,
+          storageKey: input.imageRef.storageKey ?? null,
+          provenanceSource: input.provenanceSource,
+          providerId: input.providerId ?? null,
+        },
+      })
+      .returning();
+
+    if (!row) {
+      throw new Error("Failed to persist food photo analysis.");
+    }
+
+    return row;
   }
 }
 

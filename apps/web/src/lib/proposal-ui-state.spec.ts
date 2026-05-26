@@ -208,6 +208,7 @@ describe("proposal UI state", () => {
   it("labels habit plan intents", () => {
     expect(getProposalIntentLabel("create_habit_plan")).toContain("habit plan");
     expect(getProposalIntentLabel("adapt_habit_plan")).toContain("Habit");
+    expect(getProposalIntentLabel("recommend_recipes")).toContain("Recipe");
     expect(isHabitPlanProposalIntent("create_habit_plan")).toBe(true);
     expect(isHabitPlanProposalIntent("adapt_habit_plan")).toBe(true);
     expect(isHabitPlanProposalIntent("create_goal")).toBe(false);
@@ -267,6 +268,23 @@ describe("proposal UI state", () => {
         "proposedChanges: adapt_habit_plan requires an active habit plan; use create_habit_plan to start one.",
       ]),
     ).toHaveLength(2);
+  });
+
+  it("labels wellbeing and nutrition incident intents", () => {
+    expect(getProposalIntentLabel("capture_wellbeing_checkin")).toBe("Wellbeing check-in");
+    expect(getProposalIntentLabel("log_nutrition_incident")).toBe("Nutrition incident log");
+    expect(
+      getProposalNavigationRoute({
+        intent: "capture_wellbeing_checkin",
+        targetDomain: "general",
+      }),
+    ).toBe("/today");
+    expect(
+      getProposalRejectedMessage({
+        intent: "log_nutrition_incident",
+        targetDomain: "nutrition",
+      }),
+    ).toContain("not logged");
   });
 
   it("uses habit-specific apply disabled guidance", () => {
