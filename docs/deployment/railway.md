@@ -70,6 +70,7 @@ Create a new service from the GitHub repo (or empty service + connect repo).
 | `OPENAI_API_KEY`         | Railway secret                                      | Required when `AI_COACH_PROVIDER=openai`   |
 | `OPENAI_MODEL`           | `gpt-4o-mini` (or chosen model)                     | Optional; defaults in code                 |
 | `DOCUMENT_STORAGE_PATH`  | `/app/.data/documents`                              | Local container path; see storage note     |
+| `CORS_ORIGINS`           | `https://<web-service-public-domain>`               | Optional; Safari needs explicit origins for Bearer auth |
 
 Store secrets (`OPENAI_API_KEY`, `DATABASE_URL` if not referenced) in Railway **Variables** marked as secrets. Do not commit them.
 
@@ -134,7 +135,7 @@ Create a second service from the same repo.
 | Variable                              | Value                                      |
 |---------------------------------------|--------------------------------------------|
 | `PORT`                                | Railway (automatic)                        |
-| `NEXT_PUBLIC_API_BASE_URL`            | `https://<api-service-public-domain>`      |
+| `NEXT_PUBLIC_API_BASE_URL`            | `https://<api-service-public-domain>`      | Example: `https://health-api-production-e6d8.up.railway.app` |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`   | Clerk publishable key                      |
 | `CLERK_SECRET_KEY`                    | Clerk secret (Railway secret)              |
 
@@ -147,8 +148,10 @@ The Web Dockerfile uses Next.js `output: "standalone"`. The container runs `node
 ## Domains and CORS
 
 - Assign Railway public domains (or custom domains) to both services.
-- Set `NEXT_PUBLIC_API_BASE_URL` to the API public URL (no trailing slash).
-- The API enables CORS globally; restrict origins in a future hardening pass if needed.
+- Set `NEXT_PUBLIC_API_BASE_URL` on `health-web` to the API public URL (no trailing slash), then **rebuild** the web service.
+- Set `CORS_ORIGINS` on `health-api` to the web public URL (comma-separated if you have staging + production).
+- The API reflects the request `Origin` by default instead of returning `Access-Control-Allow-Origin: *`. This is required for Safari on iOS, which blocks cross-origin `fetch()` calls that send `Authorization: Bearer ...` when the API responds with a wildcard origin.
+- If mobile shows `... could not be loaded` while `GET /health` works in the phone browser, check both `NEXT_PUBLIC_API_BASE_URL` (web rebuild) and `CORS_ORIGINS` (api redeploy).
 
 ## Document storage caveat
 
@@ -205,6 +208,7 @@ Railway captures stdout/stderr from each service.
 |---------------------------------|---------------------------------------------------|
 | API crash on start              | Missing `DATABASE_URL` or invalid Clerk JWKS URL  |
 | Web shows wrong API             | Stale build; `NEXT_PUBLIC_API_BASE_URL` needs rebuild |
+| Mobile Safari: content unavailable, desktop OK | API CORS wildcard or stale web build; set `CORS_ORIGINS`, rebuild web |
 | 502 / connection refused        | Service not listening on `PORT` or health check mismatch |
 | Migrations fail                 | Wrong `DATABASE_URL`, or migration order conflict |
 | Uploads disappear after deploy  | Ephemeral filesystem; add volume or object storage  |

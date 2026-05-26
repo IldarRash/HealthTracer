@@ -36,7 +36,6 @@ coverage
 # Docker build context noise
 **/*.md
 !docs/deployment/railway.md
-Dockerfile*
 docker-compose*.yml
 docker-compose*.yaml
 

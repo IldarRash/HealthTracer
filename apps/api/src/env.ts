@@ -18,6 +18,7 @@ export const apiEnvSchema = z.object({
   AI_COACH_PROVIDER: z.enum(["stub", "openai"]).default("stub"),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  CORS_ORIGINS: z.string().min(1).optional(),
 });
 
 const parsedEnv = validateEnv(apiEnvSchema);
