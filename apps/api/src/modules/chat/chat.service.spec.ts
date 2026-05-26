@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
-import { WELLBEING_CRISIS_SUPPORT_COPY, WEEKLY_REVIEW_CHAT_PROMPT } from "@health/types";
+import {
+  type RawAiProposal,
+  WELLBEING_CRISIS_SUPPORT_COPY,
+  WEEKLY_REVIEW_CHAT_PROMPT,
+} from "@health/types";
+import type { AttachmentProposalCandidate } from "../chat-attachments/chat-attachment-recognition.service.js";
 import { ChatService } from "./chat.service.js";
 
 const auth = {
@@ -1759,15 +1764,21 @@ describe("ChatService", () => {
               attachmentRefId: attachmentId,
             },
           ],
-          mergeAttachmentProposals: (aiProposals, attachmentProposals) => [
+          mergeAttachmentProposals: (
+            aiProposals: RawAiProposal[],
+            attachmentProposals: AttachmentProposalCandidate[],
+          ): RawAiProposal[] => [
             ...aiProposals,
-            ...attachmentProposals.map(({ intent, targetDomain, title, reason, proposedChanges }) => ({
-              intent,
-              targetDomain,
-              title,
-              reason,
-              proposedChanges,
-            })),
+            ...attachmentProposals.map(
+              ({ intent, targetDomain, title, reason, proposedChanges }) =>
+                ({
+                  intent,
+                  targetDomain,
+                  title,
+                  reason,
+                  proposedChanges,
+                }) as RawAiProposal,
+            ),
           ],
         },
       });

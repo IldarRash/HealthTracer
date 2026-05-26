@@ -31,6 +31,7 @@ Runs as a Feature Planner subagent to start the local application stack, verify 
 - Runtime status: `working`, `blocked`, or `failed`.
 - Services started or reused, including commands and ports.
 - URLs and routes verified.
+- CI-parity checks run, with exact commands and pass/fail/blocked status.
 - Smoke-check results for the target user flow.
 - Screenshots, browser notes, or console/network findings when useful.
 - Blockers with the most likely next owner: Backend Implementer, Frontend Implementer, Test Writer, UI Polish Implementer, Design System Agent, Feature Planner, or user.
@@ -58,6 +59,9 @@ Runs as a Feature Planner subagent to start the local application stack, verify 
 ## Verification Guidance
 
 - Prefer the narrowest command set that proves the target feature works.
+- Before runtime sign-off, inspect the repo's CI/package scripts and run the same relevant local checks CI would run for the changed areas, such as typecheck, tests, lint/build, migrations checks, or package-specific validation.
+- Report each CI-parity command exactly. If a CI-equivalent check cannot run locally, mark runtime status `blocked` or `partial` and explain the concrete missing dependency.
+- Do not report `working` when relevant CI-parity checks are failing, skipped without explanation, or still running.
 - Check existing processes before starting new ones.
 - Confirm database availability before blaming API or frontend code.
 - For web routes, verify both page load and the specific target interaction when possible.

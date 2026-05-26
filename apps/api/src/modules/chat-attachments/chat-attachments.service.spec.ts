@@ -108,6 +108,7 @@ describe("ChatAttachmentsService", () => {
         filename: "report.pdf",
         mimeType: "application/pdf",
         fileContentBase64: "dGVzdA==",
+        consentVersion: "v1",
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -122,6 +123,7 @@ describe("ChatAttachmentsService", () => {
         filename: "meal.jpg",
         mimeType: "image/jpeg",
         fileContentBase64: oversized,
+        consentVersion: "v1",
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -135,6 +137,7 @@ describe("ChatAttachmentsService", () => {
         filename: "labs.pdf",
         mimeType: "application/pdf",
         fileContentBase64: "dGVzdA==",
+        consentVersion: "v1",
         documentType: "lab_report",
         documentTitle: "Labs",
         consentScopes: ["parse_ocr"],

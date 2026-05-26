@@ -3,7 +3,7 @@ import { FoodPhotoAttachmentRecognizer } from "./food-photo-attachment-recognize
 
 describe("FoodPhotoAttachmentRecognizer", () => {
   it("calls analyzeOwnedPhoto with scoped image refs only", async () => {
-    const analyzeOwnedPhoto = vi.fn(async () => ({
+    const analyzeOwnedPhoto = vi.fn(async (_userId: string, _input: { imageRef: unknown }) => ({
       candidates: [
         {
           items: [{ name: "Salad", calories: 320 }],
@@ -44,7 +44,7 @@ describe("FoodPhotoAttachmentRecognizer", () => {
       }),
     );
 
-    const payload = analyzeOwnedPhoto.mock.calls[0]?.[1] as Record<string, unknown>;
+    const payload = analyzeOwnedPhoto.mock.calls[0]?.[1] as unknown as Record<string, unknown>;
     expect(payload).not.toHaveProperty("profile");
     expect(payload).not.toHaveProperty("documentText");
   });

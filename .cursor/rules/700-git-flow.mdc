@@ -1,0 +1,14 @@
+---
+description: Git authorship, staging, commit, push, and deploy handoff rules
+alwaysApply: true
+---
+
+# Git Flow And Authorship
+
+- Never add `Co-authored-by: Cursor`, `Cursor`, or any Cursor-managed identity as an author, committer, trailer, or co-author.
+- Do not run `git commit` or `git push` unless the user explicitly confirms this environment supports non-Cursor authorship. Older Git/Cursor setups may inject `git commit --trailer` authorship.
+- Preferred handoff flow: inspect `git status`, `git diff`, and recent `git log`; stage only files relevant to the user-approved change; run the narrowest useful validation; then ask the user to commit/push manually.
+- If the user wants the agent to commit/push anyway, first explain the authorship risk and ask for explicit permission to use a verified workaround.
+- Never stage or commit `.env`, secrets, credentials, private health data, `.idea/`, `.turbo/`, `.next/`, `tsconfig.tsbuildinfo`, or local runtime artifacts such as `.data/`, logs, caches, and generated test output.
+- Do not disturb unrelated staged or unstaged user changes. If staged changes already exist, preserve them unless the user asks otherwise.
+- For Railway deploys with Drizzle migrations under `packages/db/drizzle`, call out the required manual Railway migration step after push/deploy and do not mark deployment verification complete until it is done.

@@ -23,6 +23,10 @@ describe("TheMealDB recipe mapper", () => {
       strMeasure3: "2 breasts",
     });
 
+    if (!draft) {
+      throw new Error("Expected TheMealDB mapper to return a recipe draft.");
+    }
+
     expect(draft.provider).toBe("themealdb");
     expect(draft.externalId).toBe("52772");
     expect(draft.name).toBe("Teriyaki Chicken Casserole");
