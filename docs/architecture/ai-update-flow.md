@@ -31,6 +31,31 @@ sequenceDiagram
   API->>Chat: Returns updated structured state
 ```
 
+## Message Attachments
+
+Chat messages may include ownership-scoped attachment refs. Attachments are still interaction input, not structured state by themselves.
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Chat as Coach Chat
+  participant API as Attachment/Chat API
+  participant Rec as Classifier and Recognizers
+  participant Proposal as Proposal Service
+  participant DB as Postgres
+
+  User->>Chat: Sends message with attachment
+  Chat->>API: Uploads attachment ref
+  Chat->>API: Sends message with attachmentRefIds
+  API->>Rec: Classifies using bounded message context and safe metadata
+  Rec->>Rec: Runs category-specific typed extraction
+  Rec->>Proposal: Builds proposal candidate from validated extraction
+  Proposal->>DB: Stores pending AIProposal
+  API->>Chat: Returns reply, attachment outcome, proposal card
+```
+
+Attachment recognition must produce typed extraction envelopes. Backend services validate those envelopes before creating proposals. Food photos can create `log_nutrition_incident` proposals; workout or training attachments can create workout/session proposals or manual fallback; medical documents require consent and Profile review before entering coaching context.
+
 ## Proposal Shape
 
 ```json
@@ -48,8 +73,10 @@ sequenceDiagram
 ## Validation Layers
 
 - Zod schema validation for AI output.
+- Zod schema validation for attachment classification and extraction envelopes.
 - Domain validation inside NestJS services.
 - Permission checks against the authenticated user.
+- Attachment ownership, expiry, consent, provenance, and provider-isolation checks.
 - User approval check before applying state-changing proposals.
 - Safety checks for prohibited medical diagnosis wording.
 - Revision creation instead of in-place plan mutation.
@@ -65,6 +92,7 @@ sequenceDiagram
 ## Persistence Rules
 
 - Store raw conversation separately from structured state.
+- Store attachment refs separately from structured state. Attachment recognition may create pending proposals, but it must not directly write nutrition, workout, wellbeing, or plan state.
 - Store every proposal that could change a plan.
 - Store whether a proposal is pending, accepted, rejected, or superseded.
 - Store the created revision id when a proposal is applied.

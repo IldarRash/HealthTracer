@@ -8,14 +8,14 @@ The feature should make attachments useful without weakening core invariants: st
 
 ## Current Codebase Baseline
 
-- `apps/web/src/components/chat/chat-workspace.tsx` renders the Chat transcript, inline proposals, and a text-only composer. It does not accept files, show attachment previews, or send attachment refs with chat messages.
-- `packages/types/src/index.ts` and `packages/types/src/chat-action-proposals.ts` already include `capture_wellbeing_checkin` and `log_nutrition_incident` proposal intents, deterministic chat triggers, and bounded nutrition incident payloads.
-- `apps/api/src/modules/nutrition/food-photo-analysis.service.ts`, `nutrition.controller.ts`, and `packages/types/src/nutrition-incidents.ts` define a food-photo analysis boundary, owned image refs, confidence/provenance, and a `log_nutrition_incident` apply path. The current request shape assumes an existing `imageRef`; there is no general chat upload pipeline or binary food-image storage UX.
-- `apps/web/src/components/proposals/inline-proposal-card.tsx` already routes specialized proposal cards for wellbeing, nutrition incidents, and recipe recommendations. This should be extended rather than replaced.
-- `apps/api/src/modules/documents` and `apps/web/src/components/documents` support Profile-scoped text/PDF document upload, local storage, parse/summarize, signal extraction, consent scopes, search, review, revocation, and correlation preview. Chat does not yet offer an inline document attach/review flow.
-- `apps/api/src/modules/coaching-context` can include approved document summaries/signals for health-context slices. Documents are eligible only after consent and review gates; raw document text is not the intended prompt payload.
-- `packages/types/src/workouts.ts`, `apps/api/src/modules/workouts`, and proposal apply services already support revision-safe workout plan creation/adaptation and Today workout execution state. There is no training attachment recognition contract for exercise photos, plan screenshots, or training files.
-- `docs/product/feature-roadmap.md` says documents/labs are implemented as an MVP and confirms medical/lab data is allowed only as consented coaching context, not diagnosis or treatment. `docs/product/mvp-scope.md` and `docs/product/mvp-slices.md` are referenced by workflow but are not present in the current docs tree.
+- `apps/web/src/components/chat/chat-workspace.tsx` renders the Chat transcript, inline proposals, and a message-first attachment composer. Attachments upload as `unclassified` by default, show previews/status, and are sent with `attachmentRefIds`.
+- `packages/types/src/index.ts`, `packages/types/src/chat-action-proposals.ts`, and `packages/types/src/chat-attachments.ts` include action proposal intents, bounded nutrition incident payloads, attachment contracts, and typed classification/extraction envelopes.
+- `apps/api/src/modules/chat-attachments` owns attachment upload, ownership checks, message-first classification, category-specific recognition, outcome mapping, and proposal candidate construction.
+- `apps/api/src/modules/nutrition/food-photo-analysis.service.ts`, `nutrition.controller.ts`, and `packages/types/src/nutrition-incidents.ts` define food-photo analysis, owned image refs, confidence/provenance, and the `log_nutrition_incident` apply path.
+- `apps/web/src/components/proposals/inline-proposal-card.tsx` routes specialized cards for wellbeing, nutrition incidents, recipe recommendations, and generic proposal fallbacks.
+- `apps/api/src/modules/documents` and `apps/web/src/components/documents` support Profile-scoped text/PDF document upload, local storage, parse/summarize, signal extraction, consent scopes, search, review, revocation, and correlation preview. Chat medical attachments route into this consent/review model and do not expose unreviewed summaries.
+- `packages/types/src/workouts.ts`, `apps/api/src/modules/workouts`, and proposal apply services support revision-safe workout plan creation/adaptation, catalog-backed exercises, and Today workout execution state. Workout/training attachment recognition can produce proposal candidates or manual fallback without direct plan mutation.
+- `docs/product/feature-roadmap.md` captures the implemented MVP state. `docs/product/mvp-scope.md` and `docs/product/mvp-slices.md` are referenced by workflow but are not present in the current docs tree.
 
 ## Goals
 
@@ -131,7 +131,7 @@ If message-only triggers and attachment recognition would produce the same propo
    - Enforce category-specific provider adapters, prompt minimization, request redaction, retention cleanup, revocation, and audit metadata.
 
 7. **Runtime Verification**
-   - Run full CI-equivalent checks (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`) plus browser smoke at `/chat` on `localhost:3002` with the local stack after implementation, including upload previews and at least one successful or stubbed recognition path per category.
+   - Run full CI-equivalent checks (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`) plus browser smoke at `/chat` on `localhost:3001` with the local stack after implementation, including upload previews and at least one successful or stubbed recognition path per category.
 
 ## Likely Affected Modules
 
@@ -158,7 +158,7 @@ If message-only triggers and attachment recognition would produce the same propo
 12. Provider calls are category-isolated, exclude unrelated sensitive context, avoid raw medical docs to unrelated providers, and send food images to food providers only after classification.
 13. Unsupported, failed, and low-confidence recognition states are recoverable through clear manual fallback.
 14. Accepted proposals refresh the relevant Chat, Today, Nutrition, Training, Longevity/Profile document, and proposal query state.
-15. App Runner runs full CI-equivalent checks (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`) plus browser smoke at `localhost:3002/chat` verifying previews, recognition status, proposal cards, and failure fallback.
+15. App Runner runs full CI-equivalent checks (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`) plus browser smoke at `localhost:3001/chat` verifying previews, recognition status, proposal cards, and failure fallback.
 
 ## Recommended Subagents
 
@@ -173,7 +173,7 @@ If message-only triggers and attachment recognition would produce the same propo
 5. **Implementation Reviewer**
    - Security, medical-safety, structured-state, provider-boundary, and revision-safety review.
 6. **App Runner**
-   - Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, then start the local stack and verify `/chat` at `localhost:3002/chat` in the browser.
+   - Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, then start the local stack and verify `/chat` at `localhost:3001/chat` in the browser.
 
 Skip by default unless scope expands: Visual Designer and UI Polish Implementer. Use them only if the attachment experience needs a broader visual redesign beyond accessible previews/status states.
 
@@ -186,11 +186,11 @@ Skip by default unless scope expands: Visual Designer and UI Polish Implementer.
 - Document tests for upload/parse/summarize/signal eligibility, revocation, context exclusion before review/consent, and unsafe medical language rejection.
 - Workout/training tests for typed recognition result validation, message-derived intent, proposal mapping/fallback, no direct plan mutation, and revision creation only after acceptance.
 - Frontend tests for file selection, preview removal, category correction, status rendering, proposal cards, low-confidence/manual fallback, and disabled submit states.
-- App Runner runs `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, then verifies the implemented flows at `localhost:3002/chat`; if auth blocks verification, report the blocker and required test session/credentials.
+- App Runner runs `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, then verifies the implemented flows at `localhost:3001/chat`; if auth blocks verification, report the blocker and required test session/credentials.
 
 ## Risks And Blockers
 
-- Browser verification at `localhost:3002/chat` depends on the local stack, auth state, and available stub/provider behavior.
+- Browser verification at `localhost:3001/chat` depends on the local stack, auth state, and available stub/provider behavior.
 - The current code has food-photo analysis refs but no general binary upload path in Chat; implementation must choose a durable or ephemeral storage strategy.
 - Current medical document support is text/PDF; image OCR for photographed documents is a separate capability unless explicitly included.
 - Training file formats can sprawl quickly. MVP should start with a narrow allowlist and clear unsupported-format copy.

@@ -40,11 +40,14 @@ MVP 1 tables:
 - `workout_sessions`
 - `nutrition_plans`
 - `nutrition_plan_revisions`
+- `nutrition_incidents`
 - `daily_checklists`
 - `health_metrics`
 - `ai_proposals`
+- `chat_attachments`
+- `exercises`
 
-Later roadmap tables:
+Implemented support tables:
 
 - `recipes`
 - `user_recipe_recommendations`
@@ -94,6 +97,36 @@ ai_proposals
 ```
 
 Pending proposals must not change active plan state. Rejected proposals must remain auditable without applying changes.
+
+## Attachment And Incident Pattern
+
+Message attachments and nutrition incidents are structured records, but recognition itself is not a direct state mutation.
+
+```text
+chat_attachments
+  id
+  user_id
+  thread_id
+  message_id
+  category -- unclassified, food_photo, medical_document, workout_attachment
+  status
+  mime_type
+  storage_key
+  recognition
+  retention_policy
+  expires_at
+
+nutrition_incidents
+  id
+  user_id
+  source_proposal_id
+  incident_datetime
+  items
+  confidence
+  provenance
+```
+
+Chat attachments are ownership scoped and may expire. Food and workout/training recognition can create proposal candidates; medical document attachments follow document consent and review rules. Nutrition incidents are written only after an accepted `log_nutrition_incident` proposal.
 
 ## Migration Rules
 

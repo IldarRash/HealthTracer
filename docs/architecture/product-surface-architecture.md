@@ -42,7 +42,7 @@ flowchart LR
 
 ## Primary Surfaces
 
-- **Chat** is the dominant coaching surface. It is the default place to ask questions, receive explanations, review typed proposals, and approve or reject changes.
+- **Chat** is the dominant coaching surface. It is the default place to ask questions, attach food/document/workout context, receive explanations, review typed proposals, and approve or reject changes.
 - **Today** is the daily execution surface. It shows what the user should do today: current workout, today's nutrition plan, stress or recovery check-in, mental wellbeing checkpoints, habits, and checklist completion.
 - **Longevity** is the weekly overview. It summarizes consistency, trends, recovery, wellbeing, training, nutrition, goals, and safe document-context status without clinical scores.
 - **Profile** is the account and context surface. It owns onboarding status, identity, preferences, constraints, goal hierarchy, document consent, device/data consent, and settings.
@@ -60,12 +60,13 @@ Users do not manually edit active workout or nutrition plans on these screens. P
 
 - **Documents** live under Profile with explicit consent and wellness-only copy.
 - **Metrics** are not a primary consumer tab. User-facing trends appear in Today or Longevity; raw metric management and consent live under Profile/settings.
-- **Recipes** are not a standalone user-facing route. Recipes may support nutrition planning behind the scenes and may appear only as approved recommendations or nutrition plan details.
+- **Recipes** are not a standalone primary route. Recipe recommendations are nested under Nutrition and can also appear through Chat proposals.
 - **Developer tools, proposal audit pages, inspectors, and admin views** must stay out of primary navigation.
 
 ## State And Mutation Rules
 
 - Chat history is never the source of truth for plans, goals, metrics, wellbeing, or progress.
+- Chat attachments are interaction input. Attachment classification and extraction can create typed proposal cards, but structured state changes still require domain validation and user confirmation.
 - Structured state drives every primary and secondary surface.
 - AI can explain, summarize, and propose changes, but cannot silently mutate domain tables.
 - Workout and nutrition plan changes create revisions; they are not edited in place from read-only plan screens.

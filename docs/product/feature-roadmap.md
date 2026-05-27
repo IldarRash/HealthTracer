@@ -25,7 +25,7 @@ flowchart TD
 
 The user-facing web IA is intentionally small. The primary navigation has four surfaces:
 
-- Chat: the dominant coaching conversation for planning, feedback, explanations, typed proposals, and approval decisions.
+- Chat: the dominant coaching conversation for planning, feedback, explanations, message-first attachment recognition, typed proposals, and approval decisions.
 - Today: the daily execution loop for the current workout, today's nutrition plan, stress/recovery check-in, mental wellbeing checkpoints, habits, adherence, and quick feedback.
 - Longevity: the weekly overview for consistency, cross-domain trends, goals, recovery/wellbeing context, and safe coach prompts.
 - Profile: account identity, onboarding, personal context, goal hierarchy, documents, consent, device/data settings, and preferences.
@@ -90,11 +90,12 @@ As of the completed longevity foundation pass, the core coaching loop is impleme
 
 | Surface | Status | Notes |
 |---------|--------|-------|
-| Chat / Proposals | Implemented foundation | Typed proposal pipeline, evidence refs, wellbeing/recovery context, and safety gates; AI is still stub-based |
-| Today / Workouts / Nutrition | Implemented web MVP | Current workout, checklist, wellbeing, recovery, nutrition-today, adherence, reflection, and secondary Training/Nutrition links |
+| Chat / Proposals | Implemented foundation | Typed proposal pipeline, evidence refs, wellbeing/recovery context, message-first attachment recognition, nutrition incident cards, recipe proposals, and safety gates; AI is still stub-based for many flows |
+| Today / Workouts / Nutrition | Implemented web MVP | Current workout with catalog metadata and bounded feedback, checklist, wellbeing, recovery, nutrition-today, adherence, reflection, and secondary Training/Nutrition links |
 | Profile / Onboarding / Goals | Implemented web MVP | First-run onboarding, structured personal context, goal hierarchy, document consent, and profile hierarchy summary |
 | Metrics / Device Sync | Partial | API, consent, and aggregate support exist; native HealthKit/Health Connect ingestion is not live |
-| Documents / Labs | Implemented MVP | Text/PDF upload, structured signal extraction, signal approval/revocation, document-backed correlation preview, and proposal evidence refs |
+| Documents / Labs | Implemented MVP | Text/PDF upload, structured signal extraction, signal approval/revocation, document-backed correlation preview, proposal evidence refs, and Chat attachment consent/review routing |
+| Recipes / Nutrition incidents | Implemented MVP | Recipe intake/recommendations, recommendation lifecycle, recipe-backed nutrition incident proposals, and food/photo nutrition incident proposal flow |
 | Progress / Adaptation | Partial | Weekly progress includes workout and recovery context; broader cross-domain review is still planned |
 
 The backend supports `Chat -> AIProposal -> approval -> structured state` for core domains. Completed feature briefs are removed once their MVP behavior is captured in this roadmap and architecture docs.
@@ -112,6 +113,10 @@ These capabilities extend the product toward AI-first coaching for a longer and 
 | Recovery and readiness | Implemented MVP | Manual recovery check-in, qualitative recovery band, Today recovery focus card, consent-filtered recovery context, weekly recovery aggregate, and recovery-aware workout proposal guards |
 | Today daily execution | Implemented MVP | Selected-date Today nutrition card, date-scoped adherence writes, no plan editing, and clear read-only links to Training, Nutrition, and Chat |
 | Medical/lab correlations | Implemented MVP | Consent-gated text/PDF document upload, structured signal extraction/review/revocation, document-backed correlation preview, and proposal evidence validation |
+| Adaptive workout execution | Implemented MVP | Exercise catalog taxonomy, catalog-enriched Training/Today views, execution feedback, and revision-safe workout proposal validation |
+| Recipe recommendations | Implemented MVP | Provider-backed recipe normalization, confidence/provenance, Nutrition recipe panel, chat recipe proposals, and recipe-to-nutrition-incident proposal flow |
+| Chat action proposals | Implemented MVP | Wellbeing check-in and nutrition incident proposals with edit-before-apply, crisis-safe behavior, food-photo analysis, and no-write-before-confirm guards |
+| Message-first chat attachments | Implemented MVP | Chat uploads food, medical, and workout/training attachments as message context; backend classifies/extracts into typed proposal candidates with provider isolation |
 
 ### Remaining Recommended Sequence
 

@@ -22,10 +22,10 @@ Structured state is authoritative. Chat is only an interface for collecting inpu
 
 ```mermaid
 flowchart TD
-  userMessage["User message"] --> aiLayer["AI interpretation"]
+  userMessage["User message or attachment"] --> aiLayer["AI interpretation and extraction"]
   aiLayer --> proposal["Structured proposal"]
   proposal --> apiValidation["Backend validation"]
-  apiValidation --> revision["Plan revision"]
+  apiValidation --> revision["Revision or structured event"]
   revision --> database["Postgres structured state"]
   database --> clients["Mobile and web clients"]
 ```
@@ -66,6 +66,8 @@ See `docs/architecture/product-surface-architecture.md` for the complete surface
 - AI tools return proposals with reasons and typed changes.
 - Backend services validate and apply proposals.
 - The AI layer must not write directly to domain tables.
+- Chat attachments use a message-first pipeline: upload creates ownership-scoped refs, backend classifies using bounded message context plus safe attachment metadata, category-specific recognizers return typed extraction envelopes, and proposal builders convert validated extraction into editable proposal cards.
+- Food photos can become nutrition incident proposals, workout/training attachments can become workout/session proposals or manual fallback, and medical documents remain consent/review gated wellness context only.
 
 ## Clients
 

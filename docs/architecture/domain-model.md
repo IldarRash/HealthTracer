@@ -54,6 +54,22 @@ The active hierarchy is constrained: one active quarterly objective per user and
 
 Stores conversation history for continuity, but not as the authoritative state for plans or metrics.
 
+Chat messages can reference `ChatAttachment` records. Attachment content is processed through ownership, consent, expiry, provider-isolation, and typed extraction gates before it can create proposal candidates.
+
+### ChatAttachment
+
+Represents a file or image attached to a chat message.
+
+- user id
+- thread id and optional message id
+- category: unclassified, food photo, medical document, or workout/training attachment
+- MIME type, file size, and storage key
+- consent metadata when medical
+- recognition status and typed extraction envelope
+- retention policy and expiry
+
+Attachments are not authoritative workout, nutrition, or medical state. They can supply proposal evidence or document review context after validation.
+
 ### WorkoutPlan
 
 Stable plan identity for a user.
@@ -86,6 +102,8 @@ Tracks execution of a planned or ad hoc workout.
 - exercise results
 - fatigue and feedback
 
+Workout sessions may materialize catalog-backed exercises from active plan revisions. Today execution writes store completion, skipped/adjusted state, bounded actuals, perceived effort/difficulty, discomfort flags, and notes without mutating workout plan revisions.
+
 ### NutritionPlan
 
 Stable nutrition plan identity.
@@ -106,6 +124,20 @@ Immutable nutrition target version.
 - reason
 
 Nutrition plan revisions are rendered through Today nutrition cards and the secondary read-only Nutrition weekly view. Users should not manually edit active nutrition plans from the UI; plan changes should flow through approved AI proposals.
+
+### NutritionIncident
+
+Represents a confirmed food log or nutrition incident created through proposal approval.
+
+- user id
+- source proposal id
+- incident date/time
+- item estimates and optional user edits
+- calories/macros
+- confidence and provenance
+- optional image or recipe recommendation refs
+
+Pending, rejected, or low-confidence unedited proposals do not create nutrition incidents. Nutrition incidents do not mutate nutrition plan targets or revisions.
 
 ### DailyChecklist
 
@@ -183,6 +215,8 @@ Structured recipe catalog used by nutrition planning and recommendations.
 - tags
 - dietary restrictions
 - preparation metadata
+- source, provider, external id
+- confidence and provenance for approximate nutrition estimates
 
 ### UserRecipeRecommendation
 
@@ -194,6 +228,8 @@ Tracks recipe suggestions shown to the user and whether they were accepted, dism
 - related nutrition plan revision id
 - status
 - shownAt
+
+Accepted or completed recipe recommendations can create `log_nutrition_incident` proposals for explicit user confirmation. They do not directly change nutrition targets.
 
 ### DeviceConnection
 

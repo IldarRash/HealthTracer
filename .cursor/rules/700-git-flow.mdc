@@ -7,6 +7,7 @@ alwaysApply: true
 
 - Never add `Co-authored-by: Cursor`, `Cursor`, or any Cursor-managed identity as an author, committer, trailer, or co-author.
 - Do not run `git commit` or `git push` unless the user explicitly confirms this environment supports non-Cursor authorship. Older Git/Cursor setups may inject `git commit --trailer` authorship.
+- For new feature work, create or ask the user to create a dedicated feature branch before code changes. Use a short slug from the feature name, for example `feature/message-first-attachments` or `fix/recipe-proposal-logging`; do not implement feature work directly on `main` unless the user explicitly requests it.
 - Preferred handoff flow: inspect `git status`, `git diff`, and recent `git log`; stage only files relevant to the user-approved change; run the narrowest useful validation; then ask the user to commit/push manually.
 - If the user wants the agent to commit/push anyway, first explain the authorship risk and ask for explicit permission to use a verified workaround.
 - Never stage or commit `.env`, secrets, credentials, private health data, `.idea/`, `.turbo/`, `.next/`, `tsconfig.tsbuildinfo`, or local runtime artifacts such as `.data/`, logs, caches, and generated test output.
