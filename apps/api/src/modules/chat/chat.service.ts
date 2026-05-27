@@ -14,6 +14,7 @@ import {
   getChatAttachmentOwnershipErrors,
   getChatAttachmentSendEligibilityErrors,
   getTodayIsoDateInTimezone,
+  inferMealContextFromMessage,
   isWeeklyReviewChatMessage,
   mergeDeterministicChatProposals,
   shouldTriggerRecipeRecommendationRequest,
@@ -98,12 +99,16 @@ export class ChatService {
 
     const existingMessages = await this.chatRepository.listMessagesByThreadId(threadId);
     const attachmentRefIds = input.attachmentRefIds ?? [];
-    let ownedAttachments = [];
+    let attachmentRecords: Awaited<
+      ReturnType<ChatAttachmentsService["assertOwnedAttachmentRefs"]>
+    > = [];
 
     if (attachmentRefIds.length > 0) {
-      const attachmentRecords =
-        await this.chatAttachmentsService.assertOwnedAttachmentRefs(user.id, attachmentRefIds);
-      ownedAttachments = attachmentRecords.map((attachment) => ({
+      attachmentRecords = await this.chatAttachmentsService.assertOwnedAttachmentRefs(
+        user.id,
+        attachmentRefIds,
+      );
+      const ownedAttachments = attachmentRecords.map((attachment) => ({
         id: attachment.id,
         userId: attachment.userId,
         category: attachment.category,
@@ -148,6 +153,14 @@ export class ChatService {
         userMessage.id,
         threadId,
       );
+
+      attachmentRecords =
+        await this.chatAttachmentsService.classifyAndRecognizeAttachmentsForMessage({
+          auth,
+          userId: user.id,
+          messageContent,
+          attachments: attachmentRecords,
+        });
     }
 
     const crisisEvaluation = evaluateWellbeingCrisisFromText(messageContent);
@@ -226,19 +239,22 @@ export class ChatService {
 
     const attachmentOutcomes: ChatAttachmentOutcome[] = [];
     const attachmentProposalCandidates = [];
+    const mealContextLabel = inferMealContextFromMessage(messageContent);
 
-    for (const attachment of ownedAttachments.length > 0
-      ? await this.chatAttachmentsService.assertOwnedAttachmentRefs(user.id, attachmentRefIds)
-      : []) {
+    for (const attachment of attachmentRecords) {
       const candidates = this.chatAttachmentRecognitionService.buildProposalCandidates({
         attachment,
         incidentDateTime: new Date().toISOString(),
+        mealContextLabel,
       });
 
       attachmentProposalCandidates.push(...candidates);
       attachmentOutcomes.push({
         attachmentRefId: attachment.id,
-        category: attachment.category,
+        category:
+          attachment.category === "unclassified"
+            ? (attachment.recognition?.category ?? "food_photo")
+            : attachment.category,
         status: attachment.status,
         recognition: attachment.recognition,
         proposalCandidateCount: candidates.length,

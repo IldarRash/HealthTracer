@@ -19,7 +19,16 @@ export class FoodPhotoAttachmentRecognizer {
   async recognize(input: {
     userId: string;
     attachment: ChatAttachmentRecord;
+    mealContextLabel?: string | null;
+    boundedMessage?: string;
   }): Promise<FoodPhotoAnalysisResult> {
+    const instructionParts = [
+      "Estimate meal items and macros from this food photo.",
+      input.mealContextLabel ? `Meal context: ${input.mealContextLabel}.` : null,
+      input.boundedMessage ? `User message (bounded): ${input.boundedMessage.slice(0, 200)}` : null,
+    ].filter((part): part is string => part != null);
+    const instruction = instructionParts.join(" ");
+
     assertRecognitionProviderIsolation({
       category: "food_photo",
       payload: {
@@ -28,7 +37,7 @@ export class FoodPhotoAttachmentRecognizer {
           storageKey: input.attachment.storageKey ?? undefined,
           mimeType: input.attachment.mimeType,
         },
-        instruction: "Estimate meal items and macros from this food photo.",
+        instruction,
       },
     });
 
@@ -38,7 +47,7 @@ export class FoodPhotoAttachmentRecognizer {
         ...(input.attachment.storageKey ? { storageKey: input.attachment.storageKey } : {}),
         mimeType: input.attachment.mimeType,
       },
-      instruction: "Estimate meal items and macros from this food photo.",
+      instruction,
     };
 
     return this.foodPhotoAnalysisService.analyzeOwnedPhoto(input.userId, request);

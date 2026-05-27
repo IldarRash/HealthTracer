@@ -14,9 +14,14 @@ import {
 import { workoutExerciseSchema } from "./workouts.js";
 
 export const chatAttachmentCategorySchema = z.enum([
+  "unclassified",
   "food_photo",
   "medical_document",
   "workout_attachment",
+]);
+
+export const classifiedChatAttachmentCategorySchema = chatAttachmentCategorySchema.exclude([
+  "unclassified",
 ]);
 
 export type ChatAttachmentCategory = z.infer<typeof chatAttachmentCategorySchema>;
@@ -49,6 +54,12 @@ export const CHAT_FOOD_PHOTO_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
+] as const;
+
+/** Medical chat attachments include PDF/text plus screenshot uploads pending manual review. */
+export const CHAT_MEDICAL_DOCUMENT_MIME_TYPES = [
+  ...SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
+  ...CHAT_FOOD_PHOTO_MIME_TYPES,
 ] as const;
 
 export const CHAT_WORKOUT_ATTACHMENT_MIME_TYPES = [
@@ -86,7 +97,7 @@ export type RecognitionProvenance = z.infer<typeof recognitionProvenanceSchema>;
 export const chatAttachmentRefSchema = z
   .object({
     id: z.string().uuid(),
-    category: chatAttachmentCategorySchema,
+    category: classifiedChatAttachmentCategorySchema,
     filename: z.string().min(1).max(200),
     mimeType: z.string().min(1).max(120),
     fileSizeBytes: z.number().int().nonnegative().max(MAX_CHAT_FOOD_PHOTO_BYTES),
@@ -207,7 +218,7 @@ export type ChatAttachmentRecord = z.infer<typeof chatAttachmentRecordSchema>;
 export const createChatAttachmentSchema = z
   .object({
     threadId: z.string().uuid().optional(),
-    category: chatAttachmentCategorySchema,
+    category: chatAttachmentCategorySchema.default("unclassified"),
     filename: z.string().min(1).max(200),
     mimeType: z.string().min(1).max(120),
     fileContentBase64: z.string().min(1),
@@ -224,6 +235,14 @@ export const createChatAttachmentSchema = z
         code: "custom",
         message: mimeError,
         path: ["mimeType"],
+      });
+    }
+
+    if (input.category === "unclassified" && input.consentScopes?.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Consent scopes apply only after a medical document category is assigned.",
+        path: ["consentScopes"],
       });
     }
 
@@ -254,7 +273,7 @@ export const createChatAttachmentSchema = z
     }
   });
 
-export type CreateChatAttachmentInput = z.infer<typeof createChatAttachmentSchema>;
+export type CreateChatAttachmentInput = z.input<typeof createChatAttachmentSchema>;
 
 export const recognizeChatAttachmentSchema = z
   .object({
@@ -317,34 +336,99 @@ const UNSAFE_RECOGNITION_SUMMARY_PATTERNS = [
   /\bconfirmed\b/i,
 ];
 
-const CATEGORY_MIME_ALLOWLIST: Record<ChatAttachmentCategory, readonly string[]> = {
+const CATEGORY_MIME_ALLOWLIST: Record<
+  Exclude<ChatAttachmentCategory, "unclassified">,
+  readonly string[]
+> = {
   food_photo: CHAT_FOOD_PHOTO_MIME_TYPES,
-  medical_document: SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
+  medical_document: CHAT_MEDICAL_DOCUMENT_MIME_TYPES,
   workout_attachment: CHAT_WORKOUT_ATTACHMENT_MIME_TYPES,
 };
 
-const CATEGORY_SIZE_LIMIT: Record<ChatAttachmentCategory, number> = {
+const CATEGORY_SIZE_LIMIT: Record<
+  Exclude<ChatAttachmentCategory, "unclassified">,
+  number
+> = {
   food_photo: MAX_CHAT_FOOD_PHOTO_BYTES,
   medical_document: 5_000_000,
   workout_attachment: MAX_CHAT_WORKOUT_ATTACHMENT_BYTES,
 };
 
-const CATEGORY_RETENTION: Record<ChatAttachmentCategory, ChatAttachmentRetentionPolicy> = {
+const CATEGORY_RETENTION: Record<
+  Exclude<ChatAttachmentCategory, "unclassified">,
+  ChatAttachmentRetentionPolicy
+> = {
   food_photo: "ephemeral_recognition",
   medical_document: "document_consent_rules",
   workout_attachment: "ephemeral_recognition",
 };
 
+export const CHAT_PROVISIONAL_UPLOAD_MIME_TYPES = [
+  ...new Set([
+    ...CHAT_FOOD_PHOTO_MIME_TYPES,
+    ...SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
+    ...CHAT_WORKOUT_ATTACHMENT_MIME_TYPES,
+  ]),
+] as const;
+
+export const MAX_CHAT_PROVISIONAL_ATTACHMENT_BYTES = 10_000_000;
+
 export function getChatAttachmentRetentionPolicy(
   category: ChatAttachmentCategory,
 ): ChatAttachmentRetentionPolicy {
+  if (category === "unclassified") {
+    return "ephemeral_recognition";
+  }
+
   return CATEGORY_RETENTION[category];
+}
+
+export function getProvisionalAttachmentMimeTypeError(mimeType: string): string | null {
+  if (!(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES as readonly string[]).includes(mimeType)) {
+    return `Unsupported MIME type "${mimeType}" for provisional chat attachments.`;
+  }
+
+  return null;
+}
+
+export function getProvisionalAttachmentSizeError(fileSizeBytes: number): string | null {
+  if (fileSizeBytes <= 0) {
+    return "Attachment content is empty.";
+  }
+
+  if (fileSizeBytes > MAX_CHAT_PROVISIONAL_ATTACHMENT_BYTES) {
+    return `Attachment exceeds the ${MAX_CHAT_PROVISIONAL_ATTACHMENT_BYTES} byte provisional upload limit.`;
+  }
+
+  return null;
+}
+
+export function isUnclassifiedChatAttachmentCategory(
+  category: ChatAttachmentCategory,
+): category is "unclassified" {
+  return category === "unclassified";
+}
+
+export function isChatAttachmentPendingMessageFirstSend(input: {
+  category: ChatAttachmentCategory;
+  status: ChatAttachmentStatus;
+  recognition: ChatAttachmentRecognitionEnvelope | null;
+}): boolean {
+  if (input.recognition) {
+    return false;
+  }
+
+  return input.status === "queued" || input.status === "uploading";
 }
 
 export function getChatAttachmentMimeTypeError(
   category: ChatAttachmentCategory,
   mimeType: string,
 ): string | null {
+  if (category === "unclassified") {
+    return getProvisionalAttachmentMimeTypeError(mimeType);
+  }
+
   const allowlist = CATEGORY_MIME_ALLOWLIST[category];
 
   if (!allowlist.includes(mimeType)) {
@@ -358,6 +442,10 @@ export function getChatAttachmentSizeError(
   category: ChatAttachmentCategory,
   fileSizeBytes: number,
 ): string | null {
+  if (category === "unclassified") {
+    return getProvisionalAttachmentSizeError(fileSizeBytes);
+  }
+
   const limit = CATEGORY_SIZE_LIMIT[category];
 
   if (fileSizeBytes <= 0) {
@@ -404,7 +492,10 @@ export function assertRecognitionProviderIsolation(input: {
   category: ChatAttachmentCategory;
   payload: Record<string, unknown>;
 }): void {
-  const forbiddenKeysByCategory: Record<ChatAttachmentCategory, readonly string[]> = {
+  const forbiddenKeysByCategory: Record<
+    Exclude<ChatAttachmentCategory, "unclassified">,
+    readonly string[]
+  > = {
     food_photo: [
       "documentId",
       "documentText",
@@ -416,6 +507,10 @@ export function assertRecognitionProviderIsolation(input: {
     medical_document: ["imageRef", "mealContext", "workoutContext", "profile"],
     workout_attachment: ["documentId", "documentText", "profile", "mealContext", "medicalContext"],
   };
+
+  if (input.category === "unclassified") {
+    return;
+  }
 
   for (const key of forbiddenKeysByCategory[input.category]) {
     if (key in input.payload) {
@@ -471,6 +566,11 @@ export function getChatAttachmentRecognitionEligibilityErrors(
   >,
 ): string[] {
   const errors: string[] = [];
+
+  if (attachment.category === "unclassified") {
+    errors.push("Classify the attachment during chat send before running standalone recognition.");
+    return errors;
+  }
 
   if (isChatAttachmentExpired(attachment)) {
     errors.push("Attachment recognition reference has expired.");
@@ -544,7 +644,15 @@ export function getChatAttachmentSendEligibilityErrors(
   for (const [index, attachmentRefId] of attachmentRefIds.entries()) {
     const owned = ownedById.get(attachmentRefId);
 
-    if (!owned || isChatAttachmentSendEligibleStatus(owned.status)) {
+    if (
+      !owned ||
+      isChatAttachmentSendEligibleStatus(owned.status) ||
+      isChatAttachmentPendingMessageFirstSend({
+        category: owned.category,
+        status: owned.status,
+        recognition: null,
+      })
+    ) {
       continue;
     }
 

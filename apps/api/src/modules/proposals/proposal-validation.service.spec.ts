@@ -1913,6 +1913,7 @@ describe("ProposalValidationService", () => {
 
     it("validates wellbeing check-in date against user timezone", async () => {
       const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+      const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
       const service = createService(
         {},
         {},
@@ -1931,7 +1932,7 @@ describe("ProposalValidationService", () => {
         testUserId,
         "capture_wellbeing_checkin",
         {
-          date: "2026-05-25",
+          date: yesterday,
           moodScore: 2,
           stressScore: 3,
         },
@@ -1944,6 +1945,7 @@ describe("ProposalValidationService", () => {
 
     it("rejects stale wellbeing proposals when today's check-in already exists", async () => {
       const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+      const today = new Date().toISOString().slice(0, 10);
       const service = createService(
         {},
         {},
@@ -1966,7 +1968,7 @@ describe("ProposalValidationService", () => {
         testUserId,
         "capture_wellbeing_checkin",
         {
-          date: "2026-05-26",
+          date: today,
           moodScore: 2,
           stressScore: 3,
         },
@@ -1979,6 +1981,7 @@ describe("ProposalValidationService", () => {
 
     it("allows idempotent wellbeing accept when appliedReference matches existing check-in", async () => {
       const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+      const today = new Date().toISOString().slice(0, 10);
       const service = createService(
         {},
         {},
@@ -2001,7 +2004,7 @@ describe("ProposalValidationService", () => {
         testUserId,
         "capture_wellbeing_checkin",
         {
-          date: "2026-05-26",
+          date: today,
           moodScore: 2,
           stressScore: 3,
         },

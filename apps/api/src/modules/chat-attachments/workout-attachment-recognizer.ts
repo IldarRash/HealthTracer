@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 export interface WorkoutAttachmentRecognitionProvider {
   recognize(input: {
     attachment: ChatAttachmentRecord;
+    boundedMessage?: string;
   }): Promise<WorkoutAttachmentRecognitionEnvelope>;
 }
 
@@ -19,12 +20,16 @@ export class DevWorkoutAttachmentRecognitionProvider
 {
   async recognize(input: {
     attachment: ChatAttachmentRecord;
+    boundedMessage?: string;
   }): Promise<WorkoutAttachmentRecognitionEnvelope> {
+    const boundedMessage = input.boundedMessage?.trim().slice(0, 500) ?? "";
+
     assertRecognitionProviderIsolation({
       category: "workout_attachment",
       payload: {
         filename: input.attachment.filename,
         mimeType: input.attachment.mimeType,
+        boundedMessage,
       },
     });
 
@@ -33,6 +38,10 @@ export class DevWorkoutAttachmentRecognitionProvider
     const isPlanDoc =
       input.attachment.mimeType === "application/pdf" ||
       input.attachment.filename.toLowerCase().includes("plan");
+    const activityFillIntent =
+      /(заполни\s+активност|log\s+(this\s+)?activity|fill\s+in\s+(my\s+)?activity)/i.test(
+        boundedMessage,
+      );
 
     const envelope = workoutAttachmentRecognitionEnvelopeSchema.parse({
       category: "workout_attachment",
@@ -55,7 +64,11 @@ export class DevWorkoutAttachmentRecognitionProvider
           reps: "10-12",
         },
       ],
-      suggestedIntent: isPlanDoc ? "create_workout_plan" : "log_session_context",
+      suggestedIntent: isPlanDoc
+        ? "create_workout_plan"
+        : activityFillIntent
+          ? "log_session_context"
+          : "log_session_context",
       planDraftTitle: isPlanDoc ? "Imported workout plan draft" : null,
       provenance: recognitionProvenanceSchema.parse({
         source: "dev_stub",
@@ -77,7 +90,7 @@ export class DevWorkoutAttachmentRecognitionProvider
 export class WorkoutAttachmentRecognizer {
   constructor(private readonly provider: DevWorkoutAttachmentRecognitionProvider) {}
 
-  recognize(input: { attachment: ChatAttachmentRecord }) {
+  recognize(input: { attachment: ChatAttachmentRecord; boundedMessage?: string }) {
     return this.provider.recognize(input);
   }
 }

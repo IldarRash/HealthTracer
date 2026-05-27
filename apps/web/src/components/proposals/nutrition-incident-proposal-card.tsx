@@ -265,6 +265,12 @@ export function NutritionIncidentProposalCard({
     >
       {proposal.reason ? <p className="proposal-meta">{proposal.reason}</p> : null}
 
+      {form.mealContextLabel ? (
+        <p className="proposal-meta" role="status">
+          Meal context: {form.mealContextLabel}
+        </p>
+      ) : null}
+
       {isPending ? (
         <div className="action-proposal-form nutrition-incident-proposal-form">
           <div className="nutrition-incident-photo-row">

@@ -61,9 +61,11 @@ describe("WellbeingCheckinProposalCard", () => {
 });
 
 describe("NutritionIncidentProposalCard", () => {
-  it("supports photo analysis, estimate preview, and low-confidence review gating", () => {
+  it("supports photo analysis, estimate preview, meal context, and low-confidence review gating", () => {
     expect(nutritionProposalSource).toContain("analyzeFoodPhoto");
     expect(nutritionProposalSource).toContain("Analyzing photo");
+    expect(nutritionProposalSource).toContain("Meal context:");
+    expect(nutritionProposalSource).toContain("mealContextLabel");
     expect(nutritionProposalSource).toContain("buildNutritionIncidentAcceptPayload");
     expect(nutritionProposalSource).toContain("getNutritionIncidentAcceptBlockReason");
     expect(nutritionProposalSource).toContain("nutritionConfidenceNotice");

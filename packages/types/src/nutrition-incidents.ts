@@ -78,6 +78,7 @@ export const logNutritionIncidentProposalPayloadSchema = z
     provenance: nutritionProvenanceSchema,
     imageRefs: z.array(nutritionImageRefSchema).max(5).default([]),
     attachmentRefId: z.string().uuid().optional(),
+    mealContextLabel: z.string().min(1).max(120).optional(),
     userEdits: nutritionIncidentUserEditsSchema.optional(),
   })
   .strict();

@@ -58,10 +58,10 @@ Runs as a Feature Planner subagent to start the local application stack, verify 
 
 ## Verification Guidance
 
-- Prefer the narrowest command set that proves the target feature works.
-- Before runtime sign-off, inspect the repo's CI/package scripts and run the same relevant local checks CI would run for the changed areas, such as typecheck, tests, lint/build, migrations checks, or package-specific validation.
-- Report each CI-parity command exactly. If a CI-equivalent check cannot run locally, mark runtime status `blocked` or `partial` and explain the concrete missing dependency.
-- Do not report `working` when relevant CI-parity checks are failing, skipped without explanation, or still running.
+- Prefer the narrowest runtime smoke flow that proves the target feature works, but do not narrow CI-parity checks.
+- Before runtime sign-off, inspect the repo's CI/package scripts and run the full local CI-equivalent check set, including lint, typecheck, tests, build, migrations checks, and any workspace/package validation that CI would execute.
+- If full CI-equivalent execution is too slow or locally impossible, run every available CI-equivalent command and mark runtime status `partial` or `blocked` with the exact missing dependency or skipped command.
+- Report each CI-parity command exactly. Do not report `working` when any CI-equivalent check is failing, skipped without explanation, or still running.
 - Check existing processes before starting new ones.
 - Confirm database availability before blaming API or frontend code.
 - For web routes, verify both page load and the specific target interaction when possible.

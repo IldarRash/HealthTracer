@@ -33,6 +33,7 @@ describe("chat attachment contracts", () => {
       /Unsupported MIME type/,
     );
     expect(getChatAttachmentMimeTypeError("medical_document", "application/pdf")).toBeNull();
+    expect(getChatAttachmentMimeTypeError("medical_document", "image/jpeg")).toBeNull();
     expect(getChatAttachmentMimeTypeError("workout_attachment", "text/plain")).toBeNull();
   });
 
@@ -154,6 +155,7 @@ describe("chat attachment contracts", () => {
   });
 
   it("maps retention policies per attachment category", () => {
+    expect(getChatAttachmentRetentionPolicy("unclassified")).toBe("ephemeral_recognition");
     expect(getChatAttachmentRetentionPolicy("food_photo")).toBe("ephemeral_recognition");
     expect(getChatAttachmentRetentionPolicy("medical_document")).toBe("document_consent_rules");
     expect(getChatAttachmentRetentionPolicy("workout_attachment")).toBe("ephemeral_recognition");
@@ -199,8 +201,27 @@ describe("chat attachment contracts", () => {
     expect(failedErrors[0]).toMatch(/not eligible for chat reference \(failed\)/);
   });
 
-  it("rejects queued and in-progress attachment refs for chat send", () => {
-    for (const status of ["queued", "uploading", "recognizing", "needs_consent"] as const) {
+  it("allows queued unclassified refs for message-first chat send", () => {
+    const errors = getChatAttachmentSendEligibilityErrors(
+      ["a1000001-0000-4000-8000-000000000001"],
+      [
+        {
+          id: "a1000001-0000-4000-8000-000000000001",
+          userId: "user-id",
+          category: "unclassified",
+          status: "queued",
+          linkedDocumentId: null,
+          linkedImageRefId: null,
+          ...ownedAttachmentDefaults,
+        },
+      ],
+    );
+
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects in-progress and pre-classified queued refs for chat send", () => {
+    for (const status of ["recognizing", "needs_consent"] as const) {
       const errors = getChatAttachmentSendEligibilityErrors(
         ["a1000001-0000-4000-8000-000000000001"],
         [
@@ -218,6 +239,23 @@ describe("chat attachment contracts", () => {
 
       expect(errors[0]).toMatch(new RegExp(`"${status}" is not eligible for chat send`));
     }
+
+    const preClassifiedQueued = getChatAttachmentSendEligibilityErrors(
+      ["a1000001-0000-4000-8000-000000000001"],
+      [
+        {
+          id: "a1000001-0000-4000-8000-000000000001",
+          userId: "user-id",
+          category: "food_photo",
+          status: "queued",
+          linkedDocumentId: null,
+          linkedImageRefId: null,
+          ...ownedAttachmentDefaults,
+        },
+      ],
+    );
+
+    expect(preClassifiedQueued).toEqual([]);
   });
 
   it("allows ready, low_confidence, and needs_review attachment refs for chat send", () => {

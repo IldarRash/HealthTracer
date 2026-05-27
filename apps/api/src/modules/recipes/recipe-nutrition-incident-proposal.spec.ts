@@ -92,6 +92,7 @@ describe("recipe nutrition incident proposal accept flow", () => {
         validateWellbeingCheckinProposalContext: async () => [],
         validateNutritionIncidentImageRefOwnership: async () => [],
         validateNutritionIncidentRecipeRecommendationContext: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
       } as never,
       {
         applyAcceptedProposal: async () => {
@@ -113,7 +114,7 @@ describe("recipe nutrition incident proposal accept flow", () => {
   });
 
   it("routes recipe proposal creation through RecipesService without applying nutrition state", async () => {
-    let applyCalled = false;
+    const applyCalled = false;
 
     const recipesService = new RecipesService(
       {
@@ -181,6 +182,7 @@ describe("recipe nutrition incident proposal accept flow", () => {
         validateRawProposal: () => ({ valid: true, errors: [] }),
         validateNutritionIncidentImageRefOwnership: async () => [],
         validateNutritionIncidentRecipeRecommendationContext: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
       } as never,
       {
         providerName: "themealdb",

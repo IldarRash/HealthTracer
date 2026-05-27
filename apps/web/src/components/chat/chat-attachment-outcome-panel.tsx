@@ -1,17 +1,18 @@
-import type { ChatAttachmentOutcome } from "@health/types";
-import Link from "next/link";
+import type { ChatAttachmentOutcomeDisplay } from "../../lib/chat-attachment-ui-state";
 import {
   chatAttachmentCategoryLabel,
   chatAttachmentStatusBadgeTone,
   chatAttachmentStatusLabel,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
+  resolveAttachmentOutcomeConfidenceLabel,
   resolveAttachmentOutcomeFallbackCopy,
   resolveMedicalDocumentProfileHref,
 } from "../../lib/chat-attachment-ui-state";
+import Link from "next/link";
 import { AttachmentStatusBadge, ChatMetadataPanel, PrivacyBoundaryNote } from "../ui";
 
 type ChatAttachmentOutcomePanelProps = {
-  outcomes: readonly ChatAttachmentOutcome[];
+  outcomes: readonly ChatAttachmentOutcomeDisplay[];
   titleId: string;
 };
 
@@ -34,6 +35,7 @@ export function ChatAttachmentOutcomePanel({
         {outcomes.map((outcome) => {
           const fallbackCopy = resolveAttachmentOutcomeFallbackCopy(outcome);
           const statusLabel = chatAttachmentStatusLabel(outcome.status);
+          const confidenceLabel = resolveAttachmentOutcomeConfidenceLabel(outcome);
           const documentId =
             outcome.recognition?.category === "medical_document"
               ? outcome.recognition.documentId
@@ -55,6 +57,18 @@ export function ChatAttachmentOutcomePanel({
                   contextLabel={outcomeLabel}
                 />
               </div>
+
+              {confidenceLabel ? (
+                <p className="chat-attachment-outcomes__meta" role="status">
+                  Classification confidence: {confidenceLabel}
+                </p>
+              ) : null}
+
+              {outcome.mealContextLabel ? (
+                <p className="chat-attachment-outcomes__meta" role="status">
+                  Meal context: {outcome.mealContextLabel}
+                </p>
+              ) : null}
 
               {outcome.proposalCandidateCount > 0 ? (
                 <p className="chat-attachment-outcomes__meta">

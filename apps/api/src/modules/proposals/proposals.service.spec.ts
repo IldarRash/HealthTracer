@@ -109,6 +109,7 @@ function createValidationServiceMock(overrides: Record<string, unknown> = {}) {
     validateWellbeingCheckinProposalContext: async () => [],
     validateNutritionIncidentImageRefOwnership: async () => [],
     validateNutritionIncidentRecipeRecommendationContext: async () => [],
+    validateChatAttachmentProposalRefs: async () => [],
     ...overrides,
   };
 }

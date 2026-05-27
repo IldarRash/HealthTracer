@@ -1310,6 +1310,7 @@ export * from "./nutrition-incidents.js";
 export * from "./recipes.js";
 export * from "./chat-action-proposals.js";
 export * from "./chat-attachments.js";
+export * from "./chat-attachment-classification.js";
 export * from "./recovery.js";
 export {
   buildCoachingHierarchySummary,

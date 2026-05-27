@@ -4,6 +4,7 @@ import { ChatRepository } from "../chat/chat.repository.js";
 import { DocumentsModule } from "../documents/documents.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { UsersModule } from "../users/users.module.js";
+import { ChatAttachmentClassifierService } from "./chat-attachment-classifier.service.js";
 import { ChatAttachmentRecognitionService } from "./chat-attachment-recognition.service.js";
 import { ChatAttachmentsController } from "./chat-attachments.controller.js";
 import { ChatAttachmentsRepository } from "./chat-attachments.repository.js";
@@ -22,6 +23,7 @@ import {
     ChatRepository,
     ChatAttachmentsRepository,
     ChatAttachmentsService,
+    ChatAttachmentClassifierService,
     ChatAttachmentRecognitionService,
     FoodPhotoAttachmentRecognizer,
     MedicalDocumentAttachmentRecognizer,

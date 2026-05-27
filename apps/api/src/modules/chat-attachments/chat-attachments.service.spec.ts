@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ChatAttachmentClassifierService } from "./chat-attachment-classifier.service.js";
 import { ChatAttachmentsService } from "./chat-attachments.service.js";
 
 const auth = {
@@ -21,6 +22,7 @@ function createService(deps: {
   chatAttachmentsRepository?: Record<string, unknown>;
   chatRepository?: Record<string, unknown>;
   chatAttachmentRecognitionService?: Record<string, unknown>;
+  chatAttachmentClassifierService?: Record<string, unknown>;
 }) {
   const chatAttachmentsRepository = {
     create: vi.fn(async (input: unknown) => ({
@@ -31,8 +33,8 @@ function createService(deps: {
       recognition: null,
       failureReason: null,
       expiresAt: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
     })),
     findByIdForUser: vi.fn(async () => null),
     update: vi.fn(async (_userId: string, _id: string, patch: unknown) => ({
@@ -78,10 +80,22 @@ function createService(deps: {
     ...deps.chatAttachmentRecognitionService,
   };
 
+  const chatAttachmentClassifierService = {
+    classify: vi.fn(() => ({
+      category: "food_photo",
+      confidence: "high",
+      rationale: "Food photo",
+      suggestedAction: "run_category_recognition",
+      mealContextLabel: "Second meal",
+    })),
+    ...deps.chatAttachmentClassifierService,
+  };
+
   const service = new ChatAttachmentsService(
     chatAttachmentsRepository as never,
     chatRepository as never,
     chatAttachmentRecognitionService as never,
+    chatAttachmentClassifierService as never,
     {
       resolveFromAuth: async () => user,
     } as never,
@@ -91,12 +105,96 @@ function createService(deps: {
     service,
     chatAttachmentsRepository,
     chatAttachmentRecognitionService,
+    chatAttachmentClassifierService,
+  };
+}
+
+function createRepositoryWithStatefulAttachment(baseAttachment: Record<string, unknown>) {
+  const normalizeDate = (value: unknown) =>
+    value instanceof Date ? value : new Date(value as string);
+
+  let state = {
+    ...baseAttachment,
+    createdAt: normalizeDate(baseAttachment.createdAt),
+    updatedAt: normalizeDate(baseAttachment.updatedAt),
+    ...(baseAttachment.expiresAt != null
+      ? { expiresAt: normalizeDate(baseAttachment.expiresAt) }
+      : {}),
+  };
+
+  return {
+    findByIdForUser: vi.fn(async () => state),
+    update: vi.fn(async (_userId: string, _id: string, patch: unknown) => {
+      const patchRecord = patch as Record<string, unknown>;
+      state = {
+        ...state,
+        ...patchRecord,
+        ...(patchRecord.createdAt != null
+          ? { createdAt: normalizeDate(patchRecord.createdAt) }
+          : {}),
+        ...(patchRecord.updatedAt != null
+          ? { updatedAt: normalizeDate(patchRecord.updatedAt) }
+          : {}),
+        ...(patchRecord.expiresAt != null
+          ? { expiresAt: normalizeDate(patchRecord.expiresAt) }
+          : {}),
+      };
+      return state;
+    }),
+    listByIdsForUser: vi.fn(async () => []),
+  };
+}
+
+function createUnclassifiedQueuedAttachment(
+  overrides: Partial<Record<string, unknown>> = {},
+) {
+  return {
+    id: "a1000001-0000-4000-8000-000000000001",
+    userId: user.id,
+    threadId: null,
+    messageId: null,
+    category: "unclassified" as const,
+    status: "queued" as const,
+    filename: "meal.jpg",
+    mimeType: "image/jpeg",
+    fileSizeBytes: 4,
+    storageKey: "local://attachments/meal.jpg",
+    linkedDocumentId: null,
+    linkedImageRefId: null,
+    consent: null,
+    recognition: null,
+    failureReason: null,
+    retentionPolicy: "ephemeral_recognition" as const,
+    expiresAt: null,
+    createdAt: "2026-05-26T12:00:00.000Z",
+    updatedAt: "2026-05-26T12:00:00.000Z",
+    ...overrides,
   };
 }
 
 describe("ChatAttachmentsService", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("accepts provisional unclassified uploads", async () => {
+    const { service, chatAttachmentsRepository } = createService({});
+
+    const record = await service.createAttachment(auth, {
+      filename: "meal.jpg",
+      mimeType: "image/jpeg",
+      fileContentBase64: "dGVzdA==",
+      consentVersion: "v1",
+    });
+
+    expect(chatAttachmentsRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "unclassified",
+        status: "queued",
+        linkedImageRefId: null,
+      }),
+    );
+    expect(record.category).toBe("unclassified");
   });
 
   it("rejects unsupported MIME types on upload", async () => {
@@ -293,7 +391,7 @@ describe("ChatAttachmentsService", () => {
   it("recognizeAttachment rejects expired refs before provider calls", async () => {
     const recognizeAttachment = vi.fn();
 
-    const { service, chatAttachmentRecognitionService } = createService({
+    const { service } = createService({
       chatAttachmentsRepository: {
         findByIdForUser: vi.fn(async () => ({
           id: "a1000001-0000-4000-8000-000000000001",
@@ -384,5 +482,335 @@ describe("ChatAttachmentsService", () => {
         }),
       }),
     );
+  });
+
+  describe("classifyAndRecognizeAttachmentsForMessage", () => {
+    it("classifies queued unclassified food photos on send with meal context", async () => {
+      const attachmentId = "a1000001-0000-4000-8000-000000000001";
+      const recognizeAttachment = vi.fn(async () => ({
+        status: "ready" as const,
+        recognition: {
+          category: "food_photo" as const,
+          attachmentRefId: attachmentId,
+          analysis: {
+            candidates: [
+              {
+                items: [{ name: "Salad", calories: 320 }],
+                estimatedCalories: 320,
+                estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
+                confidence: "medium" as const,
+                provenance: {
+                  source: "dev_stub",
+                  providerId: "dev_food_photo",
+                  analysisId: "b1000001-0000-4000-8000-000000000002",
+                },
+              },
+            ],
+            lowConfidenceNotice: null,
+          },
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            recognitionId: "b1000001-0000-4000-8000-000000000002",
+            confidence: "medium" as const,
+          },
+        },
+        failureReason: null,
+        linkedDocumentId: null,
+        expiresAt: new Date("2026-05-27T12:00:00.000Z"),
+      }));
+
+      const classifier = new ChatAttachmentClassifierService();
+
+      const { service, chatAttachmentRecognitionService } = createService({
+        chatAttachmentsRepository: createRepositoryWithStatefulAttachment(
+          createUnclassifiedQueuedAttachment(),
+        ),
+        chatAttachmentClassifierService: {
+          classify: vi.fn((input) => classifier.classify(input)),
+        },
+        chatAttachmentRecognitionService: { recognizeAttachment },
+      });
+
+      const result = await service.classifyAndRecognizeAttachmentsForMessage({
+        auth,
+        userId: user.id,
+        messageContent: "второй прием пищи",
+        attachments: [createUnclassifiedQueuedAttachment()],
+      });
+
+      expect(chatAttachmentRecognitionService.recognizeAttachment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: "food_photo",
+          messageContext: {
+            mealContextLabel: "Second meal",
+            boundedMessage: "второй прием пищи",
+          },
+        }),
+      );
+      expect(result[0]?.category).toBe("food_photo");
+      expect(result[0]?.status).toBe("ready");
+      expect(result[0]?.linkedImageRefId).toBe(attachmentId);
+    });
+
+    it("routes medical PDFs to needs_consent without running recognition", async () => {
+      const recognizeAttachment = vi.fn();
+
+      const { service, chatAttachmentsRepository } = createService({
+          chatAttachmentsRepository: createRepositoryWithStatefulAttachment(
+            createUnclassifiedQueuedAttachment({
+              id: "d1000001-0000-4000-8000-000000000001",
+              filename: "labs.pdf",
+              mimeType: "application/pdf",
+              storageKey: "local://attachments/labs.pdf",
+            }),
+          ),
+          chatAttachmentClassifierService: {
+            classify: vi.fn(() => ({
+              category: "medical_document",
+              confidence: "high",
+              rationale: "PDF upload",
+              suggestedAction: "request_medical_consent",
+              mealContextLabel: null,
+            })),
+          },
+          chatAttachmentRecognitionService: { recognizeAttachment },
+        });
+
+      const result = await service.classifyAndRecognizeAttachmentsForMessage({
+        auth,
+        userId: user.id,
+        messageContent: "here are my lab results",
+        attachments: [
+          createUnclassifiedQueuedAttachment({
+            id: "d1000001-0000-4000-8000-000000000001",
+            filename: "labs.pdf",
+            mimeType: "application/pdf",
+            storageKey: "local://attachments/labs.pdf",
+          }),
+        ],
+      });
+
+      expect(recognizeAttachment).not.toHaveBeenCalled();
+      expect(chatAttachmentsRepository.update).toHaveBeenCalledWith(
+        user.id,
+        "d1000001-0000-4000-8000-000000000001",
+        expect.objectContaining({
+          category: "medical_document",
+          status: "needs_consent",
+        }),
+      );
+      expect(result[0]?.status).toBe("needs_consent");
+      expect(result[0]?.recognition).toBeNull();
+    });
+
+    it("routes medical-signaled images to needs_consent without food recognition", async () => {
+      const recognizeAttachment = vi.fn();
+      const foodRecognize = vi.fn();
+      const classifier = new ChatAttachmentClassifierService();
+
+      const { service } = createService({
+        chatAttachmentsRepository: createRepositoryWithStatefulAttachment(
+          createUnclassifiedQueuedAttachment({
+            id: "d1000002-0000-4000-8000-000000000002",
+            filename: "scan.jpg",
+            mimeType: "image/jpeg",
+            storageKey: "local://attachments/scan.jpg",
+          }),
+        ),
+        chatAttachmentClassifierService: {
+          classify: vi.fn((input) => classifier.classify(input)),
+        },
+        chatAttachmentRecognitionService: {
+          recognizeAttachment: recognizeAttachment.mockImplementation(async (input) => {
+            if (input.category === "food_photo") {
+              await foodRecognize();
+            }
+
+            return {
+              status: "ready",
+              recognition: null,
+              failureReason: null,
+              linkedDocumentId: null,
+              expiresAt: null,
+            };
+          }),
+        },
+      });
+
+      const result = await service.classifyAndRecognizeAttachmentsForMessage({
+        auth,
+        userId: user.id,
+        messageContent: "here are my lab results",
+        attachments: [
+          createUnclassifiedQueuedAttachment({
+            id: "d1000002-0000-4000-8000-000000000002",
+            filename: "scan.jpg",
+            mimeType: "image/jpeg",
+            storageKey: "local://attachments/scan.jpg",
+          }),
+        ],
+      });
+
+      expect(recognizeAttachment).not.toHaveBeenCalled();
+      expect(foodRecognize).not.toHaveBeenCalled();
+      expect(result[0]?.category).toBe("medical_document");
+      expect(result[0]?.status).toBe("needs_consent");
+      expect(result[0]?.recognition).toBeNull();
+    });
+
+    it("routes Russian medical image signals to needs_consent without food recognition", async () => {
+      const recognizeAttachment = vi.fn();
+      const foodRecognize = vi.fn();
+      const classifier = new ChatAttachmentClassifierService();
+
+      const { service } = createService({
+        chatAttachmentsRepository: createRepositoryWithStatefulAttachment(
+          createUnclassifiedQueuedAttachment({
+            id: "d1000003-0000-4000-8000-000000000003",
+            filename: "photo.png",
+            mimeType: "image/png",
+            storageKey: "local://attachments/photo.png",
+          }),
+        ),
+        chatAttachmentClassifierService: {
+          classify: vi.fn((input) => classifier.classify(input)),
+        },
+        chatAttachmentRecognitionService: {
+          recognizeAttachment: recognizeAttachment.mockImplementation(async (input) => {
+            if (input.category === "food_photo") {
+              await foodRecognize();
+            }
+
+            return {
+              status: "ready",
+              recognition: null,
+              failureReason: null,
+              linkedDocumentId: null,
+              expiresAt: null,
+            };
+          }),
+        },
+      });
+
+      const result = await service.classifyAndRecognizeAttachmentsForMessage({
+        auth,
+        userId: user.id,
+        messageContent: "вот мои анализы",
+        attachments: [
+          createUnclassifiedQueuedAttachment({
+            id: "d1000003-0000-4000-8000-000000000003",
+            filename: "photo.png",
+            mimeType: "image/png",
+            storageKey: "local://attachments/photo.png",
+          }),
+        ],
+      });
+
+      expect(recognizeAttachment).not.toHaveBeenCalled();
+      expect(foodRecognize).not.toHaveBeenCalled();
+      expect(result[0]?.category).toBe("medical_document");
+      expect(result[0]?.status).toBe("needs_consent");
+    });
+
+    it("classifies workout attachments from activity messages and runs recognition", async () => {
+      const attachmentId = "c1000001-0000-4000-8000-000000000001";
+      const recognizeAttachment = vi.fn(async () => ({
+        status: "ready" as const,
+        recognition: {
+          category: "workout_attachment" as const,
+          attachmentRefId: attachmentId,
+          attachmentKind: "exercise_photo" as const,
+          sessionLabel: "Recognized training session",
+          sessionDate: null,
+          exercises: [{ name: "Row", target: "3 sets", sets: 3, reps: "8-10" }],
+          suggestedIntent: "log_session_context" as const,
+          planDraftTitle: null,
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_workout_attachment",
+            recognitionId: "f1000001-0000-4000-8000-000000000002",
+            confidence: "medium" as const,
+          },
+          manualFallbackNotice: "Describe the workout in text.",
+        },
+        failureReason: null,
+        linkedDocumentId: null,
+        expiresAt: null,
+      }));
+
+      const classifier = new ChatAttachmentClassifierService();
+
+      const { service, chatAttachmentRecognitionService } = createService({
+        chatAttachmentsRepository: createRepositoryWithStatefulAttachment(
+          createUnclassifiedQueuedAttachment({
+            id: attachmentId,
+            filename: "session.jpg",
+          }),
+        ),
+        chatAttachmentClassifierService: {
+          classify: vi.fn((input) => classifier.classify(input)),
+        },
+        chatAttachmentRecognitionService: { recognizeAttachment },
+      });
+
+      const result = await service.classifyAndRecognizeAttachmentsForMessage({
+        auth,
+        userId: user.id,
+        messageContent: "заполни активность",
+        attachments: [
+          createUnclassifiedQueuedAttachment({
+            id: attachmentId,
+            filename: "session.jpg",
+          }),
+        ],
+      });
+
+      expect(chatAttachmentRecognitionService.recognizeAttachment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: "workout_attachment",
+        }),
+      );
+      expect(result[0]?.category).toBe("workout_attachment");
+      if (result[0]?.recognition?.category === "workout_attachment") {
+        expect(result[0].recognition.suggestedIntent).toBe("log_session_context");
+      }
+    });
+
+    it("skips attachments that are not pending message-first send", async () => {
+      const recognizeAttachment = vi.fn();
+      const readyAttachment = {
+        ...createUnclassifiedQueuedAttachment(),
+        category: "food_photo" as const,
+        status: "ready" as const,
+        linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
+        recognition: {
+          category: "food_photo" as const,
+          attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+          analysis: { candidates: [], lowConfidenceNotice: null },
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            recognitionId: "b1000001-0000-4000-8000-000000000002",
+            confidence: "medium" as const,
+          },
+        },
+      };
+
+      const { service, chatAttachmentClassifierService } = createService({
+          chatAttachmentRecognitionService: { recognizeAttachment },
+        });
+
+      const result = await service.classifyAndRecognizeAttachmentsForMessage({
+        auth,
+        userId: user.id,
+        messageContent: "Second meal",
+        attachments: [readyAttachment],
+      });
+
+      expect(chatAttachmentClassifierService.classify).not.toHaveBeenCalled();
+      expect(recognizeAttachment).not.toHaveBeenCalled();
+      expect(result[0]).toEqual(readyAttachment);
+    });
   });
 });

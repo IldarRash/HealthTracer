@@ -3,7 +3,6 @@
 import type { WorkoutSessionExercise } from "@health/types";
 import { useEffect, useState } from "react";
 import {
-  buildExerciseExecutionUpdatePayload,
   canSubmitExerciseExecutionUpdate,
   exerciseFeedbackToFormState,
   formatExerciseFeedbackSummary,

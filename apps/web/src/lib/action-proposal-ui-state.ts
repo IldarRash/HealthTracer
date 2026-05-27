@@ -50,6 +50,7 @@ export type NutritionIncidentProposalFormState = {
   confidence: NutritionConfidenceBand;
   provenance: NutritionProvenance;
   imageRefs: LogNutritionIncidentProposalPayload["imageRefs"];
+  mealContextLabel: string | null;
   lowConfidenceNotice: string | null;
   hasUserEdited: boolean;
 };
@@ -97,6 +98,7 @@ export function createNutritionIncidentFormState(
     confidence: payload.confidence,
     provenance: payload.provenance,
     imageRefs: [...payload.imageRefs],
+    mealContextLabel: payload.mealContextLabel ?? null,
     lowConfidenceNotice: lowConfidenceNotice ?? null,
     hasUserEdited: payload.userEdits != null,
   };
@@ -166,6 +168,7 @@ export function buildNutritionIncidentAcceptPayload(
     confidence: form.confidence,
     provenance: form.provenance,
     imageRefs: form.imageRefs,
+    ...(form.mealContextLabel ? { mealContextLabel: form.mealContextLabel } : {}),
   };
 
   if (form.confidence === "low" || form.hasUserEdited) {

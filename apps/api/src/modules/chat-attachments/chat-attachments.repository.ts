@@ -101,6 +101,7 @@ export class ChatAttachmentsRepository {
       consent: ChatAttachmentConsent | null;
       recognition: ChatAttachmentRecognitionEnvelope | null;
       failureReason: string | null;
+      retentionPolicy: ChatAttachmentRetentionPolicy;
       expiresAt: Date | null;
     }>,
   ) {

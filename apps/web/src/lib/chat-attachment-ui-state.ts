@@ -12,6 +12,8 @@ import {
   getChatAttachmentMimeTypeError,
   getChatAttachmentSizeError,
   getMedicalAttachmentConsentErrors,
+  isChatAttachmentPendingMessageFirstSend,
+  isChatAttachmentSendEligibleStatus,
   SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
 } from "@health/types";
 import type { BadgeProps } from "../components/ui";
@@ -26,16 +28,22 @@ import { formatDocumentFileSize } from "./document-upload";
 export const MAX_CHAT_COMPOSER_ATTACHMENTS = 5;
 
 export const CHAT_ATTACHMENT_PRIVACY_NOTICE =
-  "Attachments are processed separately by category. Food photos, wellness documents, and training files are not mixed during recognition.";
+  "Attachments are classified when you send your message. Food photos, wellness documents, and training files are handled separately during recognition.";
 
 export const CHAT_ATTACHMENT_CATEGORY_HINT =
-  "Choose food photos, wellness documents (PDF or text), or workout and training files or photos.";
+  "Attach a photo or file, add a short message if helpful, then send. Recognition runs after send.";
+
+export const MESSAGE_FIRST_ATTACHMENT_COPY =
+  "This attachment will be classified and recognized after you send your message. Add context in your message when helpful (for example, “second meal” or “leg day”).";
+
+export const OPTIONAL_CATEGORY_CORRECTION_COPY =
+  "Optional: correct the category before send if you already know what this file is.";
 
 export const AMBIGUOUS_IMAGE_ATTACHMENT_COPY =
-  "This image could be a food photo or workout/training file. Choose Food photo or Workout/training below, then select Recognize.";
+  "This image could be a food photo or workout file. Send it with your message, or optionally pick a category below before send.";
 
 export const FOOD_OR_WORKOUT_RECOGNIZE_COPY =
-  "Choose Food photo or Workout/training, then select Recognize to send the file to the correct provider.";
+  "Optional: pick Food photo or Workout/training if you want to correct classification before send.";
 
 export const MEDICAL_ATTACHMENT_WELLNESS_NOTICE =
   "Wellness documents are used for coaching context only. They are not reviewed for medical advice or care instructions.";
@@ -91,16 +99,32 @@ export type ChatComposerAttachmentDraft = {
   consentScopes: DocumentConsentScope[];
   attachmentId: string | null;
   record: ChatAttachmentRecord | null;
-  phase: "local" | "uploading" | "needs_consent" | "recognizing" | "ready" | "error";
+  phase:
+    | "local"
+    | "uploading"
+    | "uploaded"
+    | "needs_consent"
+    | "recognizing"
+    | "ready"
+    | "error";
   error: string | null;
   proposalCandidateCount: number;
 };
 
 export function chatAttachmentCategoryLabel(category: ChatAttachmentCategory): string {
+  if (category === "unclassified") {
+    return "Attachment";
+  }
+
   return (
     CHAT_ATTACHMENT_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ??
     category
   );
+}
+
+export function isLikelyMedicalDocumentFile(file: Pick<File, "name" | "type">): boolean {
+  const mime = normalizeAttachmentMimeType(file);
+  return (SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES as readonly string[]).includes(mime);
 }
 
 export function formatChatAttachmentFileSize(bytes: number): string {
@@ -131,15 +155,7 @@ export function shouldAutoProcessChatAttachmentOnSelect(
     return false;
   }
 
-  if (isAmbiguousFoodOrWorkoutImage(draft.file)) {
-    return false;
-  }
-
-  if (draft.category === "food_photo") {
-    return false;
-  }
-
-  return draft.category === "workout_attachment";
+  return draft.category === "unclassified" || draft.category === "food_photo" || draft.category === "workout_attachment";
 }
 
 export function guessChatAttachmentCategory(file: Pick<File, "name" | "type">): ChatAttachmentCategory {
@@ -249,7 +265,9 @@ export function getMedicalAttachmentDraftErrors(
 }
 
 export function createChatComposerAttachmentDraft(file: File): ChatComposerAttachmentDraft {
-  const category = guessChatAttachmentCategory(file);
+  const category: ChatAttachmentCategory = isLikelyMedicalDocumentFile(file)
+    ? "medical_document"
+    : "unclassified";
   const mimeType = normalizeAttachmentMimeType(file);
   const previewUrl =
     mimeType.startsWith("image/") &&
@@ -296,6 +314,10 @@ export function resolveAttachmentDisplayStatus(
 
   if (draft.phase === "recognizing") {
     return "recognizing";
+  }
+
+  if (draft.phase === "uploaded") {
+    return "queued";
   }
 
   if (draft.phase === "needs_consent") {
@@ -368,24 +390,30 @@ export function isChatAttachmentSendEligible(
     return false;
   }
 
+  if (draft.phase === "local" || draft.phase === "uploading" || draft.phase === "recognizing") {
+    return false;
+  }
+
   const blocked: ChatAttachmentStatus[] = ["unsupported", "failed", "needs_consent"];
   if (blocked.includes(record.status)) {
     return false;
   }
 
-  const processing: ChatAttachmentStatus[] = ["queued", "uploading", "recognizing"];
-  if (processing.includes(record.status)) {
-    return false;
+  if (isChatAttachmentSendEligibleStatus(record.status)) {
+    return true;
   }
 
-  return true;
+  return isChatAttachmentPendingMessageFirstSend({
+    category: record.category,
+    status: record.status,
+    recognition: record.recognition,
+  });
 }
 
 export function isChatComposerAttachmentProcessing(draft: ChatComposerAttachmentDraft): boolean {
   return (
     draft.phase === "uploading" ||
     draft.phase === "recognizing" ||
-    draft.record?.status === "queued" ||
     draft.record?.status === "uploading" ||
     draft.record?.status === "recognizing"
   );
@@ -446,7 +474,11 @@ export function buildOptimisticAttachmentSummary(
 
   if (ready.length === 1) {
     const attachment = ready[0]!;
-    return `[Attachment: ${chatAttachmentCategoryLabel(attachment.category)} — ${attachment.file.name}]`;
+    const categoryLabel =
+      attachment.record?.category && attachment.record.category !== "unclassified"
+        ? chatAttachmentCategoryLabel(attachment.record.category)
+        : chatAttachmentCategoryLabel(attachment.category);
+    return `[Attachment: ${categoryLabel} — ${attachment.file.name}]`;
   }
 
   return `[${ready.length} attachments: ${ready.map((attachment) => attachment.file.name).join(", ")}]`;
@@ -498,6 +530,63 @@ export function toggleChatAttachmentConsentScope(
 }
 
 export { DOCUMENT_CONSENT_VERSION, DOCUMENT_TYPE_OPTIONS, documentTypeLabel };
+
+export type ChatAttachmentOutcomeDisplay = ChatAttachmentOutcome & {
+  mealContextLabel?: string | null;
+};
+
+export function resolveAttachmentOutcomeConfidenceLabel(
+  outcome: ChatAttachmentOutcome,
+): string | null {
+  const confidence = outcome.recognition?.provenance.confidence;
+
+  if (!confidence) {
+    return null;
+  }
+
+  switch (confidence) {
+    case "high":
+      return "High confidence";
+    case "medium":
+      return "Medium confidence";
+    case "low":
+      return "Low confidence";
+  }
+}
+
+export function enrichAttachmentOutcomesWithProposalContext(
+  outcomes: readonly ChatAttachmentOutcome[],
+  proposals: readonly { intent: string; proposedChanges: unknown }[],
+): ChatAttachmentOutcomeDisplay[] {
+  return outcomes.map((outcome) => {
+    if (outcome.category !== "food_photo") {
+      return outcome;
+    }
+
+    for (const proposal of proposals) {
+      if (proposal.intent !== "log_nutrition_incident") {
+        continue;
+      }
+
+      const payload = proposal.proposedChanges as {
+        attachmentRefId?: string;
+        mealContextLabel?: string;
+      };
+
+      if (
+        payload.attachmentRefId === outcome.attachmentRefId &&
+        payload.mealContextLabel?.trim()
+      ) {
+        return {
+          ...outcome,
+          mealContextLabel: payload.mealContextLabel.trim(),
+        };
+      }
+    }
+
+    return outcome;
+  });
+}
 
 export function resolveAttachmentOutcomeFallbackCopy(
   outcome: ChatAttachmentOutcome,

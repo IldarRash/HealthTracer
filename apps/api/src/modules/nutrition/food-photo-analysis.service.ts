@@ -104,6 +104,7 @@ export class FoodPhotoAnalysisService {
     analysis: FoodPhotoAnalysisResult;
     imageRefs: LogNutritionIncidentProposalPayload["imageRefs"];
     selectedCandidateIndex?: number;
+    mealContextLabel?: string | null;
   }): LogNutritionIncidentProposalPayload {
     const candidate =
       input.analysis.candidates[input.selectedCandidateIndex ?? 0] ??
@@ -121,6 +122,7 @@ export class FoodPhotoAnalysisService {
       confidence: candidate.confidence,
       provenance: candidate.provenance,
       imageRefs: input.imageRefs,
+      ...(input.mealContextLabel ? { mealContextLabel: input.mealContextLabel } : {}),
     });
   }
 

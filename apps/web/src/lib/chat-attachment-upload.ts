@@ -2,7 +2,6 @@ import type {
   ChatAttachmentCategory,
   CreateChatAttachmentInput,
   DocumentConsentScope,
-  DocumentType,
 } from "@health/types";
 import { readFileAsBase64 } from "./document-upload";
 import {
@@ -30,8 +29,15 @@ export async function buildChatAttachmentUploadPayload(input: {
   const mimeType = normalizeAttachmentMimeType(draft.file);
   const fileContentBase64 = await readFileAsBase64(draft.file);
 
+  const uploadCategory: ChatAttachmentCategory =
+    draft.category === "medical_document"
+      ? "medical_document"
+      : draft.category === "unclassified"
+        ? "unclassified"
+        : draft.category;
+
   const base: CreateChatAttachmentInput = {
-    category: draft.category,
+    category: uploadCategory,
     filename: draft.file.name.slice(0, 200),
     mimeType,
     fileContentBase64,

@@ -19,8 +19,11 @@ import {
   formatChatAttachmentFileSize,
   getMedicalAttachmentDraftErrors,
   isAmbiguousFoodOrWorkoutImage,
+  isLikelyMedicalDocumentFile,
   MAX_CHAT_COMPOSER_ATTACHMENTS,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
+  MESSAGE_FIRST_ATTACHMENT_COPY,
+  OPTIONAL_CATEGORY_CORRECTION_COPY,
   resolveAttachmentDisplayStatus,
   revokeChatAttachmentPreviewUrl,
   shouldAutoProcessChatAttachmentOnSelect,
@@ -42,6 +45,7 @@ type ChatComposerAttachmentsProps = {
   onAttachmentsChange: (attachments: ChatComposerAttachmentDraft[]) => void;
   onProcessDraft: (draft: ChatComposerAttachmentDraft) => void;
   onGrantConsentAndRecognize: (localId: string) => void;
+  onRecognizeDraft?: (draft: ChatComposerAttachmentDraft) => void;
 };
 
 export function ChatComposerAttachments({
@@ -50,6 +54,7 @@ export function ChatComposerAttachments({
   onAttachmentsChange,
   onProcessDraft,
   onGrantConsentAndRecognize,
+  onRecognizeDraft,
 }: ChatComposerAttachmentsProps) {
   const updateAttachment = (
     localId: string,
@@ -135,14 +140,21 @@ export function ChatComposerAttachments({
             const displayStatus = resolveAttachmentDisplayStatus(attachment);
             const medicalErrors = getMedicalAttachmentDraftErrors(attachment);
             const showMedicalFields = attachment.category === "medical_document";
-            const showFoodOrWorkoutFields =
-              attachment.category === "food_photo" ||
-              attachment.category === "workout_attachment";
+            const showMessageFirstFields =
+              !showMedicalFields &&
+              (attachment.category === "unclassified" ||
+                attachment.category === "food_photo" ||
+                attachment.category === "workout_attachment");
             const isAmbiguousImage = isAmbiguousFoodOrWorkoutImage(attachment.file);
-            const canProcessLocally =
+            const canUploadMedicalLocally =
               attachment.phase === "local" &&
               !attachment.localValidationError &&
-              medicalErrors.length === 0;
+              medicalErrors.length === 0 &&
+              showMedicalFields;
+            const canRecognizeOptional =
+              attachment.phase === "uploaded" &&
+              !attachment.localValidationError &&
+              onRecognizeDraft != null;
             const isProcessing =
               attachment.phase === "uploading" || attachment.phase === "recognizing";
             const nameId = `attachment-name-${attachment.localId}`;
@@ -189,48 +201,15 @@ export function ChatComposerAttachments({
                   </Button>
                 </div>
 
-                <div className="chat-composer-attachments__controls">
-                  <label className="form-label" htmlFor={`attachment-category-${attachment.localId}`}>
-                    Category
-                  </label>
-                  <select
-                    id={`attachment-category-${attachment.localId}`}
-                    className="form-select"
-                    value={attachment.category}
-                    disabled={disabled || isProcessing}
-                    onChange={(event) =>
-                      handleCategoryChange(
-                        attachment.localId,
-                        event.target.value as ChatAttachmentCategory,
-                      )
-                    }
-                  >
-                    {CHAT_ATTACHMENT_CATEGORY_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="form-help" id={`attachment-category-help-${attachment.localId}`}>
-                    {
-                      CHAT_ATTACHMENT_CATEGORY_OPTIONS.find(
-                        (option) => option.value === attachment.category,
-                      )?.description
-                    }
-                  </p>
-                </div>
-
                 {attachment.localValidationError ? (
                   <p className="form-error" role="alert">
                     {attachment.localValidationError}
                   </p>
                 ) : null}
 
-                {showFoodOrWorkoutFields ? (
-                  <PrivacyBoundaryNote title="Choose category before recognition">
-                    {isAmbiguousImage
-                      ? AMBIGUOUS_IMAGE_ATTACHMENT_COPY
-                      : FOOD_OR_WORKOUT_RECOGNIZE_COPY}
+                {showMessageFirstFields ? (
+                  <PrivacyBoundaryNote title="Recognized after send">
+                    {isAmbiguousImage ? AMBIGUOUS_IMAGE_ATTACHMENT_COPY : MESSAGE_FIRST_ATTACHMENT_COPY}
                   </PrivacyBoundaryNote>
                 ) : null}
 
@@ -302,13 +281,55 @@ export function ChatComposerAttachments({
                   </div>
                 ) : null}
 
+                {showMessageFirstFields && !isLikelyMedicalDocumentFile(attachment.file) ? (
+                  <details className="chat-composer-attachments__category-correction">
+                    <summary className="form-label">{OPTIONAL_CATEGORY_CORRECTION_COPY}</summary>
+                    <div className="chat-composer-attachments__controls">
+                      <label
+                        className="form-label"
+                        htmlFor={`attachment-category-${attachment.localId}`}
+                      >
+                        Category correction
+                      </label>
+                      <select
+                        id={`attachment-category-${attachment.localId}`}
+                        className="form-select"
+                        value={attachment.category === "unclassified" ? "" : attachment.category}
+                        disabled={disabled || isProcessing || attachment.phase === "uploaded"}
+                        onChange={(event) => {
+                          const value = event.target.value as ChatAttachmentCategory;
+                          if (!value) {
+                            return;
+                          }
+                          handleCategoryChange(attachment.localId, value);
+                        }}
+                      >
+                        <option value="">Auto-detect on send</option>
+                        {CHAT_ATTACHMENT_CATEGORY_OPTIONS.filter(
+                          (option) => option.value !== "medical_document",
+                        ).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p
+                        className="form-help"
+                        id={`attachment-category-help-${attachment.localId}`}
+                      >
+                        {FOOD_OR_WORKOUT_RECOGNIZE_COPY}
+                      </p>
+                    </div>
+                  </details>
+                ) : null}
+
                 {attachment.error ? (
                   <p className="form-error" role="alert">
                     {attachment.error}
                   </p>
                 ) : null}
 
-                {canProcessLocally && showMedicalFields ? (
+                {canUploadMedicalLocally ? (
                   <div className="action-row">
                     <Button
                       type="button"
@@ -316,20 +337,7 @@ export function ChatComposerAttachments({
                       disabled={disabled}
                       onClick={() => onProcessDraft(attachment)}
                     >
-                      Upload and recognize
-                    </Button>
-                  </div>
-                ) : null}
-
-                {canProcessLocally && showFoodOrWorkoutFields ? (
-                  <div className="action-row">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={disabled}
-                      onClick={() => onProcessDraft(attachment)}
-                    >
-                      Recognize
+                      Upload document
                     </Button>
                   </div>
                 ) : null}
@@ -342,7 +350,20 @@ export function ChatComposerAttachments({
                       disabled={disabled}
                       onClick={() => onGrantConsentAndRecognize(attachment.localId)}
                     >
-                      Grant consent and recognize
+                      Grant consent and retry upload
+                    </Button>
+                  </div>
+                ) : null}
+
+                {canRecognizeOptional ? (
+                  <div className="action-row">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={disabled}
+                      onClick={() => onRecognizeDraft?.(attachment)}
+                    >
+                      Preview recognition (optional)
                     </Button>
                   </div>
                 ) : null}

@@ -7,8 +7,13 @@ import type {
 import {
   containsUnsafeRecognitionSummaryLanguage,
   getChatAttachmentMimeTypeError,
+  isChatMedicalImageMimeType,
+  isPhotoBackedNutritionProposalPayload,
+  isTextEstimateNutritionProposalPayload,
+  logNutritionIncidentProposalPayloadSchema,
   sanitizeMedicalRecognitionForClient,
   workoutPlanProposalChangesSchema,
+  type LogNutritionIncidentProposalPayload,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
@@ -51,6 +56,10 @@ export class ChatAttachmentRecognitionService {
     attachment: ChatAttachmentRecord;
     category: ChatAttachmentCategory;
     storage: ChatAttachmentStorageAdapter;
+    messageContext?: {
+      boundedMessage: string;
+      mealContextLabel: string | null;
+    };
   }): Promise<{
     status: ChatAttachmentRecord["status"];
     recognition: ChatAttachmentRecognitionEnvelope | null;
@@ -59,7 +68,14 @@ export class ChatAttachmentRecognitionService {
     expiresAt: Date | null;
   }> {
     try {
-      if (input.category !== input.attachment.category) {
+      if (input.category === "unclassified") {
+        throw new Error("Unclassified attachments must be classified before recognition.");
+      }
+
+      if (
+        input.attachment.category !== "unclassified" &&
+        input.category !== input.attachment.category
+      ) {
         throw new Error("Recognition category must match stored attachment category.");
       }
 
@@ -76,6 +92,8 @@ export class ChatAttachmentRecognitionService {
         const analysis = await this.foodPhotoRecognizer.recognize({
           userId: input.userId,
           attachment: input.attachment,
+          mealContextLabel: input.messageContext?.mealContextLabel ?? null,
+          boundedMessage: input.messageContext?.boundedMessage,
         });
         const recognition = this.foodPhotoRecognizer.buildEnvelope({
           attachmentRefId: input.attachment.id,
@@ -98,6 +116,17 @@ export class ChatAttachmentRecognitionService {
             status: "needs_consent",
             recognition: null,
             failureReason: "Explicit consent is required before processing medical documents.",
+            linkedDocumentId: null,
+            expiresAt: null,
+          };
+        }
+
+        if (isChatMedicalImageMimeType(input.attachment.mimeType)) {
+          return {
+            status: "needs_review",
+            recognition: null,
+            failureReason:
+              "Medical image uploads require manual review; automated document parsing is not available for photos.",
             linkedDocumentId: null,
             expiresAt: null,
           };
@@ -147,6 +176,7 @@ export class ChatAttachmentRecognitionService {
 
       const recognition = await this.workoutAttachmentRecognizer.recognize({
         attachment: input.attachment,
+        boundedMessage: input.messageContext?.boundedMessage,
       });
       const confidence = recognition.provenance.confidence ?? "medium";
 
@@ -174,6 +204,7 @@ export class ChatAttachmentRecognitionService {
   buildProposalCandidates(input: {
     attachment: ChatAttachmentRecord;
     incidentDateTime: string;
+    mealContextLabel?: string | null;
   }): AttachmentProposalCandidate[] {
     const recognition = input.attachment.recognition;
 
@@ -182,19 +213,24 @@ export class ChatAttachmentRecognitionService {
     }
 
     if (recognition.category === "food_photo") {
+      const mealContextLabel = input.mealContextLabel ?? null;
       const payload = this.foodPhotoAnalysisService.buildProposalPayloadFromAnalysis({
         incidentDateTime: input.incidentDateTime,
         analysis: recognition.analysis,
         imageRefs: [{ id: recognition.attachmentRefId }],
+        mealContextLabel,
       });
+
+      const mealTitleSuffix = mealContextLabel ? ` (${mealContextLabel})` : "";
 
       return [
         {
           intent: "log_nutrition_incident",
           targetDomain: "nutrition",
-          title: "Log meal from photo",
-          reason:
-            "Review the analyzed meal items and quantities before logging this nutrition incident.",
+          title: `Log meal from photo${mealTitleSuffix}`,
+          reason: mealContextLabel
+            ? `Review the analyzed ${mealContextLabel.toLowerCase()} items and quantities before logging this nutrition incident.`
+            : "Review the analyzed meal items and quantities before logging this nutrition incident.",
           proposedChanges: {
             ...payload,
             attachmentRefId: recognition.attachmentRefId,
@@ -253,6 +289,58 @@ export class ChatAttachmentRecognitionService {
     const merged = [...aiProposals];
 
     for (const candidate of attachmentProposals) {
+      if (candidate.intent === "log_nutrition_incident") {
+        const attachmentPayload = logNutritionIncidentProposalPayloadSchema.safeParse(
+          candidate.proposedChanges,
+        );
+
+        if (attachmentPayload.success && isPhotoBackedNutritionProposalPayload(attachmentPayload.data)) {
+          const textEstimateIndex = merged.findIndex((proposal) => {
+            if (proposal.intent !== "log_nutrition_incident") {
+              return false;
+            }
+
+            const parsed = logNutritionIncidentProposalPayloadSchema.safeParse(
+              proposal.proposedChanges,
+            );
+
+            return parsed.success && isTextEstimateNutritionProposalPayload(parsed.data);
+          });
+
+          const attachmentProposal = {
+            intent: candidate.intent,
+            targetDomain: candidate.targetDomain,
+            title: candidate.title,
+            reason: candidate.reason,
+            proposedChanges: candidate.proposedChanges,
+          } as RawAiProposal;
+
+          if (textEstimateIndex >= 0) {
+            merged[textEstimateIndex] = attachmentProposal;
+            continue;
+          }
+
+          const duplicatePhotoIndex = merged.findIndex((proposal) => {
+            if (proposal.intent !== "log_nutrition_incident") {
+              return false;
+            }
+
+            const parsed = logNutritionIncidentProposalPayloadSchema.safeParse(
+              proposal.proposedChanges,
+            );
+
+            return (
+              parsed.success && isPhotoBackedNutritionProposalPayload(parsed.data as LogNutritionIncidentProposalPayload)
+            );
+          });
+
+          if (duplicatePhotoIndex >= 0) {
+            merged[duplicatePhotoIndex] = attachmentProposal;
+            continue;
+          }
+        }
+      }
+
       const duplicateIntent = merged.some(
         (proposal) =>
           proposal.intent === candidate.intent &&

@@ -3,7 +3,6 @@ import {
   logNutritionIncidentProposalPayloadSchema,
   nutritionAdherenceStateSchema,
   nutritionPlanPayloadSchema,
-  type LogNutritionIncidentProposalPayload,
   type NutritionAdherenceRecord,
   type NutritionAdherenceState,
   type NutritionIncidentRecord,

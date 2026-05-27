@@ -8,7 +8,7 @@ function createRecognitionService(deps: {
   foodPhotoAnalysisService?: Record<string, unknown>;
 } = {}) {
   const foodPhotoAnalysisService = {
-    buildProposalPayloadFromAnalysis: vi.fn(() => ({
+    buildProposalPayloadFromAnalysis: vi.fn((input: { mealContextLabel?: string | null }) => ({
       incidentDateTime: "2026-05-26T18:00:00.000Z",
       items: [{ name: "Salad", calories: 320 }],
       estimatedCalories: 320,
@@ -20,6 +20,7 @@ function createRecognitionService(deps: {
         analysisId: "b1000001-0000-4000-8000-000000000002",
       },
       imageRefs: [{ id: "a1000001-0000-4000-8000-000000000001" }],
+      ...(input.mealContextLabel ? { mealContextLabel: input.mealContextLabel } : {}),
     })),
     ...deps.foodPhotoAnalysisService,
   };
@@ -79,6 +80,36 @@ describe("ChatAttachmentRecognitionService", () => {
     });
   });
 
+  it("includes meal context in food photo proposal candidate title and payload", () => {
+    const service = createRecognitionService();
+
+    const candidates = service.buildProposalCandidates({
+      attachment: {
+        id: "a1000001-0000-4000-8000-000000000001",
+        recognition: {
+          category: "food_photo",
+          attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+          analysis: {
+            candidates: [],
+            lowConfidenceNotice: null,
+          },
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            recognitionId: "b1000001-0000-4000-8000-000000000002",
+          },
+        },
+      } as never,
+      incidentDateTime: "2026-05-26T18:00:00.000Z",
+      mealContextLabel: "Second meal",
+    });
+
+    expect(candidates[0]?.title).toBe("Log meal from photo (Second meal)");
+    expect(candidates[0]?.proposedChanges).toMatchObject({
+      mealContextLabel: "Second meal",
+    });
+  });
+
   it("does not emit medical document proposals before review", () => {
     const service = createRecognitionService();
 
@@ -108,6 +139,61 @@ describe("ChatAttachmentRecognitionService", () => {
     });
 
     expect(candidates).toHaveLength(0);
+  });
+
+  it("replaces text-estimate nutrition proposals with photo-backed attachment proposals", () => {
+    const service = createRecognitionService();
+
+    const merged = service.mergeAttachmentProposals(
+      [
+        {
+          intent: "log_nutrition_incident",
+          targetDomain: "nutrition",
+          title: "Log nutrition incident",
+          reason: "Text estimate",
+          proposedChanges: {
+            incidentDateTime: "2026-05-26T18:00:00.000Z",
+            items: [{ name: "Mixed meal estimate" }],
+            estimatedCalories: 650,
+            estimatedMacros: { proteinGrams: 25, carbsGrams: 70, fatGrams: 28 },
+            confidence: "medium",
+            provenance: { source: "text_estimate", providerId: "chat_trigger" },
+            imageRefs: [],
+          },
+        },
+      ],
+      [
+        {
+          intent: "log_nutrition_incident",
+          targetDomain: "nutrition",
+          title: "Log meal from photo (Second meal)",
+          reason: "Photo-backed estimate",
+          proposedChanges: {
+            incidentDateTime: "2026-05-26T18:00:00.000Z",
+            items: [{ name: "Salad", calories: 320 }],
+            estimatedCalories: 320,
+            estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
+            confidence: "medium",
+            provenance: {
+              source: "dev_stub",
+              providerId: "dev_food_photo",
+              analysisId: "b1000001-0000-4000-8000-000000000002",
+            },
+            imageRefs: [{ id: "a1000001-0000-4000-8000-000000000001" }],
+            attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+            mealContextLabel: "Second meal",
+          },
+          attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+        },
+      ],
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.title).toMatch(/photo/i);
+    expect(merged[0]?.proposedChanges).toMatchObject({
+      attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+      mealContextLabel: "Second meal",
+    });
   });
 
   it("merges attachment proposals without replacing AI proposals", () => {
@@ -191,6 +277,42 @@ describe("ChatAttachmentRecognitionService", () => {
     });
 
     expect(outcome.status).toBe("low_confidence");
+  });
+
+  it("skips medical image OCR and returns needs_review with safe copy", async () => {
+    const medicalRecognize = vi.fn(async () => {
+      throw new Error("Medical recognizer should not run for image uploads.");
+    });
+
+    const service = createRecognitionService({
+      medicalDocumentRecognizer: {
+        recognize: medicalRecognize,
+      },
+    });
+
+    const outcome = await service.recognizeAttachment({
+      auth: { clerkUserId: "user_123" } as never,
+      userId: "user-id",
+      attachment: {
+        id: "d1000001-0000-4000-8000-000000000001",
+        category: "medical_document",
+        mimeType: "image/jpeg",
+        consent: {
+          consentScopes: ["upload_storage", "parse_ocr"],
+          consentVersion: "v1",
+          consentGrantedAt: "2026-05-26T12:00:00.000Z",
+          documentType: "lab_report",
+          documentTitle: "Labs",
+        },
+      } as never,
+      category: "medical_document",
+      storage: {} as never,
+    });
+
+    expect(outcome.status).toBe("needs_review");
+    expect(outcome.recognition).toBeNull();
+    expect(outcome.failureReason).toMatch(/manual review/i);
+    expect(medicalRecognize).not.toHaveBeenCalled();
   });
 
   it("requires consent before medical document recognition", async () => {

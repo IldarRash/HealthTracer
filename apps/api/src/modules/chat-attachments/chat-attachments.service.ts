@@ -1,6 +1,7 @@
 import type {
   ChatAttachmentRecord,
   ChatAttachmentRecognitionResponse,
+  ClassifiedChatAttachmentCategory,
   CreateChatAttachmentInput,
   GrantChatAttachmentConsentInput,
   RecognizeChatAttachmentInput,
@@ -12,6 +13,9 @@ import {
   getChatAttachmentSizeError,
   getMedicalAttachmentConsentErrors,
   isChatAttachmentExpired,
+  inferMealContextFromMessage,
+  isChatAttachmentPendingMessageFirstSend,
+  isUnclassifiedChatAttachmentCategory,
 } from "@health/types";
 import {
   BadRequestException,
@@ -24,6 +28,7 @@ import { env } from "../../env.js";
 import { ChatRepository } from "../chat/chat.repository.js";
 import { UsersService } from "../users/users.service.js";
 import { toChatAttachmentRecord, toOwnedChatAttachmentRef } from "./chat-attachment.mapper.js";
+import { ChatAttachmentClassifierService } from "./chat-attachment-classifier.service.js";
 import { ChatAttachmentRecognitionService } from "./chat-attachment-recognition.service.js";
 import { ChatAttachmentsRepository } from "./chat-attachments.repository.js";
 import { buildMedicalAttachmentConsent } from "./medical-document-attachment-recognizer.js";
@@ -40,6 +45,7 @@ export class ChatAttachmentsService {
     private readonly chatAttachmentsRepository: ChatAttachmentsRepository,
     private readonly chatRepository: ChatRepository,
     private readonly chatAttachmentRecognitionService: ChatAttachmentRecognitionService,
+    private readonly chatAttachmentClassifierService: ChatAttachmentClassifierService,
     private readonly usersService: UsersService,
   ) {
     const storageRoot = resolve(process.cwd(), env.CHAT_ATTACHMENT_STORAGE_PATH);
@@ -51,23 +57,21 @@ export class ChatAttachmentsService {
     input: CreateChatAttachmentInput,
   ): Promise<ChatAttachmentRecord> {
     const user = await this.usersService.resolveFromAuth(auth);
-    const mimeError = getChatAttachmentMimeTypeError(input.category, input.mimeType);
+    const category = input.category ?? "unclassified";
+    const mimeError = getChatAttachmentMimeTypeError(category, input.mimeType);
 
     if (mimeError) {
       throw new BadRequestException(mimeError);
     }
 
     const content = decodeAttachmentContent(input.fileContentBase64);
-    const sizeError = getChatAttachmentSizeError(input.category, content.byteLength);
+    const sizeError = getChatAttachmentSizeError(category, content.byteLength);
 
     if (sizeError) {
       throw new BadRequestException(sizeError);
     }
 
-    const consentErrors = getMedicalAttachmentConsentErrors(
-      input.category,
-      input.consentScopes,
-    );
+    const consentErrors = getMedicalAttachmentConsentErrors(category, input.consentScopes);
 
     if (consentErrors.length > 0) {
       throw new BadRequestException(consentErrors.join(" "));
@@ -90,15 +94,13 @@ export class ChatAttachmentsService {
     );
 
     const initialStatus =
-      input.category === "medical_document" && !input.consentScopes
-        ? "needs_consent"
-        : "queued";
+      category === "medical_document" && !input.consentScopes ? "needs_consent" : "queued";
 
     const consent =
-      input.category === "medical_document" && input.consentScopes
+      category === "medical_document" && input.consentScopes
         ? buildMedicalAttachmentConsent({
             consentScopes: input.consentScopes,
-            consentVersion: input.consentVersion,
+            consentVersion: input.consentVersion ?? "v1",
             documentType: input.documentType!,
             documentTitle: input.documentTitle!,
           })
@@ -108,15 +110,15 @@ export class ChatAttachmentsService {
       id: attachmentId,
       userId: user.id,
       threadId: input.threadId ?? null,
-      category: input.category,
+      category,
       status: initialStatus,
       filename: input.filename,
       mimeType: input.mimeType,
       fileSizeBytes: content.byteLength,
       storageKey,
-      linkedImageRefId: input.category === "food_photo" ? attachmentId : null,
+      linkedImageRefId: category === "food_photo" ? attachmentId : null,
       consent,
-      retentionPolicy: getChatAttachmentRetentionPolicy(input.category),
+      retentionPolicy: getChatAttachmentRetentionPolicy(category),
     });
 
     return toChatAttachmentRecord(row);
@@ -296,6 +298,121 @@ export class ChatAttachmentsService {
     }
 
     return records;
+  }
+
+  async classifyAndRecognizeAttachmentsForMessage(input: {
+    auth: ClerkAuthContext;
+    userId: string;
+    messageContent: string;
+    attachments: readonly ChatAttachmentRecord[];
+  }): Promise<ChatAttachmentRecord[]> {
+    const processed: ChatAttachmentRecord[] = [];
+
+    for (const attachment of input.attachments) {
+      if (
+        !isChatAttachmentPendingMessageFirstSend({
+          category: attachment.category,
+          status: attachment.status,
+          recognition: attachment.recognition,
+        })
+      ) {
+        processed.push(attachment);
+        continue;
+      }
+
+      const classification = this.chatAttachmentClassifierService.classify({
+        message: input.messageContent,
+        attachment,
+      });
+
+      const classifiedCategory = (
+        isUnclassifiedChatAttachmentCategory(attachment.category)
+          ? classification.category
+          : attachment.category
+      ) as ClassifiedChatAttachmentCategory;
+
+      const mealContextLabel =
+        classification.mealContextLabel ?? inferMealContextFromMessage(input.messageContent);
+
+      const consent = attachment.consent;
+      let linkedImageRefId = attachment.linkedImageRefId;
+      const retentionPolicy = getChatAttachmentRetentionPolicy(classifiedCategory);
+
+      if (classifiedCategory === "food_photo") {
+        linkedImageRefId = attachment.id;
+      }
+
+      if (classifiedCategory === "medical_document" && !consent) {
+        await this.chatAttachmentsRepository.update(input.userId, attachment.id, {
+          category: classifiedCategory,
+          status: "needs_consent",
+          linkedImageRefId,
+          retentionPolicy,
+          failureReason:
+            "Explicit consent is required before processing medical documents in chat.",
+        });
+
+        const row = await this.chatAttachmentsRepository.findByIdForUser(
+          input.userId,
+          attachment.id,
+        );
+
+        if (row) {
+          processed.push(toChatAttachmentRecord(row));
+        }
+
+        continue;
+      }
+
+      await this.chatAttachmentsRepository.update(input.userId, attachment.id, {
+        category: classifiedCategory,
+        status: "recognizing",
+        linkedImageRefId,
+        retentionPolicy,
+        failureReason: null,
+      });
+
+      const refreshed = await this.chatAttachmentsRepository.findByIdForUser(
+        input.userId,
+        attachment.id,
+      );
+
+      if (!refreshed) {
+        continue;
+      }
+
+      const attachmentForRecognition = toChatAttachmentRecord(refreshed);
+
+      const outcome = await this.chatAttachmentRecognitionService.recognizeAttachment({
+        auth: input.auth,
+        userId: input.userId,
+        attachment: attachmentForRecognition,
+        category: classifiedCategory,
+        storage: this.storage,
+        messageContext: {
+          mealContextLabel,
+          boundedMessage: input.messageContent.trim().slice(0, 500),
+        },
+      });
+
+      const updated = await this.chatAttachmentsRepository.update(input.userId, attachment.id, {
+        category: classifiedCategory,
+        status: outcome.status,
+        recognition: outcome.recognition,
+        failureReason: outcome.failureReason,
+        linkedDocumentId: outcome.linkedDocumentId,
+        linkedImageRefId:
+          classifiedCategory === "food_photo" ? attachment.id : linkedImageRefId,
+        expiresAt: outcome.expiresAt,
+        retentionPolicy: getChatAttachmentRetentionPolicy(classifiedCategory),
+      });
+
+      if (updated) {
+        processed.push(toChatAttachmentRecord(updated));
+      }
+    }
+
+    return processed;
   }
 
   async linkAttachmentsToMessage(

@@ -13,6 +13,7 @@ import { healthDocuments } from "./documents.js";
 import { users } from "./users.js";
 
 export const chatAttachmentCategoryEnum = pgEnum("chat_attachment_category", [
+  "unclassified",
   "food_photo",
   "medical_document",
   "workout_attachment",

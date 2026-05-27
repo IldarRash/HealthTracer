@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import type { AiProposal, ChatAttachmentOutcome, ProposalModifyResponse } from "@health/types";
+import type { AiProposal, ProposalModifyResponse } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
@@ -18,8 +18,10 @@ import {
 import {
   buildOptimisticAttachmentSummary,
   canSendChatComposer,
+  enrichAttachmentOutcomesWithProposalContext,
   isChatAttachmentSendEligible,
   revokeChatAttachmentPreviewUrl,
+  type ChatAttachmentOutcomeDisplay,
   type ChatComposerAttachmentDraft,
 } from "../../lib/chat-attachment-ui-state";
 import {
@@ -87,7 +89,7 @@ export function ChatWorkspace() {
     [],
   );
   const [attachmentOutcomesByMessageId, setAttachmentOutcomesByMessageId] = useState<
-    Record<string, ChatAttachmentOutcome[]>
+    Record<string, ChatAttachmentOutcomeDisplay[]>
   >({});
 
   const threadsQuery = useQuery({
@@ -262,31 +264,8 @@ export function ChatWorkspace() {
           ...current,
           attachmentId: uploadResult.data!.id,
           record: uploadResult.data!,
-          phase: "recognizing",
-        }));
-
-        const recognizeResult = await recognizeChatAttachment(token, uploadResult.data.id, {
-          consentScopes: resolveRecognizeConsentScopes(
-            draftInput.category,
-            draftInput.consentScopes,
-          ),
-          consentVersion: DOCUMENT_CONSENT_VERSION,
-        });
-
-        if (recognizeResult.error || !recognizeResult.data) {
-          updateComposerAttachment(draftInput.localId, (current) => ({
-            ...current,
-            phase: "error",
-            error: recognizeResult.error ?? "Attachment could not be recognized.",
-          }));
-          return;
-        }
-
-        updateComposerAttachment(draftInput.localId, (current) => ({
-          ...current,
-          record: recognizeResult.data!.attachment,
-          phase: "ready",
-          proposalCandidateCount: recognizeResult.data!.proposalCandidates.length,
+          phase: "uploaded",
+          error: null,
         }));
       } catch (error) {
         updateComposerAttachment(draftInput.localId, (current) => ({
@@ -299,7 +278,7 @@ export function ChatWorkspace() {
     [getToken, primaryThreadId, updateComposerAttachment],
   );
 
-  const grantConsentAndRecognize = useCallback(
+  const grantConsentAndRetry = useCallback(
     async (localId: string) => {
       const draft = composerAttachments.find((attachment) => attachment.localId === localId);
       if (!draft) {
@@ -313,6 +292,55 @@ export function ChatWorkspace() {
 
       updateComposerAttachment(localId, (current) => ({
         ...current,
+        phase: "uploading",
+        error: null,
+      }));
+
+      try {
+        const token = await getToken();
+        if (!token) {
+          throw new Error("Clerk session token is unavailable.");
+        }
+
+        const consentResult = await grantChatAttachmentConsent(token, draft.attachmentId, {
+          consentScopes: [...draft.consentScopes],
+          consentVersion: DOCUMENT_CONSENT_VERSION,
+        });
+
+        if (consentResult.error || !consentResult.data) {
+          updateComposerAttachment(localId, (current) => ({
+            ...current,
+            phase: "needs_consent",
+            error: consentResult.error ?? "Consent could not be recorded.",
+          }));
+          return;
+        }
+
+        updateComposerAttachment(localId, (current) => ({
+          ...current,
+          record: consentResult.data!,
+          phase: "uploaded",
+          error: null,
+        }));
+      } catch (error) {
+        updateComposerAttachment(localId, (current) => ({
+          ...current,
+          phase: "needs_consent",
+          error: error instanceof Error ? error.message : "Consent could not be recorded.",
+        }));
+      }
+    },
+    [composerAttachments, getToken, processAttachmentDraft, updateComposerAttachment],
+  );
+
+  const recognizeAttachmentDraft = useCallback(
+    async (draftInput: ChatComposerAttachmentDraft) => {
+      if (!draftInput.attachmentId) {
+        return;
+      }
+
+      updateComposerAttachment(draftInput.localId, (current) => ({
+        ...current,
         phase: "recognizing",
         error: null,
       }));
@@ -323,40 +351,38 @@ export function ChatWorkspace() {
           throw new Error("Clerk session token is unavailable.");
         }
 
-        await grantChatAttachmentConsent(token, draft.attachmentId, {
-          consentScopes: [...draft.consentScopes],
-          consentVersion: DOCUMENT_CONSENT_VERSION,
-        });
-
-        const recognizeResult = await recognizeChatAttachment(token, draft.attachmentId, {
-          consentScopes: [...draft.consentScopes],
+        const recognizeResult = await recognizeChatAttachment(token, draftInput.attachmentId, {
+          consentScopes: resolveRecognizeConsentScopes(
+            draftInput.category,
+            draftInput.consentScopes,
+          ),
           consentVersion: DOCUMENT_CONSENT_VERSION,
         });
 
         if (recognizeResult.error || !recognizeResult.data) {
-          updateComposerAttachment(localId, (current) => ({
+          updateComposerAttachment(draftInput.localId, (current) => ({
             ...current,
-            phase: "error",
+            phase: "uploaded",
             error: recognizeResult.error ?? "Attachment could not be recognized.",
           }));
           return;
         }
 
-        updateComposerAttachment(localId, (current) => ({
+        updateComposerAttachment(draftInput.localId, (current) => ({
           ...current,
           record: recognizeResult.data!.attachment,
           phase: "ready",
           proposalCandidateCount: recognizeResult.data!.proposalCandidates.length,
         }));
       } catch (error) {
-        updateComposerAttachment(localId, (current) => ({
+        updateComposerAttachment(draftInput.localId, (current) => ({
           ...current,
-          phase: "error",
-          error: error instanceof Error ? error.message : "Consent or recognition failed.",
+          phase: "uploaded",
+          error: error instanceof Error ? error.message : "Attachment recognition failed.",
         }));
       }
     },
-    [composerAttachments, getToken, processAttachmentDraft, updateComposerAttachment],
+    [getToken, updateComposerAttachment],
   );
 
   const sendMessageMutation = useMutation({
@@ -421,7 +447,10 @@ export function ChatWorkspace() {
       if (turn.attachmentOutcomes?.length) {
         setAttachmentOutcomesByMessageId((current) => ({
           ...current,
-          [turn.assistantMessage.id]: turn.attachmentOutcomes ?? [],
+          [turn.assistantMessage.id]: enrichAttachmentOutcomesWithProposalContext(
+            turn.attachmentOutcomes ?? [],
+            turn.proposals,
+          ),
         }));
       }
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
@@ -689,7 +718,10 @@ export function ChatWorkspace() {
                   void processAttachmentDraft(draft);
                 }}
                 onGrantConsentAndRecognize={(localId) => {
-                  void grantConsentAndRecognize(localId);
+                  void grantConsentAndRetry(localId);
+                }}
+                onRecognizeDraft={(draft) => {
+                  void recognizeAttachmentDraft(draft);
                 }}
               />
               <label className="sr-only" htmlFor="chat-message">
