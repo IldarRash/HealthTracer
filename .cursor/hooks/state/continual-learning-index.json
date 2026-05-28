@@ -1,0 +1,19 @@
+{
+  "processedAt": "2026-05-27T20:19:00.000Z",
+  "processedTranscripts": {
+    "70a3b808-4832-4ada-8c7b-7bbcdcad9e3f/70a3b808-4832-4ada-8c7b-7bbcdcad9e3f.jsonl": "AI-First Intent Routing implementation",
+    "70a3b808-4832-4ada-8c7b-7bbcdcad9e3f/subagents/8f55b941-1f7f-4492-9f8e-8f0a2bd5bdf0.jsonl": "AI-First Intent Routing verification",
+    "70a3b808-4832-4ada-8c7b-7bbcdcad9e3f/subagents/0f02825f-fd24-448e-9b19-06e753b0c5ac.jsonl": "AI-First Intent Routing memory update",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/4e755887-02e2-4037-bcfe-ebd45b610d1d.jsonl": "Capability pipeline phases implementation",
+    "777971d4-c60f-4957-b809-866490755e7b/777971d4-c60f-4957-b809-866490755e7b.jsonl": "Phase 5 context contracts",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/86f8605d-8785-4a8c-87af-fe8606987430.jsonl": "Phase 5 regression matrix",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/2e671d5e-fa12-4b40-b2ad-98fca6be39c1.jsonl": "Phase 5 runtime verification",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/576305b8-51e4-4589-a196-e4fc3d2431ac.jsonl": "Phase 5 typecheck fix",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/7e19a421-6215-49a6-b8c0-dc407f52657d.jsonl": "Capability phases memory update",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/663c2a88-1b8d-4e5b-87b1-e0dc541caaff.jsonl": "Repo-backed AI behavior runtime check",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/e0e1aa8d-56d1-41f9-9446-f33f92b1eecd.jsonl": "AI behavior config DI fix",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/1c489233-ceb3-416c-ab09-aa5cc6a3c233.jsonl": "Context compression DI fix",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/7651adce-1a13-41c8-9ec3-e445f64a1064.jsonl": "Repo-backed AI behavior verification",
+    "4e755887-02e2-4037-bcfe-ebd45b610d1d/subagents/06a6b16e-3e3c-4932-8451-d26957838cb6.jsonl": "Repo-backed AI behavior memory update"
+  }
+}

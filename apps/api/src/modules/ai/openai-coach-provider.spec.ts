@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { compilePromptTemplates } from "@health/types";
 import {
   createOpenAiCoachProvider,
   OpenAiCoachProviderMissingKeyError,
@@ -26,6 +27,7 @@ describe("OpenAiCoachProvider", () => {
           {
             message: {
               content: JSON.stringify({
+                kind: "final_answer",
                 reply: "Вот безопасный план питания как обычный ответ.",
                 proposals: [
                   {
@@ -71,7 +73,7 @@ describe("OpenAiCoachProvider", () => {
           {
             message: {
               content: JSON.stringify({
-                intent: "adjust_workout",
+                catalogIntentId: "adjust_workout",
                 confidence: 0.86,
                 routingMethod: "llm_router",
                 requiredContextSlices: [
@@ -106,7 +108,7 @@ describe("OpenAiCoachProvider", () => {
           {
             message: {
               content: JSON.stringify({
-                intent: "adjust_nutrition",
+                catalogIntentId: "adjust_nutrition",
                 confidence: 0.84,
                 routingMethod: "llm_router",
                 requiredContextSlices: [
@@ -130,12 +132,45 @@ describe("OpenAiCoachProvider", () => {
     });
 
     expect(route.routingMethod).toBe("llm_router");
-    expect(route.intent).toBe("adjust_nutrition");
+    expect(route.catalogIntentId).toBe("adjust_nutrition");
     expect(route.requiredContextSlices).toHaveLength(3);
     expect(route.requiredContextSlices[0]?.type).toBe("nutrition_adaptation");
     expect(route.requiredContextSlices[0]?.depth).toBe("medium");
     expect(route).not.toHaveProperty("reply");
     expect(route).not.toHaveProperty("proposals");
+  });
+
+  it("rejects attachment-family catalog ids from llm router output", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                catalogIntentId: "attachment_food_photo",
+                confidence: 0.95,
+                routingMethod: "llm_router",
+                requiredContextSlices: [
+                  { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
+                ],
+                safetyFlags: [],
+                expectedResponseMode: "recommendation_with_optional_proposal",
+              }),
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    const provider = createOpenAiCoachProvider("test-key", "gpt-4o-mini");
+
+    await expect(
+      provider.generateIntentRoute({
+        userMessage: "What is in this meal photo?",
+        recentMessages: [],
+      }),
+    ).rejects.toThrow(/Invalid enum value|Invalid option/);
   });
 
   it("rejects llm router output that exceeds the max context slice count", async () => {
@@ -146,7 +181,7 @@ describe("OpenAiCoachProvider", () => {
           {
             message: {
               content: JSON.stringify({
-                intent: "adjust_nutrition",
+                catalogIntentId: "adjust_nutrition",
                 confidence: 0.84,
                 routingMethod: "llm_router",
                 requiredContextSlices: [
@@ -174,6 +209,53 @@ describe("OpenAiCoachProvider", () => {
     ).rejects.toThrow(/Too big: expected array to have <=3 items/);
   });
 
+  it("renders repo-backed prompt template overrides", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                catalogIntentId: "general",
+                confidence: 0.8,
+                routingMethod: "llm_router",
+                requiredContextSlices: [
+                  { type: "general_chat", depth: "medium", timeRange: "14d" },
+                ],
+                safetyFlags: [],
+                expectedResponseMode: "advice_only",
+              }),
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    const provider = createOpenAiCoachProvider(
+      "test-key",
+      "gpt-4o-mini",
+      compilePromptTemplates({
+        templates: {
+          openai_intent_router: {
+            templateKey: "openai_intent_router",
+            body: "Custom router {{intentCatalogJson}}",
+            placeholders: ["intentCatalogJson"],
+          },
+        },
+      }),
+    );
+
+    await provider.generateIntentRoute({
+      userMessage: "hello",
+      recentMessages: [],
+    });
+
+    const requestBody = JSON.parse(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body));
+    expect(requestBody.messages[0].content).toMatch(/^Custom router /);
+    expect(requestBody.messages[0].content).toContain('"id":"general"');
+  });
+
   it("returns user-facing coaching text only from generateCoachResponse", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
@@ -182,6 +264,7 @@ describe("OpenAiCoachProvider", () => {
           {
             message: {
               content: JSON.stringify({
+                kind: "final_answer",
                 reply: "I recommend a lighter recovery session you can review first.",
                 proposals: [],
               }),

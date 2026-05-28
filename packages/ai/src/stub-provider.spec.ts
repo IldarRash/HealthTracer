@@ -24,7 +24,7 @@ describe("StubCoachAiProvider", () => {
       recentMessages: [],
     });
 
-    expect(route.intent).toBe("adjust_nutrition");
+    expect(route.catalogIntentId).toBe("adjust_nutrition");
     expect(route.requiredContextSlices.map((slice) => slice.type)).toEqual(
       expect.arrayContaining(["nutrition_adaptation", "weekly_review"]),
     );

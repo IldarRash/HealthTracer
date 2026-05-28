@@ -15,7 +15,9 @@ import {
   grantChatAttachmentConsentSchema,
   createChatAttachmentSchema,
   isChatAttachmentExpired,
+  isChatAttachmentImageMimeType,
   isChatAttachmentSendEligibleStatus,
+  parseChatMessageAttachmentRefIds,
   recognizeChatAttachmentSchema,
   sanitizeMedicalRecognitionForClient,
   sendChatMessageSchema,
@@ -152,6 +154,20 @@ describe("chat attachment contracts", () => {
     const parsed = sendChatMessageSchema.safeParse({ content: "" });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it("parses attachment ref ids from chat message metadata", () => {
+    expect(
+      parseChatMessageAttachmentRefIds({
+        attachmentRefIds: ["a1000001-0000-4000-8000-000000000001"],
+      }),
+    ).toEqual(["a1000001-0000-4000-8000-000000000001"]);
+    expect(parseChatMessageAttachmentRefIds({})).toEqual([]);
+  });
+
+  it("detects image mime types for transcript previews", () => {
+    expect(isChatAttachmentImageMimeType("image/jpeg")).toBe(true);
+    expect(isChatAttachmentImageMimeType("application/pdf")).toBe(false);
   });
 
   it("maps retention policies per attachment category", () => {
@@ -354,6 +370,9 @@ describe("chat attachment contracts", () => {
     expect(
       grantChatAttachmentConsentSchema.safeParse({
         consentScopes: ["upload_storage"],
+        documentType: "lab_report",
+        documentTitle: "Labs",
+        fileContentBase64: "dGVzdA==",
       }).success,
     ).toBe(true);
 

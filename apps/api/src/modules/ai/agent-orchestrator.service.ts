@@ -1,33 +1,57 @@
 import {
-  parseAiStructuredOutput,
+  coerceAgentLoopFinalAnswer,
+  parseAgentLoopOutput,
   validateReplySafety,
+  type CoachAiLoopRequest,
   type CoachAiProvider,
 } from "@health/ai";
 import type {
   AgentContextPacket,
+  AgentToolCallResult,
   AgentToolName,
+  AgentTurnCapabilityPresentation,
   AgentTurnMetadata,
   AiStructuredOutput,
+  ChatAttachmentCategory,
   IntentRouteResult,
+  ProposalExplainerTurnContext,
   RawAiProposal,
+  ResolvedCapabilityPresentationMetadata,
 } from "@health/types";
-import {
-  llmIntentRouterOutputSchema,
-  mergeLlmRouterOutputIntoRoute,
-  validateLlmRouterOutputShape,
-  buildContextSliceRequestForIntent,
-  INTENT_TO_SLICE_PURPOSE,
-} from "@health/types";
+import { MAX_AGENT_LOOP_ITERATIONS } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { mapContextSourceRefsToAgentCitations } from "../coaching-context/agent-prompt-context.js";
 import { CoachingContextService } from "../coaching-context/coaching-context.service.js";
+import { ContextCompressionService } from "../coaching-context/context-compression.service.js";
+import { ContextExpansionPolicyService } from "../coaching-context/context-expansion-policy.service.js";
+import { ActionResolverService } from "./action-resolver.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
+import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
+import type { CoachIntentDefinitionMetadata } from "./capability-intent-definition.adapter.js";
 import { createCoachAiProvider, resolveAiCoachProviderMode } from "./coach-provider.factory.js";
-import { routeAgentIntent } from "./intent-router.js";
+import { SystemPlannerService } from "./system-planner.service.js";
 
 const SAFE_FALLBACK_REPLY =
   "I could not safely process that response. Please try again with a wellness-focused question.";
+
+export interface AttachmentPreparedProposalSummary {
+  intent: string;
+  targetDomain: string;
+  title: string;
+}
+
+export interface AttachmentTurnContextItem {
+  attachmentRefId: string;
+  category: ChatAttachmentCategory;
+  status: string;
+  recognition?: unknown;
+}
+
+export interface AttachmentTurnContext {
+  attachments: ReadonlyArray<AttachmentTurnContextItem>;
+  preparedProposals?: ReadonlyArray<AttachmentPreparedProposalSummary>;
+}
 
 export interface ProposalRevisionContext {
   supersededProposalId: string;
@@ -43,6 +67,8 @@ export interface OrchestrateCoachTurnInput {
     content: string;
   }>;
   proposalRevision?: ProposalRevisionContext;
+  proposalExplainer?: ProposalExplainerTurnContext;
+  attachmentTurn?: AttachmentTurnContext;
 }
 
 export interface OrchestratedCoachTurnResult {
@@ -58,9 +84,16 @@ export class AgentOrchestratorService {
 
   constructor(
     private readonly coachingContextService: CoachingContextService,
+    private readonly contextCompressionService: ContextCompressionService,
+    private readonly contextExpansionPolicyService: ContextExpansionPolicyService,
     private readonly agentToolRegistryService: AgentToolRegistryService,
+    private readonly systemPlannerService: SystemPlannerService,
+    private readonly actionResolverService: ActionResolverService,
+    private readonly aiBehaviorConfigService: AiBehaviorConfigService,
   ) {
-    this.provider = createCoachAiProvider();
+    this.provider = createCoachAiProvider(
+      this.aiBehaviorConfigService.getCompiledPromptTemplates(),
+    );
   }
 
   getProviderMode() {
@@ -70,8 +103,17 @@ export class AgentOrchestratorService {
   async orchestrateCoachTurn(
     input: OrchestrateCoachTurnInput,
   ): Promise<OrchestratedCoachTurnResult> {
-    const route = await this.resolveRoute(input);
-    const toolsInvoked: AgentToolName[] = [];
+    const plan = await this.systemPlannerService.planTurn(
+      {
+        userMessage: input.userMessage,
+        recentMessages: input.recentMessages,
+        proposalRevision: input.proposalRevision,
+        attachmentTurn: input.attachmentTurn,
+      },
+      this.provider,
+    );
+    const { route, intentDefinition, presentationMetadata } = plan;
+    const capabilityTurnMetadata = toAgentTurnCapabilityPresentation(presentationMetadata);
 
     const contextPacket = await this.coachingContextService.buildAgentContext(
       input.auth,
@@ -84,31 +126,57 @@ export class AgentOrchestratorService {
         includeDocuments: route.includeDocuments,
       },
       route,
+      { contextBudget: plan.contextBudget },
     );
 
-    if (route.includeDocuments || contextPacket.slice.documentContext) {
-      const documentTool = await this.agentToolRegistryService.executeTool(input.auth, {
-        tool: "getDocumentContext",
-        input: {},
-      });
-
-      if (documentTool.ok) {
-        toolsInvoked.push("getDocumentContext");
-      }
-    }
-
-    if (route.intent === "review_progress") {
-      const weeklyTool = await this.agentToolRegistryService.executeTool(input.auth, {
-        tool: "getWeeklyProgressContext",
-        input: {},
-      });
-
-      if (weeklyTool.ok) {
-        toolsInvoked.push("getWeeklyProgressContext");
-      }
-    }
-
     const coachingContext = this.coachingContextService.toAgentPromptContext(contextPacket);
+    const expansionPolicy = this.contextExpansionPolicyService.createPolicySnapshot(
+      plan.contextBudget,
+    );
+
+    if (plan.requiresCompression) {
+      const compression = await this.contextCompressionService.compressForTurn({
+        packet: contextPacket,
+        reviewSignals: plan,
+        budget: plan.contextBudget,
+      });
+
+      if (compression.summary) {
+        coachingContext.contextCompressionSummary = compression.summary;
+      }
+
+      if (compression.notes.length > 0) {
+        coachingContext.contextCompressionNotes = compression.notes;
+      }
+
+      const agentContext = coachingContext.agentContext;
+
+      if (agentContext && typeof agentContext === "object") {
+        (agentContext as Record<string, unknown>).contextCompressionApplied =
+          compression.summary != null;
+        (agentContext as Record<string, unknown>).expansionPolicy = expansionPolicy;
+      }
+    } else {
+      const agentContext = coachingContext.agentContext;
+
+      if (agentContext && typeof agentContext === "object") {
+        (agentContext as Record<string, unknown>).expansionPolicy = expansionPolicy;
+      }
+    }
+
+    if (input.attachmentTurn?.attachments.length) {
+      coachingContext.attachmentTurn = {
+        attachments: input.attachmentTurn.attachments.map((attachment) => ({
+          attachmentRefId: attachment.attachmentRefId,
+          category: attachment.category,
+          status: attachment.status,
+          recognition: attachment.recognition,
+        })),
+        ...(input.attachmentTurn.preparedProposals?.length
+          ? { preparedProposals: [...input.attachmentTurn.preparedProposals] }
+          : {}),
+      };
+    }
 
     if (input.proposalRevision) {
       coachingContext.proposalRevision = {
@@ -118,198 +186,247 @@ export class AgentOrchestratorService {
       };
     }
 
-    return this.invokeProvider(
+    if (input.proposalExplainer) {
+      coachingContext.proposalExplainer = input.proposalExplainer;
+    }
+
+    return this.runAgentLoop(
       input,
       contextPacket,
       coachingContext,
       route,
-      toolsInvoked,
+      intentDefinition,
+      capabilityTurnMetadata,
     );
   }
 
-  private async resolveRoute(input: OrchestrateCoachTurnInput): Promise<IntentRouteResult> {
-    if (input.proposalRevision) {
-      const original = input.proposalRevision.originalProposal;
-      const mappedIntent =
-        original.intent === "create_workout_plan" ||
-        original.intent === "adapt_workout_plan" ||
-        original.intent === "adapt_workout_plan_from_progress"
-          ? "adjust_workout"
-          : original.intent === "create_nutrition_plan" ||
-              original.intent === "adjust_nutrition_plan"
-            ? "adjust_nutrition"
-            : original.intent === "create_habit_plan" || original.intent === "adapt_habit_plan"
-              ? "longevity_overview"
-              : "general";
-      const purpose = INTENT_TO_SLICE_PURPOSE[mappedIntent];
-      const sliceRequest = buildContextSliceRequestForIntent(mappedIntent);
-
-      return {
-        intent: mappedIntent,
-        confidence: 0.95,
-        isConfident: true,
-        purpose,
-        depth: sliceRequest.depth ?? "medium",
-        timeRange: sliceRequest.timeRange ?? "14d",
-        includeDocuments: sliceRequest.includeDocuments ?? false,
-        routingMethod: "rule_based",
-        requiredContextSlices: [sliceRequest],
-        safetyFlags: [],
-        expectedResponseMode: "recommendation_with_optional_proposal",
-      };
-    }
-
-    const ruleRoute = routeAgentIntent(input.userMessage);
-
-    if (ruleRoute.isConfident) {
-      return ruleRoute;
-    }
-
-    let rawRouterOutput: unknown;
-
-    try {
-      rawRouterOutput = await this.provider.generateIntentRoute({
-        userMessage: input.userMessage,
-        recentMessages: input.recentMessages,
-        ruleRouteHint: {
-          intent: ruleRoute.intent,
-          safetyFlags: ruleRoute.safetyFlags,
-        },
-      });
-    } catch {
-      return {
-        ...ruleRoute,
-        routingMethod: "llm_router",
-        isConfident: false,
-        confidence: 0.5,
-      };
-    }
-
-    const shapeErrors = validateLlmRouterOutputShape(rawRouterOutput);
-
-    if (shapeErrors.length > 0) {
-      return {
-        ...ruleRoute,
-        routingMethod: "llm_router",
-        isConfident: false,
-        confidence: 0.5,
-      };
-    }
-
-    const llmRoute = llmIntentRouterOutputSchema.parse(rawRouterOutput);
-    return mergeLlmRouterOutputIntoRoute(ruleRoute, llmRoute);
-  }
-
-  private async invokeProvider(
+  private async runAgentLoop(
     input: OrchestrateCoachTurnInput,
     contextPacket: AgentContextPacket,
     coachingContext: Record<string, unknown>,
     route: IntentRouteResult,
-    toolsInvoked: AgentToolName[],
+    intentDefinition: CoachIntentDefinitionMetadata,
+    capabilityTurnMetadata: AgentTurnCapabilityPresentation,
   ): Promise<OrchestratedCoachTurnResult> {
     const providerMode = resolveAiCoachProviderMode();
+    const toolsInvoked: AgentToolName[] = [];
+    const priorToolResults: AgentToolCallResult[] = [];
+    let loopIterations = 0;
+
     const baseMetadata = {
       provider: providerMode,
       intent: route.intent,
+      catalogIntentId: route.catalogIntentId,
+      primaryCapabilityId: capabilityTurnMetadata.primaryCapabilityId,
+      selectedCapabilityIds: [...capabilityTurnMetadata.selectedCapabilityIds],
+      capabilityPresentation: capabilityTurnMetadata,
       purpose: contextPacket.purpose,
       depth: contextPacket.depth,
       timeRange: contextPacket.timeRange,
       toolsInvoked,
       citations: mapContextSourceRefsToAgentCitations(contextPacket.sourceRefs),
-      routing: contextPacket.routing ?? {
+      routing: {
         confidence: route.confidence,
         routingMethod: route.routingMethod,
         llmRouterInvoked: route.routingMethod === "llm_router",
+        catalogIntentId: route.catalogIntentId,
         safetyFlags: route.safetyFlags,
         expectedResponseMode: route.expectedResponseMode,
         contextSliceCount: route.requiredContextSlices.length,
+        maxLoopIterations: MAX_AGENT_LOOP_ITERATIONS,
       },
       missingContextNotes: contextPacket.missingContextNotes,
     };
 
+    const agentMetadataBase: NonNullable<CoachAiLoopRequest["agentMetadata"]> = {
+      purpose: contextPacket.purpose,
+      intent: contextPacket.intent,
+      catalogIntentId: route.catalogIntentId,
+      depth: contextPacket.depth,
+      timeRange: contextPacket.timeRange,
+      safetyConstraints: contextPacket.safetyConstraints,
+      expectedResponseMode: route.expectedResponseMode,
+      safetyFlags: route.safetyFlags,
+      missingContextNotes: contextPacket.missingContextNotes,
+      intentDefinition,
+      allowedTools: intentDefinition.allowedTools,
+      allowedProposalIntents: intentDefinition.allowedProposalIntents,
+    };
+
     try {
-      const rawOutput = await this.provider.generateCoachResponse({
-        userMessage: input.userMessage,
-        recentMessages: input.recentMessages,
-        coachingContext,
-        agentMetadata: {
-          purpose: contextPacket.purpose,
-          intent: contextPacket.intent,
-          depth: contextPacket.depth,
-          timeRange: contextPacket.timeRange,
-          safetyConstraints: contextPacket.safetyConstraints,
-          expectedResponseMode: route.expectedResponseMode,
-          safetyFlags: route.safetyFlags,
-          missingContextNotes: contextPacket.missingContextNotes,
-        },
-      });
+      for (let iteration = 1; iteration <= MAX_AGENT_LOOP_ITERATIONS; iteration += 1) {
+        loopIterations = iteration;
 
-      const parsed = parseAiStructuredOutput(rawOutput);
+        const rawOutput = await this.provider.generateAgentLoopStep({
+          userMessage: input.userMessage,
+          recentMessages: input.recentMessages,
+          coachingContext,
+          agentMetadata: agentMetadataBase,
+          iteration,
+          maxIterations: MAX_AGENT_LOOP_ITERATIONS,
+          priorToolResults,
+        });
 
-      if (!parsed.ok) {
+        const parsedLoop = parseAgentLoopOutput(rawOutput);
+
+        if (!parsedLoop.ok) {
+          return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+            parseErrors: parsedLoop.errors,
+            replySafetyErrors: [],
+            safetyStatus: "parse_failed",
+          });
+        }
+
+        if (parsedLoop.value.kind === "tool_request") {
+          const toolAllowed = intentDefinition.allowedTools.includes(parsedLoop.value.tool);
+
+          if (!toolAllowed) {
+            return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+              parseErrors: [
+                `Requested tool "${parsedLoop.value.tool}" is not allowed for intent "${route.catalogIntentId}".`,
+              ],
+              replySafetyErrors: [],
+              safetyStatus: "parse_failed",
+            });
+          }
+
+          const toolResult = await this.agentToolRegistryService.executeTool(input.auth, {
+            tool: parsedLoop.value.tool,
+            input: parsedLoop.value.input ?? {},
+          });
+
+          priorToolResults.push(toolResult);
+
+          if (toolResult.ok) {
+            toolsInvoked.push(toolResult.tool);
+            coachingContext.toolResults = priorToolResults;
+          }
+
+          continue;
+        }
+
+        const coerced = coerceAgentLoopFinalAnswer(parsedLoop.value);
+
+        if (!coerced) {
+          return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+            parseErrors: ["Agent loop final_answer could not be coerced into structured output."],
+            replySafetyErrors: [],
+            safetyStatus: "parse_failed",
+          });
+        }
+
+        const replySafetyErrors = validateReplySafety(coerced.reply);
+
+        if (replySafetyErrors.length > 0) {
+          return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+            parseErrors: [],
+            replySafetyErrors,
+            safetyStatus: "reply_blocked",
+            blockedReasons: replySafetyErrors,
+          });
+        }
+
+        const resolvedOutput = this.actionResolverService.resolveProposalOnlyOutput({
+          output: coerced,
+          catalogIntentId: route.catalogIntentId,
+          allowedProposalIntents: intentDefinition.allowedProposalIntents,
+        });
+
         return {
-          output: { reply: SAFE_FALLBACK_REPLY, proposals: [] },
-          parseErrors: parsed.errors,
+          output: resolvedOutput,
+          parseErrors: [],
           replySafetyErrors: [],
           agentMetadata: {
             ...baseMetadata,
+            toolsInvoked,
+            routing: {
+              ...baseMetadata.routing,
+              loopIterations,
+            },
             safety: {
-              status: "parse_failed",
-              blockedReasons: parsed.errors,
+              status: "passed",
+              blockedReasons: [],
               constraintsApplied: contextPacket.safetyConstraints,
             },
           },
         };
       }
 
-      const replySafetyErrors = validateReplySafety(parsed.value.reply);
-
-      if (replySafetyErrors.length > 0) {
-        return {
-          output: { reply: SAFE_FALLBACK_REPLY, proposals: [] },
-          parseErrors: [],
-          replySafetyErrors,
-          agentMetadata: {
-            ...baseMetadata,
-            safety: {
-              status: "reply_blocked",
-              blockedReasons: replySafetyErrors,
-              constraintsApplied: contextPacket.safetyConstraints,
-            },
-          },
-        };
-      }
-
-      return {
-        output: parsed.value,
-        parseErrors: [],
+      return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+        parseErrors: [
+          `Agent loop exceeded the maximum of ${MAX_AGENT_LOOP_ITERATIONS} iterations without a final answer.`,
+        ],
         replySafetyErrors: [],
-        agentMetadata: {
-          ...baseMetadata,
-          safety: {
-            status: "passed",
-            blockedReasons: [],
-            constraintsApplied: contextPacket.safetyConstraints,
-          },
-        },
-      };
+        safetyStatus: "parse_failed",
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown agent provider error.";
 
-      return {
-        output: { reply: SAFE_FALLBACK_REPLY, proposals: [] },
+      return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
         parseErrors: [message],
         replySafetyErrors: [],
-        agentMetadata: {
-          ...baseMetadata,
-          safety: {
-            status: "provider_error",
-            blockedReasons: [message],
-            constraintsApplied: contextPacket.safetyConstraints,
-          },
-        },
-      };
+        safetyStatus: "provider_error",
+        blockedReasons: [message],
+      });
     }
   }
+
+  private buildFailureResult(
+    baseMetadata: Omit<AgentTurnMetadata, "safety"> & {
+      toolsInvoked: AgentToolName[];
+      routing?: AgentTurnMetadata["routing"];
+    },
+    contextPacket: AgentContextPacket,
+    loopIterations: number,
+    failure: {
+      parseErrors: string[];
+      replySafetyErrors: string[];
+      safetyStatus: "parse_failed" | "reply_blocked" | "provider_error";
+      blockedReasons?: string[];
+    },
+  ): OrchestratedCoachTurnResult {
+    return {
+      output: { reply: SAFE_FALLBACK_REPLY, proposals: [] },
+      parseErrors: failure.parseErrors,
+      replySafetyErrors: failure.replySafetyErrors,
+      agentMetadata: {
+        ...baseMetadata,
+        routing: baseMetadata.routing
+          ? {
+              ...baseMetadata.routing,
+              loopIterations,
+            }
+          : undefined,
+        safety: {
+          status: failure.safetyStatus,
+          blockedReasons: failure.blockedReasons ?? [
+            ...failure.parseErrors,
+            ...failure.replySafetyErrors,
+          ],
+          constraintsApplied: contextPacket.safetyConstraints,
+        },
+      },
+    };
+  }
+}
+
+function toAgentTurnCapabilityPresentation(
+  presentation: ResolvedCapabilityPresentationMetadata,
+): AgentTurnCapabilityPresentation {
+  return {
+    primaryCapabilityId: presentation.primaryCapabilityId,
+    selectedCapabilityIds: [...presentation.selectedCapabilityIds],
+    compositionStrategy: presentation.compositionStrategy,
+    widgetDescriptors: presentation.widgetDescriptors.map((descriptor) => ({
+      id: descriptor.id,
+      type: descriptor.type,
+      ...(descriptor.proposalIntent ? { proposalIntent: descriptor.proposalIntent } : {}),
+    })),
+    actionDescriptors: presentation.actionDescriptors.map((descriptor) => ({
+      id: descriptor.id,
+      type: descriptor.type,
+      ...(descriptor.proposalIntent ? { proposalIntent: descriptor.proposalIntent } : {}),
+    })),
+  };
 }

@@ -1,10 +1,12 @@
 import type {
   ChatAttachmentCategory,
+  ChatAttachmentCategorySource,
   CreateChatAttachmentInput,
   DocumentConsentScope,
 } from "@health/types";
 import { readFileAsBase64 } from "./document-upload";
 import {
+  isUserSelectedChatAttachmentDraft,
   normalizeAttachmentMimeType,
   validateChatAttachmentFile,
   type ChatComposerAttachmentDraft,
@@ -14,6 +16,27 @@ import { DOCUMENT_CONSENT_VERSION } from "./documents-ui-state";
 export type BuildChatAttachmentUploadPayloadResult =
   | { ok: true; payload: CreateChatAttachmentInput }
   | { ok: false; message: string };
+
+export function resolveChatAttachmentUploadCategory(input: {
+  category: ChatAttachmentCategory;
+  categorySource: ChatAttachmentCategorySource;
+}): {
+  category: ChatAttachmentCategory;
+  categorySource: ChatAttachmentCategorySource;
+} {
+  if (input.categorySource === "user_selected" && input.category !== "unclassified") {
+    return {
+      category: input.category,
+      categorySource: "user_selected",
+    };
+  }
+
+  return {
+    category: "unclassified",
+    categorySource:
+      input.categorySource === "mime_inferred" ? "mime_inferred" : "default_unclassified",
+  };
+}
 
 export async function buildChatAttachmentUploadPayload(input: {
   draft: ChatComposerAttachmentDraft;
@@ -28,16 +51,14 @@ export async function buildChatAttachmentUploadPayload(input: {
 
   const mimeType = normalizeAttachmentMimeType(draft.file);
   const fileContentBase64 = await readFileAsBase64(draft.file);
-
-  const uploadCategory: ChatAttachmentCategory =
-    draft.category === "medical_document"
-      ? "medical_document"
-      : draft.category === "unclassified"
-        ? "unclassified"
-        : draft.category;
+  const { category: uploadCategory, categorySource } = resolveChatAttachmentUploadCategory({
+    category: draft.category,
+    categorySource: draft.categorySource,
+  });
 
   const base: CreateChatAttachmentInput = {
     category: uploadCategory,
+    categorySource,
     filename: draft.file.name.slice(0, 200),
     mimeType,
     fileContentBase64,
@@ -45,7 +66,7 @@ export async function buildChatAttachmentUploadPayload(input: {
     consentVersion: DOCUMENT_CONSENT_VERSION,
   };
 
-  if (draft.category === "medical_document") {
+  if (isUserSelectedChatAttachmentDraft(draft) && draft.category === "medical_document") {
     if (!draft.documentTitle.trim()) {
       return { ok: false, message: "Add a document title before uploading a wellness document." };
     }
@@ -61,9 +82,22 @@ export async function buildChatAttachmentUploadPayload(input: {
       ok: true,
       payload: {
         ...base,
+        category: "medical_document",
+        categorySource: "user_selected",
         consentScopes: [...draft.consentScopes],
         documentType: draft.documentType,
         documentTitle: draft.documentTitle.trim(),
+      },
+    };
+  }
+
+  if (isUserSelectedChatAttachmentDraft(draft)) {
+    return {
+      ok: true,
+      payload: {
+        ...base,
+        category: draft.category,
+        categorySource: "user_selected",
       },
     };
   }

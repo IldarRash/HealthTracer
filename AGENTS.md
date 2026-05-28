@@ -25,6 +25,8 @@ The Feature Planner's goal is to deliver the user's requested feature to a fully
 
 Hard rule: the Feature Planner never writes implementation code for feature work. The planner may inspect code, refine plans and docs, synthesize subagent results, and assign follow-up tasks, but all source changes, tests, migrations, UI, styling, design polish, and runtime fixes must be done by the appropriate subagent. If the planner discovers a needed code change, it must create the smallest corrective task for the right subagent instead of editing directly.
 
+Subagent scope rule: before launching a subagent, estimate whether the task is likely to consume more than 30% of that subagent's context window. If so, split the work into smaller role-specific tasks and launch additional subagents instead of assigning one oversized task. Prefer several narrow subagents with clear handoff outputs over one broad subagent that risks losing context.
+
 1. The user describes the feature they want to build.
 2. Feature Planner launches Product Analyst as a subagent to clarify the problem, scope, acceptance criteria, risks, and an initial implementation plan.
 3. Product Analyst writes the analyzed feature brief to `docs/product/features/<feature-slug>.md`.
@@ -91,3 +93,15 @@ Role templates live in `.cursor/agents`.
 - `docs/architecture/auth.md`
 - `docs/architecture/foundation-slice.md`
 - `docs/architecture/mcp.md`
+
+## Learned Workspace Facts
+
+- AI/chat behavior policy is files-first and repo-backed via `packages/ai-behavior/config/ai-behavior.json` and the `@health/ai-behavior` loader; DB-backed policy overlay is explicitly deferred.
+- Repo behavior config covers direct paths, proposal revision routing, response modes, context budgets/triggers, prompt templates, attachment routing, proposal explainer detection, and deterministic proposal trigger phrases.
+- Future AI/chat behavior changes should prefer repo config plus focused tests over service hardcoding.
+- Capability-specific generation should use registry-provided policy metadata for prompts, safety rules, context strategy, allowed tools, and proposal allowlists; preserve the bounded max-3 `AgentToolRegistryService` loop.
+- Direct chat paths are deterministic and explicit only: today summary read and marking today's workout done; plan changes remain proposal-only.
+- Proposal explainer is read-only, rule-routed, excluded from the LLM router catalog, and must not create proposals or mutations.
+- Context budgets deny documents and sensitive health context by default; config cannot enable those contexts because code-level safety floors remain authoritative.
+- Preserve chat safety invariants in code when changing orchestration: schemas, fail-closed config loading, safety floors, proposal validation, permissions, consent, no raw documents, no direct LLM mutation, executor guards, crisis boundaries, and provider isolation.
+- Runtime verification for repo-backed AI behavior config: AppModule starts, config source is `file`, API health/ready pass, and authenticated chat E2E requires Clerk credentials.

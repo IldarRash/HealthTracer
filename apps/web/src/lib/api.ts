@@ -57,6 +57,7 @@ import {
   type ChatMessage,
   type ChatThread,
   type ChatTurnResponse,
+  type DirectChatPathRefreshHint,
   type CreateChatAttachmentInput,
   type GrantChatAttachmentConsentInput,
   type RecognizeChatAttachmentInput,
@@ -370,6 +371,39 @@ export async function getChatAttachment(
     token,
     chatAttachmentRecordSchema,
   );
+}
+
+export async function fetchChatAttachmentContentBlob(
+  token: string,
+  attachmentId: string,
+): Promise<ApiResult<Blob>> {
+  const requestId = createRequestId();
+  const path = `/chat/attachments/${encodeURIComponent(attachmentId)}/content`;
+
+  try {
+    const response = await fetch(`${clientApiBaseUrl}${path}`, {
+      cache: "no-store",
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        [REQUEST_ID_HEADER]: requestId,
+      },
+    });
+
+    const responseRequestId = resolveResponseRequestId(requestId, response);
+
+    if (!response.ok) {
+      const errorBody = await readResponseBody(response);
+      return buildApiErrorResult(
+        parseApiErrorBody(path, response.status, errorBody),
+        responseRequestId,
+      );
+    }
+
+    return { data: await response.blob(), requestId: responseRequestId };
+  } catch {
+    return buildApiErrorResult(`${path} could not be loaded`, requestId);
+  }
 }
 
 export async function grantChatAttachmentConsent(
@@ -709,6 +743,32 @@ export function getWorkoutExecutionRefreshQueryKeys(): ReadonlyArray<readonly un
 
 export function getTodayItemStatusRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
   return getWorkoutExecutionRefreshQueryKeys();
+}
+
+export function getDirectChatPathRefreshQueryKeys(
+  refreshHints: readonly DirectChatPathRefreshHint[],
+): ReadonlyArray<readonly unknown[]> {
+  const keys: Array<readonly unknown[]> = [];
+
+  for (const hint of refreshHints) {
+    switch (hint) {
+      case "today":
+        keys.push(apiQueryKeys.todayDayPrefix, apiQueryKeys.todayHistoryPrefix);
+        break;
+      case "dashboard":
+        keys.push(apiQueryKeys.dashboardState);
+        break;
+      case "longevity":
+        keys.push(apiQueryKeys.longevityState);
+        break;
+      default: {
+        const _exhaustive: never = hint;
+        return _exhaustive;
+      }
+    }
+  }
+
+  return keys;
 }
 
 export function getWellbeingRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {

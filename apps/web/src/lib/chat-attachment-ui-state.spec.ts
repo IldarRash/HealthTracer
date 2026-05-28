@@ -3,6 +3,7 @@ import type { ChatAttachmentOutcome, ChatAttachmentRecord } from "@health/types"
 import {
   applyChatAttachmentCategoryChange,
   buildChatAttachmentConsentScopeItems,
+  canPreviewRecognizeChatAttachmentDraft,
   canSendChatComposer,
   canSubmitMedicalAttachmentDraft,
   CHAT_ATTACHMENT_PRIVACY_NOTICE,
@@ -42,6 +43,7 @@ function createReadyRecord(
     threadId: "24b19287-75b8-4a3e-9c10-691908479405",
     messageId: null,
     category: "food_photo",
+    categorySource: "default_unclassified",
     status: "ready",
     filename: "meal.jpg",
     mimeType: "image/jpeg",
@@ -61,32 +63,36 @@ function createReadyRecord(
 }
 
 describe("chat attachment UI state", () => {
-  it("starts non-medical attachments as unclassified and auto-uploads on select", () => {
+  it("starts all attachments as unclassified with non-user-selected category source", () => {
     const workoutPhoto = createMockFile("gym-session.jpg", "image/jpeg");
 
     expect(isAmbiguousFoodOrWorkoutImage(workoutPhoto)).toBe(true);
-    expect(createChatComposerAttachmentDraft(workoutPhoto).category).toBe("unclassified");
-    expect(shouldAutoProcessChatAttachmentOnSelect(createChatComposerAttachmentDraft(workoutPhoto))).toBe(
-      true,
-    );
+    const workoutDraft = createChatComposerAttachmentDraft(workoutPhoto);
+    expect(workoutDraft.category).toBe("unclassified");
+    expect(workoutDraft.categorySource).toBe("default_unclassified");
+    expect(shouldAutoProcessChatAttachmentOnSelect(workoutDraft)).toBe(true);
 
     const mealPhoto = createMockFile("meal.jpg", "image/jpeg");
-    expect(createChatComposerAttachmentDraft(mealPhoto).category).toBe("unclassified");
-    expect(shouldAutoProcessChatAttachmentOnSelect(createChatComposerAttachmentDraft(mealPhoto))).toBe(
-      true,
-    );
+    const mealDraft = createChatComposerAttachmentDraft(mealPhoto);
+    expect(mealDraft.category).toBe("unclassified");
+    expect(mealDraft.categorySource).toBe("default_unclassified");
+    expect(shouldAutoProcessChatAttachmentOnSelect(mealDraft)).toBe(true);
   });
 
-  it("detects wellness documents and blocks auto-upload until consent is provided", () => {
+  it("keeps wellness document MIME types unclassified until the user selects a category", () => {
     const pdfFile = createMockFile("lab.pdf", "application/pdf");
     const pdfDraft = createChatComposerAttachmentDraft(pdfFile);
 
     expect(isLikelyMedicalDocumentFile(pdfFile)).toBe(true);
-    expect(pdfDraft.category).toBe("medical_document");
-    expect(shouldAutoProcessChatAttachmentOnSelect(pdfDraft)).toBe(false);
+    expect(pdfDraft.category).toBe("unclassified");
+    expect(pdfDraft.categorySource).toBe("mime_inferred");
+    expect(shouldAutoProcessChatAttachmentOnSelect(pdfDraft)).toBe(true);
 
     const textFile = createMockFile("plan.txt", "text/plain");
-    expect(createChatComposerAttachmentDraft(textFile).category).toBe("medical_document");
+    const textDraft = createChatComposerAttachmentDraft(textFile);
+    expect(textDraft.category).toBe("unclassified");
+    expect(textDraft.categorySource).toBe("mime_inferred");
+    expect(shouldAutoProcessChatAttachmentOnSelect(textDraft)).toBe(true);
   });
 
   it("allows auto-processing for corrected workout files after optional category change", () => {
@@ -97,10 +103,35 @@ describe("chat attachment UI state", () => {
     );
 
     expect(isAmbiguousFoodOrWorkoutImage(planFile)).toBe(false);
+    expect(workoutDraft.categorySource).toBe("user_selected");
     expect(shouldAutoProcessChatAttachmentOnSelect(workoutDraft)).toBe(true);
     expect(shouldAutoProcessChatAttachmentOnSelect(createChatComposerAttachmentDraft(planFile))).toBe(
-      false,
+      true,
     );
+  });
+
+  it("blocks auto-upload for user-selected medical attachments until consent is provided", () => {
+    const medicalDraft = applyChatAttachmentCategoryChange(
+      createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
+      "medical_document",
+    );
+
+    expect(medicalDraft.categorySource).toBe("user_selected");
+    expect(shouldAutoProcessChatAttachmentOnSelect(medicalDraft)).toBe(false);
+  });
+
+  it("blocks optional preview recognition for unclassified uploads", () => {
+    const unclassifiedDraft: ChatComposerAttachmentDraft = {
+      ...createChatComposerAttachmentDraft(createMockFile("meal.jpg", "image/jpeg")),
+      phase: "uploaded",
+    };
+
+    expect(unclassifiedDraft.category).toBe("unclassified");
+    expect(canPreviewRecognizeChatAttachmentDraft(unclassifiedDraft)).toBe(false);
+
+    const foodDraft = applyChatAttachmentCategoryChange(unclassifiedDraft, "food_photo");
+    expect(foodDraft.categorySource).toBe("user_selected");
+    expect(canPreviewRecognizeChatAttachmentDraft({ ...foodDraft, phase: "uploaded" })).toBe(true);
   });
 
   it("guesses categories from MIME types and supports category correction validation", () => {
@@ -125,8 +156,10 @@ describe("chat attachment UI state", () => {
   });
 
   it("requires medical consent, title, and upload_storage before submit", () => {
-    const draft = createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf"));
-    draft.category = "medical_document";
+    const draft = applyChatAttachmentCategoryChange(
+      createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
+      "medical_document",
+    );
     draft.documentTitle = "";
 
     expect(draft.consentScopes).toEqual([]);
@@ -365,8 +398,10 @@ describe("chat attachment UI state", () => {
 
   it("resets upload state and consent when category is corrected after processing", () => {
     const uploadedDraft: ChatComposerAttachmentDraft = {
-      ...createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
-      category: "medical_document",
+      ...applyChatAttachmentCategoryChange(
+        createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
+        "medical_document",
+      ),
       documentTitle: "Lab results",
       consentScopes: ["upload_storage", "parse_ocr"],
       attachmentId: "d1000001-0000-4000-8000-000000000001",
@@ -380,6 +415,7 @@ describe("chat attachment UI state", () => {
     const resetDraft = applyChatAttachmentCategoryChange(uploadedDraft, "food_photo");
 
     expect(resetDraft.category).toBe("food_photo");
+    expect(resetDraft.categorySource).toBe("user_selected");
     expect(resetDraft.consentScopes).toEqual([]);
     expect(resetDraft.attachmentId).toBeNull();
     expect(resetDraft.record).toBeNull();

@@ -38,4 +38,21 @@ describe("WorkoutAttachmentRecognizer", () => {
     expect(envelope.suggestedIntent).toBe("log_session_context");
     expect(envelope.manualFallbackNotice).toMatch(/low/i);
   });
+
+  it("labels volleyball sessions from the user message", async () => {
+    const provider = new DevWorkoutAttachmentRecognitionProvider();
+    const recognizer = new WorkoutAttachmentRecognizer(provider);
+
+    const envelope = await recognizer.recognize({
+      attachment: {
+        id: "c1000004-0000-4000-8000-000000000004",
+        filename: "volleyball.jpg",
+        mimeType: "image/jpeg",
+      } as never,
+      boundedMessage: "запиши мне тренировку волейбола на сегодня",
+    });
+
+    expect(envelope.sessionLabel).toBe("Volleyball training");
+    expect(envelope.suggestedIntent).toBe("log_session_context");
+  });
 });

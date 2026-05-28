@@ -11,9 +11,13 @@ import {
   isPhotoBackedNutritionProposalPayload,
   isTextEstimateNutritionProposalPayload,
   logNutritionIncidentProposalPayloadSchema,
+  inferWorkoutTodayChecklistLabel,
+  messageRequestsTodayWorkoutLog,
   sanitizeMedicalRecognitionForClient,
+  todayChecklistPayloadSchema,
   workoutPlanProposalChangesSchema,
   type LogNutritionIncidentProposalPayload,
+  type WorkoutAttachmentRecognitionEnvelope,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
@@ -40,6 +44,16 @@ export type AttachmentProposalCandidate = {
   proposedChanges: unknown;
   attachmentRefId: string;
 };
+
+export type MergeAttachmentProposalsOptions = {
+  workoutRecognitions?: WorkoutAttachmentRecognitionEnvelope[];
+};
+
+const FULL_WORKOUT_PLAN_PROPOSAL_INTENTS = new Set([
+  "create_workout_plan",
+  "adapt_workout_plan",
+  "adapt_workout_plan_from_progress",
+]);
 
 @Injectable()
 export class ChatAttachmentRecognitionService {
@@ -205,6 +219,8 @@ export class ChatAttachmentRecognitionService {
     attachment: ChatAttachmentRecord;
     incidentDateTime: string;
     mealContextLabel?: string | null;
+    boundedMessage?: string;
+    todayIsoDate?: string;
   }): AttachmentProposalCandidate[] {
     const recognition = input.attachment.recognition;
 
@@ -274,19 +290,76 @@ export class ChatAttachmentRecognitionService {
       ];
     }
 
+    if (recognition.suggestedIntent === "log_session_context") {
+      const boundedMessage = input.boundedMessage?.trim() ?? "";
+      const todayIsoDate = input.todayIsoDate?.trim();
+
+      if (
+        boundedMessage.length > 0 &&
+        todayIsoDate &&
+        messageRequestsTodayWorkoutLog(boundedMessage)
+      ) {
+        return this.buildTodayWorkoutChecklistProposalCandidates({
+          recognition,
+          boundedMessage,
+          todayIsoDate,
+        });
+      }
+    }
+
     // Session-context attachments surface recognition for manual review; no auto plan mutation.
     return [];
+  }
+
+  private buildTodayWorkoutChecklistProposalCandidates(input: {
+    recognition: WorkoutAttachmentRecognitionEnvelope;
+    boundedMessage: string;
+    todayIsoDate: string;
+  }): AttachmentProposalCandidate[] {
+    const label = inferWorkoutTodayChecklistLabel(
+      input.boundedMessage,
+      input.recognition.sessionLabel,
+    );
+    const proposedChanges = todayChecklistPayloadSchema.parse({
+      date: input.todayIsoDate,
+      items: [
+        {
+          label,
+          kind: "workout",
+          status: "pending",
+        },
+      ],
+    });
+
+    return [
+      {
+        intent: "create_today_checklist",
+        targetDomain: "today",
+        title: "Add today's workout to Today",
+        reason:
+          "Review this Today checklist item before it is saved. Nothing changes until you accept the proposal.",
+        proposedChanges,
+        attachmentRefId: input.recognition.attachmentRefId,
+      },
+    ];
   }
 
   mergeAttachmentProposals(
     aiProposals: RawAiProposal[],
     attachmentProposals: AttachmentProposalCandidate[],
+    options?: MergeAttachmentProposalsOptions,
   ): RawAiProposal[] {
+    const filteredAiProposals = this.filterDisallowedWorkoutPlanProposals(
+      aiProposals,
+      attachmentProposals,
+      options?.workoutRecognitions ?? [],
+    );
+
     if (attachmentProposals.length === 0) {
-      return aiProposals;
+      return filteredAiProposals;
     }
 
-    const merged = [...aiProposals];
+    const merged = [...filteredAiProposals];
 
     for (const candidate of attachmentProposals) {
       if (candidate.intent === "log_nutrition_incident") {
@@ -360,4 +433,53 @@ export class ChatAttachmentRecognitionService {
 
     return merged;
   }
+
+  private filterDisallowedWorkoutPlanProposals(
+    aiProposals: RawAiProposal[],
+    attachmentProposals: AttachmentProposalCandidate[],
+    workoutRecognitions: WorkoutAttachmentRecognitionEnvelope[],
+  ): RawAiProposal[] {
+    if (
+      !shouldSuppressFullWorkoutPlanProposals(attachmentProposals, workoutRecognitions)
+    ) {
+      return aiProposals;
+    }
+
+    return aiProposals.filter(
+      (proposal) => !FULL_WORKOUT_PLAN_PROPOSAL_INTENTS.has(proposal.intent),
+    );
+  }
+}
+
+function allowsFullWorkoutPlanProposals(
+  attachmentProposals: AttachmentProposalCandidate[],
+  workoutRecognitions: WorkoutAttachmentRecognitionEnvelope[],
+): boolean {
+  if (attachmentProposals.some((candidate) => candidate.intent === "create_workout_plan")) {
+    return true;
+  }
+
+  return workoutRecognitions.some(
+    (recognition) => recognition.suggestedIntent === "create_workout_plan",
+  );
+}
+
+function shouldSuppressFullWorkoutPlanProposals(
+  attachmentProposals: AttachmentProposalCandidate[],
+  workoutRecognitions: WorkoutAttachmentRecognitionEnvelope[],
+): boolean {
+  if (workoutRecognitions.length === 0) {
+    return false;
+  }
+
+  if (allowsFullWorkoutPlanProposals(attachmentProposals, workoutRecognitions)) {
+    return false;
+  }
+
+  return (
+    attachmentProposals.some((candidate) => candidate.intent === "create_today_checklist") ||
+    workoutRecognitions.some(
+      (recognition) => recognition.suggestedIntent === "log_session_context",
+    )
+  );
 }

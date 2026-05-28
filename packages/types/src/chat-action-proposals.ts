@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { isoDateSchema } from "./dates.js";
+import type { DeterministicProposalTriggersConfig } from "./ai-behavior-config.js";
+import { buildDefaultAiBehaviorConfig } from "./ai-behavior-config.js";
 import {
   evaluateWellbeingCrisisFromText,
   wellbeingCrisisFlagReasonSchema,
@@ -34,138 +36,122 @@ export type CaptureWellbeingCheckinProposalPayload = z.infer<
   typeof captureWellbeingCheckinProposalPayloadSchema
 >;
 
-const LOW_MOOD_STRESS_FATIGUE_PHRASES = [
-  "feel bad",
-  "feeling bad",
-  "feel awful",
-  "feeling awful",
-  "feel terrible",
-  "feeling terrible",
-  "feel low",
-  "feeling low",
-  "feel down",
-  "feeling down",
-  "feel rough",
-  "feeling rough",
-  "not doing well",
-  "having a bad day",
-  "stressed",
-  "stressful",
-  "overwhelmed",
-  "burnt out",
-  "burned out",
-  "tired",
-  "exhausted",
-  "fatigue",
-  "fatigued",
-  "no energy",
-  "low energy",
-] as const;
-
-const NUTRITION_INCIDENT_PHRASES = [
-  "cheat meal",
-  "cheat day",
-  "ate too much",
-  "overate",
-  "forgot to log",
-  "missed log",
-  "didn't log",
-  "did not log",
-  "i ate this",
-  "ate this",
-  "had this for",
-  "food photo",
-  "picture of my meal",
-  "photo of my meal",
-  "off plan meal",
-  "went off plan",
-] as const;
-
-const RECIPE_RECOMMENDATION_PHRASES = [
-  "meal idea",
-  "meal ideas",
-  "recipe idea",
-  "recipe ideas",
-  "what should i eat",
-  "dinner idea",
-  "lunch idea",
-  "breakfast idea",
-  "suggest a recipe",
-  "recommend a recipe",
-  "food ideas",
-  "ideas for dinner",
-  "ideas for lunch",
-  "ideas for breakfast",
-  "what can i cook",
-  "what to cook",
-] as const;
-
 export function normalizeChatTriggerMessage(message: string): string {
   return message.trim().toLowerCase();
 }
 
-export function containsLowMoodStressFatigueSignal(normalizedMessage: string): boolean {
-  return LOW_MOOD_STRESS_FATIGUE_PHRASES.some((phrase) => normalizedMessage.includes(phrase));
+function containsPhrase(normalizedMessage: string, phrases: readonly string[]): boolean {
+  return phrases.some((phrase) => normalizedMessage.includes(phrase));
 }
 
-export function containsNutritionIncidentSignal(normalizedMessage: string): boolean {
-  return NUTRITION_INCIDENT_PHRASES.some((phrase) => normalizedMessage.includes(phrase));
+export function containsLowMoodStressFatigueSignal(
+  normalizedMessage: string,
+  config: DeterministicProposalTriggersConfig = buildDefaultAiBehaviorConfig()
+    .deterministicProposalTriggers,
+): boolean {
+  return containsPhrase(normalizedMessage, config.wellbeingCheckin.moodPhrases);
 }
 
-export function containsRecipeRecommendationSignal(normalizedMessage: string): boolean {
-  return RECIPE_RECOMMENDATION_PHRASES.some((phrase) => normalizedMessage.includes(phrase));
+export function containsNutritionIncidentSignal(
+  normalizedMessage: string,
+  config: DeterministicProposalTriggersConfig = buildDefaultAiBehaviorConfig()
+    .deterministicProposalTriggers,
+): boolean {
+  return containsPhrase(normalizedMessage, config.nutritionIncident.phrases);
+}
+
+export function containsRecipeRecommendationSignal(
+  normalizedMessage: string,
+  config: DeterministicProposalTriggersConfig = buildDefaultAiBehaviorConfig()
+    .deterministicProposalTriggers,
+): boolean {
+  return containsPhrase(normalizedMessage, config.recipeRecommendation.phrases);
 }
 
 export function shouldTriggerWellbeingCheckinProposal(
   message: string,
   hasTodayWellbeingCheckIn: boolean,
+  config: DeterministicProposalTriggersConfig = buildDefaultAiBehaviorConfig()
+    .deterministicProposalTriggers,
 ): boolean {
-  if (hasTodayWellbeingCheckIn) {
+  const triggerConfig = config.wellbeingCheckin;
+
+  if (!triggerConfig.enabled) {
+    return false;
+  }
+
+  if (triggerConfig.requireNoTodayCheckIn && hasTodayWellbeingCheckIn) {
     return false;
   }
 
   const normalized = normalizeChatTriggerMessage(message);
   const crisis = evaluateWellbeingCrisisFromText(message);
 
-  if (crisis.shouldShowCrisisSupport) {
+  if (triggerConfig.skipWhenCrisis && crisis.shouldShowCrisisSupport) {
     return false;
   }
 
   if (
-    containsNutritionIncidentSignal(normalized) ||
-    normalized.includes("hungry") ||
-    normalized.includes("not losing weight")
+    triggerConfig.excludeWhenNutritionIncidentSignal &&
+    containsNutritionIncidentSignal(normalized, config)
   ) {
     return false;
   }
 
-  return containsLowMoodStressFatigueSignal(normalized);
+  if (triggerConfig.excludeContainsPhrases.some((phrase) => normalized.includes(phrase))) {
+    return false;
+  }
+
+  return containsLowMoodStressFatigueSignal(normalized, config);
 }
 
-export function shouldTriggerNutritionIncidentProposal(message: string): boolean {
+export function shouldTriggerNutritionIncidentProposal(
+  message: string,
+  config: DeterministicProposalTriggersConfig = buildDefaultAiBehaviorConfig()
+    .deterministicProposalTriggers,
+): boolean {
+  const triggerConfig = config.nutritionIncident;
+
+  if (!triggerConfig.enabled) {
+    return false;
+  }
+
   const normalized = normalizeChatTriggerMessage(message);
   const crisis = evaluateWellbeingCrisisFromText(message);
 
-  if (crisis.shouldShowCrisisSupport) {
+  if (triggerConfig.skipWhenCrisis && crisis.shouldShowCrisisSupport) {
     return false;
   }
 
-  return containsNutritionIncidentSignal(normalized);
+  return containsNutritionIncidentSignal(normalized, config);
 }
 
-export function shouldTriggerRecipeRecommendationRequest(message: string): boolean {
+export function shouldTriggerRecipeRecommendationRequest(
+  message: string,
+  config: DeterministicProposalTriggersConfig = buildDefaultAiBehaviorConfig()
+    .deterministicProposalTriggers,
+): boolean {
+  const triggerConfig = config.recipeRecommendation;
+
+  if (!triggerConfig.enabled) {
+    return false;
+  }
+
   const normalized = normalizeChatTriggerMessage(message);
   const crisis = evaluateWellbeingCrisisFromText(message);
 
-  if (crisis.shouldShowCrisisSupport) {
+  if (triggerConfig.skipWhenCrisis && crisis.shouldShowCrisisSupport) {
     return false;
   }
 
-  if (containsNutritionIncidentSignal(normalized)) {
+  if (
+    triggerConfig.excludeWhenNutritionIncidentSignal &&
+    containsNutritionIncidentSignal(normalized, config)
+  ) {
     return false;
   }
 
-  return containsRecipeRecommendationSignal(normalized);
+  return containsRecipeRecommendationSignal(normalized, config);
 }
 
 export function buildWellbeingCheckinProposal(todayIsoDate: string): ChatProposalDraft {
@@ -247,7 +233,10 @@ export function mergeDeterministicChatProposals<T extends ChatProposalDraft>(inp
   hasTodayWellbeingCheckIn: boolean;
   aiProposals: T[];
   now?: Date;
+  triggerConfig?: DeterministicProposalTriggersConfig;
 }): Array<T | ChatProposalDraft> {
+  const triggerConfig =
+    input.triggerConfig ?? buildDefaultAiBehaviorConfig().deterministicProposalTriggers;
   const crisis = evaluateWellbeingCrisisFromText(input.userMessage);
 
   if (crisis.shouldShowCrisisSupport) {
@@ -258,14 +247,18 @@ export function mergeDeterministicChatProposals<T extends ChatProposalDraft>(inp
   const hasIntent = (intent: string) => merged.some((proposal) => proposal.intent === intent);
 
   if (
-    shouldTriggerWellbeingCheckinProposal(input.userMessage, input.hasTodayWellbeingCheckIn) &&
+    shouldTriggerWellbeingCheckinProposal(
+      input.userMessage,
+      input.hasTodayWellbeingCheckIn,
+      triggerConfig,
+    ) &&
     !hasIntent("capture_wellbeing_checkin")
   ) {
     merged.push(buildWellbeingCheckinProposal(input.todayIsoDate));
   }
 
   if (
-    shouldTriggerNutritionIncidentProposal(input.userMessage) &&
+    shouldTriggerNutritionIncidentProposal(input.userMessage, triggerConfig) &&
     !hasIntent("log_nutrition_incident")
   ) {
     merged.push(
@@ -273,7 +266,7 @@ export function mergeDeterministicChatProposals<T extends ChatProposalDraft>(inp
     );
   }
 
-  return merged.slice(0, 5);
+  return merged.slice(0, triggerConfig.maxMergedProposals);
 }
 
 export const WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR =

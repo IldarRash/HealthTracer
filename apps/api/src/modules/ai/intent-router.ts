@@ -1,3 +1,7 @@
+/**
+ * @deprecated Legacy rule-based intent router retained for unit tests only.
+ * Production chat turns route through AgentOrchestratorService (LLM router + attachment families).
+ */
 import type { AgentIntent, AgentSafetyFlag, IntentRouteResult } from "@health/types";
 import {
   buildContextSliceRequestForIntent,
@@ -25,6 +29,7 @@ export function routeAgentIntent(userMessage: string): IntentRouteResult {
 
   return {
     intent: classification.intent,
+    catalogIntentId: classification.intent,
     confidence,
     isConfident,
     purpose,

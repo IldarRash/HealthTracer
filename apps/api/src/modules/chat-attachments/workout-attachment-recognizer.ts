@@ -43,11 +43,18 @@ export class DevWorkoutAttachmentRecognitionProvider
         boundedMessage,
       );
 
+    const volleyballSession =
+      !isPlanDoc && /(?:волейбол|volleyball)/i.test(boundedMessage);
+
     const envelope = workoutAttachmentRecognitionEnvelopeSchema.parse({
       category: "workout_attachment",
       attachmentRefId: input.attachment.id,
       attachmentKind: isPlanDoc ? "plan_screenshot" : "exercise_photo",
-      sessionLabel: isPlanDoc ? null : "Recognized training session",
+      sessionLabel: isPlanDoc
+        ? null
+        : volleyballSession
+          ? "Volleyball training"
+          : "Recognized training session",
       sessionDate: null,
       exercises: [
         {

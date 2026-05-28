@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@health/ai": "workspace:*",
+    "@health/ai-behavior": "workspace:*",
     "@health/config": "workspace:*",
     "@health/db": "workspace:^",
     "@health/types": "workspace:*",

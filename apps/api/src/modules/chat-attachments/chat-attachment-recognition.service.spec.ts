@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { RawAiProposal } from "@health/types";
 import { ChatAttachmentRecognitionService } from "./chat-attachment-recognition.service.js";
 
 function createRecognitionService(deps: {
@@ -501,6 +502,43 @@ describe("ChatAttachmentRecognitionService", () => {
     expect(candidates[0]?.reason).toMatch(/revision/i);
   });
 
+  it("builds create_today_checklist proposal when user asks to log today's workout", () => {
+    const service = createRecognitionService();
+
+    const candidates = service.buildProposalCandidates({
+      attachment: {
+        id: "c1000001-0000-4000-8000-000000000001",
+        recognition: {
+          category: "workout_attachment",
+          attachmentRefId: "c1000001-0000-4000-8000-000000000001",
+          attachmentKind: "exercise_photo",
+          sessionLabel: "Volleyball training",
+          sessionDate: null,
+          exercises: [{ name: "Volleyball drill", target: "3 sets", sets: 3, reps: "8-10" }],
+          suggestedIntent: "log_session_context",
+          planDraftTitle: null,
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_workout_attachment",
+            recognitionId: "f1000001-0000-4000-8000-000000000002",
+          },
+          manualFallbackNotice: null,
+        },
+      } as never,
+      incidentDateTime: "2026-05-26T18:00:00.000Z",
+      boundedMessage: "запиши мне тренировку волейбола на сегодня",
+      todayIsoDate: "2026-05-26",
+    });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.intent).toBe("create_today_checklist");
+    expect(candidates[0]?.targetDomain).toBe("today");
+    expect(candidates[0]?.proposedChanges).toMatchObject({
+      date: "2026-05-26",
+      items: [{ label: "Волейбол", kind: "workout", status: "pending" }],
+    });
+  });
+
   it("does not emit workout session proposals without plan-level intent", () => {
     const service = createRecognitionService();
 
@@ -528,5 +566,121 @@ describe("ChatAttachmentRecognitionService", () => {
     });
 
     expect(candidates).toHaveLength(0);
+  });
+
+  it("drops AI full workout plan proposals for one-off today checklist attachment turns", () => {
+    const service = createRecognitionService();
+    const workoutRecognition = {
+      category: "workout_attachment" as const,
+      attachmentRefId: "c1000001-0000-4000-8000-000000000001",
+      attachmentKind: "exercise_photo" as const,
+      sessionLabel: "Volleyball training",
+      sessionDate: null,
+      exercises: [{ name: "Volleyball drill", target: "3 sets", sets: 3, reps: "8-10" }],
+      suggestedIntent: "log_session_context" as const,
+      planDraftTitle: null,
+      provenance: {
+        source: "dev_stub",
+        providerId: "dev_workout_attachment",
+        recognitionId: "f1000001-0000-4000-8000-000000000002",
+      },
+      manualFallbackNotice: null,
+    };
+
+    const merged = service.mergeAttachmentProposals(
+      [
+        {
+          intent: "create_workout_plan",
+          targetDomain: "workout",
+          title: "Imported workout plan",
+          reason: "AI emitted a full plan",
+          proposedChanges: {
+            title: "Imported workout plan",
+            summary: "Plan from attachment",
+            days: [],
+            notes: [],
+          },
+        },
+        {
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Adapt workout plan",
+          reason: "AI adaptation",
+          proposedChanges: {
+            title: "Adapted plan",
+            summary: "Adapted plan",
+            days: [],
+            notes: [],
+          },
+        },
+      ] as RawAiProposal[],
+      [
+        {
+          intent: "create_today_checklist",
+          targetDomain: "today",
+          title: "Add today's workout to Today",
+          reason: "Review before accepting",
+          proposedChanges: {
+            date: "2026-05-26",
+            items: [{ label: "Volleyball training", kind: "workout", status: "pending" }],
+          },
+          attachmentRefId: "c1000001-0000-4000-8000-000000000001",
+        },
+      ],
+      { workoutRecognitions: [workoutRecognition] },
+    );
+
+    expect(merged.map((proposal) => proposal.intent)).toEqual(["create_today_checklist"]);
+  });
+
+  it("keeps AI create_workout_plan proposals for plan-document attachment turns", () => {
+    const service = createRecognitionService();
+    const workoutRecognition = {
+      category: "workout_attachment" as const,
+      attachmentRefId: "c1000008-0000-4000-8000-000000000008",
+      attachmentKind: "plan_screenshot" as const,
+      sessionLabel: null,
+      sessionDate: null,
+      exercises: [{ name: "Squat", target: "3 sets", sets: 3, reps: "8-10" }],
+      suggestedIntent: "create_workout_plan" as const,
+      planDraftTitle: "Imported workout plan draft",
+      provenance: {
+        source: "dev_stub",
+        providerId: "dev_workout_attachment",
+        recognitionId: "f1000001-0000-4000-8000-000000000001",
+      },
+      manualFallbackNotice: null,
+    };
+
+    const aiWorkoutPlan = {
+      intent: "create_workout_plan",
+      targetDomain: "workout",
+      title: "Review imported workout plan",
+      reason: "AI plan draft",
+      proposedChanges: {
+        title: "Imported workout plan draft",
+        summary: "Plan from attachment",
+        days: [],
+        notes: [],
+        attachmentRefId: "c1000008-0000-4000-8000-000000000008",
+      },
+    } as RawAiProposal;
+
+    const merged = service.mergeAttachmentProposals(
+      [aiWorkoutPlan],
+      [
+        {
+          intent: "create_workout_plan",
+          targetDomain: "workout",
+          title: "Review imported workout plan",
+          reason: "Deterministic plan candidate",
+          proposedChanges: aiWorkoutPlan.proposedChanges,
+          attachmentRefId: "c1000008-0000-4000-8000-000000000008",
+        },
+      ],
+      { workoutRecognitions: [workoutRecognition] },
+    );
+
+    expect(merged.some((proposal) => proposal.intent === "create_workout_plan")).toBe(true);
   });
 });

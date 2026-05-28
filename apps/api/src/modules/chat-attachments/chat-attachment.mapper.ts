@@ -31,6 +31,7 @@ export function toChatAttachmentRecord(row: ChatAttachmentRow): ChatAttachmentRe
     threadId: row.threadId,
     messageId: row.messageId,
     category: row.category,
+    categorySource: row.categorySource,
     status: row.status,
     filename: row.filename,
     mimeType: row.mimeType,

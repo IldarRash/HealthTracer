@@ -1,6 +1,7 @@
 import { chatAttachments } from "@health/db";
 import type {
   ChatAttachmentCategory,
+  ChatAttachmentCategorySource,
   ChatAttachmentConsent,
   ChatAttachmentRecognitionEnvelope,
   ChatAttachmentRetentionPolicy,
@@ -16,6 +17,7 @@ export type CreateChatAttachmentRowInput = {
   userId: string;
   threadId?: string | null;
   category: ChatAttachmentCategory;
+  categorySource?: ChatAttachmentCategorySource;
   status: ChatAttachmentStatus;
   filename: string;
   mimeType: string;
@@ -42,6 +44,7 @@ export class ChatAttachmentsRepository {
         userId: input.userId,
         threadId: input.threadId ?? null,
         category: input.category,
+        categorySource: input.categorySource ?? "default_unclassified",
         status: input.status,
         filename: input.filename,
         mimeType: input.mimeType,
@@ -92,6 +95,7 @@ export class ChatAttachmentsRepository {
     attachmentId: string,
     patch: Partial<{
       category: ChatAttachmentCategory;
+      categorySource: ChatAttachmentCategorySource;
       status: ChatAttachmentStatus;
       threadId: string | null;
       messageId: string | null;

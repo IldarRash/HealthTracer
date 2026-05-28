@@ -191,12 +191,33 @@ export type ChatAttachmentRecognitionEnvelope = z.infer<
   typeof chatAttachmentRecognitionEnvelopeSchema
 >;
 
+export const chatAttachmentUploadClassificationMetaSchema = z
+  .object({
+    providerId: z.string().min(1).max(80),
+    method: z.string().min(1).max(40),
+  })
+  .strict();
+
+export type ChatAttachmentUploadClassificationMeta = z.infer<
+  typeof chatAttachmentUploadClassificationMetaSchema
+>;
+
+export const chatAttachmentCategorySourceSchema = z.enum([
+  "default_unclassified",
+  "mime_inferred",
+  "user_selected",
+  "ai_classified",
+]);
+
+export type ChatAttachmentCategorySource = z.infer<typeof chatAttachmentCategorySourceSchema>;
+
 export const chatAttachmentRecordSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
   threadId: z.string().uuid().nullable(),
   messageId: z.string().uuid().nullable(),
   category: chatAttachmentCategorySchema,
+  categorySource: chatAttachmentCategorySourceSchema.default("default_unclassified"),
   status: chatAttachmentStatusSchema,
   filename: z.string().min(1).max(200),
   mimeType: z.string().min(1).max(120),
@@ -211,6 +232,7 @@ export const chatAttachmentRecordSchema = z.object({
   expiresAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
+  uploadClassificationMeta: chatAttachmentUploadClassificationMetaSchema.nullable().optional(),
 });
 
 export type ChatAttachmentRecord = z.infer<typeof chatAttachmentRecordSchema>;
@@ -219,6 +241,7 @@ export const createChatAttachmentSchema = z
   .object({
     threadId: z.string().uuid().optional(),
     category: chatAttachmentCategorySchema.default("unclassified"),
+    categorySource: chatAttachmentCategorySourceSchema.optional(),
     filename: z.string().min(1).max(200),
     mimeType: z.string().min(1).max(120),
     fileContentBase64: z.string().min(1),
@@ -275,11 +298,21 @@ export const createChatAttachmentSchema = z
 
 export type CreateChatAttachmentInput = z.input<typeof createChatAttachmentSchema>;
 
+/** Optional metadata and content supplied when granting medical document consent. */
+export const medicalConsentGrantFieldsSchema = z
+  .object({
+    documentType: documentTypeSchema.optional(),
+    documentTitle: z.string().min(1).max(160).optional(),
+    fileContentBase64: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const recognizeChatAttachmentSchema = z
   .object({
     consentScopes: z.array(documentConsentScopeSchema).min(1).max(5).optional(),
     consentVersion: z.string().min(1).max(40).optional(),
   })
+  .merge(medicalConsentGrantFieldsSchema)
   .strict();
 
 export type RecognizeChatAttachmentInput = z.infer<typeof recognizeChatAttachmentSchema>;
@@ -289,6 +322,7 @@ export const grantChatAttachmentConsentSchema = z
     consentScopes: z.array(documentConsentScopeSchema).min(1).max(5),
     consentVersion: z.string().min(1).max(40).default("v1"),
   })
+  .merge(medicalConsentGrantFieldsSchema)
   .strict();
 
 export type GrantChatAttachmentConsentInput = z.infer<typeof grantChatAttachmentConsentSchema>;
@@ -320,6 +354,35 @@ export const chatAttachmentOutcomeSchema = z.object({
 });
 
 export type ChatAttachmentOutcome = z.infer<typeof chatAttachmentOutcomeSchema>;
+
+/** Image MIME types eligible for inline chat transcript previews. */
+export const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = CHAT_FOOD_PHOTO_MIME_TYPES;
+
+export function isChatAttachmentImageMimeType(mimeType: string): boolean {
+  return (CHAT_ATTACHMENT_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType);
+}
+
+export const chatMessageAttachmentDisplaySchema = z
+  .object({
+    attachmentRefId: z.string().uuid(),
+    filename: z.string().min(1).max(200),
+    mimeType: z.string().min(1).max(120),
+  })
+  .strict();
+
+export type ChatMessageAttachmentDisplay = z.infer<typeof chatMessageAttachmentDisplaySchema>;
+
+export function parseChatMessageAttachmentRefIds(
+  metadata: Record<string, unknown>,
+): string[] {
+  const raw = metadata.attachmentRefIds;
+
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.filter((value): value is string => typeof value === "string");
+}
 
 const UNSAFE_RECOGNITION_SUMMARY_PATTERNS = [
   /\bdiagnos(e|is|ed|ing)\b/i,

@@ -4,9 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   AMBIGUOUS_IMAGE_ATTACHMENT_COPY,
-  CHAT_ATTACHMENT_PRIVACY_NOTICE,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
-  MESSAGE_FIRST_ATTACHMENT_COPY,
 } from "../../lib/chat-attachment-ui-state.js";
 
 const chatDir = dirname(fileURLToPath(import.meta.url));
@@ -14,6 +12,10 @@ const chatDir = dirname(fileURLToPath(import.meta.url));
 const chatWorkspaceSource = readFileSync(join(chatDir, "chat-workspace.tsx"), "utf8");
 const composerAttachmentsSource = readFileSync(
   join(chatDir, "chat-composer-attachments.tsx"),
+  "utf8",
+);
+const composerAttachmentInputSource = readFileSync(
+  join(chatDir, "chat-composer-attachment-input.tsx"),
   "utf8",
 );
 const outcomePanelSource = readFileSync(
@@ -25,9 +27,7 @@ const ATTACHMENT_USER_VISIBLE_SOURCES = [
   chatWorkspaceSource,
   composerAttachmentsSource,
   outcomePanelSource,
-  CHAT_ATTACHMENT_PRIVACY_NOTICE,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
-  MESSAGE_FIRST_ATTACHMENT_COPY,
 ];
 
 const FORBIDDEN_ATTACHMENT_TERMS = [
@@ -46,26 +46,49 @@ describe("chat composer attachments wiring", () => {
     expect(chatWorkspaceSource).toContain("grantChatAttachmentConsent");
     expect(chatWorkspaceSource).toContain("attachmentRefIds");
     expect(chatWorkspaceSource).toContain("ChatComposerAttachments");
+    expect(chatWorkspaceSource).toContain("ChatComposerAttachmentInput");
+    expect(chatWorkspaceSource).toContain("ChatMessageAttachmentPreviews");
+    expect(chatWorkspaceSource).toContain("chat-composer-controls");
+    expect(chatWorkspaceSource).toContain("buildOptimisticAttachmentDisplays");
     expect(chatWorkspaceSource).toContain("ChatAttachmentOutcomePanel");
     expect(chatWorkspaceSource).toContain("canSendChatComposer");
     expect(chatWorkspaceSource).toContain('phase: "uploaded"');
     expect(chatWorkspaceSource).toContain("enrichAttachmentOutcomesWithProposalContext");
   });
 
-  it("uses shared file input and consent primitives", () => {
-    expect(composerAttachmentsSource).toContain("FileInputTrigger");
-    expect(composerAttachmentsSource).toContain("ConsentScopeChecklist");
-    expect(composerAttachmentsSource).toContain("AttachmentPreviewThumb");
-    expect(composerAttachmentsSource).toContain("AttachmentStatusBadge");
-    expect(composerAttachmentsSource).toContain('inputId="chat-attachment-input"');
-    expect(composerAttachmentsSource).toContain("labelText=");
+  it("places the attach control in the composer input row", () => {
+    expect(composerAttachmentInputSource).toContain("FileInputTrigger");
+    expect(composerAttachmentInputSource).toContain('inputId="chat-attachment-input"');
+    expect(composerAttachmentsSource).not.toContain("FileInputTrigger");
+    expect(composerAttachmentsSource).not.toContain("Attachment privacy");
+    expect(composerAttachmentsSource).not.toContain("CHAT_ATTACHMENT_PRIVACY_NOTICE");
   });
 
-  it("does not require category select on the message-first happy path", () => {
-    expect(composerAttachmentsSource).toContain("MESSAGE_FIRST_ATTACHMENT_COPY");
-    expect(composerAttachmentsSource).toContain("Recognized after send");
-    expect(composerAttachmentsSource).toContain('option value="">Auto-detect on send</option>');
+  it("uses shared file input and consent primitives", () => {
+    expect(composerAttachmentInputSource).toContain("FileInputTrigger");
+    expect(composerAttachmentInputSource).toContain('inputId="chat-attachment-input"');
+    expect(composerAttachmentInputSource).toContain("labelText=");
+    expect(composerAttachmentsSource).toContain("ConsentScopeChecklist");
+    expect(composerAttachmentsSource).toContain("AttachmentPreviewThumb");
+    expect(composerAttachmentsSource).not.toContain("PrivacyBoundaryNote");
+  });
+
+  it("renders compact attachment chips without privacy panels", () => {
+    expect(composerAttachmentsSource).toContain("chat-composer-attachments__chips");
+    expect(composerAttachmentsSource).toContain("chat-composer-attachments__chip");
+    expect(composerAttachmentsSource).not.toContain("PrivacyBoundaryNote");
+    expect(composerAttachmentsSource).not.toContain("Recognized after send");
+    expect(composerAttachmentsSource).not.toContain("CHAT_ATTACHMENT_PRIVACY_NOTICE");
+    expect(composerAttachmentsSource).not.toContain("formatChatAttachmentFileSize");
+    expect(composerAttachmentsSource).not.toContain("AttachmentStatusBadge");
+  });
+
+  it("keeps category correction collapsed for ambiguous images and unclassified documents", () => {
     expect(composerAttachmentsSource).toContain("OPTIONAL_CATEGORY_CORRECTION_COPY");
+    expect(composerAttachmentsSource).toContain("isAmbiguousFoodOrWorkoutImage");
+    expect(composerAttachmentsSource).toContain("isUnclassifiedLikelyMedicalDocumentDraft");
+    expect(composerAttachmentsSource).toContain('option value="">Auto-detect on send</option>');
+    expect(composerAttachmentsSource).toContain("chat-composer-attachments__category-correction");
     expect(composerAttachmentsSource).not.toMatch(
       /<label[^>]+>[\s\S]*Category[\s\S]*<\/label>[\s\S]*<select[^>]+required/s,
     );
@@ -97,6 +120,10 @@ describe("chat composer attachments wiring", () => {
     expect(outcomePanelSource).toContain("Classification confidence:");
     expect(outcomePanelSource).toContain("Nothing changes until you apply");
     expect(outcomePanelSource).toContain('aria-label="Attachment recognition results"');
+    expect(outcomePanelSource).toContain("Grant consent and process");
+    expect(outcomePanelSource).toContain("ConsentScopeChecklist");
+    expect(chatWorkspaceSource).toContain("pendingMedicalConsentByAttachmentId");
+    expect(chatWorkspaceSource).toContain("buildGrantMedicalAttachmentConsentInput");
   });
 
   it("avoids forbidden clinical terms in attachment user-visible copy", () => {
@@ -107,12 +134,13 @@ describe("chat composer attachments wiring", () => {
     }
   });
 
-  it("auto-uploads non-medical attachments on select without pre-send recognize", () => {
-    expect(composerAttachmentsSource).toContain("shouldAutoProcessChatAttachmentOnSelect");
-    expect(composerAttachmentsSource).toMatch(
+  it("auto-uploads provisional attachments on select without pre-send recognize for unclassified", () => {
+    expect(composerAttachmentInputSource).toContain("shouldAutoProcessChatAttachmentOnSelect");
+    expect(composerAttachmentInputSource).toMatch(
       /shouldAutoProcessChatAttachmentOnSelect\(draft\)[\s\S]*onProcessDraft\(draft\)/,
     );
     expect(composerAttachmentsSource).not.toContain(">Recognize<");
+    expect(composerAttachmentsSource).toContain("canPreviewRecognizeChatAttachmentDraft");
     expect(composerAttachmentsSource).toContain("Preview recognition (optional)");
     expect(AMBIGUOUS_IMAGE_ATTACHMENT_COPY).toMatch(/Send it with your message/i);
   });

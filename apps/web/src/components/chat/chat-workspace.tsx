@@ -8,6 +8,7 @@ import {
   apiQueryKeys,
   createChatThread,
   getChatThread,
+  getDirectChatPathRefreshQueryKeys,
   grantChatAttachmentConsent,
   listChatThreads,
   listProposals,
@@ -16,7 +17,13 @@ import {
   uploadChatAttachment,
 } from "../../lib/api";
 import {
-  buildOptimisticAttachmentSummary,
+  buildGrantMedicalAttachmentConsentInput,
+  createEmptyPendingMedicalAttachmentConsent,
+  createPendingMedicalAttachmentConsentFromDraft,
+  type PendingMedicalAttachmentConsent,
+} from "../../lib/chat-attachment-medical-consent";
+import {
+  buildOptimisticAttachmentDisplays,
   canSendChatComposer,
   enrichAttachmentOutcomesWithProposalContext,
   isChatAttachmentSendEligible,
@@ -28,6 +35,10 @@ import {
   buildChatAttachmentUploadPayload,
   resolveRecognizeConsentScopes,
 } from "../../lib/chat-attachment-upload";
+import {
+  getDirectChatPathRefreshHints,
+  resolveChatMessageDirectPathFeedback,
+} from "../../lib/chat-direct-path-ui-state";
 import { DOCUMENT_CONSENT_VERSION } from "../../lib/documents-ui-state";
 import {
   createOptimisticUserMessage,
@@ -41,9 +52,15 @@ import {
   SUGGESTED_CHAT_PROMPTS,
   type OptimisticChatMessage,
 } from "../../lib/chat-ui-state";
+import {
+  resolveChatMessageAttachmentPreviews,
+  resolveChatMessageTextContent,
+} from "../../lib/chat-message-attachments";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
 import { ChatAttachmentOutcomePanel } from "./chat-attachment-outcome-panel";
+import { ChatComposerAttachmentInput } from "./chat-composer-attachment-input";
 import { ChatComposerAttachments } from "./chat-composer-attachments";
+import { ChatMessageAttachmentPreviews } from "./chat-message-attachment-previews";
 import { WeeklyReviewChatSummary } from "./weekly-review-chat-summary";
 import { mergeProposalsById } from "../../lib/proposal-ui-state";
 import {
@@ -90,6 +107,9 @@ export function ChatWorkspace() {
   );
   const [attachmentOutcomesByMessageId, setAttachmentOutcomesByMessageId] = useState<
     Record<string, ChatAttachmentOutcomeDisplay[]>
+  >({});
+  const [pendingMedicalConsentByAttachmentId, setPendingMedicalConsentByAttachmentId] = useState<
+    Record<string, PendingMedicalAttachmentConsent>
   >({});
 
   const threadsQuery = useQuery({
@@ -189,6 +209,8 @@ export function ChatWorkspace() {
     setLocalProposals([]);
     setOptimisticMessage(null);
     setPendingRevisionSend(null);
+    setAttachmentOutcomesByMessageId({});
+    setPendingMedicalConsentByAttachmentId({});
     setComposerAttachments((current) => {
       for (const attachment of current) {
         revokeChatAttachmentPreviewUrl(attachment);
@@ -302,10 +324,30 @@ export function ChatWorkspace() {
           throw new Error("Clerk session token is unavailable.");
         }
 
-        const consentResult = await grantChatAttachmentConsent(token, draft.attachmentId, {
-          consentScopes: [...draft.consentScopes],
-          consentVersion: DOCUMENT_CONSENT_VERSION,
-        });
+        const consentPayloadResult = await buildGrantMedicalAttachmentConsentInput(
+          {
+            consentScopes: draft.consentScopes,
+            documentTitle: draft.documentTitle,
+            documentType: draft.documentType,
+            file: draft.file,
+          },
+          { requireFile: false },
+        );
+
+        if (!consentPayloadResult.ok) {
+          updateComposerAttachment(localId, (current) => ({
+            ...current,
+            phase: "needs_consent",
+            error: consentPayloadResult.message,
+          }));
+          return;
+        }
+
+        const consentResult = await grantChatAttachmentConsent(
+          token,
+          draft.attachmentId,
+          consentPayloadResult.payload,
+        );
 
         if (consentResult.error || !consentResult.data) {
           updateComposerAttachment(localId, (current) => ({
@@ -331,6 +373,118 @@ export function ChatWorkspace() {
       }
     },
     [composerAttachments, getToken, processAttachmentDraft, updateComposerAttachment],
+  );
+
+  const updatePendingMedicalConsent = useCallback(
+    (
+      attachmentRefId: string,
+      updater: (current: PendingMedicalAttachmentConsent) => PendingMedicalAttachmentConsent,
+    ) => {
+      setPendingMedicalConsentByAttachmentId((current) => {
+        const existing = current[attachmentRefId];
+        if (!existing) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [attachmentRefId]: updater(existing),
+        };
+      });
+    },
+    [],
+  );
+
+  const grantMedicalConsentForOutcome = useCallback(
+    async (attachmentRefId: string) => {
+      const pending = pendingMedicalConsentByAttachmentId[attachmentRefId];
+      if (!pending) {
+        return;
+      }
+
+      updatePendingMedicalConsent(attachmentRefId, (current) => ({
+        ...current,
+        isGranting: true,
+        error: null,
+      }));
+
+      try {
+        const token = await getToken();
+        if (!token) {
+          throw new Error("Clerk session token is unavailable.");
+        }
+
+        const consentPayloadResult = await buildGrantMedicalAttachmentConsentInput(pending);
+
+        if (!consentPayloadResult.ok) {
+          updatePendingMedicalConsent(attachmentRefId, (current) => ({
+            ...current,
+            isGranting: false,
+            error: consentPayloadResult.message,
+          }));
+          return;
+        }
+
+        const consentResult = await grantChatAttachmentConsent(
+          token,
+          attachmentRefId,
+          consentPayloadResult.payload,
+        );
+
+        if (consentResult.error || !consentResult.data) {
+          updatePendingMedicalConsent(attachmentRefId, (current) => ({
+            ...current,
+            isGranting: false,
+            error: consentResult.error ?? "Consent could not be recorded.",
+          }));
+          return;
+        }
+
+        const recognizeResult = await recognizeChatAttachment(token, attachmentRefId, {});
+
+        if (recognizeResult.error || !recognizeResult.data) {
+          updatePendingMedicalConsent(attachmentRefId, (current) => ({
+            ...current,
+            isGranting: false,
+            error: recognizeResult.error ?? "Document could not be processed after consent.",
+          }));
+          return;
+        }
+
+        const updatedAttachment = recognizeResult.data.attachment;
+        setAttachmentOutcomesByMessageId((current) => {
+          const next: Record<string, ChatAttachmentOutcomeDisplay[]> = {};
+
+          for (const [messageId, outcomes] of Object.entries(current)) {
+            next[messageId] = outcomes.map((outcome) =>
+              outcome.attachmentRefId === attachmentRefId
+                ? {
+                    attachmentRefId,
+                    category: updatedAttachment.category,
+                    status: updatedAttachment.status,
+                    recognition: updatedAttachment.recognition,
+                    proposalCandidateCount: recognizeResult.data!.proposalCandidates.length,
+                  }
+                : outcome,
+            );
+          }
+
+          return next;
+        });
+
+        setPendingMedicalConsentByAttachmentId((current) => {
+          const { [attachmentRefId]: _removed, ...rest } = current;
+          return rest;
+        });
+      } catch (error) {
+        updatePendingMedicalConsent(attachmentRefId, (current) => ({
+          ...current,
+          isGranting: false,
+          error: error instanceof Error ? error.message : "Consent could not be recorded.",
+        }));
+      }
+    },
+    [getToken, pendingMedicalConsentByAttachmentId, updatePendingMedicalConsent],
   );
 
   const recognizeAttachmentDraft = useCallback(
@@ -423,40 +577,93 @@ export function ChatWorkspace() {
       }
 
       if (typeof input === "object" && "attachmentRefIds" in input) {
-        const attachmentSummary = buildOptimisticAttachmentSummary(composerAttachments);
+        const pendingSnapshots: Record<string, PendingMedicalAttachmentConsent> = {};
+
+        for (const attachment of composerAttachments) {
+          if (
+            attachment.attachmentId &&
+            input.attachmentRefIds.includes(attachment.attachmentId)
+          ) {
+            pendingSnapshots[attachment.attachmentId] =
+              createPendingMedicalAttachmentConsentFromDraft(attachment);
+          }
+        }
+
         setOptimisticMessage(
-          createOptimisticUserMessage(primaryThreadId, input.content, attachmentSummary),
+          createOptimisticUserMessage(
+            primaryThreadId,
+            input.content,
+            buildOptimisticAttachmentDisplays(composerAttachments),
+          ),
         );
-        return;
+
+        return { pendingSnapshots };
       }
 
       const content = isProposalRevisionChatSend(input) ? input.message : input;
       setOptimisticMessage(createOptimisticUserMessage(primaryThreadId, content));
     },
-    onSuccess: (turn) => {
+    onSuccess: (turn, _variables, context) => {
       setDraft("");
       setOptimisticMessage(null);
       setPendingRevisionSend(null);
+
       setComposerAttachments((current) => {
         for (const attachment of current) {
           revokeChatAttachmentPreviewUrl(attachment);
         }
         return [];
       });
+
       setLocalProposals(turn.proposals);
       if (turn.attachmentOutcomes?.length) {
+        const enrichedOutcomes = enrichAttachmentOutcomesWithProposalContext(
+          turn.attachmentOutcomes ?? [],
+          turn.proposals,
+        );
+
         setAttachmentOutcomesByMessageId((current) => ({
           ...current,
-          [turn.assistantMessage.id]: enrichAttachmentOutcomesWithProposalContext(
-            turn.attachmentOutcomes ?? [],
-            turn.proposals,
-          ),
+          [turn.assistantMessage.id]: enrichedOutcomes,
         }));
+
+        const needsConsentIds = enrichedOutcomes
+          .filter(
+            (outcome) =>
+              outcome.category === "medical_document" && outcome.status === "needs_consent",
+          )
+          .map((outcome) => outcome.attachmentRefId);
+
+        if (needsConsentIds.length > 0) {
+          setPendingMedicalConsentByAttachmentId(() => {
+            const snapshots = context?.pendingSnapshots ?? {};
+            const next: Record<string, PendingMedicalAttachmentConsent> = {};
+
+            for (const attachmentRefId of needsConsentIds) {
+              next[attachmentRefId] =
+                snapshots[attachmentRefId] ??
+                createEmptyPendingMedicalAttachmentConsent(attachmentRefId);
+            }
+
+            return next;
+          });
+        } else {
+          setPendingMedicalConsentByAttachmentId({});
+        }
+      } else {
+        setPendingMedicalConsentByAttachmentId({});
       }
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
       void queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
       void queryClient.invalidateQueries({ queryKey: ["proposals", turn.thread.id] });
       void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
+
+      const directPathRefreshHints = getDirectChatPathRefreshHints(turn.assistantMessage.metadata);
+      if (directPathRefreshHints.length > 0) {
+        for (const queryKey of getDirectChatPathRefreshQueryKeys(directPathRefreshHints)) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
+      }
     },
     onError: () => {
       setOptimisticMessage(null);
@@ -618,12 +825,21 @@ export function ChatWorkspace() {
             {messages.map((message) => {
               const linkedProposals = proposalsByMessageId.get(message.id) ?? [];
               const isUser = message.role === "user";
+              const attachmentPreviews = isUser
+                ? resolveChatMessageAttachmentPreviews(message)
+                : [];
+              const messageText = isUser
+                ? resolveChatMessageTextContent(message.content, attachmentPreviews)
+                : message.content;
               const crisisSupportCopy = isUser
                 ? null
                 : resolveChatMessageCrisisSupport(message);
               const weeklyReviewPack = isUser
                 ? null
                 : resolveChatMessageWeeklyReview(message);
+              const directPathFeedback = isUser
+                ? null
+                : resolveChatMessageDirectPathFeedback(message);
 
               return (
                 <li key={message.id}>
@@ -644,7 +860,17 @@ export function ChatWorkspace() {
                         titleId={`chat-crisis-${message.id}`}
                       />
                     ) : (
-                      message.content
+                      <>
+                        {attachmentPreviews.length > 0 ? (
+                          <ChatMessageAttachmentPreviews previews={attachmentPreviews} />
+                        ) : null}
+                        {messageText ? <p className="chat-bubble__text">{messageText}</p> : null}
+                        {directPathFeedback ? (
+                          <p className="notice notice-inline" role="status">
+                            {directPathFeedback.message}
+                          </p>
+                        ) : null}
+                      </>
                     )}
                   </ChatBubble>
 
@@ -659,6 +885,11 @@ export function ChatWorkspace() {
                     <ChatAttachmentOutcomePanel
                       outcomes={attachmentOutcomesByMessageId[message.id] ?? []}
                       titleId={`chat-attachment-outcomes-${message.id}`}
+                      pendingMedicalConsentByAttachmentId={pendingMedicalConsentByAttachmentId}
+                      onPendingMedicalConsentChange={updatePendingMedicalConsent}
+                      onGrantMedicalConsent={(attachmentRefId) => {
+                        void grantMedicalConsentForOutcome(attachmentRefId);
+                      }}
                     />
                   ) : null}
 
@@ -724,22 +955,30 @@ export function ChatWorkspace() {
                   void recognizeAttachmentDraft(draft);
                 }}
               />
-              <label className="sr-only" htmlFor="chat-message">
-                Message your coach
-              </label>
-              <textarea
-                id="chat-message"
-                className="form-textarea"
-                rows={2}
-                value={draft}
-                placeholder="Message your coach…"
-                disabled={sendMessageMutation.isPending}
-                onChange={(event) => setDraft(event.target.value)}
-              />
-              <div className="action-row composer-actions">
+              <div className="chat-composer-controls">
+                <ChatComposerAttachmentInput
+                  attachments={composerAttachments}
+                  disabled={sendMessageMutation.isPending}
+                  onAttachmentsChange={setComposerAttachments}
+                  onProcessDraft={(draft) => {
+                    void processAttachmentDraft(draft);
+                  }}
+                />
+                <label className="sr-only" htmlFor="chat-message">
+                  Message your coach
+                </label>
+                <textarea
+                  id="chat-message"
+                  className="form-textarea chat-composer-controls__input"
+                  rows={2}
+                  value={draft}
+                  placeholder="Message your coach…"
+                  disabled={sendMessageMutation.isPending}
+                  onChange={(event) => setDraft(event.target.value)}
+                />
                 <Button
                   type="submit"
-                  className="button-coach"
+                  className="button-coach chat-composer-controls__send"
                   disabled={sendDisabled || !primaryThreadId}
                 >
                   {sendMessageMutation.isPending ? "Sending…" : "Send"}

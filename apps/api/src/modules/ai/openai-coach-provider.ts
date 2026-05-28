@@ -1,9 +1,23 @@
-import type { CoachAiProvider, CoachAiRequest, IntentRouterRequest } from "@health/ai";
-import type { AiStructuredOutputInput, LlmIntentRouterOutputInput } from "@health/types";
+import type {
+  CoachAiProvider,
+  CoachAiLoopRequest,
+  CoachAiRequest,
+  IntentRouterRequest,
+} from "@health/ai";
+import type {
+  AgentLoopOutputInput,
+  AiStructuredOutputInput,
+  CompiledPromptTemplates,
+  LlmIntentRouterOutputInput,
+} from "@health/types";
 import {
+  agentLoopOutputSchema,
   aiStructuredOutputSchema,
+  getDefaultCompiledPromptTemplates,
   llmIntentRouterOutputSchema,
   normalizeContextSlicePlan,
+  serializeIntentCatalogForRouter,
+  validateAgentLoopOutputShape,
   validateLlmRouterOutputShape,
 } from "@health/types";
 
@@ -19,6 +33,7 @@ export class OpenAiCoachProviderMissingKeyError extends Error {
 export interface OpenAiCoachProviderOptions {
   apiKey: string;
   model: string;
+  promptTemplates?: CompiledPromptTemplates;
 }
 
 interface OpenAiChatCompletionResponse {
@@ -33,15 +48,23 @@ interface OpenAiChatCompletionResponse {
 }
 
 export class OpenAiCoachProvider implements CoachAiProvider {
+  private readonly promptTemplates: CompiledPromptTemplates;
+
   constructor(private readonly options: OpenAiCoachProviderOptions) {
     if (!options.apiKey.trim()) {
       throw new OpenAiCoachProviderMissingKeyError();
     }
+
+    this.promptTemplates = options.promptTemplates ?? getDefaultCompiledPromptTemplates();
   }
 
   async generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput> {
-    const systemPrompt = buildOpenAiIntentRouterPrompt(request);
-    const payload = await this.requestJsonCompletion(systemPrompt, request.userMessage, request.recentMessages);
+    const systemPrompt = buildOpenAiIntentRouterPrompt(request, this.promptTemplates);
+    const payload = await this.requestJsonCompletion(
+      systemPrompt,
+      request.userMessage,
+      request.recentMessages,
+    );
     const shapeErrors = validateLlmRouterOutputShape(payload);
 
     if (shapeErrors.length > 0) {
@@ -58,15 +81,33 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     };
   }
 
-  async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput> {
-    const systemPrompt = buildOpenAiSystemPrompt(request);
+  async generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput> {
+    const systemPrompt = buildOpenAiIntentLoopPrompt(request, this.promptTemplates);
     const payload = await this.requestJsonCompletion(
       systemPrompt,
       request.userMessage,
       request.recentMessages,
     );
 
-    return coerceOpenAiStructuredOutput(payload);
+    return coerceOpenAiLoopOutput(payload);
+  }
+
+  async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput> {
+    const loopStep = await this.generateAgentLoopStep({
+      ...request,
+      iteration: 1,
+      maxIterations: 1,
+      priorToolResults: [],
+    });
+
+    if (loopStep.kind === "final_answer") {
+      return coerceOpenAiStructuredOutput({
+        reply: loopStep.reply,
+        proposals: loopStep.proposals ?? [],
+      });
+    }
+
+    throw new Error("OpenAI coach provider returned a tool request during single-pass generation.");
   }
 
   private async requestJsonCompletion(
@@ -118,18 +159,116 @@ export class OpenAiCoachProvider implements CoachAiProvider {
   }
 }
 
-function buildOpenAiIntentRouterPrompt(request: IntentRouterRequest): string {
-  return [
-    "You are an internal intent router for a wellness coaching product.",
-    "Return JSON only. Do not answer the user. Do not provide advice, proposals, or coaching text.",
-    "Allowed JSON shape:",
-    '{"intent":"general|ask_about_today|adjust_workout|adjust_nutrition|review_progress|longevity_overview|ask_health_context","confidence":0.0-1.0,"routingMethod":"llm_router","requiredContextSlices":[{"type":"general_chat|daily_checkin|workout_adaptation|nutrition_adaptation|weekly_review|longevity_overview|health_context","depth":"small|medium|large","timeRange":"7d|14d|30d|90d|1y","includeDocuments":false}],"safetyFlags":["fatigue|pain|sleep_issue|stress|hunger|schedule_conflict|health_context"],"expectedResponseMode":"advice_only|recommendation_with_optional_proposal|clarification_question"}',
-    "Use at most 3 context slices. Prefer medium depth. Disable documents unless health context is explicit.",
-    "Never include reply, advice, answer, response, proposals, or user-facing text fields.",
-    request.ruleRouteHint
-      ? `Rule-router hint: ${JSON.stringify(request.ruleRouteHint)}`
-      : "Rule-router hint: none",
-  ].join("\n");
+function buildOpenAiIntentRouterPrompt(
+  request: IntentRouterRequest,
+  promptTemplates: CompiledPromptTemplates,
+): string {
+  const catalog = request.intentCatalog ?? serializeIntentCatalogForRouter();
+
+  return promptTemplates.renderIntentRouter({
+    intentCatalogJson: JSON.stringify(catalog),
+  });
+}
+
+function buildOpenAiIntentLoopPrompt(
+  request: CoachAiLoopRequest,
+  promptTemplates: CompiledPromptTemplates,
+): string {
+  const metadata = request.agentMetadata;
+  const intentDefinition = metadata?.intentDefinition;
+
+  return promptTemplates.renderCoachLoop({
+    iteration: String(request.iteration),
+    maxIterations: String(request.maxIterations),
+    selectedIntentLabel: intentDefinition
+      ? intentDefinition.id
+      : (metadata?.catalogIntentId ?? metadata?.intent ?? "general"),
+    intentInstructions: intentDefinition?.promptInstructions
+      ? intentDefinition.promptInstructions
+      : "Provide conservative wellness coaching.",
+    intentSafetyGuidance: intentDefinition?.safetyGuidance?.length
+      ? intentDefinition.safetyGuidance.join(" | ")
+      : "none",
+    allowedTools: metadata?.allowedTools?.length
+      ? metadata.allowedTools.join(", ")
+      : "getUserContextSlice",
+    allowedProposalIntents: metadata?.allowedProposalIntents?.length
+      ? metadata.allowedProposalIntents.join(", ")
+      : "none",
+    taskPurpose: metadata?.purpose ?? "general_chat",
+    taskIntent: metadata?.intent ?? "general",
+    expectedResponseMode:
+      metadata?.expectedResponseMode ?? "recommendation_with_optional_proposal",
+    safetyFlags: metadata?.safetyFlags?.length ? metadata.safetyFlags.join(", ") : "none",
+    missingContextNotes: metadata?.missingContextNotes?.length
+      ? metadata.missingContextNotes.join(" | ")
+      : "none",
+    priorToolResultsJson: request.priorToolResults.length
+      ? JSON.stringify(request.priorToolResults)
+      : "none",
+    safetyConstraints:
+      metadata?.safetyConstraints?.join("\n- ") ??
+      "Do not diagnose, prescribe, or claim to treat diseases.",
+    preparedAttachmentProposalsLine: buildPreparedAttachmentProposalPromptLine(
+      request.coachingContext,
+    ),
+    coachingContextJson: JSON.stringify(request.coachingContext),
+  });
+}
+
+function buildPreparedAttachmentProposalPromptLine(
+  coachingContext: Record<string, unknown>,
+): string {
+  const attachmentTurn = coachingContext.attachmentTurn;
+
+  if (!attachmentTurn || typeof attachmentTurn !== "object") {
+    return "Prepared attachment proposals: none";
+  }
+
+  const preparedProposals = (attachmentTurn as { preparedProposals?: unknown })
+    .preparedProposals;
+
+  if (!Array.isArray(preparedProposals) || preparedProposals.length === 0) {
+    return "Prepared attachment proposals: none";
+  }
+
+  const summaries = preparedProposals
+    .map((proposal) => {
+      if (!proposal || typeof proposal !== "object") {
+        return null;
+      }
+
+      const record = proposal as {
+        intent?: unknown;
+        title?: unknown;
+        targetDomain?: unknown;
+      };
+
+      if (typeof record.intent !== "string" || typeof record.title !== "string") {
+        return null;
+      }
+
+      return `${record.intent}: ${record.title}`;
+    })
+    .filter((summary): summary is string => summary != null);
+
+  if (summaries.length === 0) {
+    return "Prepared attachment proposals: none";
+  }
+
+  return `Prepared attachment proposals (already created server-side; mention briefly, do not duplicate): ${summaries.join("; ")}`;
+}
+
+function coerceOpenAiLoopOutput(value: unknown): AgentLoopOutputInput {
+  const shapeErrors = validateAgentLoopOutputShape(value);
+
+  if (shapeErrors.length > 0) {
+    throw new Error(
+      `OpenAI coach provider returned invalid loop output: ${shapeErrors.join(" ")}`,
+    );
+  }
+
+  return agentLoopOutputSchema.parse(value);
 }
 
 function coerceOpenAiStructuredOutput(value: unknown): AiStructuredOutputInput {
@@ -158,45 +297,14 @@ function coerceOpenAiStructuredOutput(value: unknown): AiStructuredOutputInput {
   );
 }
 
-function buildOpenAiSystemPrompt(request: CoachAiRequest): string {
-  const metadata = request.agentMetadata;
-  const constraints =
-    metadata?.safetyConstraints?.join("\n- ") ??
-    "Do not diagnose, prescribe, or claim to treat diseases.";
-
-  return [
-    "You are an AI wellness coach for fitness, habits, nutrition, and recovery.",
-    "Respond in the same language as the user's latest message.",
-    "Return JSON only with this shape: {\"reply\": string, \"proposals\": array}.",
-    "For normal coaching advice, set proposals to an empty array.",
-    "Only include proposals when you can produce an exact typed proposal that matches one of the allowed intents.",
-    "Allowed proposal intents: update_profile, create_goal, update_goal, create_workout_plan, adapt_workout_plan, adapt_workout_plan_from_progress, create_nutrition_plan, adjust_nutrition_plan, recommend_recipes, create_today_checklist, create_habit_plan, adapt_habit_plan, summarize_progress.",
-    "Never invent proposal intents. Never return more than 5 proposals.",
-    "Proposals must remain pending until the user approves them.",
-    "Never mutate structured state directly. Suggest plan changes only through proposals.",
-    `Task purpose: ${metadata?.purpose ?? "general_chat"}`,
-    `Task intent: ${metadata?.intent ?? "general"}`,
-    `Expected response mode: ${metadata?.expectedResponseMode ?? "recommendation_with_optional_proposal"}`,
-    metadata?.safetyFlags?.length
-      ? `Safety flags: ${metadata.safetyFlags.join(", ")}`
-      : "Safety flags: none",
-    metadata?.missingContextNotes?.length
-      ? `Missing context notes: ${metadata.missingContextNotes.join(" | ")}`
-      : "Missing context notes: none",
-    "Safety constraints:",
-    `- ${constraints}`,
-    "Structured coaching context:",
-    JSON.stringify(request.coachingContext),
-  ].join("\n");
-}
-
 export function createOpenAiCoachProvider(
   apiKey: string | undefined,
   model: string,
+  promptTemplates?: CompiledPromptTemplates,
 ): OpenAiCoachProvider {
   if (!apiKey?.trim()) {
     throw new OpenAiCoachProviderMissingKeyError();
   }
 
-  return new OpenAiCoachProvider({ apiKey, model });
+  return new OpenAiCoachProvider({ apiKey, model, promptTemplates });
 }

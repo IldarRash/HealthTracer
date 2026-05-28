@@ -1,11 +1,16 @@
 import type {
+  AgentLoopOutputInput,
+  AgentToolCallResult,
   AiStructuredOutputInput,
+  IntentCatalogEntry,
   LlmIntentRouterOutputInput,
 } from "@health/types";
 import {
   buildContextSliceRequestForIntent,
   isWeeklyReviewChatMessage,
   normalizeContextSlicePlan,
+  resolveDefaultExpectedResponseMode,
+  serializeIntentCatalogForRouter,
 } from "@health/types";
 import {
   hasActiveHabitPlanInContext,
@@ -38,10 +43,12 @@ export interface IntentRouterRequest {
     readonly role: "user" | "assistant" | "system";
     readonly content: string;
   }>;
-  readonly ruleRouteHint?: {
-    readonly intent: string;
-    readonly safetyFlags: readonly string[];
-  };
+  readonly intentCatalog?: ReadonlyArray<{
+    readonly id: string;
+    readonly description: string;
+    readonly routerGuidance: string;
+    readonly examples: readonly string[];
+  }>;
 }
 
 export interface CoachAiRequest {
@@ -54,17 +61,28 @@ export interface CoachAiRequest {
   readonly agentMetadata?: {
     readonly purpose: string;
     readonly intent: string;
+    readonly catalogIntentId?: string;
     readonly depth: string;
     readonly timeRange: string;
     readonly safetyConstraints: readonly string[];
     readonly expectedResponseMode?: string;
     readonly safetyFlags?: readonly string[];
     readonly missingContextNotes?: readonly string[];
+    readonly intentDefinition?: IntentCatalogEntry;
+    readonly allowedTools?: readonly string[];
+    readonly allowedProposalIntents?: readonly string[];
   };
+}
+
+export interface CoachAiLoopRequest extends CoachAiRequest {
+  readonly iteration: number;
+  readonly maxIterations: number;
+  readonly priorToolResults: ReadonlyArray<AgentToolCallResult>;
 }
 
 export interface CoachAiProvider {
   generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput>;
+  generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput>;
   generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput>;
 }
 
@@ -78,9 +96,55 @@ function stubCoachOutput(value: unknown): AiStructuredOutputInput {
   return value as AiStructuredOutputInput;
 }
 
+function buildPreparedAttachmentWorkoutReply(
+  request: CoachAiRequest,
+): AiStructuredOutputInput | null {
+  const catalogIntentId =
+    request.agentMetadata?.catalogIntentId ?? request.agentMetadata?.intent;
+
+  if (catalogIntentId !== "attachment_workout") {
+    return null;
+  }
+
+  const attachmentTurn = request.coachingContext.attachmentTurn;
+
+  if (!attachmentTurn || typeof attachmentTurn !== "object") {
+    return null;
+  }
+
+  const preparedProposals = (attachmentTurn as { preparedProposals?: unknown })
+    .preparedProposals;
+
+  if (!Array.isArray(preparedProposals) || preparedProposals.length === 0) {
+    return null;
+  }
+
+  const todayChecklistProposal = preparedProposals.find(
+    (proposal) =>
+      proposal &&
+      typeof proposal === "object" &&
+      (proposal as { intent?: unknown }).intent === "create_today_checklist",
+  ) as { title?: string } | undefined;
+
+  if (!todayChecklistProposal) {
+    return null;
+  }
+
+  const proposalTitle =
+    typeof todayChecklistProposal.title === "string"
+      ? todayChecklistProposal.title
+      : "Today workout checklist";
+
+  return {
+    reply: `I reviewed your training attachment and prepared "${proposalTitle}" for your approval. Review the proposal card below before anything is saved to Today.`,
+    proposals: [],
+  };
+}
+
 export class StubCoachAiProvider implements CoachAiProvider {
   async generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput> {
     const normalized = request.userMessage.toLowerCase();
+    const catalog = request.intentCatalog ?? serializeIntentCatalogForRouter();
 
     if (
       normalized.includes("not losing weight") ||
@@ -88,7 +152,7 @@ export class StubCoachAiProvider implements CoachAiProvider {
       (normalized.includes("hungry") && normalized.includes("tired"))
     ) {
       return {
-        intent: "adjust_nutrition",
+        catalogIntentId: "adjust_nutrition",
         confidence: 0.84,
         routingMethod: "llm_router",
         requiredContextSlices: normalizeContextSlicePlan([
@@ -106,7 +170,7 @@ export class StubCoachAiProvider implements CoachAiProvider {
       normalized.includes("routine is not")
     ) {
       return {
-        intent: "adjust_workout",
+        catalogIntentId: "adjust_workout",
         confidence: 0.82,
         routingMethod: "llm_router",
         requiredContextSlices: normalizeContextSlicePlan([
@@ -118,13 +182,53 @@ export class StubCoachAiProvider implements CoachAiProvider {
       };
     }
 
+    if (isWeeklyReviewChatMessage(request.userMessage)) {
+      return {
+        catalogIntentId: "review_progress",
+        confidence: 0.93,
+        routingMethod: "llm_router",
+        requiredContextSlices: [buildContextSliceRequestForIntent("review_progress")],
+        safetyFlags: [],
+        expectedResponseMode: "recommendation_with_optional_proposal",
+      };
+    }
+
+    const fallbackId = catalog[0]?.id ?? "general";
+
     return {
-      intent: "general",
+      catalogIntentId: fallbackId as LlmIntentRouterOutputInput["catalogIntentId"],
       confidence: 0.78,
       routingMethod: "llm_router",
       requiredContextSlices: [buildContextSliceRequestForIntent("general")],
       safetyFlags: [],
-      expectedResponseMode: "advice_only",
+      expectedResponseMode: resolveDefaultExpectedResponseMode("general"),
+    };
+  }
+
+  async generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput> {
+    const catalogIntentId = request.agentMetadata?.catalogIntentId ?? request.agentMetadata?.intent;
+
+    if (
+      catalogIntentId === "review_progress" &&
+      request.iteration < request.maxIterations &&
+      !request.priorToolResults.some(
+        (result) => result.tool === "getWeeklyProgressContext" && result.ok,
+      )
+    ) {
+      return {
+        kind: "tool_request",
+        tool: "getWeeklyProgressContext",
+        input: {},
+        rationale: "Weekly progress context is needed before summarizing the user's week.",
+      };
+    }
+
+    const coachOutput = await this.generateCoachResponse(request);
+
+    return {
+      kind: "final_answer",
+      reply: coachOutput.reply,
+      proposals: coachOutput.proposals ?? [],
     };
   }
 
@@ -134,6 +238,11 @@ export class StubCoachAiProvider implements CoachAiProvider {
       return stubCoachOutput(
         buildStubProposalRevisionOutput(revision, request.coachingContext),
       );
+    }
+
+    const preparedAttachmentReply = buildPreparedAttachmentWorkoutReply(request);
+    if (preparedAttachmentReply) {
+      return stubCoachOutput(preparedAttachmentReply);
     }
 
     const normalized = request.userMessage.toLowerCase();

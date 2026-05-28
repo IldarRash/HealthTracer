@@ -151,6 +151,17 @@ export class ChatRepository {
       .where(and(eq(aiProposals.userId, userId), eq(aiProposals.threadId, threadId)))
       .orderBy(desc(aiProposals.createdAt));
   }
+
+  async findLatestProposalForThread(userId: string, threadId: string) {
+    const [record] = await this.db
+      .select()
+      .from(aiProposals)
+      .where(and(eq(aiProposals.userId, userId), eq(aiProposals.threadId, threadId)))
+      .orderBy(desc(aiProposals.createdAt))
+      .limit(1);
+
+    return record ?? null;
+  }
 }
 
 export type ChatThreadRow = typeof chatThreads.$inferSelect;

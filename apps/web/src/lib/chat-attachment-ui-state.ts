@@ -1,5 +1,6 @@
 import type {
   ChatAttachmentCategory,
+  ChatAttachmentCategorySource,
   ChatAttachmentOutcome,
   ChatAttachmentRecord,
   ChatAttachmentStatus,
@@ -92,6 +93,7 @@ export type ChatComposerAttachmentDraft = {
   localId: string;
   file: File;
   category: ChatAttachmentCategory;
+  categorySource: ChatAttachmentCategorySource;
   previewUrl: string | null;
   localValidationError: string | null;
   documentType: DocumentType;
@@ -127,6 +129,24 @@ export function isLikelyMedicalDocumentFile(file: Pick<File, "name" | "type">): 
   return (SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES as readonly string[]).includes(mime);
 }
 
+export function isUnclassifiedLikelyMedicalDocumentDraft(
+  draft: Pick<ChatComposerAttachmentDraft, "category" | "file">,
+): boolean {
+  return draft.category === "unclassified" && isLikelyMedicalDocumentFile(draft.file);
+}
+
+export function resolveInitialChatAttachmentCategorySource(
+  file: Pick<File, "name" | "type">,
+): ChatAttachmentCategorySource {
+  return isLikelyMedicalDocumentFile(file) ? "mime_inferred" : "default_unclassified";
+}
+
+export function isUserSelectedChatAttachmentDraft(
+  draft: Pick<ChatComposerAttachmentDraft, "category" | "categorySource">,
+): boolean {
+  return draft.categorySource === "user_selected" && draft.category !== "unclassified";
+}
+
 export function formatChatAttachmentFileSize(bytes: number): string {
   return formatDocumentFileSize(bytes);
 }
@@ -156,6 +176,16 @@ export function shouldAutoProcessChatAttachmentOnSelect(
   }
 
   return draft.category === "unclassified" || draft.category === "food_photo" || draft.category === "workout_attachment";
+}
+
+export function canPreviewRecognizeChatAttachmentDraft(
+  draft: Pick<ChatComposerAttachmentDraft, "phase" | "localValidationError" | "category">,
+): boolean {
+  if (draft.phase !== "uploaded" || draft.localValidationError) {
+    return false;
+  }
+
+  return draft.category === "food_photo" || draft.category === "workout_attachment";
 }
 
 export function guessChatAttachmentCategory(file: Pick<File, "name" | "type">): ChatAttachmentCategory {
@@ -265,9 +295,8 @@ export function getMedicalAttachmentDraftErrors(
 }
 
 export function createChatComposerAttachmentDraft(file: File): ChatComposerAttachmentDraft {
-  const category: ChatAttachmentCategory = isLikelyMedicalDocumentFile(file)
-    ? "medical_document"
-    : "unclassified";
+  const category: ChatAttachmentCategory = "unclassified";
+  const categorySource = resolveInitialChatAttachmentCategorySource(file);
   const mimeType = normalizeAttachmentMimeType(file);
   const previewUrl =
     mimeType.startsWith("image/") &&
@@ -282,6 +311,7 @@ export function createChatComposerAttachmentDraft(file: File): ChatComposerAttac
     localId: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     file,
     category,
+    categorySource,
     previewUrl,
     localValidationError: validateChatAttachmentFile(file, category),
     documentType: "other",
@@ -461,6 +491,30 @@ export function canSendChatComposer(input: {
   return Boolean(trimmed) || sendReadyAttachments.length > 0;
 }
 
+export function buildOptimisticAttachmentDisplays(
+  attachments: readonly ChatComposerAttachmentDraft[],
+): {
+  attachmentRefId: string;
+  filename: string;
+  mimeType: string;
+  previewUrl: string | null;
+}[] {
+  return attachments
+    .filter((attachment) => isChatAttachmentSendEligible(attachment.record, attachment))
+    .flatMap((attachment) =>
+      attachment.attachmentId
+        ? [
+            {
+              attachmentRefId: attachment.attachmentId,
+              filename: attachment.file.name,
+              mimeType: attachment.file.type || "application/octet-stream",
+              previewUrl: attachment.previewUrl,
+            },
+          ]
+        : [],
+    );
+}
+
 export function buildOptimisticAttachmentSummary(
   attachments: readonly ChatComposerAttachmentDraft[],
 ): string {
@@ -499,9 +553,15 @@ export function applyChatAttachmentCategoryChange(
   draft: ChatComposerAttachmentDraft,
   category: ChatAttachmentCategory,
 ): ChatComposerAttachmentDraft {
+  const categorySource: ChatAttachmentCategorySource =
+    category === "unclassified"
+      ? resolveInitialChatAttachmentCategorySource(draft.file)
+      : "user_selected";
+
   return {
     ...draft,
     category,
+    categorySource,
     localValidationError: validateChatAttachmentFile(draft.file, category),
     consentScopes: [],
     attachmentId: null,

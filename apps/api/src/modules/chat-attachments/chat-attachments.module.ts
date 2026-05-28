@@ -9,6 +9,8 @@ import { ChatAttachmentRecognitionService } from "./chat-attachment-recognition.
 import { ChatAttachmentsController } from "./chat-attachments.controller.js";
 import { ChatAttachmentsRepository } from "./chat-attachments.repository.js";
 import { ChatAttachmentsService } from "./chat-attachments.service.js";
+import { DevChatAttachmentClassificationProvider } from "./dev-chat-attachment-classification.provider.js";
+import { createChatAttachmentClassificationProvider } from "./chat-attachment-classification.factory.js";
 import { FoodPhotoAttachmentRecognizer } from "./food-photo-attachment-recognizer.js";
 import { MedicalDocumentAttachmentRecognizer } from "./medical-document-attachment-recognizer.js";
 import {
@@ -23,7 +25,17 @@ import {
     ChatRepository,
     ChatAttachmentsRepository,
     ChatAttachmentsService,
-    ChatAttachmentClassifierService,
+    DevChatAttachmentClassificationProvider,
+    {
+      provide: "CHAT_ATTACHMENT_CLASSIFICATION_PROVIDER",
+      useFactory: createChatAttachmentClassificationProvider,
+    },
+    {
+      provide: ChatAttachmentClassifierService,
+      useFactory: (provider: ReturnType<typeof createChatAttachmentClassificationProvider>) =>
+        new ChatAttachmentClassifierService(provider),
+      inject: ["CHAT_ATTACHMENT_CLASSIFICATION_PROVIDER"],
+    },
     ChatAttachmentRecognitionService,
     FoodPhotoAttachmentRecognizer,
     MedicalDocumentAttachmentRecognizer,

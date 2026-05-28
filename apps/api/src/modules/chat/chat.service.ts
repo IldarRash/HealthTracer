@@ -7,6 +7,7 @@ import type {
   CreateChatThreadInput,
   RawAiProposal,
   SendChatMessageInput,
+  WorkoutAttachmentRecognitionEnvelope,
 } from "@health/types";
 import {
   evaluateWellbeingCrisisFromText,
@@ -22,6 +23,8 @@ import {
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiService } from "../ai/ai.service.js";
+import type { AttachmentTurnContext } from "../ai/agent-orchestrator.service.js";
+import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
 import { ChatAttachmentRecognitionService } from "../chat-attachments/chat-attachment-recognition.service.js";
 import { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { ProgressWeeklyReviewService } from "../progress/progress-weekly-review.service.js";
@@ -31,6 +34,8 @@ import { UsersService } from "../users/users.service.js";
 import { WellbeingCheckInsService } from "../wellbeing-check-ins/wellbeing-check-ins.service.js";
 import { toChatMessage, toChatThread } from "./chat.mapper.js";
 import { ChatRepository } from "./chat.repository.js";
+import { DirectChatPathService } from "./direct-chat-path.service.js";
+import { ProposalExplainerService } from "./proposal-explainer.service.js";
 import { toAiProposal } from "../proposals/proposal.mapper.js";
 
 const AI_RECENT_MESSAGE_LIMIT = 20;
@@ -47,6 +52,9 @@ export class ChatService {
     private readonly recipesService: RecipesService,
     private readonly chatAttachmentsService: ChatAttachmentsService,
     private readonly chatAttachmentRecognitionService: ChatAttachmentRecognitionService,
+    private readonly directChatPathService: DirectChatPathService,
+    private readonly proposalExplainerService: ProposalExplainerService,
+    private readonly aiBehaviorConfigService: AiBehaviorConfigService,
   ) {}
 
   async listThreads(auth: ClerkAuthContext): Promise<ChatThread[]> {
@@ -192,6 +200,75 @@ export class ChatService {
       };
     }
 
+    const explainerPreAi = await this.proposalExplainerService.resolvePreAiTurn({
+      auth,
+      threadId,
+      userMessage: messageContent,
+      hasAttachments: attachmentRefIds.length > 0,
+      hasProposalRevision: Boolean(input.proposalRevision),
+    });
+
+    if (explainerPreAi.kind === "no_proposal") {
+      const assistantMessage = await this.chatRepository.createMessage(
+        threadId,
+        "assistant",
+        explainerPreAi.reply,
+        {
+          proposalExplainer: {
+            status: "no_proposal",
+          },
+        },
+      );
+
+      const title =
+        thread.title ??
+        (existingMessages.length === 0 ? truncateTitle(messageContent) : undefined);
+
+      await this.chatRepository.touchThread(threadId, title);
+
+      const updatedThread = await this.chatRepository.findThreadById(user.id, threadId);
+
+      return {
+        thread: toChatThread(updatedThread ?? thread),
+        userMessage: toChatMessage(userMessage),
+        assistantMessage: toChatMessage(assistantMessage),
+        proposals: [],
+      };
+    }
+
+    const directPathResult = await this.directChatPathService.tryExecute({
+      auth,
+      userMessage: messageContent,
+      proposalRevision: input.proposalRevision,
+      hasAttachments: attachmentRefIds.length > 0,
+    });
+
+    if (directPathResult) {
+      const assistantMessage = await this.chatRepository.createMessage(
+        threadId,
+        "assistant",
+        directPathResult.reply,
+        {
+          directPath: directPathResult.metadata,
+        },
+      );
+
+      const title =
+        thread.title ??
+        (existingMessages.length === 0 ? truncateTitle(messageContent) : undefined);
+
+      await this.chatRepository.touchThread(threadId, title);
+
+      const updatedThread = await this.chatRepository.findThreadById(user.id, threadId);
+
+      return {
+        thread: toChatThread(updatedThread ?? thread),
+        userMessage: toChatMessage(userMessage),
+        assistantMessage: toChatMessage(assistantMessage),
+        proposals: [],
+      };
+    }
+
     const isWeeklyReviewTurn = isWeeklyReviewChatMessage(input.content);
     const todayIsoDate = getTodayIsoDateInTimezone(user.timezone);
     const todayCheckIn = await this.wellbeingCheckInsService.getCheckInForDate(
@@ -199,20 +276,64 @@ export class ChatService {
       todayIsoDate,
     );
 
+    const mealContextLabel = inferMealContextFromMessage(messageContent);
+    const attachmentProposalCandidatesPreAi = [];
+
+    for (const attachment of attachmentRecords) {
+      attachmentProposalCandidatesPreAi.push(
+        ...this.chatAttachmentRecognitionService.buildProposalCandidates({
+          attachment,
+          incidentDateTime: new Date().toISOString(),
+          mealContextLabel,
+          boundedMessage: messageContent,
+          todayIsoDate,
+        }),
+      );
+    }
+
     const generated = await this.aiService.generateCoachResponse({
       auth,
       userMessage: messageContent,
-      recentMessages: [...existingMessages, userMessage]
+      recentMessages: existingMessages
         .slice(-AI_RECENT_MESSAGE_LIMIT)
         .map((message) => ({
           role: message.role,
           content: message.content,
         })),
       ...(input.proposalRevision ? { proposalRevision: input.proposalRevision } : {}),
+      ...(explainerPreAi.kind === "with_proposal"
+        ? { proposalExplainer: explainerPreAi.context }
+        : {}),
+      ...(attachmentRecords.length > 0
+        ? {
+            attachmentTurn: {
+              attachments: attachmentRecords.map((attachment) => ({
+                attachmentRefId: attachment.id,
+                category: attachment.category,
+                status: attachment.status,
+                recognition: attachment.recognition,
+              })),
+              ...(attachmentProposalCandidatesPreAi.length > 0
+                ? {
+                    preparedProposals: attachmentProposalCandidatesPreAi.map((candidate) => ({
+                      intent: candidate.intent,
+                      targetDomain: candidate.targetDomain,
+                      title: candidate.title,
+                    })),
+                  }
+                : {}),
+            } satisfies AttachmentTurnContext,
+          }
+        : {}),
     });
 
     let proposalsToPersist: RawAiProposal[] = generated.output.proposals;
     let weeklyReviewMetadata: Record<string, unknown> | undefined;
+    const isProposalExplainerTurn = explainerPreAi.kind === "with_proposal";
+
+    if (isProposalExplainerTurn) {
+      proposalsToPersist = [];
+    }
 
     if (isWeeklyReviewTurn) {
       const packed = await this.progressWeeklyReviewService.packChatWeeklyReviewProposals(
@@ -235,26 +356,19 @@ export class ChatService {
       todayIsoDate,
       hasTodayWellbeingCheckIn: todayCheckIn.checkIn != null,
       aiProposals: proposalsToPersist,
+      triggerConfig: this.aiBehaviorConfigService.getDeterministicProposalTriggers(),
     }) as RawAiProposal[];
 
     const attachmentOutcomes: ChatAttachmentOutcome[] = [];
-    const attachmentProposalCandidates = [];
-    const mealContextLabel = inferMealContextFromMessage(messageContent);
+    const attachmentProposalCandidates = [...attachmentProposalCandidatesPreAi];
 
     for (const attachment of attachmentRecords) {
-      const candidates = this.chatAttachmentRecognitionService.buildProposalCandidates({
-        attachment,
-        incidentDateTime: new Date().toISOString(),
-        mealContextLabel,
-      });
-
-      attachmentProposalCandidates.push(...candidates);
+      const candidates = attachmentProposalCandidates.filter(
+        (candidate) => candidate.attachmentRefId === attachment.id,
+      );
       attachmentOutcomes.push({
         attachmentRefId: attachment.id,
-        category:
-          attachment.category === "unclassified"
-            ? (attachment.recognition?.category ?? "food_photo")
-            : attachment.category,
+        category: attachment.category,
         status: attachment.status,
         recognition: attachment.recognition,
         proposalCandidateCount: candidates.length,
@@ -264,10 +378,21 @@ export class ChatService {
     proposalsToPersist = this.chatAttachmentRecognitionService.mergeAttachmentProposals(
       proposalsToPersist,
       attachmentProposalCandidates,
+      {
+        workoutRecognitions: attachmentRecords
+          .map((attachment) => attachment.recognition)
+          .filter(
+            (recognition): recognition is WorkoutAttachmentRecognitionEnvelope =>
+              recognition?.category === "workout_attachment",
+          ),
+      },
     );
 
     if (
-      shouldTriggerRecipeRecommendationRequest(messageContent) &&
+      shouldTriggerRecipeRecommendationRequest(
+        messageContent,
+        this.aiBehaviorConfigService.getDeterministicProposalTriggers(),
+      ) &&
       !proposalsToPersist.some((proposal) => proposal.intent === "recommend_recipes")
     ) {
       const recipeProposal = await this.recipesService.packChatRecipeRecommendationProposal(auth);
@@ -291,100 +416,102 @@ export class ChatService {
 
     const createdProposals = [];
 
-    for (const rawProposal of proposalsToPersist) {
-      const safetyErrors = validateProposalSafety(rawProposal);
-      const validation = this.proposalValidationService.validateRawProposal(rawProposal);
-      const ownershipErrors =
-        await this.proposalValidationService.validateCorrelationEvidenceOwnership(
-          user.id,
-          rawProposal.evidenceRefs,
-        );
-      const provenanceErrors =
-        await this.proposalValidationService.validateProvenanceOwnership(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const progressLinkedProvenanceErrors =
-        this.proposalValidationService.validateProgressLinkedProvenanceRequired(
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const goalHierarchyErrors =
-        await this.proposalValidationService.validateGoalProposalHierarchy(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const todaySourceRefErrors =
-        await this.proposalValidationService.validateTodayChecklistGoalSourceRefs(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const recoveryAdaptationErrors =
-        await this.proposalValidationService.validateRecoveryAwareWorkoutAdaptation(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const habitProposalContextErrors =
-        await this.proposalValidationService.validateHabitProposalContext(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const wellbeingProposalContextErrors =
-        await this.proposalValidationService.validateWellbeingCheckinProposalContext(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const nutritionIncidentImageRefErrors =
-        await this.proposalValidationService.validateNutritionIncidentImageRefOwnership(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const recipeRecommendationContextErrors =
-        await this.proposalValidationService.validateRecipeRecommendationProposalContext(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const chatAttachmentProposalRefErrors =
-        await this.proposalValidationService.validateChatAttachmentProposalRefs(
-          user.id,
-          rawProposal.intent,
-          rawProposal.proposedChanges,
-        );
-      const validationErrors = [
-        ...safetyErrors,
-        ...validation.errors,
-        ...ownershipErrors,
-        ...provenanceErrors,
-        ...progressLinkedProvenanceErrors,
-        ...goalHierarchyErrors,
-        ...todaySourceRefErrors,
-        ...recoveryAdaptationErrors,
-        ...habitProposalContextErrors,
-        ...wellbeingProposalContextErrors,
-        ...nutritionIncidentImageRefErrors,
-        ...recipeRecommendationContextErrors,
-        ...chatAttachmentProposalRefErrors,
-      ];
-      const validationStatus = validationErrors.length === 0 ? "valid" : "invalid";
+    if (!isProposalExplainerTurn) {
+      for (const rawProposal of proposalsToPersist) {
+        const safetyErrors = validateProposalSafety(rawProposal);
+        const validation = this.proposalValidationService.validateRawProposal(rawProposal);
+        const ownershipErrors =
+          await this.proposalValidationService.validateCorrelationEvidenceOwnership(
+            user.id,
+            rawProposal.evidenceRefs,
+          );
+        const provenanceErrors =
+          await this.proposalValidationService.validateProvenanceOwnership(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const progressLinkedProvenanceErrors =
+          this.proposalValidationService.validateProgressLinkedProvenanceRequired(
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const goalHierarchyErrors =
+          await this.proposalValidationService.validateGoalProposalHierarchy(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const todaySourceRefErrors =
+          await this.proposalValidationService.validateTodayChecklistGoalSourceRefs(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const recoveryAdaptationErrors =
+          await this.proposalValidationService.validateRecoveryAwareWorkoutAdaptation(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const habitProposalContextErrors =
+          await this.proposalValidationService.validateHabitProposalContext(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const wellbeingProposalContextErrors =
+          await this.proposalValidationService.validateWellbeingCheckinProposalContext(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const nutritionIncidentImageRefErrors =
+          await this.proposalValidationService.validateNutritionIncidentImageRefOwnership(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const recipeRecommendationContextErrors =
+          await this.proposalValidationService.validateRecipeRecommendationProposalContext(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const chatAttachmentProposalRefErrors =
+          await this.proposalValidationService.validateChatAttachmentProposalRefs(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+        const validationErrors = [
+          ...safetyErrors,
+          ...validation.errors,
+          ...ownershipErrors,
+          ...provenanceErrors,
+          ...progressLinkedProvenanceErrors,
+          ...goalHierarchyErrors,
+          ...todaySourceRefErrors,
+          ...recoveryAdaptationErrors,
+          ...habitProposalContextErrors,
+          ...wellbeingProposalContextErrors,
+          ...nutritionIncidentImageRefErrors,
+          ...recipeRecommendationContextErrors,
+          ...chatAttachmentProposalRefErrors,
+        ];
+        const validationStatus = validationErrors.length === 0 ? "valid" : "invalid";
 
-      const record = await this.chatRepository.createProposal(
-        user.id,
-        threadId,
-        assistantMessage.id,
-        rawProposal,
-        validationStatus,
-        validationErrors,
-      );
+        const record = await this.chatRepository.createProposal(
+          user.id,
+          threadId,
+          assistantMessage.id,
+          rawProposal,
+          validationStatus,
+          validationErrors,
+        );
 
-      createdProposals.push(toAiProposal(record));
+        createdProposals.push(toAiProposal(record));
+      }
     }
 
     const title =

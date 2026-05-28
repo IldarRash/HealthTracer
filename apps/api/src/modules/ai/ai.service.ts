@@ -1,8 +1,9 @@
-import type { AiStructuredOutput, AgentTurnMetadata } from "@health/types";
+import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
   AgentOrchestratorService,
+  type AttachmentTurnContext,
   type ProposalRevisionContext,
 } from "./agent-orchestrator.service.js";
 
@@ -17,6 +18,8 @@ export interface GenerateCoachResponseInput {
     content: string;
   }>;
   proposalRevision?: ProposalRevisionContext;
+  proposalExplainer?: ProposalExplainerTurnContext;
+  attachmentTurn?: AttachmentTurnContext;
 }
 
 export interface GeneratedCoachResponse {

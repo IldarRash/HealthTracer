@@ -1,117 +1,473 @@
 # AI Update Flow
 
-## Principle
+This document describes the chat and AI flow as implemented in the current backend.
+The primary code paths are `ChatService.sendMessage`, `ChatAttachmentsService`,
+`ChatAttachmentRecognitionService`, and `AgentOrchestratorService`.
+Repo-backed behavior policy for routing, prompts, direct paths, and context budgets
+is documented in `docs/architecture/ai-behavior-config.md`.
 
-AI may interpret, explain, summarize, and propose. It must not directly mutate domain entities.
+## Core Principle
 
-Any AI proposal that changes a user-facing plan or tab state must be approved by the user before it is applied. Approval is a product action, not an AI decision.
+AI may interpret, explain, summarize, classify, and propose. It must not directly
+mutate domain entities.
 
-## Flow
+Any AI proposal that changes a user-facing plan, Today state, nutrition log, profile
+state, or other structured state must be stored as a pending proposal and approved by
+the user before it is applied. Approval is a product action, not an AI decision.
+
+Structured state is authoritative. Chat messages and attachments are interaction
+input; they are not the source of truth by themselves.
+
+## Chat Turn Entry Point
+
+All chat sends go through `ChatService.sendMessage(auth, threadId, input)`.
+
+The service always:
+
+1. Resolves the authenticated user.
+2. Loads the target thread and existing messages.
+3. Validates attachment refs when `attachmentRefIds` are present.
+4. Creates the user chat message, storing `attachmentRefIds` in message metadata.
+5. Links attachments to the message and thread.
+6. Runs attachment classification and recognition before the coach response when
+   attachments are present.
+7. Evaluates crisis text and short-circuits before AI when crisis support is needed.
+8. Builds attachment proposal candidates before the coach call.
+9. Calls `AiService.generateCoachResponse`.
+10. Merges AI proposals, deterministic proposal helpers, and attachment proposals.
+11. Creates the assistant message.
+12. Validates and persists each proposal as pending or invalid.
+13. Touches the thread title and returns the updated chat turn.
 
 ```mermaid
 sequenceDiagram
-  participant User
-  participant Chat as Coach Chat
-  participant AI as AI Orchestrator
-  participant API as Domain Service
-  participant DB as Postgres
+  participant Client
+  participant ChatService
+  participant Attachments
+  participant AI
+  participant Proposals
+  participant DB
 
-  User->>Chat: Gives feedback
-  Chat->>AI: Sends recent context and structured state
-  AI->>AI: Produces typed proposal
-  AI->>API: Returns proposal object
-  API->>API: Validates schema and domain rules
-  API->>DB: Creates pending AIProposal record
-  API->>Chat: Returns explanation and pending proposal
-  User->>Chat: Accepts or rejects proposal
-  Chat->>API: Sends proposal decision
-  API->>API: Re-validates permissions and domain rules
-  API->>DB: Stores decision
-  API->>DB: Creates plan revision if accepted
-  API->>Chat: Returns updated structured state
+  Client->>ChatService: sendMessage(threadId, content, attachmentRefIds)
+  ChatService->>DB: create user message
+  alt attachments present
+    ChatService->>Attachments: link refs to message
+    ChatService->>Attachments: classifyAndRecognizeAttachmentsForMessage
+  end
+  alt crisis boundary
+    ChatService->>DB: create crisis support assistant message
+    ChatService-->>Client: return no proposals
+  else normal turn
+    ChatService->>ChatService: build pre-AI attachment proposal candidates
+    ChatService->>AI: generateCoachResponse
+    ChatService->>ChatService: merge deterministic and attachment proposals
+    ChatService->>DB: create assistant message
+    ChatService->>Proposals: validate each raw proposal
+    Proposals->>DB: create proposal rows
+    ChatService-->>Client: return messages, proposals, attachment outcomes
+  end
 ```
 
-## Message Attachments
+## Text-Only Message Flow
 
-Chat messages may include ownership-scoped attachment refs. Attachments are still interaction input, not structured state by themselves.
+A message with no attachments is AI-first unless it is an explicit system-owned
+exception.
+
+Current exceptions:
+
+- Proposal revision turns route deterministically from the original proposal intent.
+- Crisis boundary turns do not call the coach LLM.
+- Deterministic proposal merge helpers may add narrow product proposals after the
+  coach call, but they do not replace the LLM routing step.
+
+Normal text-only flow:
+
+1. `AgentOrchestratorService.resolveRoute` calls the LLM router through
+   `provider.generateIntentRoute`.
+2. The router receives the user message, recent messages, and
+   `serializeIntentCatalogForRouter()`.
+3. The router must return a valid normal catalog intent id, confidence, expected
+   response mode, safety flags, and up to 3 context slice requests.
+4. The orchestrator validates the router output with Zod and forbidden user-facing
+   field checks.
+5. Invalid or failed routing falls back to `general` with low confidence.
+6. The orchestrator maps the catalog intent to an agent intent and builds an
+   `AgentContextPacket` through `CoachingContextService`.
+7. The selected intent definition supplies prompt instructions, safety guidance,
+   allowed tools, and allowed proposal intents.
+8. The provider runs the bounded agent loop.
 
 ```mermaid
 sequenceDiagram
-  participant User
-  participant Chat as Coach Chat
-  participant API as Attachment/Chat API
-  participant Rec as Classifier and Recognizers
-  participant Proposal as Proposal Service
-  participant DB as Postgres
+  participant ChatService
+  participant Orchestrator
+  participant RouterLLM
+  participant Context
+  participant CoachLLM
+  participant Tools
 
-  User->>Chat: Sends message with attachment
-  Chat->>API: Uploads attachment ref
-  Chat->>API: Sends message with attachmentRefIds
-  API->>Rec: Classifies using bounded message context and safe metadata
-  Rec->>Rec: Runs category-specific typed extraction
-  Rec->>Proposal: Builds proposal candidate from validated extraction
-  Proposal->>DB: Stores pending AIProposal
-  API->>Chat: Returns reply, attachment outcome, proposal card
+  ChatService->>Orchestrator: userMessage, recentMessages
+  Orchestrator->>RouterLLM: classify with normal intent catalog
+  RouterLLM-->>Orchestrator: catalogIntentId and context slice plan
+  Orchestrator->>Context: buildAgentContext for selected intent
+  loop max 3 iterations
+    Orchestrator->>CoachLLM: intent-specific prompt and context
+    alt model requests allowed tool
+      CoachLLM-->>Orchestrator: tool_request
+      Orchestrator->>Tools: executeTool
+      Tools-->>Orchestrator: validated tool result
+    else model returns final answer
+      CoachLLM-->>Orchestrator: final_answer
+    end
+  end
 ```
 
-Attachment recognition must produce typed extraction envelopes. Backend services validate those envelopes before creating proposals. Food photos can create `log_nutrition_incident` proposals; workout or training attachments can create workout/session proposals or manual fallback; medical documents require consent and Profile review before entering coaching context.
+## Proposal Revision Flow
 
-## Proposal Shape
+Proposal revision turns skip the LLM router because the system already knows the
+proposal being revised.
 
-```json
-{
-  "intent": "adjust_workout_intensity",
-  "targetDomain": "workout",
-  "reason": "User reported high fatigue after two sessions.",
-  "changes": {
-    "volumeMultiplier": 0.8,
-    "affectedDays": ["day_2", "day_4"]
-  }
-}
+`AgentOrchestratorService.resolveProposalRevisionRoute` maps the original proposal:
+
+- Workout proposal intents map to `adjust_workout`.
+- Nutrition proposal intents map to `adjust_nutrition`.
+- Habit proposal intents map to `longevity_overview`.
+- Everything else maps to `general`.
+
+The original proposal, superseded proposal id, and user modification feedback are
+added to `coachingContext.proposalRevision`. The second-pass coach loop still runs
+with intent-specific instructions and proposal validation still applies.
+
+## Crisis Boundary Flow
+
+`ChatService.sendMessage` evaluates `evaluateWellbeingCrisisFromText(messageContent)`
+after user message persistence and attachment processing, before the AI coach call.
+
+When crisis support should be shown:
+
+1. Chat creates an assistant message from `formatWellbeingCrisisSupportReply`.
+2. Assistant metadata includes `crisisBoundary` and `crisisSupport`.
+3. No AI coach response is generated.
+4. No proposals are created.
+
+## Attachment Upload Flow
+
+Attachment upload happens before message send through `ChatAttachmentsService.createAttachment`.
+The upload endpoint receives `fileContentBase64`, but raw base64 is not persisted in
+chat message metadata or transcript.
+
+There are two upload paths:
+
+- trusted user-selected upload
+- provisional AI-classified upload
+
+### Trusted User-Selected Upload
+
+A trusted user-selected upload requires `categorySource: "user_selected"`.
+
+When the user explicitly selects a category:
+
+1. The backend validates category MIME and category size limits.
+2. Medical document uploads require consent scopes and document metadata before bytes
+   are stored.
+3. The file is stored.
+4. The attachment row is created with `categorySource: "user_selected"` and
+   `status: "queued"`.
+5. User-selected category is trusted at send time unless medical consent blocks
+   processing.
+
+### Provisional AI-Classified Upload
+
+Default composer uploads are not trusted category selections. The client sends
+`category: "unclassified"` plus a non-user-selected `categorySource` such as
+`default_unclassified` or `mime_inferred`.
+
+For provisional uploads:
+
+1. The backend decodes the file in memory.
+2. It validates provisional MIME and provisional size.
+3. It rejects consent scopes because consent applies only after a medical category is
+   assigned.
+4. It calls `ChatAttachmentClassifierService.classify` before storage.
+5. The classifier provider receives file bytes when available, safe metadata, the
+   optional bounded message, and the allowed attachment categories:
+   `food_photo`, `workout_attachment`, `medical_document`.
+6. The provider returns a structured classification result.
+7. The backend resolves an upload disposition.
+
+Upload disposition:
+
+- `food_photo`: store bytes, create row as `food_photo`, `categorySource: "ai_classified"`, `status: "queued"`.
+- `workout_attachment`: store bytes, create row as `workout_attachment`, `categorySource: "ai_classified"`, `status: "queued"`.
+- `medical_document` without consent: do not store bytes, create row with `storageKey: null`, `status: "needs_consent"`.
+- `unclassified`, `manual_fallback`, or unsupported: do not store bytes, create row as `unclassified`, `status: "needs_review"`.
+
+Important invariant: image MIME alone must not default to food, and PDF MIME alone
+must not default to medical. Classification provider output is the source of truth
+unless the user explicitly selected a category.
+
+## Attachment Send-Time Flow
+
+When a message contains attachment refs, `ChatService.sendMessage` calls
+`ChatAttachmentsService.classifyAndRecognizeAttachmentsForMessage`.
+
+For each attachment:
+
+1. Attachments that are not pending message-first send are returned unchanged.
+2. Pending attachments are classified again at send time with the final user message.
+3. Stored bytes are passed to the classifier when `storageKey` exists.
+4. Send-time classification wins over upload-time AI classification unless the
+   category was trusted user-selected or consented medical.
+5. `categorySource` is updated with `resolveSendTimeCategorySource`.
+6. Manual fallback or unsupported output sets `category: "unclassified"` and
+   `status: "needs_review"` without recognition.
+7. Medical output without consent purges any stored bytes, clears `storageKey`, and
+   sets `status: "needs_consent"`.
+8. Food and workout outputs move to `recognizing`, then run the matching recognizer.
+9. Recognition output is stored as a typed envelope.
+
+```mermaid
+flowchart TD
+  upload[Attachment upload] --> provisional{User selected category?}
+  provisional -->|Yes| trusted[Store as user_selected after validation]
+  provisional -->|No| classifyUpload[Classify in memory with attachment provider]
+  classifyUpload --> foodUpload[Food or workout: store bytes queued]
+  classifyUpload --> medicalUpload[Medical: no storage, needs_consent]
+  classifyUpload --> fallbackUpload[Unclassified: no storage, needs_review]
+  foodUpload --> send[Message send]
+  trusted --> send
+  send --> classifySend[Classify again with final message]
+  classifySend --> trustedCheck{Trusted user selection?}
+  trustedCheck -->|Yes| keepCategory[Keep selected category]
+  trustedCheck -->|No| useClassifier[Use send-time classification]
+  useClassifier --> recognize[Run category recognizer]
+  keepCategory --> recognize
 ```
 
-## Validation Layers
+## Attachment Category Flows
 
-- Zod schema validation for AI output.
-- Zod schema validation for attachment classification and extraction envelopes.
-- Domain validation inside NestJS services.
-- Permission checks against the authenticated user.
-- Attachment ownership, expiry, consent, provenance, and provider-isolation checks.
-- User approval check before applying state-changing proposals.
-- Safety checks for prohibited medical diagnosis wording.
-- Revision creation instead of in-place plan mutation.
+### Food Photo
 
-## MVP Tools
+Food photo recognition runs through `FoodPhotoAttachmentRecognizer`.
 
-- `createWorkoutPlan`
-- `adaptPlanBasedOnFeedback`
-- `createDailyChecklist`
-- `summarizeProgress`
-- `createNutritionPlan`
+The recognizer:
+
+1. Builds a typed `food_photo` recognition envelope.
+2. Uses `FoodPhotoAnalysisService` to build nutrition estimates.
+3. Sets attachment status to `ready` or `low_confidence`.
+4. Sets an ephemeral expiry.
+
+`ChatAttachmentRecognitionService.buildProposalCandidates` creates a
+`log_nutrition_incident` proposal candidate from the analysis. That proposal is
+merged with AI proposals. If there is already a text-estimate nutrition incident,
+the photo-backed proposal replaces it.
+
+### Workout Attachment
+
+Workout recognition runs through `WorkoutAttachmentRecognizer`.
+
+There are two main workout outcomes:
+
+- Plan document or plan screenshot: `suggestedIntent: "create_workout_plan"`.
+- One-off session or exercise photo: `suggestedIntent: "log_session_context"`.
+
+Plan documents can create `create_workout_plan` proposal candidates. Accepting those
+proposals creates a workout plan revision through proposal apply services.
+
+One-off session context does not create a full workout plan. If the user message asks
+to add or log today's workout, for example "запиши мне тренировку волейбола на сегодня",
+`buildProposalCandidates` creates a `create_today_checklist` proposal with a workout
+item for today's date. The coach receives `attachmentTurn.preparedProposals` so it can
+refer to the prepared card instead of inventing a separate plan in the reply.
+
+For one-off session-context workout attachments, full workout plan proposals from the
+coach are filtered before persistence. The filtered intents are:
+
+- `create_workout_plan`
+- `adapt_workout_plan`
+- `adapt_workout_plan_from_progress`
+
+Plan-document workout attachments still allow full workout plan proposals.
+
+### Medical Document
+
+Medical document handling is consent-first.
+
+If a message-first or upload-time classifier identifies a medical document without
+consent:
+
+1. The backend does not process the content.
+2. Any stored provisional bytes are deleted.
+3. `storageKey` is cleared.
+4. The attachment becomes `needs_consent`.
+
+After consent is granted:
+
+1. The user must provide consent scopes and document metadata.
+2. If content was purged, the client must re-upload file bytes with consent.
+3. Image medical documents go to `needs_review`; automated medical image parsing is not used.
+4. Supported document files can be parsed by the medical document recognizer.
+5. Medical recognition is sanitized before returning to the client.
+6. Medical documents do not create state-changing proposals automatically.
+
+## Attachment Family AI Route
+
+After attachment recognition, `ChatService` passes `attachmentTurn` to
+`AiService.generateCoachResponse`.
+
+The attachment turn context contains:
+
+- attachment ref id
+- final category
+- status
+- recognition envelope
+- prepared proposal summaries when the backend already created deterministic
+  attachment proposal candidates
+
+`AgentOrchestratorService` routes directly to an attachment catalog intent when at
+least one attachment has a non-`unclassified` category:
+
+- `food_photo` -> `attachment_food_photo`
+- `workout_attachment` -> `attachment_workout`
+- `medical_document` -> `attachment_medical_document`
+
+If all attachments remain `unclassified`, the orchestrator does not use an attachment
+family route; it falls back to normal LLM catalog routing.
+
+## Agent Loop
+
+The agent loop runs in `AgentOrchestratorService.runAgentLoop`.
+
+Every final answer must come from `provider.generateAgentLoopStep` as either:
+
+- `tool_request`
+- `final_answer`
+
+Loop rules:
+
+1. Maximum iterations: `MAX_AGENT_LOOP_ITERATIONS`.
+2. Tool requests are allowed only when the selected catalog intent lists the tool.
+3. Tool execution uses `AgentToolRegistryService.executeTool`.
+4. Tool results are added to `coachingContext.toolResults`.
+5. A disallowed tool request fails safely.
+6. Invalid loop output fails safely.
+7. Reply safety is validated before returning the answer.
+8. Final proposals are coerced, then filtered by `ActionResolverService` using the selected capability allowlist.
+
+Available context tools:
+
+- `getUserContextSlice`
+- `getDocumentContext`
+- `getWeeklyProgressContext`
+
+## Proposal Merge And Persistence
+
+`ChatService` starts with proposals returned by the AI coach and then merges additional
+proposal sources.
+
+Merge order:
+
+1. AI coach proposals.
+2. Weekly review packing when `isWeeklyReviewChatMessage(input.content)` is true.
+3. Deterministic chat proposals from `mergeDeterministicChatProposals`.
+4. Attachment proposal candidates from `ChatAttachmentRecognitionService`.
+5. Recipe recommendation proposal when recipe trigger text is present and no recipe
+   proposal already exists.
+
+Before persistence, every raw proposal is validated through:
+
+- `validateProposalSafety`
+- `ProposalValidationService.validateRawProposal`
+- evidence ownership validation
+- provenance ownership validation
+- progress-linked provenance requirements
+- goal hierarchy validation
+- Today checklist source ref validation
+- recovery-aware workout validation
+- habit proposal context validation
+- wellbeing proposal context validation
+- nutrition incident image ref ownership validation
+- recipe recommendation context validation
+- chat attachment proposal ref validation
+
+Each proposal row is created with `validationStatus: "valid"` or `"invalid"` and the
+validation errors. Invalid proposals are stored for audit, but they still cannot be
+applied successfully.
+
+## Proposal Decision Flow
+
+Proposal decisions are handled by the proposal module, not by the chat LLM.
+
+When the user accepts or rejects a proposal:
+
+1. The API checks ownership and proposal status.
+2. Rejection stores the decision and does not mutate structured state.
+3. Acceptance revalidates permissions and domain rules.
+4. The proposal apply service dispatches by proposal intent.
+5. Workout and nutrition plan changes create revisions instead of overwriting plan state.
+6. Today checklist proposals write through Today domain services.
+7. The proposal row records the decision and applied reference.
 
 ## Persistence Rules
 
 - Store raw conversation separately from structured state.
-- Store attachment refs separately from structured state. Attachment recognition may create pending proposals, but it must not directly write nutrition, workout, wellbeing, or plan state.
-- Store every proposal that could change a plan.
-- Store whether a proposal is pending, accepted, rejected, or superseded.
-- Store the created revision id when a proposal is applied.
-- Store enough context to audit why the proposal was shown and who approved it.
+- Store attachment refs separately from structured state.
+- Store `categorySource` for attachments so trusted user selections can be separated
+  from AI-classified or MIME-inferred categories.
+- Do not store raw base64 in chat transcript metadata.
+- Do not keep provisional medical bytes without consent.
+- Store every proposal that could change structured state.
+- Store proposal status: pending, accepted, rejected, superseded, valid, or invalid
+  as represented by the proposal records.
+- Store enough proposal context to audit why the proposal was shown and who approved it.
 
 ## Client Rules
 
-- Chat may render explanations and pending proposals.
+- Chat renders explanations, attachment outcomes, image previews, and proposal cards.
+- Attachment controls live inside the chat composer.
+- Attachment previews use authenticated attachment content endpoints, not raw base64
+  from message metadata.
 - Primary tabs are Chat, Today, Longevity, and Profile.
-- Today, Longevity, Profile, and secondary Training/Nutrition views read from structured state.
-- Training and Nutrition are read-only weekly plan views for active workout and nutrition plan structure; users request changes through Chat proposals.
-- Recipes, Metrics, Documents, Goals, Progress, proposal audit, and developer tools are nested or hidden support surfaces, not primary tabs.
+- Today, Longevity, Profile, and secondary Training/Nutrition views read from
+  structured state.
+- Training and Nutrition are read-only weekly plan views for active workout and
+  nutrition plan structure; users request changes through Chat proposals.
+- Recipes, Metrics, Documents, Goals, Progress, proposal audit, and developer tools
+  are nested or hidden support surfaces, not primary tabs.
 - Surfaces update after accepted proposals are validated and applied by backend services.
-- Users can mark tasks complete from the relevant tab, but completion writes must still go through domain APIs.
+- Users can mark tasks complete from the relevant tab, but completion writes must still
+  go through domain APIs.
+
+## Validation And Safety Checklist
+
+- Validate LLM router output with Zod and forbidden field checks.
+- Validate agent loop output and reply safety.
+- Validate attachment classifier output.
+- Validate attachment recognition envelopes.
+- Enforce attachment ownership, send eligibility, expiry, retention, consent, and
+  provider isolation.
+- Validate all proposals before persistence.
+- Revalidate proposals before applying.
+- Never diagnose, prescribe medication, or claim to treat disease.
+- Never mutate structured state directly from chat or attachment recognition.
+- Never bypass user approval for plan, Today, nutrition, profile, goal, habit, or
+  progress state changes.
 
 ## Testing Rules
 
-- Test invalid AI output.
-- Test unsafe or unsupported intents.
-- Test that accepted workout changes create a new revision.
-- Test that rejected proposals do not change active plan state.
-- Test that pending proposals do not change active plan state.
+- Test invalid AI router and agent loop output.
+- Test disallowed tool requests.
+- Test unsafe replies and unsupported intents.
+- Test text-only LLM catalog routing.
+- Test attachment upload classification before storage.
+- Test that ambiguous images do not default to food.
+- Test medical classification purges bytes and requires consent.
+- Test send-time classification overriding upload-time AI classification.
+- Test user-selected category preserving the selected category.
+- Test workout plan documents creating plan proposals.
+- Test one-off workout attachments creating Today proposals when the user asks to log
+  today's session.
+- Test that one-off workout attachments suppress full workout plan proposals.
+- Test that accepted workout changes create revisions.
+- Test that rejected proposals do not change structured state.
+- Test that pending proposals do not change structured state.

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WEEKLY_REVIEW_CHAT_PROMPT } from "@health/types";
 import { routeAgentIntent } from "./intent-router.js";
 
+/** Covers the legacy rule-based router kept for regression tests only. */
 describe("routeAgentIntent", () => {
   it("routes workout adaptation messages conservatively", () => {
     const route = routeAgentIntent("I feel tired today. Should I train?");

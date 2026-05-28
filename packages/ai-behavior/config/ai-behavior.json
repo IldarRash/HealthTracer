@@ -1,0 +1,467 @@
+{
+  "version": 1,
+  "capabilities": [],
+  "directPaths": {
+    "enabled": true,
+    "confidence": 0.95,
+    "routingMethod": "rule_based",
+    "blockWhenAttachments": true,
+    "blockWhenProposalRevision": true,
+    "detectionOrder": [
+      "mark_today_workout_done",
+      "today_summary_read"
+    ],
+    "sharedPatterns": {
+      "adviceOrImplicitMutation": {
+        "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+        "flags": "i"
+      },
+      "workoutCompletionCommandHint": {
+        "source": "\\b(?:mark|set|check off|log|complete|finish)\\s+(?:today(?:['’]s|s)?\\s+)?(?:my\\s+)?(?:workout|training)\\b",
+        "flags": "i"
+      }
+    },
+    "kinds": [
+      {
+        "kind": "mark_today_workout_done",
+        "refreshHintsOnExecuted": [
+          "today",
+          "dashboard",
+          "longevity"
+        ],
+        "matchPatterns": [
+          {
+            "source": "\\b(?:mark|set|check off|log)\\s+(?:today(?:['’]s|s)?\\s+)?(?:my\\s+)?(?:workout|training)\\s+(?:as\\s+)?(?:done|complete|completed|finished)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:mark|set|check off|log)\\s+(?:my\\s+)?(?:today(?:['’]s|s)?\\s+)?(?:workout|training)\\s+(?:as\\s+)?(?:done|complete|completed|finished)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\bcheck off\\s+(?:today(?:['’]s|s)?\\s+)?(?:my\\s+)?(?:workout|training)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:complete|finish)\\s+(?:today(?:['’]s|s)?\\s+)?(?:my\\s+)?(?:workout|training)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:complete|finish)\\s+(?:my\\s+)?(?:today(?:['’]s|s)?\\s+)?(?:workout|training)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "(?:отмет|заверш|сделай).*(?:тренировк|workout).*(?:выполн|done|complete|готов)",
+            "flags": "i"
+          }
+        ],
+        "negativePatterns": [
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\?\\s*$",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:i\\s+)?(?:finished|completed|did)\\s+(?:my\\s+)?(?:workout|training)\\b",
+            "flags": "i"
+          }
+        ],
+        "requireWorkoutLexeme": true,
+        "workoutLexemePattern": "\\b(?:workout|training|трениров)\\b"
+      },
+      {
+        "kind": "today_summary_read",
+        "refreshHintsOnExecuted": [
+          "today"
+        ],
+        "matchPatterns": [
+          {
+            "source": "^what(?:['’]s| is)\\s+today\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^what(?:['’]s| is)\\s+(?:my\\s+)?today(?:['’]s|s)?(?:\\s+(?:plan|summary|checklist))?\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^what(?:['’]s| is)\\s+(?:my\\s+)?(?:plan|schedule|agenda)\\s+(?:for\\s+)?today\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^what(?:['’]s| is)\\s+(?:on\\s+)?(?:my\\s+)?(?:plan|schedule|agenda)\\s+(?:for\\s+)?today\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:show|tell)\\s+(?:me\\s+)?(?:my\\s+)?today(?:['’]s|s)?(?:\\s+(?:plan|summary|checklist))?\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:show|tell)\\s+(?:me\\s+)?(?:my\\s+)?(?:plan|summary|checklist)\\s+(?:for\\s+)?today\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^today(?:['’]s|s)?\\s+(?:plan|summary|checklist)\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^summ(?:ary|arise)\\s+(?:for\\s+)?today\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^что\\s+(?:у меня\\s+)?(?:на\\s+)?сегодня\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:покажи|расскажи)\\s+(?:мой\\s+)?(?:план|расписание)\\s+(?:на\\s+)?сегодня\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^план\\s+на\\s+сегодня\\s*\\??$",
+            "flags": "i"
+          }
+        ],
+        "negativePatterns": [
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:mark|set|check off|log|complete|finish)\\s+(?:today(?:['’]s|s)?\\s+)?(?:my\\s+)?(?:workout|training)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i)\\b",
+            "flags": "i"
+          }
+        ],
+        "requireTodayMention": true,
+        "todayMentionPatterns": [
+          {
+            "source": "\\btoday\\b",
+            "flags": "i"
+          },
+          {
+            "source": "сегодня",
+            "flags": "i"
+          }
+        ]
+      }
+    ]
+  },
+  "proposalRevisionRouting": {
+    "confidence": 0.95,
+    "routingMethod": "rule_based",
+    "expectedResponseMode": "recommendation_with_optional_proposal",
+    "fallbackCapabilityId": "general",
+    "routes": [
+      {
+        "proposalIntents": [
+          "create_workout_plan",
+          "adapt_workout_plan",
+          "adapt_workout_plan_from_progress"
+        ],
+        "capabilityId": "adjust_workout"
+      },
+      {
+        "proposalIntents": [
+          "create_nutrition_plan",
+          "adjust_nutrition_plan"
+        ],
+        "capabilityId": "adjust_nutrition"
+      },
+      {
+        "proposalIntents": [
+          "create_habit_plan",
+          "adapt_habit_plan"
+        ],
+        "capabilityId": "longevity_overview"
+      }
+    ]
+  },
+  "responseModes": {
+    "fallbackCapabilityId": "general"
+  },
+  "contextBudgets": {
+    "profiles": {
+      "default": {
+        "profile": "default",
+        "maxSlices": 3,
+        "maxDepth": "medium",
+        "maxRawItems": 20,
+        "maxLookbackDays": 30,
+        "allowDocuments": false,
+        "allowSensitiveHealthContext": false,
+        "requiresCompression": false,
+        "maxExpansionRounds": 0,
+        "maxSlicesPerExpansionRound": 2
+      },
+      "deep_review": {
+        "profile": "deep_review",
+        "maxSlices": 5,
+        "maxDepth": "large",
+        "maxRawItems": 50,
+        "maxLookbackDays": 90,
+        "allowDocuments": false,
+        "allowSensitiveHealthContext": false,
+        "requiresCompression": true,
+        "maxExpansionRounds": 2,
+        "maxSlicesPerExpansionRound": 3
+      }
+    },
+    "triggers": {
+      "monthlyReviewMessagePattern": "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day)\\b",
+      "multiDomainMessagePattern": "\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b.*\\b(and|plus|also|versus|vs)\\b.*\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b",
+      "extendedLookbackTimeRanges": [
+        "30d",
+        "90d",
+        "1y"
+      ],
+      "multiDomainSlicePurposes": [
+        "workout_adaptation",
+        "nutrition_adaptation",
+        "weekly_review",
+        "longevity_overview",
+        "health_context"
+      ],
+      "multiDomainSliceCountThreshold": 2,
+      "multiDomainCapabilityCountThreshold": 2,
+      "progressReviewCatalogIntentIds": [
+        "review_progress"
+      ],
+      "progressReviewAgentIntents": [
+        "review_progress"
+      ],
+      "progressReviewSlicePurposes": [
+        "weekly_review"
+      ],
+      "monthlyReviewCatalogIntentIds": [
+        "longevity_overview"
+      ],
+      "monthlyReviewAgentIntents": [
+        "longevity_overview"
+      ]
+    }
+  },
+  "promptTemplates": {
+    "templates": {
+      "openai_intent_router": {
+        "templateKey": "openai_intent_router",
+        "body": "You are an internal intent router for a wellness coaching product.\nReturn JSON only. Do not answer the user. Do not provide advice, proposals, or coaching text.\nChoose exactly one catalogIntentId from the provided intent catalog.\nAllowed JSON shape:\n{\"catalogIntentId\":\"general|ask_about_today|adjust_workout|adjust_nutrition|review_progress|longevity_overview|ask_health_context\",\"confidence\":0.0-1.0,\"routingMethod\":\"llm_router\",\"requiredContextSlices\":[{\"type\":\"general_chat|daily_checkin|workout_adaptation|nutrition_adaptation|weekly_review|longevity_overview|health_context\",\"depth\":\"small|medium|large\",\"timeRange\":\"7d|14d|30d|90d|1y\",\"includeDocuments\":false}],\"safetyFlags\":[\"fatigue|pain|sleep_issue|stress|hunger|schedule_conflict|health_context\"],\"expectedResponseMode\":\"advice_only|recommendation_with_optional_proposal|clarification_question\"}\nUse at most 3 context slices. Prefer medium depth. Disable documents unless health context is explicit.\nNever include reply, advice, answer, response, proposals, or user-facing text fields.\nIntent catalog:\n{{intentCatalogJson}}",
+        "placeholders": [
+          "intentCatalogJson"
+        ]
+      },
+      "openai_coach_loop": {
+        "templateKey": "openai_coach_loop",
+        "body": "You are an AI wellness coach for fitness, habits, nutrition, and recovery.\nRespond in the same language as the user's latest message.\nReturn JSON only with one of these shapes:\n{\"kind\":\"tool_request\",\"tool\":\"getUserContextSlice|getDocumentContext|getWeeklyProgressContext\",\"input\":{},\"rationale\":\"optional short reason\"}\n{\"kind\":\"final_answer\",\"reply\":\"string\",\"proposals\":[]}\nIteration {{iteration}} of {{maxIterations}}. Request additional context through allowed tools only when needed.\nIf enough context is available, return final_answer.\nNever mutate structured state directly. Plan changes must remain typed proposals requiring user approval.\nSelected intent: {{selectedIntentLabel}}\nIntent instructions: {{intentInstructions}}\nIntent safety guidance: {{intentSafetyGuidance}}\nAllowed tools: {{allowedTools}}\nAllowed proposal intents: {{allowedProposalIntents}}\nTask purpose: {{taskPurpose}}\nTask intent: {{taskIntent}}\nExpected response mode: {{expectedResponseMode}}\nSafety flags: {{safetyFlags}}\nMissing context notes: {{missingContextNotes}}\nPrior tool results: {{priorToolResultsJson}}\nGlobal safety constraints:\n- {{safetyConstraints}}\n{{preparedAttachmentProposalsLine}}\nStructured coaching context:\n{{coachingContextJson}}",
+        "placeholders": [
+          "iteration",
+          "maxIterations",
+          "selectedIntentLabel",
+          "intentInstructions",
+          "intentSafetyGuidance",
+          "allowedTools",
+          "allowedProposalIntents",
+          "taskPurpose",
+          "taskIntent",
+          "expectedResponseMode",
+          "safetyFlags",
+          "missingContextNotes",
+          "priorToolResultsJson",
+          "safetyConstraints",
+          "preparedAttachmentProposalsLine",
+          "coachingContextJson"
+        ]
+      }
+    }
+  },
+  "attachmentRouting": {
+    "categoryPriority": [
+      "medical_document",
+      "workout_attachment",
+      "food_photo"
+    ],
+    "categoryToCapability": {
+      "food_photo": "attachment_food_photo",
+      "workout_attachment": "attachment_workout",
+      "medical_document": "attachment_medical_document"
+    },
+    "defaultCapabilityId": "attachment_food_photo",
+    "confidence": 0.98,
+    "routingMethod": "attachment_family"
+  },
+  "proposalExplainer": {
+    "capabilityId": "proposal_explainer",
+    "confidence": 0.95,
+    "routingMethod": "rule_based",
+    "noProposalReply": "I don't see a recent proposal in this chat to explain. If you're asking about a specific suggestion, try referring to it or ask for a new recommendation first.",
+    "blockWhenAttachments": true,
+    "blockWhenProposalRevision": true,
+    "detectionPatterns": {
+      "positivePatterns": [
+        {
+          "source": "\\bwhy\\s+(?:this|that|the)\\s+proposal\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bwhy\\s+did\\s+you\\s+(?:suggest|recommend|propose)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bwhy\\s+(?:did\\s+you|do\\s+you)\\s+(?:want|need)\\s+to\\s+(?:suggest|recommend|propose|change)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bexplain\\s+(?:this|that|the)\\s+proposal\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bexplain\\s+(?:why\\s+)?(?:you\\s+)?(?:suggested|recommended|proposed)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bwhy\\s+(?:this|that)\\s+(?:change|suggestion|recommendation)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "почему\\s+(?:ты\\s+)?(?:предложил|предлагаешь|рекомендуешь|хочешь\\s+предложить)",
+          "flags": "i"
+        },
+        {
+          "source": "почему\\s+(?:это|эт[ао])\\s+предложени",
+          "flags": "i"
+        },
+        {
+          "source": "объясни\\s+(?:это\\s+)?предложени",
+          "flags": "i"
+        },
+        {
+          "source": "объясни\\s+(?:почему\\s+)?(?:ты\\s+)?(?:предложил|рекомендуешь)",
+          "flags": "i"
+        }
+      ],
+      "negativePatterns": [
+        {
+          "source": "\\bwhy\\s+should\\s+i\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bwhy\\s+(?:do|does|did)\\s+i\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bwhy\\s+(?:would|can|could)\\s+i\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bwhy\\s+(?:is|are|was|were)\\s+(?:protein|sleep|water|carbs|fat|calories|exercise|training)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bwhy\\s+(?:is|are)\\s+it\\b",
+          "flags": "i"
+        },
+        {
+          "source": "почему\\s+(?:мне|я)\\s+(?:должен|нужно|стоит)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "почему\\s+(?:это|так)\\s+(?:важно|полезно|нужно)\\b",
+          "flags": "i"
+        }
+      ]
+    }
+  },
+  "deterministicProposalTriggers": {
+    "maxMergedProposals": 5,
+    "wellbeingCheckin": {
+      "enabled": true,
+      "moodPhrases": [
+        "feel bad",
+        "feeling bad",
+        "feel awful",
+        "feeling awful",
+        "feel terrible",
+        "feeling terrible",
+        "feel low",
+        "feeling low",
+        "feel down",
+        "feeling down",
+        "feel rough",
+        "feeling rough",
+        "not doing well",
+        "having a bad day",
+        "stressed",
+        "stressful",
+        "overwhelmed",
+        "burnt out",
+        "burned out",
+        "tired",
+        "exhausted",
+        "fatigue",
+        "fatigued",
+        "no energy",
+        "low energy"
+      ],
+      "excludeContainsPhrases": [
+        "hungry",
+        "not losing weight"
+      ],
+      "excludeWhenNutritionIncidentSignal": true,
+      "requireNoTodayCheckIn": true,
+      "skipWhenCrisis": true
+    },
+    "nutritionIncident": {
+      "enabled": true,
+      "phrases": [
+        "cheat meal",
+        "cheat day",
+        "ate too much",
+        "overate",
+        "forgot to log",
+        "missed log",
+        "didn't log",
+        "did not log",
+        "i ate this",
+        "ate this",
+        "had this for",
+        "food photo",
+        "picture of my meal",
+        "photo of my meal",
+        "off plan meal",
+        "went off plan"
+      ],
+      "skipWhenCrisis": true
+    },
+    "recipeRecommendation": {
+      "enabled": true,
+      "phrases": [
+        "meal idea",
+        "meal ideas",
+        "recipe idea",
+        "recipe ideas",
+        "what should i eat",
+        "dinner idea",
+        "lunch idea",
+        "breakfast idea",
+        "suggest a recipe",
+        "recommend a recipe",
+        "food ideas",
+        "ideas for dinner",
+        "ideas for lunch",
+        "ideas for breakfast",
+        "what can i cook",
+        "what to cook"
+      ],
+      "excludeWhenNutritionIncidentSignal": true,
+      "skipWhenCrisis": true
+    }
+  }
+}

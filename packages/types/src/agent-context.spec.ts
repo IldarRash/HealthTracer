@@ -4,6 +4,7 @@ import {
   agentContextPacketSchema,
   agentToolCallRequestSchema,
   agentToolCallResultSchema,
+  agentTurnCapabilityPresentationSchema,
   agentTurnMetadataSchema,
   buildAgentContextRequestSchema,
   buildContextSliceRequestForIntent,
@@ -100,6 +101,32 @@ describe("agent context contracts", () => {
     expect(metadata.toolsInvoked).toEqual([]);
   });
 
+  it("accepts optional capability composition metadata on agent turns", () => {
+    const presentation = agentTurnCapabilityPresentationSchema.parse({
+      primaryCapabilityId: "adjust_workout",
+      selectedCapabilityIds: ["adjust_workout", "ask_about_today"],
+      compositionStrategy: "primary_only",
+      widgetDescriptors: [{ id: "adapt_workout_plan_card", type: "proposal_card" }],
+      actionDescriptors: [{ id: "adapt_workout_plan", type: "create_proposal" }],
+    });
+
+    const metadata = agentTurnMetadataSchema.parse({
+      provider: "stub",
+      intent: "adjust_workout",
+      catalogIntentId: "adjust_workout",
+      primaryCapabilityId: "adjust_workout",
+      selectedCapabilityIds: ["adjust_workout", "ask_about_today"],
+      capabilityPresentation: presentation,
+      purpose: "workout_adaptation",
+      depth: "medium",
+      timeRange: "14d",
+      safety: { status: "passed" },
+    });
+
+    expect(metadata.capabilityPresentation?.widgetDescriptors).toHaveLength(1);
+    expect(metadata.selectedCapabilityIds).toEqual(["adjust_workout", "ask_about_today"]);
+  });
+
   it("normalizes router context slice plans to bounded defaults", () => {
     const plan = normalizeContextSlicePlan([
       { type: "workout_adaptation" },
@@ -116,7 +143,7 @@ describe("agent context contracts", () => {
 
   it("validates llm router output and rejects user-facing advice fields", () => {
     const valid = llmIntentRouterOutputSchema.parse({
-      intent: "adjust_workout",
+      catalogIntentId: "adjust_workout",
       confidence: 0.86,
       routingMethod: "llm_router",
       requiredContextSlices: [buildContextSliceRequestForIntent("adjust_workout")],
@@ -157,9 +184,24 @@ describe("agent context contracts", () => {
     );
   });
 
+  it("rejects attachment-family catalog ids from llm router output", () => {
+    const attachmentFamilyPayload = {
+      catalogIntentId: "attachment_food_photo",
+      confidence: 0.9,
+      routingMethod: "llm_router" as const,
+      requiredContextSlices: [buildContextSliceRequestForIntent("adjust_nutrition")],
+      safetyFlags: [] as AgentSafetyFlag[],
+      expectedResponseMode: "recommendation_with_optional_proposal" as const,
+    };
+
+    expect(llmIntentRouterOutputSchema.safeParse(attachmentFamilyPayload).success).toBe(false);
+    expect(validateLlmRouterOutputShape(attachmentFamilyPayload).length).toBeGreaterThan(0);
+  });
+
   it("merges llm router output into an uncertain rule route", () => {
     const uncertainRoute = {
       intent: "general" as const,
+      catalogIntentId: "general" as const,
       confidence: 0.4,
       isConfident: false,
       purpose: "general_chat" as const,
@@ -173,7 +215,7 @@ describe("agent context contracts", () => {
     };
 
     const merged = mergeLlmRouterOutputIntoRoute(uncertainRoute, {
-      intent: "adjust_nutrition",
+      catalogIntentId: "adjust_nutrition",
       confidence: 0.84,
       routingMethod: "llm_router",
       requiredContextSlices: [
@@ -182,7 +224,7 @@ describe("agent context contracts", () => {
       ],
       safetyFlags: ["hunger"],
       expectedResponseMode: "recommendation_with_optional_proposal",
-    });
+    }, "adjust_nutrition");
 
     expect(merged.routingMethod).toBe("llm_router");
     expect(merged.intent).toBe("adjust_nutrition");

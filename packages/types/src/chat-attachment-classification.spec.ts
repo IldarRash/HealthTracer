@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   classifyAttachmentFromMessageContext,
   foodAttachmentExtractionResultSchema,
+  hasFoodAttachmentSignals,
   hasMedicalDocumentSignals,
+  hasWorkoutAttachmentSignals,
   inferMealContextFromMessage,
+  inferWorkoutTodayChecklistLabel,
   isPhotoBackedNutritionProposalPayload,
+  messageRequestsTodayWorkoutLog,
   isTextEstimateNutritionProposalPayload,
+  llmAttachmentClassifierOutputSchema,
+  mapLlmAttachmentClassifierOutput,
   medicalDocumentAttachmentExtractionResultSchema,
   workoutAttachmentExtractionResultSchema,
 } from "./chat-attachment-classification.js";
@@ -40,6 +46,27 @@ describe("chat attachment classification contracts", () => {
     expect(inferMealContextFromMessage("hello coach")).toBeNull();
   });
 
+  it("detects when the user asks to log today's workout from message text", () => {
+    expect(
+      messageRequestsTodayWorkoutLog("запиши мне тренировку волейбола на сегодня"),
+    ).toBe(true);
+    expect(messageRequestsTodayWorkoutLog("log my volleyball training for today")).toBe(
+      true,
+    );
+    expect(messageRequestsTodayWorkoutLog("волейбол на сегодня")).toBe(true);
+    expect(messageRequestsTodayWorkoutLog("заполни активность")).toBe(false);
+    expect(messageRequestsTodayWorkoutLog("волейбол")).toBe(false);
+  });
+
+  it("infers workout checklist labels from message and session context", () => {
+    expect(
+      inferWorkoutTodayChecklistLabel("запиши тренировку волейбола на сегодня", null),
+    ).toBe("Волейбол");
+    expect(
+      inferWorkoutTodayChecklistLabel("", "Volleyball training"),
+    ).toBe("Volleyball training");
+  });
+
   it("classifies food images with meal context from message text", () => {
     const result = classifyAttachmentFromMessageContext({
       message: "второй прием пищи",
@@ -63,7 +90,7 @@ describe("chat attachment classification contracts", () => {
     expect(result.suggestedAction).toBe("run_category_recognition");
   });
 
-  it("routes medical PDFs to consent-first classification", () => {
+  it("routes medical-signaled PDFs to consent-first classification", () => {
     const result = classifyAttachmentFromMessageContext({
       message: "here are my lab results",
       filename: "labs.pdf",
@@ -72,6 +99,17 @@ describe("chat attachment classification contracts", () => {
 
     expect(result.category).toBe("medical_document");
     expect(result.suggestedAction).toBe("request_medical_consent");
+  });
+
+  it("does not classify PDFs as medical from MIME alone", () => {
+    const result = classifyAttachmentFromMessageContext({
+      message: "",
+      filename: "document.pdf",
+      mimeType: "application/pdf",
+    });
+
+    expect(result.category).toBe("unclassified");
+    expect(result.suggestedAction).toBe("manual_fallback");
   });
 
   it("routes medical-signaled images to medical consent without food classification", () => {
@@ -83,7 +121,7 @@ describe("chat attachment classification contracts", () => {
       });
 
       expect(result.category).toBe("medical_document");
-      expect(result.suggestedAction).toBe("manual_fallback");
+      expect(result.suggestedAction).toBe("request_medical_consent");
       expect(result.mealContextLabel).toBeNull();
     }
   });
@@ -99,7 +137,7 @@ describe("chat attachment classification contracts", () => {
     });
 
     expect(result.category).toBe("medical_document");
-    expect(result.suggestedAction).toBe("manual_fallback");
+    expect(result.suggestedAction).toBe("request_medical_consent");
   });
 
   it("keeps meal photos as food when no medical signals are present", () => {
@@ -123,6 +161,53 @@ describe("chat attachment classification contracts", () => {
 
     expect(result.category).toBe("workout_attachment");
     expect(result.suggestedAction).toBe("run_category_recognition");
+  });
+
+  it("classifies volleyball and training filenames as workout attachments for jpeg images", () => {
+    for (const filename of ["volleyball-practice.jpg", "gym-session.png", "crossfit-wod.webp"]) {
+      const result = classifyAttachmentFromMessageContext({
+        message: "",
+        filename,
+        mimeType: filename.endsWith(".png")
+          ? "image/png"
+          : filename.endsWith(".webp")
+            ? "image/webp"
+            : "image/jpeg",
+      });
+
+      expect(result.category).toBe("workout_attachment");
+      expect(result.confidence).not.toBe("low");
+      expect(result.suggestedAction).toBe("run_category_recognition");
+    }
+  });
+
+  it("prefers workout classification when message and filename indicate training", () => {
+    expect(
+      hasWorkoutAttachmentSignals("volleyball training today", "IMG_1234.jpg"),
+    ).toBe(true);
+    expect(hasFoodAttachmentSignals("volleyball training today", null)).toBe(false);
+
+    const result = classifyAttachmentFromMessageContext({
+      message: "volleyball training today",
+      filename: "IMG_1234.jpg",
+      mimeType: "image/jpeg",
+    });
+
+    expect(result.category).toBe("workout_attachment");
+    expect(result.confidence).toBe("high");
+  });
+
+  it("returns manual fallback for ambiguous jpeg images instead of food", () => {
+    const result = classifyAttachmentFromMessageContext({
+      message: "",
+      filename: "IMG_1234.jpg",
+      mimeType: "image/jpeg",
+    });
+
+    expect(result.category).toBe("unclassified");
+    expect(result.confidence).toBe("low");
+    expect(result.suggestedAction).toBe("manual_fallback");
+    expect(hasWorkoutAttachmentSignals("", "IMG_1234.jpg")).toBe(false);
   });
 
   it("treats queued unclassified refs as pending message-first send", () => {
@@ -236,5 +321,37 @@ describe("chat attachment classification contracts", () => {
     });
 
     expect(medicalExtraction.proposalsSuppressed).toBe(true);
+  });
+
+  it("rejects invalid llm classifier categories and maps manual fallback to unclassified", () => {
+    expect(
+      llmAttachmentClassifierOutputSchema.safeParse({
+        category: "unclassified",
+        confidence: "low",
+        rationale: "Unknown attachment.",
+        suggestedAction: "run_category_recognition",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      llmAttachmentClassifierOutputSchema.safeParse({
+        category: "food_photo",
+        confidence: "low",
+        rationale: "Ambiguous image.",
+        suggestedAction: "manual_fallback",
+        mealContextLabel: null,
+      }).success,
+    ).toBe(true);
+
+    const mapped = mapLlmAttachmentClassifierOutput({
+      category: "food_photo",
+      confidence: "low",
+      rationale: "Ambiguous image.",
+      suggestedAction: "manual_fallback",
+      mealContextLabel: null,
+    });
+
+    expect(mapped.category).toBe("unclassified");
+    expect(mapped.suggestedAction).toBe("manual_fallback");
   });
 });
