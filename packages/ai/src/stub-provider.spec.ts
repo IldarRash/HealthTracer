@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { turnDecisionOutputSchema } from "@health/types";
 import { StubCoachAiProvider } from "./stub-provider.js";
 

@@ -11,12 +11,9 @@ import type {
 } from "@health/types";
 import type { AgentSafetyFlag, CatalogIntentId } from "@health/types";
 import {
-  buildContextSliceRequestForIntent,
   isWeeklyReviewChatMessage,
   mapTurnDecisionOutputFromMessageUnderstanding,
   messageUnderstandingOutputSchema,
-  normalizeContextSlicePlan,
-  resolveDefaultExpectedResponseMode,
 } from "@health/types";
 import {
   hasActiveHabitPlanInContext,
