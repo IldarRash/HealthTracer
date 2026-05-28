@@ -58,11 +58,6 @@ export const catalogIntentIdSchema = z.union([
 
 export type CatalogIntentId = z.infer<typeof catalogIntentIdSchema>;
 
-/** Normal text-turn router catalog IDs — excludes attachment-family entries. */
-export const normalRouterCatalogIntentIdSchema = agentIntentSchema;
-
-export type NormalRouterCatalogIntentId = z.infer<typeof normalRouterCatalogIntentIdSchema>;
-
 export const MAX_AGENT_LOOP_ITERATIONS = 3 as const;
 
 export const MAX_CONTEXT_SLICES = 3 as const;
@@ -100,30 +95,23 @@ export type ContextSliceRequest = z.infer<typeof contextSliceRequestSchema>;
 
 export const agentRoutingMethodSchema = z.enum([
   "rule_based",
+  /** @deprecated Historical persisted metadata only; production uses unified_turn_decision. */
   "llm_router",
+  /** @deprecated Historical persisted metadata only; production uses unified_turn_decision. */
+  "message_understanding",
+  "unified_turn_decision",
+  /** @deprecated Historical persisted metadata only; attachments route via TurnDecision hints. */
   "attachment_family",
 ]);
 
 export type AgentRoutingMethod = z.infer<typeof agentRoutingMethodSchema>;
 
-export const llmIntentRouterOutputSchema = z
-  .object({
-    catalogIntentId: normalRouterCatalogIntentIdSchema,
-    confidence: z.number().min(0).max(1),
-    routingMethod: z.literal("llm_router"),
-    requiredContextSlices: z.array(contextSliceRequestSchema).min(1).max(MAX_CONTEXT_SLICES),
-    safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
-    expectedResponseMode: expectedResponseModeSchema,
-  })
-  .strict();
-
-export type LlmIntentRouterOutput = z.infer<typeof llmIntentRouterOutputSchema>;
-export type LlmIntentRouterOutputInput = z.input<typeof llmIntentRouterOutputSchema>;
-
 export const agentRoutingMetadataSchema = z.object({
   confidence: z.number().min(0).max(1),
   routingMethod: agentRoutingMethodSchema,
   llmRouterInvoked: z.boolean(),
+  messageUnderstandingInvoked: z.boolean().optional(),
+  unifiedTurnDecisionInvoked: z.boolean().optional(),
   catalogIntentId: catalogIntentIdSchema.optional(),
   safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
   expectedResponseMode: expectedResponseModeSchema,
@@ -535,6 +523,74 @@ export type AgentTurnCapabilityPresentation = z.infer<
   typeof agentTurnCapabilityPresentationSchema
 >;
 
+export const agentMessageUnderstandingMetadataSchema = z.object({
+  ran: z.boolean(),
+  source: z.enum(["llm", "fallback"]).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  signals: z
+    .array(
+      z.enum([
+        "question",
+        "request_change",
+        "information_share",
+        "feedback",
+        "clarification_needed",
+        "command_like",
+        "greeting",
+        "progress_update",
+        "attachment_reference",
+        "wellness_check_in",
+      ]),
+    )
+    .max(10)
+    .optional(),
+  capabilityHints: z
+    .array(
+      z.object({
+        capabilityId: catalogIntentIdSchema,
+        confidence: z.number().min(0).max(1),
+      }),
+    )
+    .max(3)
+    .optional(),
+  complexity: z.enum(["simple", "moderate", "complex"]).optional(),
+  needsContext: z
+    .array(
+      z.enum([
+        "today_summary",
+        "active_workout_plan",
+        "active_nutrition_plan",
+        "weekly_progress",
+        "habit_plan",
+        "wellbeing_history",
+        "health_documents",
+        "attachment_context",
+        "recent_conversation",
+      ]),
+    )
+    .max(10)
+    .optional(),
+  safetyFlags: z.array(agentSafetyFlagSchema).max(10).optional(),
+  validationErrorCount: z.number().int().min(0).max(20).optional(),
+});
+
+export type AgentMessageUnderstandingMetadata = z.infer<
+  typeof agentMessageUnderstandingMetadataSchema
+>;
+
+export const agentUnifiedTurnDecisionMetadataSchema = z.object({
+  ran: z.boolean(),
+  source: z.enum(["llm", "fallback"]).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  routingMethod: z.literal("unified_turn_decision").optional(),
+  validationErrorCount: z.number().int().min(0).max(20).optional(),
+  blockedFallback: z.boolean().optional(),
+});
+
+export type AgentUnifiedTurnDecisionMetadata = z.infer<
+  typeof agentUnifiedTurnDecisionMetadataSchema
+>;
+
 export const agentTurnMetadataSchema = z.object({
   provider: z.enum(["stub", "openai"]),
   intent: agentIntentSchema,
@@ -549,6 +605,36 @@ export const agentTurnMetadataSchema = z.object({
   safety: agentSafetyMetadataSchema,
   citations: z.array(agentCitationSchema).max(10).default([]),
   routing: agentRoutingMetadataSchema.optional(),
+  messageUnderstanding: agentMessageUnderstandingMetadataSchema.optional(),
+  unifiedTurnDecision: agentUnifiedTurnDecisionMetadataSchema.optional(),
+  responseModeExecution: z
+    .object({
+      executorMode: z.enum([
+        "deterministic_read",
+        "deterministic_write",
+        "single_llm",
+        "context_aware_llm",
+        "proposal_flow",
+        "context_expansion_loop",
+      ]),
+      llmInvoked: z.boolean(),
+      expectedResponseMode: expectedResponseModeSchema,
+      delegatedToPreAiGate: z.boolean().optional(),
+      preAiGateDelegationMissed: z.boolean().optional(),
+      handlerPath: z
+        .enum([
+          "pre_ai_gate_delegation",
+          "single_final_answer",
+          "bounded_tool_loop",
+          "proposal_bounded_loop",
+          "context_expansion_bounded_loop",
+        ])
+        .optional(),
+      maxLoopIterations: z.number().int().min(0).max(MAX_AGENT_LOOP_ITERATIONS).optional(),
+      allowToolLoop: z.boolean().optional(),
+      useContextExpansionMetadata: z.boolean().optional(),
+    })
+    .optional(),
   missingContextNotes: z.array(z.string().min(1).max(240)).max(5).default([]),
 });
 
@@ -684,30 +770,6 @@ export function buildContextSliceRequestForIntent(
   };
 }
 
-export function mergeLlmRouterOutputIntoRoute(
-  fallbackRoute: IntentRouteResult,
-  llmOutput: LlmIntentRouterOutput,
-  mappedAgentIntent: AgentIntent,
-): IntentRouteResult {
-  const slicePlan = normalizeContextSlicePlan(llmOutput.requiredContextSlices);
-  const primary = slicePlan[0]!;
-
-  return {
-    intent: mappedAgentIntent,
-    catalogIntentId: llmOutput.catalogIntentId,
-    confidence: llmOutput.confidence,
-    isConfident: llmOutput.confidence >= RULE_ROUTE_CONFIDENCE_THRESHOLD,
-    purpose: primary.type,
-    depth: primary.depth ?? resolveDefaultDepthForPurpose(primary.type),
-    timeRange: primary.timeRange ?? resolveDefaultTimeRangeForPurpose(primary.type),
-    includeDocuments: primary.includeDocuments ?? shouldIncludeDocumentsForPurpose(primary.type),
-    routingMethod: "llm_router",
-    requiredContextSlices: slicePlan,
-    safetyFlags: llmOutput.safetyFlags,
-    expectedResponseMode: llmOutput.expectedResponseMode,
-  };
-}
-
 export function buildRouteFromCatalogIntent(input: {
   catalogIntentId: CatalogIntentId;
   mappedAgentIntent: AgentIntent;
@@ -739,36 +801,3 @@ export function buildRouteFromCatalogIntent(input: {
   };
 }
 
-const LLM_ROUTER_FORBIDDEN_KEYS = [
-  "reply",
-  "advice",
-  "recommendation",
-  "answer",
-  "response",
-  "proposals",
-  "proposal",
-  "userMessage",
-  "coachingText",
-] as const;
-
-export function validateLlmRouterOutputShape(value: unknown): string[] {
-  if (!value || typeof value !== "object") {
-    return ["LLM router output must be an object."];
-  }
-
-  const errors: string[] = [];
-
-  for (const key of LLM_ROUTER_FORBIDDEN_KEYS) {
-    if (key in value) {
-      errors.push(`LLM router output must not include user-facing field "${key}".`);
-    }
-  }
-
-  const parsed = llmIntentRouterOutputSchema.safeParse(value);
-
-  if (!parsed.success) {
-    errors.push(...parsed.error.issues.map((issue) => issue.message));
-  }
-
-  return errors;
-}

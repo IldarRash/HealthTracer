@@ -280,6 +280,9 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "The user is asking why a specific prior proposal was made. Explain using the proposalExplainer context: title, reason, and evidence summaries. Stay supportive and coaching-oriented. Do not create proposals or suggest applying changes in this turn.",
     mappedAgentIntent: "proposal_explainer",
   },
+  // Historical schema compatibility: attachment_family catalog entries remain for
+  // capability allowlists and persisted metadata. Production routing uses TurnDecision
+  // plus attachments.json categoryToCapability hints, not attachment_family bypass.
   {
     id: "attachment_food_photo",
     kind: "attachment_family",
@@ -365,6 +368,7 @@ export function isCatalogIntentId(value: string): value is CatalogIntentId {
   return catalogIntentIdSchema.safeParse(value).success;
 }
 
+/** Historical tests and config parity; production uses attachments.json routing hints. */
 export function resolveAttachmentCatalogIntentId(
   category: ClassifiedChatAttachmentCategory,
   routing: AttachmentRoutingPolicy = DEFAULT_ATTACHMENT_ROUTING_POLICY,

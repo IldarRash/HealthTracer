@@ -11,6 +11,12 @@ export const DEFAULT_AI_BEHAVIOR_CONFIG_FILE = join(
   "ai-behavior.json",
 );
 
+export const DEFAULT_ATTACHMENT_BEHAVIOR_CONFIG_FILE = join(
+  AI_BEHAVIOR_PACKAGE_ROOT,
+  "config",
+  "attachments.json",
+);
+
 export function resolveAiBehaviorConfigPath(
   configuredPath?: string | null,
 ): string {
@@ -21,4 +27,16 @@ export function resolveAiBehaviorConfigPath(
   }
 
   return DEFAULT_AI_BEHAVIOR_CONFIG_FILE;
+}
+
+export function resolveAttachmentBehaviorConfigPath(
+  configuredPath?: string | null,
+): string {
+  const trimmed = configuredPath?.trim();
+
+  if (trimmed) {
+    return trimmed;
+  }
+
+  return DEFAULT_ATTACHMENT_BEHAVIOR_CONFIG_FILE;
 }

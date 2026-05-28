@@ -395,7 +395,6 @@ describe("web api helpers", () => {
                   category: "food_photo",
                   status: "ready",
                   recognition: null,
-                  proposalCandidateCount: 1,
                 },
               ],
             }),
@@ -542,7 +541,6 @@ describe("web api helpers", () => {
                 createdAt: "2026-05-22T12:00:00.000Z",
                 updatedAt: "2026-05-22T12:00:02.000Z",
               },
-              proposalCandidates: [],
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );

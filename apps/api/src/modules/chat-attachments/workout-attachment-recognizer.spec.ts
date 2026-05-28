@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { createDefaultAiBehaviorConfigService } from "../ai/test-ai-behavior-fixtures.js";
 import {
-  DevWorkoutAttachmentRecognitionProvider,
+  LocalWorkoutAttachmentRecognitionProvider,
   WorkoutAttachmentRecognizer,
 } from "./workout-attachment-recognizer.js";
 
 describe("WorkoutAttachmentRecognizer", () => {
+  const aiBehaviorConfigService = createDefaultAiBehaviorConfigService();
+
   it("returns stub recognition envelope for plan documents", async () => {
-    const provider = new DevWorkoutAttachmentRecognitionProvider();
+    const provider = new LocalWorkoutAttachmentRecognitionProvider(aiBehaviorConfigService);
     const recognizer = new WorkoutAttachmentRecognizer(provider);
 
     const envelope = await recognizer.recognize({
@@ -24,7 +27,7 @@ describe("WorkoutAttachmentRecognizer", () => {
   });
 
   it("returns session context intent for exercise photos with manual fallback on low confidence", async () => {
-    const provider = new DevWorkoutAttachmentRecognitionProvider();
+    const provider = new LocalWorkoutAttachmentRecognitionProvider(aiBehaviorConfigService);
     const recognizer = new WorkoutAttachmentRecognizer(provider);
 
     const envelope = await recognizer.recognize({
@@ -40,7 +43,7 @@ describe("WorkoutAttachmentRecognizer", () => {
   });
 
   it("labels volleyball sessions from the user message", async () => {
-    const provider = new DevWorkoutAttachmentRecognitionProvider();
+    const provider = new LocalWorkoutAttachmentRecognitionProvider(aiBehaviorConfigService);
     const recognizer = new WorkoutAttachmentRecognizer(provider);
 
     const envelope = await recognizer.recognize({

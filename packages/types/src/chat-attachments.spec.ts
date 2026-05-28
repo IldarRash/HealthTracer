@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   assertRecognitionProviderIsolation,
-  buildMedicalDocumentReviewPath,
   chatAttachmentRecognitionEnvelopeSchema,
   containsUnsafeRecognitionSummaryLanguage,
   getChatAttachmentMimeTypeError,
@@ -19,6 +18,7 @@ import {
   isChatAttachmentSendEligibleStatus,
   parseChatMessageAttachmentRefIds,
   recognizeChatAttachmentSchema,
+  parseStoredChatAttachmentRecognition,
   sanitizeMedicalRecognitionForClient,
   sendChatMessageSchema,
 } from "./index.js";
@@ -330,26 +330,27 @@ describe("chat attachment contracts", () => {
     const medicalEnvelope = chatAttachmentRecognitionEnvelopeSchema.parse({
       category: "medical_document",
       attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-      documentId: "e1000001-0000-4000-8000-000000000001",
+      documentId: "00000000-0000-4000-8000-000000000000",
       documentType: "lab_report",
       title: "Labs",
-      parseStatus: "summary_ready",
-      summarySnippet: "Vitamin D is slightly below the reference range.",
-      reviewStatus: "pending_review",
+      parseStatus: "uploaded",
+      summarySnippet: null,
+      reviewStatus: null,
       consentScopes: ["upload_storage", "parse_ocr"],
       provenance: {
-        source: "document_parser",
-        providerId: "documents_module",
+        source: "attachment_context_only",
+        providerId: "chat_attachment",
         recognitionId: "f1000001-0000-4000-8000-000000000001",
       },
       wellnessContextOnlyNotice:
-        "This document is wellness coaching context only. It is not a diagnosis or treatment plan.",
+        "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
       documentReviewPath: null,
+      documentPersistenceStatus: "attachment_context_only",
     });
 
     expect(medicalEnvelope.category).toBe("medical_document");
     if (medicalEnvelope.category === "medical_document") {
-      expect(medicalEnvelope.reviewStatus).toBe("pending_review");
+      expect(medicalEnvelope.documentPersistenceStatus).toBe("attachment_context_only");
     }
   });
 
@@ -428,7 +429,7 @@ describe("chat attachment contracts", () => {
     expect(errors[0]).toMatch(/Unsupported MIME type/);
   });
 
-  it("strips medical summary text until review approval", () => {
+  it("sanitizes medical recognition to context-only client shape", () => {
     const sanitized = sanitizeMedicalRecognitionForClient({
       category: "medical_document",
       attachmentRefId: "d1000001-0000-4000-8000-000000000001",
@@ -438,21 +439,84 @@ describe("chat attachment contracts", () => {
       parseStatus: "summary_ready",
       summarySnippet: "Vitamin D is slightly below the reference range.",
       reviewStatus: "pending_review",
-      documentReviewPath: null,
+      documentReviewPath: "/profile#documents?documentId=e1000001-0000-4000-8000-000000000001",
       consentScopes: ["upload_storage", "parse_ocr"],
       provenance: {
-        source: "document_parser",
-        providerId: "documents_module",
+        source: "attachment_context_only",
+        providerId: "chat_attachment",
         recognitionId: "f1000001-0000-4000-8000-000000000001",
       },
       wellnessContextOnlyNotice:
-        "This document is wellness coaching context only. It is not a diagnosis or treatment plan.",
+        "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
     });
 
+    expect(sanitized.documentPersistenceStatus).toBe("attachment_context_only");
     expect(sanitized.summarySnippet).toBeNull();
-    expect(sanitized.documentReviewPath).toBe(
-      buildMedicalDocumentReviewPath("e1000001-0000-4000-8000-000000000001"),
-    );
+    expect(sanitized.reviewStatus).toBeNull();
+    expect(sanitized.documentReviewPath).toBeNull();
+    expect(sanitized.parseStatus).toBe("uploaded");
+    expect(sanitized.documentId).toBe("00000000-0000-4000-8000-000000000000");
+  });
+
+  describe("historical medical metadata compatibility", () => {
+    it("parses legacy saved_health_document recognition rows as context-only", () => {
+      const parsed = parseStoredChatAttachmentRecognition({
+        category: "medical_document",
+        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
+        documentId: "e1000001-0000-4000-8000-000000000001",
+        documentType: "lab_report",
+        title: "Labs",
+        parseStatus: "summary_ready",
+        summarySnippet: "Vitamin D is slightly below the reference range.",
+        reviewStatus: "pending_review",
+        documentReviewPath: "/profile#documents?documentId=e1000001-0000-4000-8000-000000000001",
+        consentScopes: ["upload_storage", "parse_ocr"],
+        provenance: {
+          source: "chat_attachment",
+          providerId: "chat_attachment",
+          recognitionId: "f1000001-0000-4000-8000-000000000001",
+        },
+        wellnessContextOnlyNotice:
+          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
+        documentPersistenceStatus: "saved_health_document",
+      });
+
+      expect(parsed?.category).toBe("medical_document");
+      if (parsed?.category === "medical_document") {
+        expect(parsed.documentPersistenceStatus).toBe("attachment_context_only");
+        expect(parsed.summarySnippet).toBeNull();
+        expect(parsed.documentId).toBe("00000000-0000-4000-8000-000000000000");
+      }
+    });
+  });
+
+  it("does not expose saved-document semantics for context-only medical recognition", () => {
+    const sanitized = sanitizeMedicalRecognitionForClient({
+      category: "medical_document",
+      attachmentRefId: "d1000001-0000-4000-8000-000000000001",
+      documentId: "d1000001-0000-4000-8000-000000000001",
+      documentType: "lab_report",
+      title: "Labs",
+      parseStatus: "uploaded",
+      summarySnippet: null,
+      reviewStatus: "pending_review",
+      documentReviewPath: null,
+      consentScopes: ["upload_storage", "parse_ocr"],
+      provenance: {
+        source: "attachment_context_only",
+        providerId: "chat_attachment",
+        recognitionId: "f1000001-0000-4000-8000-000000000001",
+      },
+      wellnessContextOnlyNotice:
+        "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
+      documentPersistenceStatus: "attachment_context_only",
+    });
+
+    expect(sanitized.documentPersistenceStatus).toBe("attachment_context_only");
+    expect(sanitized.summarySnippet).toBeNull();
+    expect(sanitized.reviewStatus).toBeNull();
+    expect(sanitized.documentReviewPath).toBeNull();
+    expect(sanitized.parseStatus).toBe("uploaded");
   });
 
   it("caps attachment ref count on chat messages", () => {

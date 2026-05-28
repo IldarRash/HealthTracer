@@ -12,13 +12,12 @@ import {
 import { Injectable } from "@nestjs/common";
 import type { ChatAttachmentCategorySource } from "@health/types";
 import type { ChatAttachmentClassificationProvider } from "./chat-attachment-classification.provider.js";
-import { createChatAttachmentClassificationProvider } from "./chat-attachment-classification.factory.js";
 import {
   resolveAttachmentClassificationProviderId,
   withAttachmentClassificationMetadata,
 } from "./chat-attachment-classification-metadata.js";
 import { resolveOpenAiClassificationMethod } from "./chat-attachment-classification-content.js";
-import { DevChatAttachmentClassificationProvider } from "./dev-chat-attachment-classification.provider.js";
+import { LocalChatAttachmentClassificationProvider } from "./local-chat-attachment-classification.provider.js";
 
 const MAX_MESSAGE_CONTEXT_CHARS = 500;
 
@@ -26,9 +25,7 @@ const MAX_MESSAGE_CONTEXT_CHARS = 500;
 export class ChatAttachmentClassifierService {
   private readonly providerId: string;
 
-  constructor(
-    private readonly provider: ChatAttachmentClassificationProvider = createChatAttachmentClassificationProvider(),
-  ) {
+  constructor(private readonly provider: ChatAttachmentClassificationProvider) {
     this.providerId = resolveAttachmentClassificationProviderId(this.provider);
   }
 
@@ -100,7 +97,7 @@ export class ChatAttachmentClassifierService {
   private resolveProviderClassificationMethod(
     mimeType: string,
   ): "dev_heuristic" | "vision" | "text_excerpt" | "metadata_only" {
-    if (this.provider instanceof DevChatAttachmentClassificationProvider) {
+    if (this.provider instanceof LocalChatAttachmentClassificationProvider) {
       return "dev_heuristic";
     }
 

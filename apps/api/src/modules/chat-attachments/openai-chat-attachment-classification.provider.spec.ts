@@ -1,7 +1,16 @@
+import { buildDefaultAttachmentBehaviorConfig } from "@health/types";
 import { describe, expect, it, vi } from "vitest";
 import { OpenAiChatAttachmentClassificationProvider } from "./openai-chat-attachment-classification.provider.js";
 
 describe("OpenAiChatAttachmentClassificationProvider", () => {
+  const defaultClassification = buildDefaultAttachmentBehaviorConfig().classification;
+
+  const createProvider = (classification = defaultClassification) =>
+    new OpenAiChatAttachmentClassificationProvider({
+      apiKey: "test-key",
+      model: "gpt-4o-mini",
+      classification,
+    });
   const attachmentRequest = {
     message: "",
     filename: "IMG_1234.jpg",
@@ -21,10 +30,7 @@ describe("OpenAiChatAttachmentClassificationProvider", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const provider = new OpenAiChatAttachmentClassificationProvider({
-      apiKey: "test-key",
-      model: "gpt-4o-mini",
-    });
+    const provider = createProvider();
 
     const result = await provider.classify(attachmentRequest);
 
@@ -56,10 +62,7 @@ describe("OpenAiChatAttachmentClassificationProvider", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const provider = new OpenAiChatAttachmentClassificationProvider({
-      apiKey: "test-key",
-      model: "gpt-4o-mini",
-    });
+    const provider = createProvider();
 
     const result = await provider.classify(attachmentRequest);
 
@@ -90,10 +93,7 @@ describe("OpenAiChatAttachmentClassificationProvider", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const provider = new OpenAiChatAttachmentClassificationProvider({
-      apiKey: "test-key",
-      model: "gpt-4o-mini",
-    });
+    const provider = createProvider();
 
     const result = await provider.classify(attachmentRequest);
 
@@ -125,10 +125,7 @@ describe("OpenAiChatAttachmentClassificationProvider", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const provider = new OpenAiChatAttachmentClassificationProvider({
-      apiKey: "test-key",
-      model: "gpt-4o-mini",
-    });
+    const provider = createProvider();
 
     const result = await provider.classify({
       ...attachmentRequest,
@@ -175,10 +172,7 @@ describe("OpenAiChatAttachmentClassificationProvider", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const provider = new OpenAiChatAttachmentClassificationProvider({
-      apiKey: "test-key",
-      model: "gpt-4o-mini",
-    });
+    const provider = createProvider();
 
     await provider.classify({
       message: "",
@@ -222,10 +216,7 @@ describe("OpenAiChatAttachmentClassificationProvider", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const provider = new OpenAiChatAttachmentClassificationProvider({
-      apiKey: "test-key",
-      model: "gpt-4o-mini",
-    });
+    const provider = createProvider();
 
     const result = await provider.classify({
       message: "",
@@ -248,6 +239,48 @@ describe("OpenAiChatAttachmentClassificationProvider", () => {
 
     expect(userContent?.[0]?.text).toContain("PDF file content is not parsed");
     expect(userContent?.[0]?.text).not.toContain("base64");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("uses attachment config prompts in OpenAI requests", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                category: "workout_attachment",
+                confidence: "medium",
+                rationale: "Training equipment visible.",
+                suggestedAction: "run_category_recognition",
+                mealContextLabel: null,
+              }),
+            },
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = createProvider({
+      ...defaultClassification,
+      llmClassifierPrompt: "CONFIG_ONLY_SYSTEM_PROMPT",
+      llmUserPromptIntro: "CONFIG_ONLY_USER_INTRO",
+    });
+
+    await provider.classify(attachmentRequest);
+
+    const fetchCall = fetchMock.mock.calls[0] as [string, RequestInit] | undefined;
+    const requestBody = JSON.parse(String(fetchCall?.[1]?.body)) as {
+      messages: Array<{ role: string; content: string | Array<{ text?: string }> }>;
+    };
+
+    expect(requestBody.messages[0]?.content).toBe("CONFIG_ONLY_SYSTEM_PROMPT");
+    const userText = requestBody.messages[1]?.content;
+    const userPrompt = Array.isArray(userText) ? userText[0]?.text : userText;
+    expect(userPrompt).toContain("CONFIG_ONLY_USER_INTRO");
 
     vi.unstubAllGlobals();
   });

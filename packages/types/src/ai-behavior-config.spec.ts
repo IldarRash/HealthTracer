@@ -136,6 +136,41 @@ describe("ai behavior config", () => {
     expect(defaults.contextBudgets.profiles.deep_review).toEqual(DEEP_REVIEW_CONTEXT_BUDGET_POLICY);
   });
 
+  it("loads file config without deprecated attachmentRouting", () => {
+    const defaults = buildDefaultAiBehaviorConfig();
+    const { attachmentRouting: _removed, ...fileWithoutAttachmentRouting } = defaults;
+    const loaded = resolveLoadedAiBehaviorConfig({
+      fileValue: fileWithoutAttachmentRouting,
+      defaults,
+    });
+
+    expect(loaded.source).toBe("file");
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.warnings).not.toContain(
+      "attachmentRouting in ai-behavior.json is deprecated and ignored at runtime; configure routing in attachments.json instead.",
+    );
+    expect(loaded.config.attachmentRouting).toEqual(defaults.attachmentRouting);
+  });
+
+  it("warns when ai-behavior file still contains deprecated attachmentRouting", () => {
+    const loaded = resolveLoadedAiBehaviorConfig({
+      fileValue: {
+        ...buildDefaultAiBehaviorConfig(),
+        attachmentRouting: {
+          categoryPriority: ["food_photo"],
+          categoryToCapability: buildDefaultAiBehaviorConfig().attachmentRouting.categoryToCapability,
+          defaultCapabilityId: "attachment_food_photo",
+          confidence: 0.98,
+          routingMethod: "attachment_family",
+        },
+      },
+    });
+
+    expect(loaded.warnings).toContain(
+      "attachmentRouting in ai-behavior.json is deprecated and ignored at runtime; configure routing in attachments.json instead.",
+    );
+  });
+
   it("changes attachment routing priority from config without code changes", () => {
     const config = normalizeAiBehaviorConfig({
       attachmentRouting: {

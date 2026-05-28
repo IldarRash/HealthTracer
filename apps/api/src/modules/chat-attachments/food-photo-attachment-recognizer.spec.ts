@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createDefaultAiBehaviorConfigService } from "../ai/test-ai-behavior-fixtures.js";
 import { FoodPhotoAttachmentRecognizer } from "./food-photo-attachment-recognizer.js";
 
 describe("FoodPhotoAttachmentRecognizer", () => {
@@ -20,9 +21,10 @@ describe("FoodPhotoAttachmentRecognizer", () => {
       lowConfidenceNotice: null,
     }));
 
-    const recognizer = new FoodPhotoAttachmentRecognizer({
-      analyzeOwnedPhoto,
-    } as never);
+    const recognizer = new FoodPhotoAttachmentRecognizer(
+      { analyzeOwnedPhoto } as never,
+      createDefaultAiBehaviorConfigService(),
+    );
 
     await recognizer.recognize({
       userId: "user-id",
@@ -50,7 +52,10 @@ describe("FoodPhotoAttachmentRecognizer", () => {
   });
 
   it("builds a food photo recognition envelope with provenance", () => {
-    const recognizer = new FoodPhotoAttachmentRecognizer({} as never);
+    const recognizer = new FoodPhotoAttachmentRecognizer(
+      {} as never,
+      createDefaultAiBehaviorConfigService(),
+    );
 
     const envelope = recognizer.buildEnvelope({
       attachmentRefId: "a1000001-0000-4000-8000-000000000001",

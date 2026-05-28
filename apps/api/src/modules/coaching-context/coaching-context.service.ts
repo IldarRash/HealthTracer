@@ -383,7 +383,7 @@ export class CoachingContextService {
         ? {
             confidence: route.confidence,
             routingMethod: route.routingMethod,
-            llmRouterInvoked: route.routingMethod === "llm_router",
+            llmRouterInvoked: false,
             catalogIntentId: route.catalogIntentId,
             safetyFlags: route.safetyFlags,
             expectedResponseMode: route.expectedResponseMode,

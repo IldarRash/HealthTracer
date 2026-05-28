@@ -1,28 +1,17 @@
 import type { ChatAttachmentRecord } from "@health/types";
 import {
   chatAttachmentConsentSchema,
-  chatAttachmentRecognitionEnvelopeSchema,
   chatAttachmentRecordSchema,
-  sanitizeMedicalRecognitionForClient,
+  parseStoredChatAttachmentRecognition,
 } from "@health/types";
 import type { ChatAttachmentRow } from "./chat-attachments.repository.js";
-
-function sanitizeStoredRecognition(
-  recognition: NonNullable<ChatAttachmentRecord["recognition"]>,
-): NonNullable<ChatAttachmentRecord["recognition"]> {
-  if (recognition.category === "medical_document" && recognition.reviewStatus !== "approved") {
-    return sanitizeMedicalRecognitionForClient(recognition);
-  }
-
-  return recognition;
-}
 
 export function toChatAttachmentRecord(row: ChatAttachmentRow): ChatAttachmentRecord {
   const consent = row.consent
     ? chatAttachmentConsentSchema.parse(row.consent)
     : null;
   const recognition = row.recognition
-    ? sanitizeStoredRecognition(chatAttachmentRecognitionEnvelopeSchema.parse(row.recognition))
+    ? parseStoredChatAttachmentRecognition(row.recognition)
     : null;
 
   return chatAttachmentRecordSchema.parse({

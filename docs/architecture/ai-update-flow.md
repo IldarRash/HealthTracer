@@ -32,12 +32,11 @@ The service always:
 6. Runs attachment classification and recognition before the coach response when
    attachments are present.
 7. Evaluates crisis text and short-circuits before AI when crisis support is needed.
-8. Builds attachment proposal candidates before the coach call.
-9. Calls `AiService.generateCoachResponse`.
-10. Merges AI proposals, deterministic proposal helpers, and attachment proposals.
-11. Creates the assistant message.
-12. Validates and persists each proposal as pending or invalid.
-13. Touches the thread title and returns the updated chat turn.
+8. Calls `AiService.generateCoachResponse`.
+9. Merges AI proposals with remaining code-owned deterministic proposal helpers.
+10. Creates the assistant message.
+11. Validates and persists each proposal as pending or invalid.
+12. Touches the thread title and returns the updated chat turn.
 
 ```mermaid
 sequenceDiagram
@@ -58,9 +57,8 @@ sequenceDiagram
     ChatService->>DB: create crisis support assistant message
     ChatService-->>Client: return no proposals
   else normal turn
-    ChatService->>ChatService: build pre-AI attachment proposal candidates
     ChatService->>AI: generateCoachResponse
-    ChatService->>ChatService: merge deterministic and attachment proposals
+    ChatService->>ChatService: merge code-owned deterministic proposals
     ChatService->>DB: create assistant message
     ChatService->>Proposals: validate each raw proposal
     Proposals->>DB: create proposal rows
@@ -82,33 +80,36 @@ Current exceptions:
 
 Normal text-only flow:
 
-1. `AgentOrchestratorService.resolveRoute` calls the LLM router through
-   `provider.generateIntentRoute`.
-2. The router receives the user message, recent messages, and
-   `serializeIntentCatalogForRouter()`.
-3. The router must return a valid normal catalog intent id, confidence, expected
-   response mode, safety flags, and up to 3 context slice requests.
-4. The orchestrator validates the router output with Zod and forbidden user-facing
-   field checks.
-5. Invalid or failed routing falls back to `general` with low confidence.
-6. The orchestrator maps the catalog intent to an agent intent and builds an
-   `AgentContextPacket` through `CoachingContextService`.
-7. The selected intent definition supplies prompt instructions, safety guidance,
-   allowed tools, and allowed proposal intents.
-8. The provider runs the bounded agent loop.
+1. `AgentOrchestratorService` builds a TurnDecision request from the full user
+   message, recent messages, available capabilities, allowed tools, and safety
+   guardrails.
+2. `provider.generateTurnDecision` returns route/capability hints, context needs,
+   tool needs, direct-command signals, safety flags, and confidence.
+3. The orchestrator validates the TurnDecision output with Zod and forbidden
+   user-facing field checks. Invalid or low-confidence output stays in the same
+   contract and falls back to a safe `general` plan.
+4. `SystemPlannerService` clamps the TurnDecision against code-owned policy:
+   capability allowlists, context budgets, context slices, executor mode, allowed
+   tools, and allowed proposal intents.
+5. The planner output builds an `AgentContextPacket` through
+   `CoachingContextService`.
+6. The selected capability supplies prompt instructions, safety guidance, allowed
+   tools, and allowed proposal intents.
+7. `ResponseModeExecutorService` runs the bounded agent loop.
 
 ```mermaid
 sequenceDiagram
   participant ChatService
   participant Orchestrator
-  participant RouterLLM
+  participant TurnDecisionLLM
   participant Context
   participant CoachLLM
   participant Tools
 
   ChatService->>Orchestrator: userMessage, recentMessages
-  Orchestrator->>RouterLLM: classify with normal intent catalog
-  RouterLLM-->>Orchestrator: catalogIntentId and context slice plan
+  Orchestrator->>TurnDecisionLLM: decide with message, intents, tools, guardrails
+  TurnDecisionLLM-->>Orchestrator: route hints and context/tool needs
+  Orchestrator->>Orchestrator: SystemPlanner clamps policy
   Orchestrator->>Context: buildAgentContext for selected intent
   loop max 3 iterations
     Orchestrator->>CoachLLM: intent-specific prompt and context
@@ -124,7 +125,7 @@ sequenceDiagram
 
 ## Proposal Revision Flow
 
-Proposal revision turns skip the LLM router because the system already knows the
+Proposal revision turns skip TurnDecision because the system already knows the
 proposal being revised.
 
 `AgentOrchestratorService.resolveProposalRevisionRoute` maps the original proposal:
@@ -257,10 +258,10 @@ The recognizer:
 3. Sets attachment status to `ready` or `low_confidence`.
 4. Sets an ephemeral expiry.
 
-`ChatAttachmentRecognitionService.buildProposalCandidates` creates a
-`log_nutrition_incident` proposal candidate from the analysis. That proposal is
-merged with AI proposals. If there is already a text-estimate nutrition incident,
-the photo-backed proposal replaces it.
+The recognition envelope is stored as attachment context and passed into
+TurnDecision and the agent loop. It does not create pre-AI proposal candidates.
+Any nutrition proposal must come from the unified agent loop and then pass normal
+proposal validation.
 
 ### Workout Attachment
 
@@ -271,23 +272,11 @@ There are two main workout outcomes:
 - Plan document or plan screenshot: `suggestedIntent: "create_workout_plan"`.
 - One-off session or exercise photo: `suggestedIntent: "log_session_context"`.
 
-Plan documents can create `create_workout_plan` proposal candidates. Accepting those
-proposals creates a workout plan revision through proposal apply services.
-
-One-off session context does not create a full workout plan. If the user message asks
-to add or log today's workout, for example "запиши мне тренировку волейбола на сегодня",
-`buildProposalCandidates` creates a `create_today_checklist` proposal with a workout
-item for today's date. The coach receives `attachmentTurn.preparedProposals` so it can
-refer to the prepared card instead of inventing a separate plan in the reply.
-
-For one-off session-context workout attachments, full workout plan proposals from the
-coach are filtered before persistence. The filtered intents are:
-
-- `create_workout_plan`
-- `adapt_workout_plan`
-- `adapt_workout_plan_from_progress`
-
-Plan-document workout attachments still allow full workout plan proposals.
+Workout recognition produces typed context for TurnDecision and the agent loop.
+Plan-like attachments and one-off session context can both influence the coach
+response, but they no longer create deterministic pre-AI proposal candidates.
+Any workout plan, adaptation, or Today checklist proposal must come from the
+unified agent loop and then pass the existing proposal validation and apply flow.
 
 ### Medical Document
 
@@ -306,11 +295,13 @@ After consent is granted:
 1. The user must provide consent scopes and document metadata.
 2. If content was purged, the client must re-upload file bytes with consent.
 3. Image medical documents go to `needs_review`; automated medical image parsing is not used.
-4. Supported document files can be parsed by the medical document recognizer.
+4. Supported document files produce context-only medical recognition metadata.
 5. Medical recognition is sanitized before returning to the client.
-6. Medical documents do not create state-changing proposals automatically.
+6. Medical chat attachments do not create `health_documents` rows automatically.
+   Documents are created only by the explicit documents flow.
+7. Medical documents do not create state-changing proposals automatically.
 
-## Attachment Family AI Route
+## Attachment Context In The Unified Route
 
 After attachment recognition, `ChatService` passes `attachmentTurn` to
 `AiService.generateCoachResponse`.
@@ -321,22 +312,14 @@ The attachment turn context contains:
 - final category
 - status
 - recognition envelope
-- prepared proposal summaries when the backend already created deterministic
-  attachment proposal candidates
+- bounded context summaries
 
-`AgentOrchestratorService` routes directly to an attachment catalog intent when at
-least one attachment has a non-`unclassified` category:
-
-- `food_photo` -> `attachment_food_photo`
-- `workout_attachment` -> `attachment_workout`
-- `medical_document` -> `attachment_medical_document`
-
-If all attachments remain `unclassified`, the orchestrator does not use an attachment
-family route; it falls back to normal LLM catalog routing.
+Attachments do not use an attachment-family planner bypass. They are context for
+the same TurnDecision first-LLM stage used by text-only turns.
 
 ## Agent Loop
 
-The agent loop runs in `AgentOrchestratorService.runAgentLoop`.
+The agent loop runs through `ResponseModeExecutorService`.
 
 Every final answer must come from `provider.generateAgentLoopStep` as either:
 
@@ -362,16 +345,15 @@ Available context tools:
 
 ## Proposal Merge And Persistence
 
-`ChatService` starts with proposals returned by the AI coach and then merges additional
-proposal sources.
+`ChatService` starts with proposals returned by the AI coach and then applies the
+remaining code-owned deterministic proposal helpers.
 
 Merge order:
 
 1. AI coach proposals.
 2. Weekly review packing when `isWeeklyReviewChatMessage(input.content)` is true.
 3. Deterministic chat proposals from `mergeDeterministicChatProposals`.
-4. Attachment proposal candidates from `ChatAttachmentRecognitionService`.
-5. Recipe recommendation proposal when recipe trigger text is present and no recipe
+4. Recipe recommendation proposal when recipe trigger text is present and no recipe
    proposal already exists.
 
 Before persistence, every raw proposal is validated through:
@@ -440,7 +422,7 @@ When the user accepts or rejects a proposal:
 
 ## Validation And Safety Checklist
 
-- Validate LLM router output with Zod and forbidden field checks.
+- Validate TurnDecision output with Zod and forbidden field checks.
 - Validate agent loop output and reply safety.
 - Validate attachment classifier output.
 - Validate attachment recognition envelopes.

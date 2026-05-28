@@ -118,7 +118,7 @@ describe("chat composer attachments wiring", () => {
     expect(outcomePanelSource).toContain("resolveAttachmentOutcomeConfidenceLabel");
     expect(outcomePanelSource).toContain("Meal context:");
     expect(outcomePanelSource).toContain("Classification confidence:");
-    expect(outcomePanelSource).toContain("Nothing changes until you apply");
+    expect(outcomePanelSource).not.toContain("Nothing changes until you apply");
     expect(outcomePanelSource).toContain('aria-label="Attachment recognition results"');
     expect(outcomePanelSource).toContain("Grant consent and process");
     expect(outcomePanelSource).toContain("ConsentScopeChecklist");

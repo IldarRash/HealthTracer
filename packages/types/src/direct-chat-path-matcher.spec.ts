@@ -3,11 +3,7 @@ import {
   buildDefaultAiBehaviorConfig,
   normalizeAiBehaviorConfig,
 } from "./ai-behavior-config.js";
-import {
-  buildDefaultDirectPathKindMatchers,
-  DEFAULT_DIRECT_PATH_DETECTION_ORDER,
-  DEFAULT_DIRECT_PATH_SHARED_PATTERNS,
-} from "./direct-chat-path-default-patterns.js";
+import { buildDefaultDirectPathKindMatchers } from "./direct-chat-path-default-patterns.js";
 import {
   compileDirectPathMatcher,
   compileRegexPatternRule,
@@ -33,13 +29,8 @@ describe("detectDirectChatPathCandidateFromConfig", () => {
   it("changes detection when config patterns are overridden", () => {
     const custom = normalizeAiBehaviorConfig({
       directPaths: {
-        enabled: true,
+        ...buildDefaultAiBehaviorConfig().directPaths,
         confidence: 0.5,
-        routingMethod: "rule_based",
-        blockWhenAttachments: true,
-        blockWhenProposalRevision: true,
-        detectionOrder: [...DEFAULT_DIRECT_PATH_DETECTION_ORDER],
-        sharedPatterns: DEFAULT_DIRECT_PATH_SHARED_PATTERNS,
         kinds: [
           {
             kind: "today_summary_read",

@@ -301,21 +301,22 @@ describe("chat attachment classification contracts", () => {
       recognition: {
         category: "medical_document",
         attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-        documentId: "e1000001-0000-4000-8000-000000000001",
+        documentId: "00000000-0000-4000-8000-000000000000",
         documentType: "lab_report",
         title: "Labs",
-        parseStatus: "summary_ready",
+        parseStatus: "uploaded",
         summarySnippet: null,
-        reviewStatus: "pending_review",
+        reviewStatus: null,
         consentScopes: ["upload_storage", "parse_ocr"],
         provenance: {
-          source: "document_parser",
-          providerId: "documents_module",
+          source: "attachment_context_only",
+          providerId: "chat_attachment",
           recognitionId: "f1000001-0000-4000-8000-000000000001",
         },
         wellnessContextOnlyNotice:
-          "This document is wellness coaching context only. It is not a diagnosis or treatment plan.",
+          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
         documentReviewPath: null,
+        documentPersistenceStatus: "attachment_context_only",
       },
       proposalsSuppressed: true,
     });

@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./config/ai-behavior.json": "./config/ai-behavior.json"
+    "./config/ai-behavior.json": "./config/ai-behavior.json",
+    "./config/attachments.json": "./config/attachments.json"
   },
   "scripts": {
     "build": "tsc --noEmit",

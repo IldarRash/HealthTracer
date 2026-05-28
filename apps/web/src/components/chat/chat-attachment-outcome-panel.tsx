@@ -110,14 +110,6 @@ export function ChatAttachmentOutcomePanel({
                 </p>
               ) : null}
 
-              {outcome.proposalCandidateCount > 0 ? (
-                <p className="chat-attachment-outcomes__meta">
-                  {outcome.proposalCandidateCount} proposal
-                  {outcome.proposalCandidateCount === 1 ? "" : "s"} available below for your
-                  review. Nothing changes until you apply.
-                </p>
-              ) : null}
-
               {outcome.category === "medical_document" ? (
                 <PrivacyBoundaryNote title="Wellness context only">
                   {MEDICAL_ATTACHMENT_WELLNESS_NOTICE}

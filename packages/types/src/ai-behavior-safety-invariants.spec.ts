@@ -191,18 +191,34 @@ describe("ai behavior safety invariants", () => {
     it("falls back to default prompt templates when config bodies are invalid", () => {
       const compiled = compilePromptTemplates({
         templates: {
-          openai_intent_router: {
-            templateKey: "openai_intent_router",
+          openai_coach_loop: {
+            templateKey: "openai_coach_loop",
             body: "Broken template without placeholders",
             placeholders: [],
           },
         },
       });
 
-      expect(compiled.templates.openai_intent_router.source).toBe("default");
-      expect(compiled.renderIntentRouter({ intentCatalogJson: "[]" })).toContain(
-        "internal intent router",
-      );
+      expect(compiled.templates.openai_coach_loop.source).toBe("default");
+      expect(
+        compiled.renderCoachLoop({
+          iteration: "1",
+          maxIterations: "3",
+          selectedIntentLabel: "general",
+          intentInstructions: "Coach",
+          intentSafetyGuidance: "none",
+          allowedTools: "getUserContextSlice",
+          allowedProposalIntents: "none",
+          taskPurpose: "general_chat",
+          taskIntent: "general",
+          expectedResponseMode: "advice_only",
+          safetyFlags: "none",
+          missingContextNotes: "none",
+          priorToolResultsJson: "none",
+          safetyConstraints: "Stay conservative",
+          coachingContextJson: "{}",
+        }),
+      ).toContain("AI wellness coach");
     });
   });
 

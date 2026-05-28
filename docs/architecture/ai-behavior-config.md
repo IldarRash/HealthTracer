@@ -2,12 +2,13 @@
 
 ## Policy
 
-Chat/AI **behavior policy** (direct paths, revision routing, context budgets, prompt templates, attachment routing, explainer detection, deterministic triggers) lives in version-controlled repo files first. Runtime code is a generic engine that loads, validates, and enforces safety invariants.
+Chat/AI **behavior policy** lives in version-controlled repo files first. `ai-behavior.json` owns chat/LLM behavior (direct paths, revision routing, context budgets, prompt templates, explainer detection, deterministic triggers), while `attachments.json` owns attachment behavior and routing. Runtime code is a generic engine that loads, validates, and enforces safety invariants.
 
-- **Source of truth:** `packages/ai-behavior/config/ai-behavior.json` (override path via `AI_BEHAVIOR_CONFIG_PATH`).
+- **Chat/LLM source of truth:** `packages/ai-behavior/config/ai-behavior.json` (override path via `AI_BEHAVIOR_CONFIG_PATH`).
+- **Attachment source of truth:** `packages/ai-behavior/config/attachments.json` (override path via `ATTACHMENT_BEHAVIOR_CONFIG_PATH`; runtime attachment routing no longer lives in `ai-behavior.json`).
 - **No DB overlay** in this phase. Policy changes ship with the deploy artifact and code review.
-- **Schema validation:** Zod schemas in `@health/types` (`aiBehaviorConfigSchema` and section schemas).
-- **Fail-closed loading:** Missing, malformed JSON, or invalid schema → built-in defaults from `buildDefaultAiBehaviorConfig()`.
+- **Schema validation:** Zod schemas in `@health/types` (`aiBehaviorConfigSchema`, `attachmentBehaviorConfigSchema`, and section schemas).
+- **Fail-closed loading:** Missing, malformed JSON, or invalid schema → built-in defaults from `buildDefaultAiBehaviorConfig()` or `buildDefaultAttachmentBehaviorConfig()`.
 
 ## Ownership
 
@@ -31,16 +32,16 @@ These cannot be disabled by config:
 
 ## How config is loaded
 
-1. `loadAiBehaviorConfig()` reads JSON from disk (or uses defaults on failure).
-2. `resolveLoadedAiBehaviorConfig()` parses with Zod; invalid files → full defaults.
-3. `normalizeAiBehaviorConfig()` merges partial values onto defaults and **sanitizes** context budgets (safety floor + trigger regex validation).
+1. `loadAiBehaviorConfig()` and `loadAttachmentBehaviorConfig()` read JSON from disk (or use defaults on failure).
+2. `resolveLoadedAiBehaviorConfig()` and attachment config parsing validate with Zod; invalid files → full defaults.
+3. Normalization merges partial values onto defaults and **sanitizes** code-owned safety floors (for example context budget floors and attachment consent/provider/ownership constraints).
 4. `AiBehaviorConfigService` exposes typed getters; facades/matchers compile regex and templates at init.
 
 Startup logs warnings for sanitized values (e.g. invalid trigger regex, rejected document/sensitive-health flags).
 
 ## Editing config
 
-1. Edit `packages/ai-behavior/config/ai-behavior.json` (or env-pointed file).
+1. Edit `packages/ai-behavior/config/ai-behavior.json` for chat/LLM behavior, or `packages/ai-behavior/config/attachments.json` for attachment behavior.
 2. Keep `version` at `1` until a migration is defined.
 3. Run narrow validation:
    - `pnpm --dir packages/types test -- src/ai-behavior-config.spec.ts src/ai-behavior-safety-invariants.spec.ts src/context-budget.spec.ts`
@@ -58,7 +59,7 @@ Startup logs warnings for sanitized values (e.g. invalid trigger regex, rejected
 
 ## Rollback
 
-1. **Revert the config commit** (or restore the previous `ai-behavior.json` from git) and redeploy/restart API.
+1. **Revert the config commit** (or restore the previous behavior config file from git) and redeploy/restart API.
 2. **Emergency:** unset `AI_BEHAVIOR_CONFIG_PATH` or point it at a known-good file; missing/invalid files load built-in defaults.
 3. **Verify:** check API logs for `Loaded repo-backed AI behavior config` vs default warnings; run chat smoke paths (direct path, explainer, deep-review monthly message).
 
@@ -66,6 +67,5 @@ DB-backed policy overlays, audit history, and version pinning are deferred until
 
 ## Related docs
 
-- Feature brief: `docs/product/features/repo-backed-ai-behavior-config.md`
+- Unified LLM pipeline: `docs/architecture/llm-pipeline.md`
 - AI update flow: `docs/architecture/ai-update-flow.md`
-- Capability chat pipeline: `docs/architecture/capability-based-chat-flow.md`

@@ -3,14 +3,20 @@ import type {
   AgentToolCallResult,
   AiStructuredOutputInput,
   IntentCatalogEntry,
-  LlmIntentRouterOutputInput,
+  MessageUnderstandingOutputInput,
+  MessageUnderstandingRequest,
+  MessageUnderstandingSignal,
+  TurnDecisionOutputInput,
+  TurnDecisionRequest,
 } from "@health/types";
+import type { AgentSafetyFlag, CatalogIntentId } from "@health/types";
 import {
   buildContextSliceRequestForIntent,
   isWeeklyReviewChatMessage,
+  mapTurnDecisionOutputFromMessageUnderstanding,
+  messageUnderstandingOutputSchema,
   normalizeContextSlicePlan,
   resolveDefaultExpectedResponseMode,
-  serializeIntentCatalogForRouter,
 } from "@health/types";
 import {
   hasActiveHabitPlanInContext,
@@ -37,20 +43,6 @@ import {
   stubSwapExerciseWorkoutPlan,
 } from "./stub-workout-plan.js";
 
-export interface IntentRouterRequest {
-  readonly userMessage: string;
-  readonly recentMessages: ReadonlyArray<{
-    readonly role: "user" | "assistant" | "system";
-    readonly content: string;
-  }>;
-  readonly intentCatalog?: ReadonlyArray<{
-    readonly id: string;
-    readonly description: string;
-    readonly routerGuidance: string;
-    readonly examples: readonly string[];
-  }>;
-}
-
 export interface CoachAiRequest {
   readonly userMessage: string;
   readonly recentMessages: ReadonlyArray<{
@@ -71,6 +63,14 @@ export interface CoachAiRequest {
     readonly intentDefinition?: IntentCatalogEntry;
     readonly allowedTools?: readonly string[];
     readonly allowedProposalIntents?: readonly string[];
+    readonly messageUnderstandingSummary?: Record<string, unknown>;
+    readonly responseModeExecutor?: {
+      readonly mode: string;
+      readonly handlerPath: string;
+      readonly maxLoopIterations: number;
+      readonly allowToolLoop: boolean;
+      readonly useContextExpansionMetadata: boolean;
+    };
   };
 }
 
@@ -81,7 +81,10 @@ export interface CoachAiLoopRequest extends CoachAiRequest {
 }
 
 export interface CoachAiProvider {
-  generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput>;
+  generateMessageUnderstanding(
+    request: MessageUnderstandingRequest,
+  ): Promise<MessageUnderstandingOutputInput>;
+  generateTurnDecision(request: TurnDecisionRequest): Promise<TurnDecisionOutputInput>;
   generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput>;
   generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput>;
 }
@@ -96,112 +99,160 @@ function stubCoachOutput(value: unknown): AiStructuredOutputInput {
   return value as AiStructuredOutputInput;
 }
 
-function buildPreparedAttachmentWorkoutReply(
-  request: CoachAiRequest,
-): AiStructuredOutputInput | null {
-  const catalogIntentId =
-    request.agentMetadata?.catalogIntentId ?? request.agentMetadata?.intent;
-
-  if (catalogIntentId !== "attachment_workout") {
-    return null;
-  }
-
-  const attachmentTurn = request.coachingContext.attachmentTurn;
-
-  if (!attachmentTurn || typeof attachmentTurn !== "object") {
-    return null;
-  }
-
-  const preparedProposals = (attachmentTurn as { preparedProposals?: unknown })
-    .preparedProposals;
-
-  if (!Array.isArray(preparedProposals) || preparedProposals.length === 0) {
-    return null;
-  }
-
-  const todayChecklistProposal = preparedProposals.find(
-    (proposal) =>
-      proposal &&
-      typeof proposal === "object" &&
-      (proposal as { intent?: unknown }).intent === "create_today_checklist",
-  ) as { title?: string } | undefined;
-
-  if (!todayChecklistProposal) {
-    return null;
-  }
-
-  const proposalTitle =
-    typeof todayChecklistProposal.title === "string"
-      ? todayChecklistProposal.title
-      : "Today workout checklist";
-
-  return {
-    reply: `I reviewed your training attachment and prepared "${proposalTitle}" for your approval. Review the proposal card below before anything is saved to Today.`,
-    proposals: [],
-  };
-}
-
 export class StubCoachAiProvider implements CoachAiProvider {
-  async generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput> {
-    const normalized = request.userMessage.toLowerCase();
-    const catalog = request.intentCatalog ?? serializeIntentCatalogForRouter();
+  async generateTurnDecision(request: TurnDecisionRequest): Promise<TurnDecisionOutputInput> {
+    const messageUnderstandingRequest: MessageUnderstandingRequest = {
+      originalText: request.originalText,
+      normalizedText: request.normalizedText,
+      preprocessor: request.preprocessor,
+      attachmentContextSummaries: request.attachmentContextSummaries.map((summary) => ({
+        attachmentRefId: summary.attachmentRefId,
+        category: summary.category,
+        status: summary.status,
+        routingCapabilityId: summary.routingCapabilityId,
+        contextHint: summary.contextHint,
+        recognitionPresent: summary.recognitionPresent,
+      })),
+      recentMessageHints: request.recentMessageHints,
+      catalogHints: request.catalogHints,
+    };
+    const understandingOutput = messageUnderstandingOutputSchema.parse(
+      await this.generateMessageUnderstanding(messageUnderstandingRequest),
+    );
+    const mapped = mapTurnDecisionOutputFromMessageUnderstanding(understandingOutput, request);
+    const toolNeeds: TurnDecisionOutputInput["toolNeeds"] = [...(mapped.toolNeeds ?? [])];
 
     if (
-      normalized.includes("not losing weight") ||
-      normalized.includes("not seeing results") ||
-      (normalized.includes("hungry") && normalized.includes("tired"))
+      understandingOutput.needsContext.includes("weekly_progress") ||
+      request.normalizedText.toLowerCase().includes("weekly")
     ) {
-      return {
-        catalogIntentId: "adjust_nutrition",
-        confidence: 0.84,
-        routingMethod: "llm_router",
-        requiredContextSlices: normalizeContextSlicePlan([
-          buildContextSliceRequestForIntent("adjust_nutrition"),
-          { type: "weekly_review", depth: "medium", timeRange: "7d" },
-        ]),
-        safetyFlags: ["hunger", "fatigue"],
-        expectedResponseMode: "recommendation_with_optional_proposal",
-      };
+      if (request.availableTools.includes("getWeeklyProgressContext")) {
+        toolNeeds.push({
+          tool: "getWeeklyProgressContext",
+          rationale: "Weekly progress may inform routing.",
+        });
+      }
     }
-
-    if (
-      normalized.includes("feel off") ||
-      normalized.includes("completely off") ||
-      normalized.includes("routine is not")
-    ) {
-      return {
-        catalogIntentId: "adjust_workout",
-        confidence: 0.82,
-        routingMethod: "llm_router",
-        requiredContextSlices: normalizeContextSlicePlan([
-          buildContextSliceRequestForIntent("adjust_workout"),
-          { type: "daily_checkin", depth: "small", timeRange: "7d" },
-        ]),
-        safetyFlags: ["fatigue", "stress"],
-        expectedResponseMode: "recommendation_with_optional_proposal",
-      };
-    }
-
-    if (isWeeklyReviewChatMessage(request.userMessage)) {
-      return {
-        catalogIntentId: "review_progress",
-        confidence: 0.93,
-        routingMethod: "llm_router",
-        requiredContextSlices: [buildContextSliceRequestForIntent("review_progress")],
-        safetyFlags: [],
-        expectedResponseMode: "recommendation_with_optional_proposal",
-      };
-    }
-
-    const fallbackId = catalog[0]?.id ?? "general";
 
     return {
-      catalogIntentId: fallbackId as LlmIntentRouterOutputInput["catalogIntentId"],
-      confidence: 0.78,
-      routingMethod: "llm_router",
-      requiredContextSlices: [buildContextSliceRequestForIntent("general")],
-      safetyFlags: [],
-      expectedResponseMode: resolveDefaultExpectedResponseMode("general"),
+      ...mapped,
+      toolNeeds: toolNeeds.slice(0, 5),
+    };
+  }
+
+  async generateMessageUnderstanding(
+    request: MessageUnderstandingRequest,
+  ): Promise<MessageUnderstandingOutputInput> {
+    const { preprocessor, normalizedText, attachmentContextSummaries } = request;
+    const signals = new Set<MessageUnderstandingSignal>();
+    const capabilityHints: Array<{ capabilityId: CatalogIntentId; confidence: number }> = [];
+    const safetyFlags = new Set<AgentSafetyFlag>();
+
+    if (preprocessor.simpleSignals.fatigue) {
+      safetyFlags.add("fatigue");
+    }
+
+    if (preprocessor.simpleSignals.pain) {
+      safetyFlags.add("pain");
+    }
+
+    if (preprocessor.simpleSignals.sleep) {
+      safetyFlags.add("sleep_issue");
+    }
+
+    if (preprocessor.directPathCandidate) {
+      signals.add("command_like");
+
+      return {
+        signals: [...signals],
+        entities: [],
+        capabilityHints: [{ capabilityId: "general", confidence: 0.7 }],
+        complexity: "simple",
+        directCommand: {
+          detected: true,
+          kind: preprocessor.directPathCandidate.kind,
+          confidence: 0.85,
+        },
+        safetyFlags: [...safetyFlags],
+        needsContext:
+          preprocessor.directPathCandidate.kind === "today_summary_read"
+            ? ["today_summary"]
+            : ["today_summary", "active_workout_plan"],
+        confidence: 0.85,
+      };
+    }
+
+    if (/\?/.test(normalizedText)) {
+      signals.add("question");
+    }
+
+    if (attachmentContextSummaries.length > 0) {
+      signals.add("attachment_reference");
+    }
+
+    if (preprocessor.simpleSignals.workout) {
+      signals.add("request_change");
+      capabilityHints.push({ capabilityId: "adjust_workout", confidence: 0.72 });
+    }
+
+    if (preprocessor.simpleSignals.nutrition) {
+      signals.add("request_change");
+      capabilityHints.push({ capabilityId: "adjust_nutrition", confidence: 0.72 });
+    }
+
+    if (preprocessor.simpleSignals.today) {
+      capabilityHints.push({ capabilityId: "ask_about_today", confidence: 0.68 });
+    }
+
+    if (isWeeklyReviewChatMessage(request.originalText)) {
+      capabilityHints.push({ capabilityId: "review_progress", confidence: 0.8 });
+      signals.add("progress_update");
+    }
+
+    for (const summary of attachmentContextSummaries) {
+      if (!summary.routingCapabilityId) {
+        continue;
+      }
+
+      if (summary.routingCapabilityId === "attachment_workout") {
+        capabilityHints.push({ capabilityId: "attachment_workout", confidence: 0.78 });
+      }
+
+      if (summary.routingCapabilityId === "attachment_food_photo") {
+        capabilityHints.push({ capabilityId: "attachment_food_photo", confidence: 0.78 });
+      }
+
+      if (summary.routingCapabilityId === "attachment_medical_document") {
+        capabilityHints.push({ capabilityId: "attachment_medical_document", confidence: 0.78 });
+      }
+    }
+
+    if (
+      preprocessor.simpleSignals.fatigue ||
+      preprocessor.simpleSignals.pain ||
+      preprocessor.simpleSignals.sleep
+    ) {
+      signals.add("wellness_check_in");
+    }
+
+    if (capabilityHints.length === 0) {
+      capabilityHints.push({ capabilityId: "general", confidence: 0.65 });
+    }
+
+    return {
+      signals: [...signals],
+      entities: [],
+      capabilityHints: capabilityHints.slice(0, 5),
+      complexity: signals.size > 2 ? "moderate" : "simple",
+      directCommand: { detected: false },
+      safetyFlags: [...safetyFlags],
+      needsContext:
+        attachmentContextSummaries.length > 0
+          ? ["attachment_context"]
+          : request.recentMessageHints.length > 0
+            ? ["recent_conversation"]
+            : [],
+      confidence: 0.72,
     };
   }
 
@@ -238,11 +289,6 @@ export class StubCoachAiProvider implements CoachAiProvider {
       return stubCoachOutput(
         buildStubProposalRevisionOutput(revision, request.coachingContext),
       );
-    }
-
-    const preparedAttachmentReply = buildPreparedAttachmentWorkoutReply(request);
-    if (preparedAttachmentReply) {
-      return stubCoachOutput(preparedAttachmentReply);
     }
 
     const normalized = request.userMessage.toLowerCase();

@@ -54,7 +54,7 @@ The active hierarchy is constrained: one active quarterly objective per user and
 
 Stores conversation history for continuity, but not as the authoritative state for plans or metrics.
 
-Chat messages can reference `ChatAttachment` records. Attachment content is processed through ownership, consent, expiry, provider-isolation, and typed extraction gates before it can create proposal candidates.
+Chat messages can reference `ChatAttachment` records. Attachment content is processed through ownership, consent, expiry, provider-isolation, and typed extraction gates before it can supply context to TurnDecision and the agent loop.
 
 ### ChatAttachment
 

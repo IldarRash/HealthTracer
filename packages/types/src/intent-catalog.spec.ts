@@ -43,7 +43,7 @@ describe("intent catalog", () => {
     ).toBe("attachment_medical_document");
   });
 
-  it("serializes router guidance for llm routing", () => {
+  it("serializes router guidance for turn decision catalog hints", () => {
     const serialized = serializeIntentCatalogForRouter();
 
     expect(serialized.length).toBeGreaterThan(0);

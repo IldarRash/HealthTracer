@@ -1,0 +1,12 @@
+---
+description: Refactoring must remove obsolete legacy code instead of layering new paths forever
+alwaysApply: true
+---
+
+# Refactor Cleanup
+
+- During refactors, do not only add the new implementation path. Remove the superseded legacy code, unused files, dead exports, obsolete tests, stale config keys, and duplicate abstractions as part of the same work whenever it is safe.
+- If legacy code must remain temporarily for rollout, feature flags, persisted data, or compatibility, mark it explicitly as compatibility code and define the condition for removing it.
+- Prefer replacing in-progress branch code outright over adding shims around it. Preserve backwards compatibility only for shipped behavior, persisted data, public API contracts, and active rollout safety.
+- Before calling a refactor complete, search for old names and deleted concepts, remove unused imports/exports/files, and run the narrow validation that proves the old path is no longer referenced.
+- In final status, call out any remaining legacy code by name and explain why it still exists.

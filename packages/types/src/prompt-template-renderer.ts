@@ -2,7 +2,7 @@ import type { PromptTemplatesBehaviorConfig } from "./ai-behavior-config.js";
 import {
   DEFAULT_PROMPT_TEMPLATE_BODIES,
   OPENAI_COACH_LOOP_TEMPLATE_KEY,
-  OPENAI_INTENT_ROUTER_TEMPLATE_KEY,
+  OPENAI_MESSAGE_UNDERSTANDING_TEMPLATE_KEY,
   PROMPT_TEMPLATE_KEYS,
   PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS,
   type PromptTemplateKey,
@@ -21,8 +21,15 @@ export type CompiledPromptTemplate = {
 
 export type CompiledPromptTemplates = {
   readonly templates: Readonly<Record<PromptTemplateKey, CompiledPromptTemplate>>;
-  renderIntentRouter(values: { intentCatalogJson: string }): string;
   renderCoachLoop(values: PromptTemplateRenderValues): string;
+  renderMessageUnderstanding(values: {
+    normalizedText: string;
+    originalText: string;
+    preprocessorJson: string;
+    attachmentContextSummariesJson: string;
+    recentMessageHintsJson: string;
+    catalogHintsJson: string;
+  }): string;
 };
 
 export function validatePromptTemplateBody(
@@ -116,16 +123,6 @@ export function compilePromptTemplates(
 
   return {
     templates,
-    renderIntentRouter(values) {
-      const rendered = templates[OPENAI_INTENT_ROUTER_TEMPLATE_KEY].render({
-        intentCatalogJson: values.intentCatalogJson,
-      });
-
-      return rendered ?? DEFAULT_PROMPT_TEMPLATE_BODIES[OPENAI_INTENT_ROUTER_TEMPLATE_KEY].replace(
-        "{{intentCatalogJson}}",
-        values.intentCatalogJson,
-      );
-    },
     renderCoachLoop(values) {
       const rendered = templates[OPENAI_COACH_LOOP_TEMPLATE_KEY].render(values);
 
@@ -135,6 +132,18 @@ export function compilePromptTemplates(
 
       return renderPromptTemplateBody(
         DEFAULT_PROMPT_TEMPLATE_BODIES[OPENAI_COACH_LOOP_TEMPLATE_KEY],
+        values,
+      )!;
+    },
+    renderMessageUnderstanding(values) {
+      const rendered = templates[OPENAI_MESSAGE_UNDERSTANDING_TEMPLATE_KEY].render(values);
+
+      if (rendered != null) {
+        return rendered;
+      }
+
+      return renderPromptTemplateBody(
+        DEFAULT_PROMPT_TEMPLATE_BODIES[OPENAI_MESSAGE_UNDERSTANDING_TEMPLATE_KEY],
         values,
       )!;
     },

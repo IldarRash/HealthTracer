@@ -56,7 +56,6 @@ function attachmentNeedsComposerExtras(
     Boolean(attachment.localValidationError) ||
     Boolean(attachment.error) ||
     Boolean(attachment.record?.failureReason) ||
-    attachment.proposalCandidateCount > 0 ||
     showMedicalFields ||
     showCategoryCorrection ||
     canUploadMedicalLocally ||
@@ -366,13 +365,6 @@ export function ChatComposerAttachments({
                 {attachment.record?.failureReason ? (
                   <p className="form-error" role="status">
                     {attachment.record.failureReason}
-                  </p>
-                ) : null}
-
-                {attachment.proposalCandidateCount > 0 ? (
-                  <p className="chat-composer-attachments__meta" role="status">
-                    {attachment.proposalCandidateCount} proposal candidate
-                    {attachment.proposalCandidateCount === 1 ? "" : "s"} ready for chat review.
                   </p>
                 ) : null}
               </div>

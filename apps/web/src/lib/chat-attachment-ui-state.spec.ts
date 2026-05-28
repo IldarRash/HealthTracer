@@ -249,7 +249,6 @@ describe("chat attachment UI state", () => {
         category: "food_photo",
         status: "ready",
         recognition: null,
-        proposalCandidateCount: 1,
       },
     ];
 
@@ -273,7 +272,6 @@ describe("chat attachment UI state", () => {
       category: "food_photo",
       status: "low_confidence",
       recognition: null,
-      proposalCandidateCount: 1,
     };
 
     const fallback = resolveAttachmentOutcomeFallbackCopy(foodOutcome);
@@ -339,7 +337,6 @@ describe("chat attachment UI state", () => {
       category: "medical_document",
       status: "needs_review",
       recognition: null,
-      proposalCandidateCount: 0,
     };
 
     expect(resolveAttachmentOutcomeFallbackCopy(medicalOutcome)).toBe(
@@ -367,7 +364,6 @@ describe("chat attachment UI state", () => {
         },
         manualFallbackNotice: "Describe the workout in text.",
       },
-      proposalCandidateCount: 0,
     };
 
     const workoutFallback = resolveAttachmentOutcomeFallbackCopy(workoutOutcome);
@@ -420,6 +416,5 @@ describe("chat attachment UI state", () => {
     expect(resetDraft.attachmentId).toBeNull();
     expect(resetDraft.record).toBeNull();
     expect(resetDraft.phase).toBe("local");
-    expect(resetDraft.proposalCandidateCount).toBe(0);
   });
 });

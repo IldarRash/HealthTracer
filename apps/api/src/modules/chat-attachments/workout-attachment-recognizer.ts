@@ -6,6 +6,7 @@ import {
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
 
 export interface WorkoutAttachmentRecognitionProvider {
   recognize(input: {
@@ -15,9 +16,11 @@ export interface WorkoutAttachmentRecognitionProvider {
 }
 
 @Injectable()
-export class DevWorkoutAttachmentRecognitionProvider
+export class LocalWorkoutAttachmentRecognitionProvider
   implements WorkoutAttachmentRecognitionProvider
 {
+  constructor(private readonly aiBehaviorConfigService: AiBehaviorConfigService) {}
+
   async recognize(input: {
     attachment: ChatAttachmentRecord;
     boundedMessage?: string;
@@ -43,6 +46,8 @@ export class DevWorkoutAttachmentRecognitionProvider
         boundedMessage,
       );
 
+    const devStub =
+      this.aiBehaviorConfigService.getAttachmentBehavior().recognition.devStub.workout_attachment;
     const volleyballSession =
       !isPlanDoc && /(?:волейбол|volleyball)/i.test(boundedMessage);
 
@@ -53,30 +58,16 @@ export class DevWorkoutAttachmentRecognitionProvider
       sessionLabel: isPlanDoc
         ? null
         : volleyballSession
-          ? "Volleyball training"
-          : "Recognized training session",
+          ? devStub.sessionLabelVolleyball
+          : devStub.sessionLabelDefault,
       sessionDate: null,
-      exercises: [
-        {
-          name: isPlanDoc ? "Barbell squat" : "Dumbbell row",
-          target: "3 sets",
-          sets: 3,
-          reps: "8-10",
-          notes: "Review extracted values before confirming.",
-        },
-        {
-          name: isPlanDoc ? "Romanian deadlift" : "Push-up",
-          target: "3 sets",
-          sets: 3,
-          reps: "10-12",
-        },
-      ],
+      exercises: isPlanDoc ? devStub.planExercises : devStub.photoExercises,
       suggestedIntent: isPlanDoc
         ? "create_workout_plan"
         : activityFillIntent
           ? "log_session_context"
           : "log_session_context",
-      planDraftTitle: isPlanDoc ? "Imported workout plan draft" : null,
+      planDraftTitle: isPlanDoc ? devStub.planDraftTitle : null,
       provenance: recognitionProvenanceSchema.parse({
         source: "dev_stub",
         providerId: "dev_workout_attachment",
@@ -84,9 +75,7 @@ export class DevWorkoutAttachmentRecognitionProvider
         confidence,
       }),
       manualFallbackNotice:
-        confidence === "low"
-          ? "Recognition confidence is low. Edit exercises or describe the workout in text."
-          : null,
+        confidence === "low" ? devStub.manualFallbackNoticeLowConfidence : null,
     });
 
     return envelope;
@@ -95,7 +84,7 @@ export class DevWorkoutAttachmentRecognitionProvider
 
 @Injectable()
 export class WorkoutAttachmentRecognizer {
-  constructor(private readonly provider: DevWorkoutAttachmentRecognitionProvider) {}
+  constructor(private readonly provider: LocalWorkoutAttachmentRecognitionProvider) {}
 
   recognize(input: { attachment: ChatAttachmentRecord; boundedMessage?: string }) {
     return this.provider.recognize(input);

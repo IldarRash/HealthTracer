@@ -1,4 +1,3 @@
-import type { CoachAiProvider } from "@health/ai";
 import type {
   CapabilityContextStrategy,
   CatalogIntentId,
@@ -7,17 +6,20 @@ import type {
   ExpectedResponseMode,
   IntentRouteResult,
   ResolvedCapabilityPresentationMetadata,
+  TurnDecisionResult,
+  ResponseModeExecutorMode,
 } from "@health/types";
 import {
+  buildContextSlicePlanFromTurnDecision,
   buildContextSliceRequestForIntent,
   buildRouteFromCatalogIntent,
-  llmIntentRouterOutputSchema,
-  mergeLlmRouterOutputIntoRoute,
+  isTurnDecisionRouteConfident,
+  mergeTurnDecisionSafetyFlags,
+  pickPrimaryCapabilityFromTurnDecision,
   normalizePreprocessorText,
   proposalRevisionIntentSchema,
-  resolvePrimaryAttachmentCapabilityId,
   resolveProposalRevisionCapabilityId,
-  validateLlmRouterOutputShape,
+  resolveResponseModeExecutorMode,
   type DirectChatPathCandidate,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
@@ -32,7 +34,7 @@ import { DirectChatPathMatcherService } from "./direct-chat-path-matcher.service
 import { ProposalExplainerMatcherService } from "./proposal-explainer-matcher.service.js";
 import { ResponseModePolicyService } from "./response-mode-policy.service.js";
 
-const LLM_FALLBACK_CONFIDENCE = 0.35;
+const SAFE_FALLBACK_CONFIDENCE = 0.35;
 
 export interface SystemPlannerAttachmentTurnContextItem {
   attachmentRefId: string;
@@ -65,6 +67,7 @@ export interface SystemPlannerTurnInput {
   }>;
   proposalRevision?: SystemPlannerProposalRevisionContext;
   attachmentTurn?: SystemPlannerAttachmentTurnContext;
+  turnDecision?: TurnDecisionResult;
 }
 
 export interface CapabilityPlanResult extends ContextBudgetPlanMetadata {
@@ -75,6 +78,7 @@ export interface CapabilityPlanResult extends ContextBudgetPlanMetadata {
   selectedCapabilities: readonly CatalogIntentId[];
   presentationMetadata: ResolvedCapabilityPresentationMetadata;
   expectedResponseMode: ExpectedResponseMode;
+  executorMode: ResponseModeExecutorMode;
   defaultContextStrategy: CapabilityContextStrategy;
   contextBudget: ContextBudgetPolicy;
 }
@@ -90,11 +94,8 @@ export class SystemPlannerService {
     private readonly proposalExplainerMatcherService: ProposalExplainerMatcherService,
   ) {}
 
-  async planTurn(
-    input: SystemPlannerTurnInput,
-    provider: CoachAiProvider,
-  ): Promise<CapabilityPlanResult> {
-    const route = await this.resolveRoute(input, provider);
+  async planTurn(input: SystemPlannerTurnInput): Promise<CapabilityPlanResult> {
+    const route = this.resolveRoute(input);
     const primaryCapabilityId = route.catalogIntentId;
     const selectedCapabilities =
       this.capabilityRegistryService.resolveSelectedCapabilityIds(primaryCapabilityId);
@@ -119,40 +120,50 @@ export class SystemPlannerService {
       },
       selectedCapabilities,
     });
+    const resolvedRoute = {
+      ...route,
+      expectedResponseMode,
+    };
+    const executorMode = resolveResponseModeExecutorMode({
+      route: resolvedRoute,
+      expectedResponseMode,
+      requiresCompression: budgetMetadata.requiresCompression,
+      allowedProposalIntents: intentDefinition.allowedProposalIntents,
+      allowedTools: intentDefinition.allowedTools,
+      directPathCandidate: this.classifyDirectPathCandidate(input),
+      messageUnderstandingDirectCommand: input.turnDecision?.output.directCommand.detected,
+    });
 
     return {
-      route: {
-        ...route,
-        expectedResponseMode,
-      },
+      route: resolvedRoute,
       intentDefinition,
       catalogIntentId: primaryCapabilityId,
       primaryCapabilityId,
       selectedCapabilities,
       presentationMetadata,
       expectedResponseMode,
+      executorMode,
       defaultContextStrategy,
       ...budgetMetadata,
     };
   }
 
-  private async resolveRoute(
-    input: SystemPlannerTurnInput,
-    provider: CoachAiProvider,
-  ): Promise<IntentRouteResult> {
+  private resolveRoute(input: SystemPlannerTurnInput): IntentRouteResult {
     if (input.proposalRevision) {
       return this.resolveProposalRevisionRoute(input.proposalRevision);
     }
 
-    if (this.hasClassifiedAttachmentTurn(input.attachmentTurn)) {
-      return this.resolveAttachmentRoute(input.attachmentTurn!);
+    const turnDecisionRoute = this.tryResolveTurnDecisionRoute(input);
+
+    if (turnDecisionRoute) {
+      return turnDecisionRoute;
     }
 
     if (this.isProposalExplainerTurn(input)) {
       return this.resolveProposalExplainerRoute();
     }
 
-    return this.resolveLlmCatalogRoute(input, provider);
+    return this.resolveSafeFallbackRoute(input);
   }
 
   private isProposalExplainerTurn(input: SystemPlannerTurnInput): boolean {
@@ -179,15 +190,6 @@ export class SystemPlannerService {
         catalogIntentId,
       ),
     });
-  }
-
-  private hasClassifiedAttachmentTurn(
-    attachmentTurn: SystemPlannerAttachmentTurnContext | undefined,
-  ): attachmentTurn is SystemPlannerAttachmentTurnContext {
-    return (
-      attachmentTurn != null &&
-      attachmentTurn.attachments.some((attachment) => attachment.category !== "unclassified")
-    );
   }
 
   private resolveProposalRevisionRoute(
@@ -217,85 +219,69 @@ export class SystemPlannerService {
     });
   }
 
-  private resolveAttachmentRoute(
-    attachmentTurn: SystemPlannerAttachmentTurnContext,
-  ): IntentRouteResult {
-    const routingConfig = this.aiBehaviorConfigService.getAttachmentRouting();
-    const catalogIntentId = resolvePrimaryAttachmentCapabilityId(
-      routingConfig,
-      attachmentTurn.attachments
-        .map((attachment) => attachment.category)
-        .filter((category): category is Exclude<ChatAttachmentCategory, "unclassified"> =>
-          category !== "unclassified",
-        ),
-    );
-    const mappedAgentIntent =
-      this.capabilityRegistryService.resolveMappedAgentIntent(catalogIntentId);
-    const contextStrategy =
-      this.capabilityRegistryService.getDefaultContextStrategy(catalogIntentId);
-
-    return buildRouteFromCatalogIntent({
-      catalogIntentId,
-      mappedAgentIntent,
-      confidence: routingConfig.confidence,
-      routingMethod: routingConfig.routingMethod,
-      requiredContextSlices: [contextStrategy],
-      expectedResponseMode: this.responseModePolicyService.resolveFromCapabilityPolicy(
-        catalogIntentId,
-      ),
-    });
-  }
-
-  private async resolveLlmCatalogRoute(
-    input: SystemPlannerTurnInput,
-    provider: CoachAiProvider,
-  ): Promise<IntentRouteResult> {
+  private resolveSafeFallbackRoute(input: SystemPlannerTurnInput): IntentRouteResult {
     const fallbackCapabilityId =
       this.aiBehaviorConfigService.getResponseModes().fallbackCapabilityId;
     const fallbackConfig = this.capabilityRegistryService.getConfig(fallbackCapabilityId);
-    const fallbackRoute = buildRouteFromCatalogIntent({
+    const safetyFlags = input.turnDecision
+      ? mergeTurnDecisionSafetyFlags(input.turnDecision.output)
+      : [];
+
+    return buildRouteFromCatalogIntent({
       catalogIntentId: fallbackCapabilityId,
       mappedAgentIntent: fallbackConfig.mappedAgentIntent,
-      confidence: LLM_FALLBACK_CONFIDENCE,
-      routingMethod: "llm_router",
+      confidence: SAFE_FALLBACK_CONFIDENCE,
+      routingMethod: input.turnDecision ? "unified_turn_decision" : "rule_based",
       requiredContextSlices: [fallbackConfig.defaultContextStrategy],
+      safetyFlags,
       expectedResponseMode: this.responseModePolicyService.resolveFromCapabilityPolicy(
         fallbackCapabilityId,
       ),
     });
+  }
 
-    let rawRouterOutput: unknown;
+  private tryResolveTurnDecisionRoute(
+    input: SystemPlannerTurnInput,
+  ): IntentRouteResult | null {
+    const turnDecision = input.turnDecision;
+
+    if (!turnDecision || !isTurnDecisionRouteConfident(turnDecision)) {
+      return null;
+    }
+
+    const catalogIntentId = pickPrimaryCapabilityFromTurnDecision(turnDecision.output);
+
+    if (!catalogIntentId) {
+      return null;
+    }
+
+    let capabilityConfig;
 
     try {
-      rawRouterOutput = await provider.generateIntentRoute({
-        userMessage: input.userMessage,
-        recentMessages: input.recentMessages,
-        intentCatalog: this.capabilityRegistryService.serializeForRouter(),
-      });
+      capabilityConfig = this.capabilityRegistryService.getConfig(catalogIntentId);
     } catch {
-      return {
-        ...fallbackRoute,
-        isConfident: false,
-        confidence: LLM_FALLBACK_CONFIDENCE,
-      };
+      return null;
     }
 
-    const shapeErrors = validateLlmRouterOutputShape(rawRouterOutput);
+    const mappedAgentIntent =
+      this.capabilityRegistryService.resolveMappedAgentIntent(catalogIntentId);
+    const requiredContextSlices = buildContextSlicePlanFromTurnDecision({
+      mappedAgentIntent,
+      defaultContextStrategy: capabilityConfig.defaultContextStrategy,
+      contextNeeds: turnDecision.output.contextNeeds,
+    });
 
-    if (shapeErrors.length > 0) {
-      return {
-        ...fallbackRoute,
-        isConfident: false,
-        confidence: LLM_FALLBACK_CONFIDENCE,
-      };
-    }
-
-    const llmRoute = llmIntentRouterOutputSchema.parse(rawRouterOutput);
-    const mappedAgentIntent = this.capabilityRegistryService.resolveMappedAgentIntent(
-      llmRoute.catalogIntentId,
-    );
-
-    return mergeLlmRouterOutputIntoRoute(fallbackRoute, llmRoute, mappedAgentIntent);
+    return buildRouteFromCatalogIntent({
+      catalogIntentId,
+      mappedAgentIntent,
+      confidence: turnDecision.output.confidence,
+      routingMethod: "unified_turn_decision",
+      safetyFlags: mergeTurnDecisionSafetyFlags(turnDecision.output),
+      requiredContextSlices,
+      expectedResponseMode: this.responseModePolicyService.resolveFromCapabilityPolicy(
+        catalogIntentId,
+      ),
+    });
   }
 
   resolveContextStrategyFallback(

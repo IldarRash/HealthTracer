@@ -65,197 +65,6 @@ describe("OpenAiCoachProvider", () => {
     });
   });
 
-  it("rejects llm router output that includes user-facing advice or proposals", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                catalogIntentId: "adjust_workout",
-                confidence: 0.86,
-                routingMethod: "llm_router",
-                requiredContextSlices: [
-                  { type: "workout_adaptation", depth: "medium", timeRange: "14d" },
-                ],
-                safetyFlags: ["fatigue"],
-                expectedResponseMode: "recommendation_with_optional_proposal",
-                reply: "You should skip training today.",
-                proposals: [{ intent: "adapt_workout_plan", targetDomain: "workout" }],
-              }),
-            },
-          },
-        ],
-      }),
-    } as Response);
-
-    const provider = createOpenAiCoachProvider("test-key", "gpt-4o-mini");
-
-    await expect(
-      provider.generateIntentRoute({
-        userMessage: "I feel completely off today. What should I do?",
-        recentMessages: [],
-      }),
-    ).rejects.toThrow(/must not include user-facing field/);
-  });
-
-  it("accepts valid llm router output and applies bounded context slice defaults", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                catalogIntentId: "adjust_nutrition",
-                confidence: 0.84,
-                routingMethod: "llm_router",
-                requiredContextSlices: [
-                  { type: "nutrition_adaptation" },
-                  { type: "weekly_review", depth: "medium", timeRange: "7d" },
-                  { type: "daily_checkin", depth: "small", timeRange: "7d" },
-                ],
-                safetyFlags: ["hunger"],
-                expectedResponseMode: "recommendation_with_optional_proposal",
-              }),
-            },
-          },
-        ],
-      }),
-    } as Response);
-
-    const provider = createOpenAiCoachProvider("test-key", "gpt-4o-mini");
-    const route = await provider.generateIntentRoute({
-      userMessage: "I feel tired and hungry all the time.",
-      recentMessages: [],
-    });
-
-    expect(route.routingMethod).toBe("llm_router");
-    expect(route.catalogIntentId).toBe("adjust_nutrition");
-    expect(route.requiredContextSlices).toHaveLength(3);
-    expect(route.requiredContextSlices[0]?.type).toBe("nutrition_adaptation");
-    expect(route.requiredContextSlices[0]?.depth).toBe("medium");
-    expect(route).not.toHaveProperty("reply");
-    expect(route).not.toHaveProperty("proposals");
-  });
-
-  it("rejects attachment-family catalog ids from llm router output", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                catalogIntentId: "attachment_food_photo",
-                confidence: 0.95,
-                routingMethod: "llm_router",
-                requiredContextSlices: [
-                  { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
-                ],
-                safetyFlags: [],
-                expectedResponseMode: "recommendation_with_optional_proposal",
-              }),
-            },
-          },
-        ],
-      }),
-    } as Response);
-
-    const provider = createOpenAiCoachProvider("test-key", "gpt-4o-mini");
-
-    await expect(
-      provider.generateIntentRoute({
-        userMessage: "What is in this meal photo?",
-        recentMessages: [],
-      }),
-    ).rejects.toThrow(/Invalid enum value|Invalid option/);
-  });
-
-  it("rejects llm router output that exceeds the max context slice count", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                catalogIntentId: "adjust_nutrition",
-                confidence: 0.84,
-                routingMethod: "llm_router",
-                requiredContextSlices: [
-                  { type: "nutrition_adaptation" },
-                  { type: "weekly_review", depth: "medium", timeRange: "7d" },
-                  { type: "daily_checkin", depth: "small", timeRange: "7d" },
-                  { type: "general_chat", depth: "small", timeRange: "7d" },
-                ],
-                safetyFlags: ["hunger"],
-                expectedResponseMode: "recommendation_with_optional_proposal",
-              }),
-            },
-          },
-        ],
-      }),
-    } as Response);
-
-    const provider = createOpenAiCoachProvider("test-key", "gpt-4o-mini");
-
-    await expect(
-      provider.generateIntentRoute({
-        userMessage: "I feel tired and hungry all the time.",
-        recentMessages: [],
-      }),
-    ).rejects.toThrow(/Too big: expected array to have <=3 items/);
-  });
-
-  it("renders repo-backed prompt template overrides", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                catalogIntentId: "general",
-                confidence: 0.8,
-                routingMethod: "llm_router",
-                requiredContextSlices: [
-                  { type: "general_chat", depth: "medium", timeRange: "14d" },
-                ],
-                safetyFlags: [],
-                expectedResponseMode: "advice_only",
-              }),
-            },
-          },
-        ],
-      }),
-    } as Response);
-
-    const provider = createOpenAiCoachProvider(
-      "test-key",
-      "gpt-4o-mini",
-      compilePromptTemplates({
-        templates: {
-          openai_intent_router: {
-            templateKey: "openai_intent_router",
-            body: "Custom router {{intentCatalogJson}}",
-            placeholders: ["intentCatalogJson"],
-          },
-        },
-      }),
-    );
-
-    await provider.generateIntentRoute({
-      userMessage: "hello",
-      recentMessages: [],
-    });
-
-    const requestBody = JSON.parse(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body));
-    expect(requestBody.messages[0].content).toMatch(/^Custom router /);
-    expect(requestBody.messages[0].content).toContain('"id":"general"');
-  });
-
   it("returns user-facing coaching text only from generateCoachResponse", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
@@ -290,5 +99,137 @@ describe("OpenAiCoachProvider", () => {
 
     expect(output.reply).toContain("recovery session");
     expect(output.proposals).toEqual([]);
+  });
+
+  it("rejects message understanding output that includes user-facing answer fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                signals: ["question"],
+                entities: [],
+                capabilityHints: [{ capabilityId: "general", confidence: 0.8 }],
+                complexity: "simple",
+                directCommand: { detected: false },
+                safetyFlags: [],
+                needsContext: [],
+                confidence: 0.8,
+                reply: "You should rest today.",
+              }),
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    const provider = createOpenAiCoachProvider("test-key", "gpt-4o-mini");
+
+    await expect(
+      provider.generateMessageUnderstanding({
+        originalText: "Should I train today?",
+        normalizedText: "should i train today?",
+        preprocessor: {
+          originalText: "Should I train today?",
+          normalizedText: "should i train today?",
+          detectedLanguage: "en",
+          responseLanguage: "en",
+          hasAttachments: false,
+          mentionedDates: ["today"],
+          simpleSignals: {
+            workout: true,
+            nutrition: false,
+            today: true,
+            sleep: false,
+            fatigue: true,
+            pain: false,
+            document: false,
+            attachment: false,
+          },
+          directPathCandidate: null,
+        },
+        attachmentContextSummaries: [],
+        recentMessageHints: [],
+        catalogHints: [],
+      }),
+    ).rejects.toThrow(/must not include forbidden field/);
+  });
+
+  it("renders repo-backed message understanding prompt templates", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                signals: ["question"],
+                entities: [],
+                capabilityHints: [{ capabilityId: "general", confidence: 0.77 }],
+                complexity: "simple",
+                directCommand: { detected: false },
+                safetyFlags: [],
+                needsContext: [],
+                confidence: 0.77,
+              }),
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    const provider = createOpenAiCoachProvider(
+      "test-key",
+      "gpt-4o-mini",
+      compilePromptTemplates({
+        templates: {
+          openai_message_understanding: {
+            templateKey: "openai_message_understanding",
+            body: "Custom understanding {{normalizedText}} :: {{originalText}} :: {{preprocessorJson}} :: {{attachmentContextSummariesJson}} :: {{recentMessageHintsJson}} :: {{catalogHintsJson}}",
+            placeholders: [
+              "normalizedText",
+              "originalText",
+              "preprocessorJson",
+              "attachmentContextSummariesJson",
+              "recentMessageHintsJson",
+              "catalogHintsJson",
+            ],
+          },
+        },
+      }),
+    );
+
+    await provider.generateMessageUnderstanding({
+      originalText: "hello",
+      normalizedText: "hello",
+      preprocessor: {
+        originalText: "hello",
+        normalizedText: "hello",
+        detectedLanguage: "en",
+        responseLanguage: "en",
+        hasAttachments: false,
+        mentionedDates: [],
+        simpleSignals: {
+          workout: false,
+          nutrition: false,
+          today: false,
+          sleep: false,
+          fatigue: false,
+          pain: false,
+          document: false,
+          attachment: false,
+        },
+        directPathCandidate: null,
+      },
+      attachmentContextSummaries: [],
+      recentMessageHints: [],
+      catalogHints: [{ id: "general", description: "General chat", routerGuidance: "fallback" }],
+    });
+
+    const requestBody = JSON.parse(String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body));
+    expect(requestBody.messages[0].content).toMatch(/^Custom understanding hello :: hello ::/);
+    expect(requestBody.messages[0].content).toContain('"routerGuidance":"fallback"');
   });
 });

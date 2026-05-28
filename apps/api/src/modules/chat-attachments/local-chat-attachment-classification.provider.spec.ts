@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DevChatAttachmentClassificationProvider } from "./dev-chat-attachment-classification.provider.js";
+import { createDefaultLocalChatAttachmentClassificationProvider } from "../ai/test-ai-behavior-fixtures.js";
 
-describe("DevChatAttachmentClassificationProvider", () => {
-  const provider = new DevChatAttachmentClassificationProvider();
+describe("LocalChatAttachmentClassificationProvider", () => {
+  const provider = createDefaultLocalChatAttachmentClassificationProvider();
 
   it("classifies meal photos with message context", async () => {
     const result = await provider.classify({

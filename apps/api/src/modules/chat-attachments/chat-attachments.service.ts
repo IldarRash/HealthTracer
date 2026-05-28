@@ -1,7 +1,6 @@
 import type {
   ChatAttachmentRecord,
   ChatAttachmentRecognitionResponse,
-  ClassifiedChatAttachmentCategory,
   CreateChatAttachmentInput,
   GrantChatAttachmentConsentInput,
   RecognizeChatAttachmentInput,
@@ -16,14 +15,9 @@ import {
   getProvisionalAttachmentSizeError,
   isChatAttachmentExpired,
   isChatAttachmentImageMimeType,
-  inferMealContextFromMessage,
-  isChatAttachmentPendingMessageFirstSend,
   isTrustedUserSelectedChatAttachmentUpload,
-  MEDICAL_ATTACHMENT_CONSENT_REQUIRED_REASON,
   resolveProvisionalUploadCategorySource,
   resolveProvisionalUploadDisposition,
-  resolveSendTimeAttachmentCategory,
-  resolveSendTimeCategorySource,
 } from "@health/types";
 import type { ChatAttachmentUploadClassificationMeta } from "@health/types";
 import {
@@ -35,8 +29,10 @@ import {
 import { resolve } from "node:path";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { env } from "../../env.js";
+import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
 import { ChatRepository } from "../chat/chat.repository.js";
 import { UsersService } from "../users/users.service.js";
+import { resolveAttachmentRetentionPolicyFromBehavior } from "./attachment-behavior-policy.helpers.js";
 import { toChatAttachmentRecord, toOwnedChatAttachmentRef } from "./chat-attachment.mapper.js";
 import { ChatAttachmentClassifierService } from "./chat-attachment-classifier.service.js";
 import { ChatAttachmentRecognitionService } from "./chat-attachment-recognition.service.js";
@@ -45,6 +41,7 @@ import { buildMedicalAttachmentConsent } from "./medical-document-attachment-rec
 import {
   decodeAttachmentContent,
   LocalChatAttachmentStorageAdapter,
+  type ChatAttachmentStorageAdapter,
 } from "./local-chat-attachment-storage.js";
 
 @Injectable()
@@ -57,6 +54,7 @@ export class ChatAttachmentsService {
     private readonly chatAttachmentRecognitionService: ChatAttachmentRecognitionService,
     private readonly chatAttachmentClassifierService: ChatAttachmentClassifierService,
     private readonly usersService: UsersService,
+    private readonly aiBehaviorConfigService: AiBehaviorConfigService,
   ) {
     const storageRoot = resolve(process.cwd(), env.CHAT_ATTACHMENT_STORAGE_PATH);
     this.storage = new LocalChatAttachmentStorageAdapter(storageRoot);
@@ -139,7 +137,7 @@ export class ChatAttachmentsService {
       storageKey,
       linkedImageRefId: category === "food_photo" ? attachmentId : null,
       consent,
-      retentionPolicy: getChatAttachmentRetentionPolicy(category),
+      retentionPolicy: this.resolveRetentionPolicy(category),
     });
 
     return this.toRecordWithUploadMeta(row, {
@@ -449,15 +447,8 @@ export class ChatAttachmentsService {
       throw new NotFoundException("Chat attachment not found.");
     }
 
-    const record = toChatAttachmentRecord(updated);
-    const proposalCandidates = this.chatAttachmentRecognitionService.buildProposalCandidates({
-      attachment: record,
-      incidentDateTime: new Date().toISOString(),
-    });
-
     return {
-      attachment: record,
-      proposalCandidates,
+      attachment: toChatAttachmentRecord(updated),
     };
   }
 
@@ -481,163 +472,30 @@ export class ChatAttachmentsService {
     return records;
   }
 
-  async classifyAndRecognizeAttachmentsForMessage(input: {
-    auth: ClerkAuthContext;
-    userId: string;
-    messageContent: string;
-    attachments: readonly ChatAttachmentRecord[];
-  }): Promise<ChatAttachmentRecord[]> {
-    const processed: ChatAttachmentRecord[] = [];
+  async readStoredContent(storageKey: string): Promise<Buffer> {
+    return this.storage.read(storageKey);
+  }
 
-    for (const attachment of input.attachments) {
-      if (
-        !isChatAttachmentPendingMessageFirstSend({
-          category: attachment.category,
-          status: attachment.status,
-          recognition: attachment.recognition,
-        })
-      ) {
-        processed.push(attachment);
-        continue;
-      }
+  async purgeStoredContent(storageKey: string | null): Promise<void> {
+    await this.purgeStoredAttachmentContent(storageKey);
+  }
 
-      const attachmentContent = attachment.storageKey
-        ? await this.storage.read(attachment.storageKey)
-        : Buffer.alloc(0);
+  getStorageAdapter(): ChatAttachmentStorageAdapter {
+    return this.storage;
+  }
 
-      const classification = await this.chatAttachmentClassifierService.classify({
-        message: input.messageContent,
-        attachment,
-        content: attachmentContent,
-        categorySource: attachment.categorySource,
-      });
+  async applyTurnStageUpdate(
+    userId: string,
+    attachmentId: string,
+    patch: Parameters<ChatAttachmentsRepository["update"]>[2],
+  ): Promise<ChatAttachmentRecord> {
+    const updated = await this.chatAttachmentsRepository.update(userId, attachmentId, patch);
 
-      if (
-        classification.suggestedAction === "manual_fallback" ||
-        classification.suggestedAction === "unsupported"
-      ) {
-        await this.chatAttachmentsRepository.update(input.userId, attachment.id, {
-          category: "unclassified",
-          categorySource: resolveSendTimeCategorySource({
-            previousCategorySource: attachment.categorySource,
-            resolvedCategory: "unclassified",
-          }),
-          status: "needs_review",
-          failureReason: classification.rationale.slice(0, 240),
-          retentionPolicy: getChatAttachmentRetentionPolicy("unclassified"),
-        });
-
-        const row = await this.chatAttachmentsRepository.findByIdForUser(
-          input.userId,
-          attachment.id,
-        );
-
-        if (row) {
-          processed.push(toChatAttachmentRecord(row));
-        }
-
-        continue;
-      }
-
-      const classifiedCategory = resolveSendTimeAttachmentCategory({
-        attachmentCategory: attachment.category,
-        attachmentCategorySource: attachment.categorySource,
-        consentScopes: attachment.consent?.consentScopes,
-        classificationCategory: classification.category as ClassifiedChatAttachmentCategory,
-      });
-
-      const categorySource = resolveSendTimeCategorySource({
-        previousCategorySource: attachment.categorySource,
-        resolvedCategory: classifiedCategory,
-      });
-
-      const mealContextLabel =
-        classification.mealContextLabel ?? inferMealContextFromMessage(input.messageContent);
-
-      const consent = attachment.consent;
-      let linkedImageRefId = attachment.linkedImageRefId;
-      const retentionPolicy = getChatAttachmentRetentionPolicy(classifiedCategory);
-
-      if (classifiedCategory === "food_photo") {
-        linkedImageRefId = attachment.id;
-      }
-
-      if (classifiedCategory === "medical_document" && !consent) {
-        await this.purgeStoredAttachmentContent(attachment.storageKey);
-
-        await this.chatAttachmentsRepository.update(input.userId, attachment.id, {
-          category: classifiedCategory,
-          categorySource,
-          status: "needs_consent",
-          storageKey: null,
-          linkedImageRefId,
-          retentionPolicy,
-          failureReason: MEDICAL_ATTACHMENT_CONSENT_REQUIRED_REASON,
-        });
-
-        const row = await this.chatAttachmentsRepository.findByIdForUser(
-          input.userId,
-          attachment.id,
-        );
-
-        if (row) {
-          processed.push(toChatAttachmentRecord(row));
-        }
-
-        continue;
-      }
-
-      await this.chatAttachmentsRepository.update(input.userId, attachment.id, {
-        category: classifiedCategory,
-        categorySource,
-        status: "recognizing",
-        linkedImageRefId,
-        retentionPolicy,
-        failureReason: null,
-      });
-
-      const refreshed = await this.chatAttachmentsRepository.findByIdForUser(
-        input.userId,
-        attachment.id,
-      );
-
-      if (!refreshed) {
-        continue;
-      }
-
-      const attachmentForRecognition = toChatAttachmentRecord(refreshed);
-
-      const outcome = await this.chatAttachmentRecognitionService.recognizeAttachment({
-        auth: input.auth,
-        userId: input.userId,
-        attachment: attachmentForRecognition,
-        category: classifiedCategory,
-        storage: this.storage,
-        messageContext: {
-          mealContextLabel,
-          boundedMessage: input.messageContent.trim().slice(0, 500),
-        },
-      });
-
-      const updated = await this.chatAttachmentsRepository.update(input.userId, attachment.id, {
-        category: classifiedCategory,
-        categorySource,
-        status: outcome.status,
-        recognition: outcome.recognition,
-        failureReason: outcome.failureReason,
-        linkedDocumentId: outcome.linkedDocumentId,
-        linkedImageRefId:
-          classifiedCategory === "food_photo" ? attachment.id : linkedImageRefId,
-        expiresAt: outcome.expiresAt,
-        retentionPolicy: getChatAttachmentRetentionPolicy(classifiedCategory),
-      });
-
-      if (updated) {
-        processed.push(toChatAttachmentRecord(updated));
-      }
+    if (!updated) {
+      throw new NotFoundException("Chat attachment not found.");
     }
 
-    return processed;
+    return toChatAttachmentRecord(updated);
   }
 
   async linkAttachmentsToMessage(
@@ -658,6 +516,15 @@ export class ChatAttachmentsService {
     return this.chatAttachmentsRepository
       .listByIdsForUser(userId, attachmentRefIds)
       .then((rows) => rows.map(toOwnedChatAttachmentRef));
+  }
+
+  private resolveRetentionPolicy(
+    category: Parameters<typeof getChatAttachmentRetentionPolicy>[0],
+  ) {
+    return resolveAttachmentRetentionPolicyFromBehavior(
+      category,
+      this.aiBehaviorConfigService.getAttachmentBehavior(),
+    );
   }
 
   private async purgeStoredAttachmentContent(storageKey: string | null): Promise<void> {

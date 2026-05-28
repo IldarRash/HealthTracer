@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { getCapabilityConfig, normalizeAiBehaviorConfig } from "@health/types";
+import {
+  getCapabilityConfig,
+  turnDecisionOutputSchema,
+  turnDecisionRequestSchema,
+  turnDecisionResultSchema,
+  normalizeAiBehaviorConfig,
+} from "@health/types";
 import {
   DEFAULT_CONTEXT_BUDGET_POLICY,
   DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
@@ -13,115 +19,182 @@ import { ResponseModePolicyService } from "./response-mode-policy.service.js";
 import { SystemPlannerService } from "./system-planner.service.js";
 import { createAiPolicyTestStack } from "./test-ai-behavior-fixtures.js";
 
+function createTurnDecisionResultForPlanner(
+  capabilityId: "attachment_food_photo" | "adjust_workout" | "general" = "attachment_food_photo",
+  confidence = 0.84,
+) {
+  turnDecisionRequestSchema.parse({
+    originalText: "Log this meal",
+    normalizedText: "log this meal",
+    preprocessor: {
+      originalText: "Log this meal",
+      normalizedText: "log this meal",
+      detectedLanguage: "en",
+      responseLanguage: "en",
+      hasAttachments: true,
+      mentionedDates: [],
+      simpleSignals: {
+        workout: false,
+        nutrition: true,
+        today: false,
+        sleep: false,
+        fatigue: false,
+        pain: false,
+        document: false,
+        attachment: true,
+      },
+      directPathCandidate: null,
+    },
+    attachmentContextSummaries: [],
+    recentMessageHints: [],
+    catalogHints: [],
+    availableTools: [],
+  });
+
+  return turnDecisionResultSchema.parse({
+    output: turnDecisionOutputSchema.parse({
+      signals:
+        capabilityId === "adjust_workout"
+          ? ["request_change"]
+          : capabilityId === "general"
+            ? ["question"]
+            : ["attachment_reference"],
+      entities: [],
+      routeCapabilityHints: [{ capabilityId, confidence: 0.86 }],
+      complexity: "moderate",
+      directCommand: { detected: false },
+      safetyFlags: capabilityId === "adjust_workout" ? ["fatigue"] : [],
+      contextNeeds:
+        capabilityId === "adjust_workout"
+          ? ["active_workout_plan"]
+          : capabilityId === "general"
+            ? ["recent_conversation"]
+            : ["attachment_context"],
+      attachmentHints: [],
+      toolNeeds: [],
+      confidence,
+    }),
+    source: "llm",
+    validationErrors: [],
+  });
+}
+
 function createPlannerHarness() {
   const stack = createAiPolicyTestStack();
-  const generateIntentRoute = vi.fn();
 
   return {
     planner: stack.systemPlannerService,
     capabilityRegistryService: stack.capabilityRegistryService,
     responseModePolicyService: stack.responseModePolicyService,
-    provider: { generateIntentRoute },
   };
 }
 
 describe("SystemPlannerService", () => {
-  it("plans llm text turns with registry-backed metadata and response mode", async () => {
-    const { planner, provider, capabilityRegistryService } = createPlannerHarness();
+  it("routes confident turn decision without safe fallback", async () => {
+    const { planner } = createPlannerHarness();
     const capabilityConfig = getCapabilityConfig("adjust_workout");
 
-    provider.generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "adjust_workout",
-      confidence: 0.84,
-      routingMethod: "llm_router",
-      requiredContextSlices: [capabilityConfig.defaultContextStrategy],
-      safetyFlags: ["fatigue"],
-      expectedResponseMode: "recommendation_with_optional_proposal",
+    const plan = await planner.planTurn({
+      userMessage: "Can you adapt my workout plan this week?",
+      recentMessages: [],
+      turnDecision: createTurnDecisionResultForPlanner("adjust_workout", 0.84),
     });
 
-    const plan = await planner.planTurn(
-      {
-        userMessage: "Can you adapt my workout plan this week?",
-        recentMessages: [],
-      },
-      provider as never,
-    );
-
-    expect(provider.generateIntentRoute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intentCatalog: capabilityRegistryService.serializeForRouter(),
-      }),
-    );
     expect(plan.catalogIntentId).toBe("adjust_workout");
-    expect(plan.route.routingMethod).toBe("llm_router");
-    expect(plan.expectedResponseMode).toBe("recommendation_with_optional_proposal");
-    expect(plan.defaultContextStrategy).toEqual(capabilityConfig.defaultContextStrategy);
-    expect(plan.intentDefinition.id).toBe("adjust_workout");
-    expect(plan.intentDefinition.promptInstructions).toBe(capabilityConfig.prompt);
-    expect(plan.primaryCapabilityId).toBe("adjust_workout");
-    expect(plan.selectedCapabilities).toEqual(["adjust_workout"]);
-    expect(plan.presentationMetadata.primaryCapabilityId).toBe("adjust_workout");
-    expect(plan.presentationMetadata.widgetDescriptors.length).toBeGreaterThan(0);
-    expect(plan.presentationMetadata.actionDescriptors.length).toBeGreaterThan(0);
-  });
-
-  it("routes attachment turns through registry context strategy without llm router", async () => {
-    const { planner, provider } = createPlannerHarness();
-    const capabilityConfig = getCapabilityConfig("attachment_food_photo");
-
-    const plan = await planner.planTurn(
-      {
-        userMessage: "Shared attachment(s) for coaching review.",
-        recentMessages: [],
-        attachmentTurn: {
-          attachments: [
-            {
-              attachmentRefId: "a1000001-0000-4000-8000-000000000001",
-              category: "food_photo",
-              status: "ready",
-            },
-          ],
-        },
-      },
-      provider as never,
-    );
-
-    expect(provider.generateIntentRoute).not.toHaveBeenCalled();
-    expect(plan.catalogIntentId).toBe("attachment_food_photo");
-    expect(plan.route.routingMethod).toBe("attachment_family");
-    expect(plan.route.requiredContextSlices).toEqual([capabilityConfig.defaultContextStrategy]);
-    expect(plan.expectedResponseMode).toBe(
-      capabilityConfig.responseMetadata?.expectedResponseMode,
+    expect(plan.route.routingMethod).toBe("unified_turn_decision");
+    expect(plan.route.isConfident).toBe(true);
+    expect(plan.route.safetyFlags).toEqual(["fatigue"]);
+    expect(plan.route.requiredContextSlices).toEqual(
+      expect.arrayContaining([capabilityConfig.defaultContextStrategy]),
     );
   });
 
-  it("falls back to uncertain general route when llm router output is invalid", async () => {
-    const { planner, provider } = createPlannerHarness();
+  it("falls back to general when turn decision confidence is low", async () => {
+    const { planner } = createPlannerHarness();
     const generalConfig = getCapabilityConfig("general");
 
-    provider.generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "adjust_workout",
-      confidence: 0.86,
-      routingMethod: "llm_router",
-      requiredContextSlices: [{ type: "workout_adaptation", depth: "medium", timeRange: "14d" }],
-      safetyFlags: ["fatigue"],
-      expectedResponseMode: "recommendation_with_optional_proposal",
-      reply: "Skip training today.",
+    const plan = await planner.planTurn({
+      userMessage: "I feel completely off today. What should I do?",
+      recentMessages: [],
+      turnDecision: {
+        ...createTurnDecisionResultForPlanner("general", 0.35),
+        source: "fallback",
+      },
     });
 
-    const plan = await planner.planTurn(
-      {
-        userMessage: "I feel completely off today. What should I do?",
-        recentMessages: [],
-      },
-      provider as never,
-    );
-
+    expect(plan.route.routingMethod).toBe("unified_turn_decision");
     expect(plan.catalogIntentId).toBe("general");
     expect(plan.route.isConfident).toBe(false);
     expect(plan.route.confidence).toBe(0.35);
     expect(plan.route.requiredContextSlices).toEqual([generalConfig.defaultContextStrategy]);
-    expect(plan.expectedResponseMode).toBe(generalConfig.responseMetadata?.expectedResponseMode);
+  });
+
+  it("routes confident unified turn decision for attachment turns", async () => {
+    const { planner } = createPlannerHarness();
+    const capabilityConfig = getCapabilityConfig("attachment_food_photo");
+
+    const plan = await planner.planTurn({
+      userMessage: "Log this meal",
+      recentMessages: [],
+      turnDecision: createTurnDecisionResultForPlanner("attachment_food_photo", 0.84),
+      attachmentTurn: {
+        attachments: [
+          {
+            attachmentRefId: "a1000001-0000-4000-8000-000000000002",
+            category: "food_photo",
+            status: "recognized",
+          },
+        ],
+      },
+    });
+
+    expect(plan.catalogIntentId).toBe("attachment_food_photo");
+    expect(plan.route.routingMethod).toBe("unified_turn_decision");
+    expect(plan.route.requiredContextSlices).toEqual(
+      expect.arrayContaining([capabilityConfig.defaultContextStrategy]),
+    );
+  });
+
+  it("does not bypass attachments when turn decision is low confidence", async () => {
+    const { planner } = createPlannerHarness();
+    const generalConfig = getCapabilityConfig("general");
+
+    const plan = await planner.planTurn({
+      userMessage: "Log this meal",
+      recentMessages: [],
+      turnDecision: {
+        ...createTurnDecisionResultForPlanner("attachment_food_photo", 0.2),
+        source: "fallback",
+      },
+      attachmentTurn: {
+        attachments: [
+          {
+            attachmentRefId: "a1000001-0000-4000-8000-000000000002",
+            category: "food_photo",
+            status: "recognized",
+          },
+        ],
+      },
+    });
+
+    expect(plan.catalogIntentId).toBe("general");
+    expect(plan.route.routingMethod).toBe("unified_turn_decision");
+    expect(plan.route.requiredContextSlices).toEqual([generalConfig.defaultContextStrategy]);
+  });
+
+  it("uses rule_based safe fallback when turn decision did not run", async () => {
+    const { planner } = createPlannerHarness();
+    const generalConfig = getCapabilityConfig("general");
+
+    const plan = await planner.planTurn({
+      userMessage: "I feel completely off today. What should I do?",
+      recentMessages: [],
+    });
+
+    expect(plan.catalogIntentId).toBe("general");
+    expect(plan.route.routingMethod).toBe("rule_based");
+    expect(plan.route.isConfident).toBe(false);
+    expect(plan.route.requiredContextSlices).toEqual([generalConfig.defaultContextStrategy]);
   });
 
   it("uses registry fallback context strategy for unknown capability ids", () => {
@@ -133,8 +206,8 @@ describe("SystemPlannerService", () => {
     ).toEqual(generalConfig.defaultContextStrategy);
   });
 
-  it("classifies explicit direct path candidates without calling the llm router", async () => {
-    const { planner, provider } = createPlannerHarness();
+  it("classifies explicit direct path candidates without planner fallback", async () => {
+    const { planner } = createPlannerHarness();
 
     expect(
       planner.classifyDirectPathCandidate({
@@ -162,21 +235,13 @@ describe("SystemPlannerService", () => {
       }),
     ).toBeNull();
 
-    expect(
-      planner.classifyDirectPathCandidate({
-        userMessage: "Make workout easier",
-      }),
-    ).toBeNull();
+    const plan = await planner.planTurn({
+      userMessage: "What is today?",
+      recentMessages: [],
+    });
 
-    await planner.planTurn(
-      {
-        userMessage: "What is today?",
-        recentMessages: [],
-      },
-      provider as never,
-    );
-
-    expect(provider.generateIntentRoute).toHaveBeenCalled();
+    expect(plan.executorMode).toBe("deterministic_read");
+    expect(plan.catalogIntentId).toBe("general");
   });
 
   it("blocks direct path classification for attachment and proposal revision turns", () => {
@@ -215,19 +280,15 @@ describe("SystemPlannerService", () => {
     ).toBeNull();
   });
 
-  it("routes explicit proposal explainer turns without llm router", async () => {
-    const { planner, provider } = createPlannerHarness();
+  it("routes explicit proposal explainer turns deterministically", async () => {
+    const { planner } = createPlannerHarness();
     const capabilityConfig = getCapabilityConfig("proposal_explainer");
 
-    const plan = await planner.planTurn(
-      {
-        userMessage: "Why this proposal?",
-        recentMessages: [],
-      },
-      provider as never,
-    );
+    const plan = await planner.planTurn({
+      userMessage: "Why this proposal?",
+      recentMessages: [],
+    });
 
-    expect(provider.generateIntentRoute).not.toHaveBeenCalled();
     expect(plan.catalogIntentId).toBe("proposal_explainer");
     expect(plan.route.routingMethod).toBe("rule_based");
     expect(plan.route.confidence).toBe(0.95);
@@ -242,31 +303,14 @@ describe("SystemPlannerService", () => {
   });
 
   it("does not route general advice questions to proposal explainer", async () => {
-    const { planner, provider, capabilityRegistryService } = createPlannerHarness();
-    const capabilityConfig = getCapabilityConfig("adjust_workout");
+    const { planner } = createPlannerHarness();
 
-    provider.generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "adjust_workout",
-      confidence: 0.84,
-      routingMethod: "llm_router",
-      requiredContextSlices: [capabilityConfig.defaultContextStrategy],
-      safetyFlags: [],
-      expectedResponseMode: "recommendation_with_optional_proposal",
+    const plan = await planner.planTurn({
+      userMessage: "Why should I train today?",
+      recentMessages: [],
+      turnDecision: createTurnDecisionResultForPlanner("adjust_workout", 0.84),
     });
 
-    const plan = await planner.planTurn(
-      {
-        userMessage: "Why should I train today?",
-        recentMessages: [],
-      },
-      provider as never,
-    );
-
-    expect(provider.generateIntentRoute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intentCatalog: capabilityRegistryService.serializeForRouter(),
-      }),
-    );
     expect(plan.catalogIntentId).toBe("adjust_workout");
   });
 
@@ -280,22 +324,20 @@ describe("SystemPlannerService", () => {
       "resolvePresentationMetadata",
     );
 
-    const plan = await planner.planTurn(
-      {
-        userMessage: "Can you adapt my workout plan this week?",
-        recentMessages: [],
-        attachmentTurn: {
-          attachments: [
-            {
-              attachmentRefId: "a1000001-0000-4000-8000-000000000001",
-              category: "food_photo",
-              status: "ready",
-            },
-          ],
-        },
+    const plan = await planner.planTurn({
+      userMessage: "Log this meal",
+      recentMessages: [],
+      turnDecision: createTurnDecisionResultForPlanner("attachment_food_photo", 0.84),
+      attachmentTurn: {
+        attachments: [
+          {
+            attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+            category: "food_photo",
+            status: "ready",
+          },
+        ],
       },
-      { generateIntentRoute: vi.fn() } as never,
-    );
+    });
 
     expect(resolveSelectedCapabilityIds).toHaveBeenCalledWith("attachment_food_photo");
     expect(resolvePresentationMetadata).toHaveBeenCalledWith("attachment_food_photo", [
@@ -307,59 +349,19 @@ describe("SystemPlannerService", () => {
     expect(plan.intentDefinition.id).toBe("attachment_food_photo");
   });
 
-  it("attaches default context budget for routine llm turns", async () => {
-    const { planner, provider } = createPlannerHarness();
-    const capabilityConfig = getCapabilityConfig("adjust_workout");
+  it("attaches default context budget for confident turn decision turns", async () => {
+    const { planner } = createPlannerHarness();
 
-    provider.generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "adjust_workout",
-      confidence: 0.84,
-      routingMethod: "llm_router",
-      requiredContextSlices: [capabilityConfig.defaultContextStrategy],
-      safetyFlags: [],
-      expectedResponseMode: "recommendation_with_optional_proposal",
+    const plan = await planner.planTurn({
+      userMessage: "Can you adapt my workout plan this week?",
+      recentMessages: [],
+      turnDecision: createTurnDecisionResultForPlanner("adjust_workout", 0.84),
     });
-
-    const plan = await planner.planTurn(
-      {
-        userMessage: "Can you adapt my workout plan this week?",
-        recentMessages: [],
-      },
-      provider as never,
-    );
 
     expect(plan.contextBudget).toEqual(DEFAULT_CONTEXT_BUDGET_POLICY);
     expect(plan.isMonthlyReview).toBe(false);
     expect(plan.isMultiDomainReview).toBe(false);
     expect(plan.requiresCompression).toBe(false);
-  });
-
-  it("flags multi-domain review and deep review budget for cross-domain turns", async () => {
-    const { planner, provider } = createPlannerHarness();
-
-    provider.generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "general",
-      confidence: 0.88,
-      routingMethod: "llm_router",
-      requiredContextSlices: [
-        { type: "workout_adaptation", depth: "medium", timeRange: "14d" },
-        { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
-      ],
-      safetyFlags: [],
-      expectedResponseMode: "advice_only",
-    });
-
-    const plan = await planner.planTurn(
-      {
-        userMessage: "How are my workout and nutrition trends together?",
-        recentMessages: [],
-      },
-      provider as never,
-    );
-
-    expect(plan.contextBudget.profile).toBe("deep_review");
-    expect(plan.isMultiDomainReview).toBe(true);
-    expect(plan.requiresCompression).toBe(true);
   });
 
   it("routes proposal revisions through config-overridden capability mapping", async () => {
@@ -396,10 +398,103 @@ describe("SystemPlannerService", () => {
       new DirectChatPathMatcherService(aiBehaviorConfigService),
       new ProposalExplainerMatcherService(aiBehaviorConfigService),
     );
-    const provider = { generateIntentRoute: vi.fn() };
 
-    const plan = await planner.planTurn(
-      {
+    const plan = await planner.planTurn({
+      userMessage: "Please revise the proposal with these changes: keep one strength exercise.",
+      recentMessages: [],
+      proposalRevision: {
+        supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+        modificationFeedback: "Keep one strength exercise.",
+        originalProposal: {
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Adjust today's workout",
+          reason: "Recovery signals are low.",
+          proposedChanges: {
+            title: "Strength base",
+            summary: "Lighter session today.",
+            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+            notes: [],
+          },
+        },
+      },
+    });
+
+    expect(plan.catalogIntentId).toBe("general");
+    expect(plan.route.routingMethod).toBe("rule_based");
+  });
+
+  describe("response mode executor mapping", () => {
+    it("maps workout adaptation plans to proposal_flow", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "Can you adapt my workout plan this week?",
+        recentMessages: [],
+        turnDecision: createTurnDecisionResultForPlanner("adjust_workout", 0.84),
+      });
+
+      expect(plan.executorMode).toBe("proposal_flow");
+    });
+
+    it("maps direct read candidates to deterministic_read on the plan", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "What is today?",
+        recentMessages: [],
+      });
+
+      expect(plan.executorMode).toBe("deterministic_read");
+    });
+
+    it("maps proposal explainer plans to single_llm", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "Why this proposal?",
+        recentMessages: [],
+      });
+
+      expect(plan.executorMode).toBe("single_llm");
+      expect(plan.expectedResponseMode).toBe("advice_only");
+    });
+
+    it("maps confident turn decision to context_aware_llm for advice-only capabilities", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "How can I stay consistent this week?",
+        recentMessages: [],
+        turnDecision: createTurnDecisionResultForPlanner("general", 0.84),
+      });
+
+      expect(plan.catalogIntentId).toBe("general");
+      expect(plan.route.routingMethod).toBe("unified_turn_decision");
+      expect(plan.executorMode).toBe("context_aware_llm");
+    });
+
+    it("maps low-confidence turn decision fallback to context_aware_llm for general", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "I feel completely off today. What should I do?",
+        recentMessages: [],
+        turnDecision: {
+          ...createTurnDecisionResultForPlanner("general", 0.35),
+          source: "fallback",
+        },
+      });
+
+      expect(plan.route.routingMethod).toBe("unified_turn_decision");
+      expect(plan.catalogIntentId).toBe("general");
+      expect(plan.executorMode).toBe("context_aware_llm");
+    });
+
+    it("ignores turn decision when proposal revision context is present", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
         userMessage: "Please revise the proposal with these changes: keep one strength exercise.",
         recentMessages: [],
         proposalRevision: {
@@ -418,40 +513,11 @@ describe("SystemPlannerService", () => {
             },
           },
         },
-      },
-      provider as never,
-    );
+        turnDecision: createTurnDecisionResultForPlanner("general", 0.84),
+      });
 
-    expect(provider.generateIntentRoute).not.toHaveBeenCalled();
-    expect(plan.catalogIntentId).toBe("general");
-    expect(plan.route.routingMethod).toBe("rule_based");
-  });
-
-  it("attaches deep review budget and flags for monthly progress review turns", async () => {
-    const { planner, provider } = createPlannerHarness();
-
-    provider.generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "review_progress",
-      confidence: 0.9,
-      routingMethod: "llm_router",
-      requiredContextSlices: [
-        { type: "weekly_review", depth: "large", timeRange: "30d" },
-      ],
-      safetyFlags: [],
-      expectedResponseMode: "recommendation_with_optional_proposal",
+      expect(plan.route.routingMethod).toBe("rule_based");
+      expect(plan.catalogIntentId).toBe("adjust_workout");
     });
-
-    const plan = await planner.planTurn(
-      {
-        userMessage: "How did my last month of training and recovery go?",
-        recentMessages: [],
-      },
-      provider as never,
-    );
-
-    expect(plan.contextBudget).toEqual(DEEP_REVIEW_CONTEXT_BUDGET_POLICY);
-    expect(plan.isMonthlyReview).toBe(true);
-    expect(plan.isProgressReview).toBe(true);
-    expect(plan.requiresCompression).toBe(true);
   });
 });

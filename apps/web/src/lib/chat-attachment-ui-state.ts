@@ -110,7 +110,6 @@ export type ChatComposerAttachmentDraft = {
     | "ready"
     | "error";
   error: string | null;
-  proposalCandidateCount: number;
 };
 
 export function chatAttachmentCategoryLabel(category: ChatAttachmentCategory): string {
@@ -321,7 +320,6 @@ export function createChatComposerAttachmentDraft(file: File): ChatComposerAttac
     record: null,
     phase: "local",
     error: null,
-    proposalCandidateCount: 0,
   };
 }
 
@@ -568,7 +566,6 @@ export function applyChatAttachmentCategoryChange(
     record: null,
     phase: "local",
     error: null,
-    proposalCandidateCount: 0,
   };
 }
 

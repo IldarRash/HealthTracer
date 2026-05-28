@@ -3,7 +3,7 @@ import type {
   ChatAttachmentClassificationResult,
 } from "@health/types";
 import type { ChatAttachmentClassificationProvider } from "./chat-attachment-classification.provider.js";
-import { DevChatAttachmentClassificationProvider } from "./dev-chat-attachment-classification.provider.js";
+import { LocalChatAttachmentClassificationProvider } from "./local-chat-attachment-classification.provider.js";
 import { OpenAiChatAttachmentClassificationProvider } from "./openai-chat-attachment-classification.provider.js";
 
 export function resolveAttachmentClassificationProviderId(
@@ -13,8 +13,8 @@ export function resolveAttachmentClassificationProviderId(
     return "openai";
   }
 
-  if (provider instanceof DevChatAttachmentClassificationProvider) {
-    return "dev_heuristic";
+  if (provider instanceof LocalChatAttachmentClassificationProvider) {
+    return "local_heuristic";
   }
 
   return "unknown";

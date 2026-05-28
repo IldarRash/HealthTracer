@@ -37,6 +37,10 @@ import {
   DEFAULT_DIRECT_PATH_DETECTION_ORDER,
   DEFAULT_DIRECT_PATH_SHARED_PATTERNS,
 } from "./direct-chat-path-default-patterns.js";
+import {
+  DEFAULT_DIRECT_PATH_REPLY_TEMPLATES,
+  directPathReplyTemplatesSchema,
+} from "./direct-chat-path-replies.js";
 import { buildDefaultPromptTemplateEntries } from "./prompt-template-renderer.js";
 import { resolvePrimaryAttachmentCatalogIntentFromRouting } from "./attachment-routing-resolver.js";
 import {
@@ -122,7 +126,18 @@ export const directPathsBehaviorConfigSchema = z.object({
   detectionOrder: z.array(directChatPathKindSchema).min(1).max(10),
   sharedPatterns: directPathsSharedPatternsConfigSchema,
   kinds: z.array(directPathKindMatcherConfigSchema).min(1).max(10),
+  replyTemplates: directPathReplyTemplatesSchema,
 });
+
+export const chatBehaviorConfigSchema = z.object({
+  emptyAttachmentMessage: z.string().min(1).max(500),
+});
+
+export type ChatBehaviorConfig = z.infer<typeof chatBehaviorConfigSchema>;
+
+export const DEFAULT_CHAT_BEHAVIOR: ChatBehaviorConfig = {
+  emptyAttachmentMessage: "Shared attachment(s) for coaching review.",
+};
 
 export type DirectPathsBehaviorConfig = z.infer<typeof directPathsBehaviorConfigSchema>;
 
@@ -205,6 +220,7 @@ export type PromptTemplatesBehaviorConfig = z.infer<typeof promptTemplatesBehavi
 
 export const attachmentRoutingConfigSchema = z.object({
   categoryPriority: z.array(classifiedChatAttachmentCategorySchema).min(1).max(10),
+  // Legacy flag-off capability hints; unified pipeline uses the same map for context hints only.
   categoryToCapability: z.object({
     food_photo: catalogIntentIdSchema,
     workout_attachment: catalogIntentIdSchema,
@@ -282,6 +298,7 @@ export type DeterministicProposalTriggersConfig = z.infer<
 export const aiBehaviorConfigSchema = z.object({
   version: aiBehaviorConfigVersionSchema,
   capabilities: z.array(capabilityConfigSchema).max(50).default([]),
+  chat: chatBehaviorConfigSchema,
   directPaths: directPathsBehaviorConfigSchema,
   proposalRevisionRouting: proposalRevisionRoutingConfigSchema,
   responseModes: responseModesBehaviorConfigSchema,
@@ -293,6 +310,15 @@ export const aiBehaviorConfigSchema = z.object({
 });
 
 export type AiBehaviorConfig = z.infer<typeof aiBehaviorConfigSchema>;
+
+/** Runtime file shape: attachmentRouting moved to attachments.json and is optional here. */
+export const aiBehaviorConfigFileSchema = aiBehaviorConfigSchema
+  .omit({ attachmentRouting: true })
+  .extend({
+    attachmentRouting: attachmentRoutingConfigSchema.optional(),
+  });
+
+export type AiBehaviorConfigFile = z.infer<typeof aiBehaviorConfigFileSchema>;
 
 export type AiBehaviorConfigParseResult =
   | { success: true; data: AiBehaviorConfig }
@@ -330,6 +356,7 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
   return aiBehaviorConfigSchema.parse({
     version: AI_BEHAVIOR_CONFIG_VERSION,
     capabilities: [],
+    chat: DEFAULT_CHAT_BEHAVIOR,
     directPaths: {
       enabled: true,
       confidence: 0.95,
@@ -339,6 +366,7 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
       sharedPatterns: DEFAULT_DIRECT_PATH_SHARED_PATTERNS,
       detectionOrder: [...DEFAULT_DIRECT_PATH_DETECTION_ORDER],
       kinds: buildDefaultDirectPathKindMatchers(),
+      replyTemplates: DEFAULT_DIRECT_PATH_REPLY_TEMPLATES,
     },
     proposalRevisionRouting: {
       confidence: 0.95,
@@ -415,10 +443,16 @@ export function formatAiBehaviorConfigValidationErrors(error: z.ZodError): strin
 }
 
 export function safeParseAiBehaviorConfig(value: unknown): AiBehaviorConfigParseResult {
-  const parsed = aiBehaviorConfigSchema.safeParse(value);
+  const parsed = aiBehaviorConfigFileSchema.safeParse(value);
 
   if (parsed.success) {
-    return { success: true, data: parsed.data };
+    const defaults = buildDefaultAiBehaviorConfig();
+    const data = aiBehaviorConfigSchema.parse({
+      ...parsed.data,
+      attachmentRouting: parsed.data.attachmentRouting ?? defaults.attachmentRouting,
+    });
+
+    return { success: true, data };
   }
 
   return { success: false, errors: formatAiBehaviorConfigValidationErrors(parsed.error) };
@@ -488,6 +522,10 @@ export function normalizeAiBehaviorConfig(
   const merged = {
     ...defaults,
     ...partial,
+    chat: {
+      ...defaults.chat,
+      ...partial?.chat,
+    },
     directPaths: {
       ...defaults.directPaths,
       ...partial?.directPaths,
@@ -497,6 +535,20 @@ export function normalizeAiBehaviorConfig(
       },
       detectionOrder: partial?.directPaths?.detectionOrder ?? defaults.directPaths.detectionOrder,
       kinds: partial?.directPaths?.kinds ?? defaults.directPaths.kinds,
+      replyTemplates: {
+        todaySummary: {
+          ...defaults.directPaths.replyTemplates.todaySummary,
+          ...partial?.directPaths?.replyTemplates?.todaySummary,
+          itemStatusLabels: {
+            ...defaults.directPaths.replyTemplates.todaySummary.itemStatusLabels,
+            ...partial?.directPaths?.replyTemplates?.todaySummary?.itemStatusLabels,
+          },
+        },
+        markWorkoutDone: {
+          ...defaults.directPaths.replyTemplates.markWorkoutDone,
+          ...partial?.directPaths?.replyTemplates?.markWorkoutDone,
+        },
+      },
     },
     proposalRevisionRouting: {
       ...defaults.proposalRevisionRouting,
@@ -601,6 +653,16 @@ export function resolveLoadedAiBehaviorConfig(input: {
 
   if (parsed.success) {
     const warnings: string[] = [];
+
+    if (
+      input.fileValue != null &&
+      typeof input.fileValue === "object" &&
+      "attachmentRouting" in input.fileValue
+    ) {
+      warnings.push(
+        "attachmentRouting in ai-behavior.json is deprecated and ignored at runtime; configure routing in attachments.json instead.",
+      );
+    }
 
     for (const key of CONTEXT_BUDGET_TRIGGER_PATTERN_KEYS) {
       if (!tryCompileContextBudgetMessagePattern(parsed.data.contextBudgets.triggers[key])) {

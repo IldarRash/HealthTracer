@@ -39,7 +39,7 @@ function buildRoute(
     depth: slices[0]!.depth ?? ("small" as const),
     timeRange: slices[0]!.timeRange ?? ("7d" as const),
     includeDocuments: slices[0]!.includeDocuments ?? false,
-    routingMethod: "llm_router" as const,
+    routingMethod: "unified_turn_decision" as const,
     requiredContextSlices: slices,
     safetyFlags: [],
     expectedResponseMode: "advice_only" as const,

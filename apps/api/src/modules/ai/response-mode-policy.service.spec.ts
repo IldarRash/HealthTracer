@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { getCapabilityConfig, resolveDefaultExpectedResponseMode } from "@health/types";
-import { ResponseModePolicyService } from "./response-mode-policy.service.js";
 import { createAiPolicyTestStack } from "./test-ai-behavior-fixtures.js";
 
 describe("ResponseModePolicyService", () => {
-  const { capabilityRegistryService: registry, responseModePolicyService: service } =
-    createAiPolicyTestStack();
+  const { responseModePolicyService: service } = createAiPolicyTestStack();
 
   it("prefers route-provided response mode over capability policy", () => {
     expect(

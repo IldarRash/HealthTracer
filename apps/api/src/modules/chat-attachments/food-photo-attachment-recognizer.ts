@@ -8,13 +8,18 @@ import {
   foodPhotoAnalysisResultSchema,
   recognitionProvenanceSchema,
 } from "@health/types";
+import { buildFoodPhotoRecognitionInstruction } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
 import { FoodPhotoAnalysisService } from "../nutrition/food-photo-analysis.service.js";
 
 @Injectable()
 export class FoodPhotoAttachmentRecognizer {
-  constructor(private readonly foodPhotoAnalysisService: FoodPhotoAnalysisService) {}
+  constructor(
+    private readonly foodPhotoAnalysisService: FoodPhotoAnalysisService,
+    private readonly aiBehaviorConfigService: AiBehaviorConfigService,
+  ) {}
 
   async recognize(input: {
     userId: string;
@@ -22,12 +27,13 @@ export class FoodPhotoAttachmentRecognizer {
     mealContextLabel?: string | null;
     boundedMessage?: string;
   }): Promise<FoodPhotoAnalysisResult> {
-    const instructionParts = [
-      "Estimate meal items and macros from this food photo.",
-      input.mealContextLabel ? `Meal context: ${input.mealContextLabel}.` : null,
-      input.boundedMessage ? `User message (bounded): ${input.boundedMessage.slice(0, 200)}` : null,
-    ].filter((part): part is string => part != null);
-    const instruction = instructionParts.join(" ");
+    const prompts = this.aiBehaviorConfigService.getAttachmentBehavior().recognition.prompts
+      .foodPhoto;
+    const instruction = buildFoodPhotoRecognitionInstruction({
+      prompts,
+      mealContextLabel: input.mealContextLabel,
+      boundedMessage: input.boundedMessage,
+    });
 
     assertRecognitionProviderIsolation({
       category: "food_photo",

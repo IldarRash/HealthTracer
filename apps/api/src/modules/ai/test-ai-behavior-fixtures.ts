@@ -1,4 +1,10 @@
-import { buildDefaultAiBehaviorConfig, resolveLoadedAiBehaviorConfig } from "@health/types";
+import {
+  buildDefaultAiBehaviorConfig,
+  buildDefaultAttachmentBehaviorConfig,
+  resolveLoadedAiBehaviorConfig,
+  resolveLoadedAttachmentBehaviorConfig,
+} from "@health/types";
+import { LocalChatAttachmentClassificationProvider } from "../chat-attachments/local-chat-attachment-classification.provider.js";
 import { ContextBudgetPolicyService } from "../coaching-context/context-budget-policy.service.js";
 import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import { CapabilityRegistryService } from "./capability-registry.service.js";
@@ -12,7 +18,14 @@ export function createDefaultAiBehaviorConfigService(): AiBehaviorConfigService 
     resolveLoadedAiBehaviorConfig({
       defaults: buildDefaultAiBehaviorConfig(),
     }),
+    resolveLoadedAttachmentBehaviorConfig({
+      defaults: buildDefaultAttachmentBehaviorConfig(),
+    }),
   );
+}
+
+export function createDefaultLocalChatAttachmentClassificationProvider(): LocalChatAttachmentClassificationProvider {
+  return new LocalChatAttachmentClassificationProvider(createDefaultAiBehaviorConfigService());
 }
 
 export function createAiPolicyTestStack() {

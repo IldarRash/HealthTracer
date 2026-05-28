@@ -96,12 +96,16 @@ Role templates live in `.cursor/agents`.
 
 ## Learned Workspace Facts
 
-- AI/chat behavior policy is files-first and repo-backed via `packages/ai-behavior/config/ai-behavior.json` and the `@health/ai-behavior` loader; DB-backed policy overlay is explicitly deferred.
-- Repo behavior config covers direct paths, proposal revision routing, response modes, context budgets/triggers, prompt templates, attachment routing, proposal explainer detection, and deterministic proposal trigger phrases.
-- Future AI/chat behavior changes should prefer repo config plus focused tests over service hardcoding.
-- Capability-specific generation should use registry-provided policy metadata for prompts, safety rules, context strategy, allowed tools, and proposal allowlists; preserve the bounded max-3 `AgentToolRegistryService` loop.
+- AI/chat behavior is files-first and repo-backed via `packages/ai-behavior/config/ai-behavior.json`, `packages/ai-behavior/config/attachments.json`, and the `@health/ai-behavior` loader; there is no DB overlay.
+- `ai-behavior.json` owns chat/LLM behavior; `attachments.json` owns attachment behavior, routing, classification, recognition, proposal templates, outcome hints, and stage order.
+- Attachments are normal chat turn stages before TurnDecision, not a standalone parallel pipeline.
+- TurnDecision runs for eligible turns (revision/explainer excluded) before SystemPlanner and returns strictly typed, read-only planning hints.
+- SystemPlanner consumes TurnDecision output when confident, otherwise deterministic rule routes from repo config and attachment summaries.
+- ResponseModeExecutor owns explicit executor modes and loop policies; direct/crisis pre-gates remain code-owned safety boundaries.
+- Future AI/chat and attachment behavior changes should prefer repo config plus focused tests over service hardcoding; the final hardcode audit found no blockers.
 - Direct chat paths are deterministic and explicit only: today summary read and marking today's workout done; plan changes remain proposal-only.
-- Proposal explainer is read-only, rule-routed, excluded from the LLM router catalog, and must not create proposals or mutations.
+- Proposal explainer is read-only, rule-routed, excluded from TurnDecision catalog hints, and must not create proposals or mutations.
 - Context budgets deny documents and sensitive health context by default; config cannot enable those contexts because code-level safety floors remain authoritative.
 - Preserve chat safety invariants in code when changing orchestration: schemas, fail-closed config loading, safety floors, proposal validation, permissions, consent, no raw documents, no direct LLM mutation, executor guards, crisis boundaries, and provider isolation.
-- Runtime verification for repo-backed AI behavior config: AppModule starts, config source is `file`, API health/ready pass, and authenticated chat E2E requires Clerk credentials.
+- Runtime verification for the unified AI pipeline: AppModule/API startup OK, config sources are `file`, health/ready pass, and authenticated chat E2E requires a Clerk bearer token.
+- Medical attachment recognition is context-only on read and write; legacy `saved_health_document` JSON parses via `parseStoredChatAttachmentRecognition` and is sanitized before API responses.

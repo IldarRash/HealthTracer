@@ -1,32 +1,27 @@
 import { validateProposalSafety } from "@health/ai";
 import type {
-  ChatAttachmentOutcome,
   ChatMessage,
   ChatThread,
   ChatTurnResponse,
   CreateChatThreadInput,
   RawAiProposal,
   SendChatMessageInput,
-  WorkoutAttachmentRecognitionEnvelope,
 } from "@health/types";
 import {
   evaluateWellbeingCrisisFromText,
   formatWellbeingCrisisSupportReply,
-  getChatAttachmentOwnershipErrors,
-  getChatAttachmentSendEligibilityErrors,
   getTodayIsoDateInTimezone,
-  inferMealContextFromMessage,
   isWeeklyReviewChatMessage,
   mergeDeterministicChatProposals,
   shouldTriggerRecipeRecommendationRequest,
 } from "@health/types";
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiService } from "../ai/ai.service.js";
 import type { AttachmentTurnContext } from "../ai/agent-orchestrator.service.js";
 import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
-import { ChatAttachmentRecognitionService } from "../chat-attachments/chat-attachment-recognition.service.js";
 import { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
+import { ChatTurnAttachmentStageService } from "../chat-attachments/chat-turn-attachment-stage.service.js";
 import { ProgressWeeklyReviewService } from "../progress/progress-weekly-review.service.js";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
 import { RecipesService } from "../recipes/recipes.service.js";
@@ -51,7 +46,7 @@ export class ChatService {
     private readonly wellbeingCheckInsService: WellbeingCheckInsService,
     private readonly recipesService: RecipesService,
     private readonly chatAttachmentsService: ChatAttachmentsService,
-    private readonly chatAttachmentRecognitionService: ChatAttachmentRecognitionService,
+    private readonly chatTurnAttachmentStageService: ChatTurnAttachmentStageService,
     private readonly directChatPathService: DirectChatPathService,
     private readonly proposalExplainerService: ProposalExplainerService,
     private readonly aiBehaviorConfigService: AiBehaviorConfigService,
@@ -107,41 +102,16 @@ export class ChatService {
 
     const existingMessages = await this.chatRepository.listMessagesByThreadId(threadId);
     const attachmentRefIds = input.attachmentRefIds ?? [];
-    let attachmentRecords: Awaited<
-      ReturnType<ChatAttachmentsService["assertOwnedAttachmentRefs"]>
-    > = [];
+    const todayIsoDate = getTodayIsoDateInTimezone(user.timezone);
 
     if (attachmentRefIds.length > 0) {
-      attachmentRecords = await this.chatAttachmentsService.assertOwnedAttachmentRefs(
-        user.id,
-        attachmentRefIds,
-      );
-      const ownedAttachments = attachmentRecords.map((attachment) => ({
-        id: attachment.id,
-        userId: attachment.userId,
-        category: attachment.category,
-        status: attachment.status,
-        linkedDocumentId: attachment.linkedDocumentId,
-        linkedImageRefId: attachment.linkedImageRefId,
-        retentionPolicy: attachment.retentionPolicy,
-        expiresAt: attachment.expiresAt,
-      }));
-
-      const attachmentRefValidationErrors = [
-        ...getChatAttachmentOwnershipErrors(attachmentRefIds, ownedAttachments),
-        ...getChatAttachmentSendEligibilityErrors(attachmentRefIds, ownedAttachments),
-      ];
-
-      if (attachmentRefValidationErrors.length > 0) {
-        throw new BadRequestException({
-          message: "Attachment references failed validation.",
-          validationErrors: attachmentRefValidationErrors,
-        });
-      }
+      await this.chatTurnAttachmentStageService.validateRefsForSend(user.id, attachmentRefIds);
     }
 
     const messageContent =
-      input.content.trim().length > 0 ? input.content : "Shared attachment(s) for coaching review.";
+      input.content.trim().length > 0
+        ? input.content
+        : this.aiBehaviorConfigService.getChat().emptyAttachmentMessage;
 
     const userMessage = await this.chatRepository.createMessage(
       threadId,
@@ -154,22 +124,20 @@ export class ChatService {
         : {},
     );
 
-    if (attachmentRefIds.length > 0) {
-      await this.chatAttachmentsService.linkAttachmentsToMessage(
-        user.id,
-        attachmentRefIds,
-        userMessage.id,
-        threadId,
-      );
+    const attachmentTurnResult =
+      attachmentRefIds.length > 0
+        ? await this.chatTurnAttachmentStageService.runTurnStages({
+            auth,
+            userId: user.id,
+            threadId,
+            messageId: userMessage.id,
+            messageContent,
+            attachmentRefIds,
+            todayIsoDate,
+          })
+        : null;
 
-      attachmentRecords =
-        await this.chatAttachmentsService.classifyAndRecognizeAttachmentsForMessage({
-          auth,
-          userId: user.id,
-          messageContent,
-          attachments: attachmentRecords,
-        });
-    }
+    const attachmentRecords = attachmentTurnResult?.attachments ?? [];
 
     const crisisEvaluation = evaluateWellbeingCrisisFromText(messageContent);
 
@@ -270,26 +238,10 @@ export class ChatService {
     }
 
     const isWeeklyReviewTurn = isWeeklyReviewChatMessage(input.content);
-    const todayIsoDate = getTodayIsoDateInTimezone(user.timezone);
     const todayCheckIn = await this.wellbeingCheckInsService.getCheckInForDate(
       auth,
       todayIsoDate,
     );
-
-    const mealContextLabel = inferMealContextFromMessage(messageContent);
-    const attachmentProposalCandidatesPreAi = [];
-
-    for (const attachment of attachmentRecords) {
-      attachmentProposalCandidatesPreAi.push(
-        ...this.chatAttachmentRecognitionService.buildProposalCandidates({
-          attachment,
-          incidentDateTime: new Date().toISOString(),
-          mealContextLabel,
-          boundedMessage: messageContent,
-          todayIsoDate,
-        }),
-      );
-    }
 
     const generated = await this.aiService.generateCoachResponse({
       auth,
@@ -313,13 +265,9 @@ export class ChatService {
                 status: attachment.status,
                 recognition: attachment.recognition,
               })),
-              ...(attachmentProposalCandidatesPreAi.length > 0
+              ...(attachmentTurnResult?.contextSummaries.length
                 ? {
-                    preparedProposals: attachmentProposalCandidatesPreAi.map((candidate) => ({
-                      intent: candidate.intent,
-                      targetDomain: candidate.targetDomain,
-                      title: candidate.title,
-                    })),
+                    contextSummaries: attachmentTurnResult.contextSummaries,
                   }
                 : {}),
             } satisfies AttachmentTurnContext,
@@ -359,34 +307,7 @@ export class ChatService {
       triggerConfig: this.aiBehaviorConfigService.getDeterministicProposalTriggers(),
     }) as RawAiProposal[];
 
-    const attachmentOutcomes: ChatAttachmentOutcome[] = [];
-    const attachmentProposalCandidates = [...attachmentProposalCandidatesPreAi];
-
-    for (const attachment of attachmentRecords) {
-      const candidates = attachmentProposalCandidates.filter(
-        (candidate) => candidate.attachmentRefId === attachment.id,
-      );
-      attachmentOutcomes.push({
-        attachmentRefId: attachment.id,
-        category: attachment.category,
-        status: attachment.status,
-        recognition: attachment.recognition,
-        proposalCandidateCount: candidates.length,
-      });
-    }
-
-    proposalsToPersist = this.chatAttachmentRecognitionService.mergeAttachmentProposals(
-      proposalsToPersist,
-      attachmentProposalCandidates,
-      {
-        workoutRecognitions: attachmentRecords
-          .map((attachment) => attachment.recognition)
-          .filter(
-            (recognition): recognition is WorkoutAttachmentRecognitionEnvelope =>
-              recognition?.category === "workout_attachment",
-          ),
-      },
-    );
+    const attachmentOutcomes = attachmentTurnResult?.outcomes ?? [];
 
     if (
       shouldTriggerRecipeRecommendationRequest(

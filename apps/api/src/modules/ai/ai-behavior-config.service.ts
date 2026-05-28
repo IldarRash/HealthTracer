@@ -1,8 +1,12 @@
-import { loadAiBehaviorConfig } from "@health/ai-behavior";
+import { loadAiBehaviorConfig, loadAttachmentBehaviorConfig } from "@health/ai-behavior";
 import type {
   AiBehaviorConfig,
   AiBehaviorConfigLoadResult,
   AiBehaviorConfigLoadSource,
+  ChatBehaviorConfig,
+  AttachmentBehaviorConfig,
+  AttachmentBehaviorConfigLoadResult,
+  AttachmentBehaviorConfigLoadSource,
   AttachmentRoutingConfig,
   CompiledPromptTemplates,
   ContextBudgetsBehaviorConfig,
@@ -17,22 +21,32 @@ import { compilePromptTemplates } from "@health/types";
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 
 export const AI_BEHAVIOR_CONFIG_PRELOAD = Symbol("AI_BEHAVIOR_CONFIG_PRELOAD");
+export const ATTACHMENT_BEHAVIOR_CONFIG_PRELOAD = Symbol("ATTACHMENT_BEHAVIOR_CONFIG_PRELOAD");
 
 @Injectable()
 export class AiBehaviorConfigService {
   private readonly logger = new Logger(AiBehaviorConfigService.name);
   readonly loadResult: AiBehaviorConfigLoadResult;
+  readonly attachmentLoadResult: AttachmentBehaviorConfigLoadResult;
   private compiledPromptTemplates: CompiledPromptTemplates;
 
   constructor(
     @Optional()
     @Inject(AI_BEHAVIOR_CONFIG_PRELOAD)
     preload?: AiBehaviorConfigLoadResult,
+    @Optional()
+    @Inject(ATTACHMENT_BEHAVIOR_CONFIG_PRELOAD)
+    attachmentPreload?: AttachmentBehaviorConfigLoadResult,
   ) {
     this.loadResult =
       preload ??
       loadAiBehaviorConfig({
         configPath: process.env.AI_BEHAVIOR_CONFIG_PATH,
+      });
+    this.attachmentLoadResult =
+      attachmentPreload ??
+      loadAttachmentBehaviorConfig({
+        configPath: process.env.ATTACHMENT_BEHAVIOR_CONFIG_PATH,
       });
     this.compiledPromptTemplates = compilePromptTemplates(this.loadResult.config.promptTemplates);
 
@@ -44,8 +58,20 @@ export class AiBehaviorConfigService {
       this.logger.error(error);
     }
 
+    for (const warning of this.attachmentLoadResult.warnings) {
+      this.logger.warn(warning);
+    }
+
+    for (const error of this.attachmentLoadResult.errors) {
+      this.logger.error(error);
+    }
+
     if (this.loadResult.source === "file") {
       this.logger.log("Loaded repo-backed AI behavior config from file.");
+    }
+
+    if (this.attachmentLoadResult.source === "file") {
+      this.logger.log("Loaded repo-backed attachment behavior config from file.");
     }
   }
 
@@ -65,6 +91,10 @@ export class AiBehaviorConfigService {
     return this.loadResult.warnings;
   }
 
+  getChat(): ChatBehaviorConfig {
+    return this.loadResult.config.chat;
+  }
+
   getDirectPaths(): DirectPathsBehaviorConfig {
     return this.loadResult.config.directPaths;
   }
@@ -82,7 +112,23 @@ export class AiBehaviorConfigService {
   }
 
   getAttachmentRouting(): AttachmentRoutingConfig {
-    return this.loadResult.config.attachmentRouting;
+    return this.attachmentLoadResult.config.routing;
+  }
+
+  getAttachmentBehavior(): AttachmentBehaviorConfig {
+    return this.attachmentLoadResult.config;
+  }
+
+  getAttachmentLoadSource(): AttachmentBehaviorConfigLoadSource {
+    return this.attachmentLoadResult.source;
+  }
+
+  getAttachmentLoadErrors(): readonly string[] {
+    return this.attachmentLoadResult.errors;
+  }
+
+  getAttachmentLoadWarnings(): readonly string[] {
+    return this.attachmentLoadResult.warnings;
   }
 
   getProposalExplainer(): ProposalExplainerBehaviorConfig {

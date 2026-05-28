@@ -1,4 +1,7 @@
-import type { ChatAttachmentClassificationResult } from "@health/types";
+import type {
+  AttachmentClassificationConfig,
+  ChatAttachmentClassificationResult,
+} from "@health/types";
 import {
   isChatAttachmentImageMimeType,
   llmAttachmentClassifierOutputSchema,
@@ -24,6 +27,7 @@ export class OpenAiAttachmentClassificationMissingKeyError extends Error {
 export interface OpenAiChatAttachmentClassificationProviderOptions {
   apiKey: string;
   model: string;
+  classification: AttachmentClassificationConfig;
 }
 
 interface OpenAiChatCompletionResponse {
@@ -36,12 +40,6 @@ interface OpenAiChatCompletionResponse {
     message?: string;
   };
 }
-
-const ALLOWED_CATEGORIES = [
-  "food_photo",
-  "workout_attachment",
-  "medical_document",
-] as const;
 
 @Injectable()
 export class OpenAiChatAttachmentClassificationProvider
@@ -56,7 +54,7 @@ export class OpenAiChatAttachmentClassificationProvider
   async classify(
     request: ChatAttachmentClassificationRequest,
   ): Promise<ChatAttachmentClassificationResult> {
-    const systemPrompt = buildAttachmentClassifierPrompt();
+    const systemPrompt = this.options.classification.llmClassifierPrompt;
     const userContent = this.buildUserContent(request);
     const payload = await this.requestJsonCompletion(systemPrompt, userContent);
     const parsed = llmAttachmentClassifierOutputSchema.safeParse(payload);
@@ -79,8 +77,7 @@ export class OpenAiChatAttachmentClassificationProvider
   ): Array<Record<string, unknown>> {
     const boundedMessage = request.message.trim().slice(0, 500);
     const metadataPrompt = [
-      "Classify this chat attachment into exactly one allowed category.",
-      `Allowed categories: ${ALLOWED_CATEGORIES.join(", ")}.`,
+      this.options.classification.llmUserPromptIntro,
       `User message: ${boundedMessage || "(empty)"}`,
       `Filename: ${request.filename}`,
       `MIME type: ${request.mimeType}`,
@@ -153,28 +150,14 @@ export class OpenAiChatAttachmentClassificationProvider
   }
 }
 
-function buildAttachmentClassifierPrompt(): string {
-  return [
-    "You classify wellness coaching chat attachments.",
-    "Return JSON only. Do not answer the user or provide coaching advice.",
-    "Allowed categories: food_photo, workout_attachment, medical_document.",
-    "Allowed suggestedAction values: run_category_recognition, request_medical_consent, manual_fallback, unsupported.",
-    "Use request_medical_consent for medical_document when explicit consent would be required before review.",
-    "Use manual_fallback when the attachment is ambiguous, unrelated, or low confidence.",
-    "Never default ambiguous images to food_photo. Prefer manual_fallback over guessing nutrition.",
-    "Allowed JSON shape:",
-    '{"category":"food_photo|workout_attachment|medical_document","confidence":"low|medium|high","rationale":"short reason","suggestedAction":"run_category_recognition|request_medical_consent|manual_fallback|unsupported","mealContextLabel":null|string}',
-    "mealContextLabel is optional and only for food_photo when meal timing is evident from the message.",
-  ].join("\n");
-}
-
 export function createOpenAiChatAttachmentClassificationProvider(
   apiKey: string | undefined,
   model: string,
+  classification: AttachmentClassificationConfig,
 ): OpenAiChatAttachmentClassificationProvider {
   if (!apiKey?.trim()) {
     throw new OpenAiAttachmentClassificationMissingKeyError();
   }
 
-  return new OpenAiChatAttachmentClassificationProvider({ apiKey, model });
+  return new OpenAiChatAttachmentClassificationProvider({ apiKey, model, classification });
 }

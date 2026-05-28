@@ -130,6 +130,18 @@ export const foodPhotoRecognitionEnvelopeSchema = z
 
 export type FoodPhotoRecognitionEnvelope = z.infer<typeof foodPhotoRecognitionEnvelopeSchema>;
 
+export const ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID =
+  "00000000-0000-4000-8000-000000000000";
+
+export const medicalDocumentPersistenceStatusSchema = z.literal("attachment_context_only");
+
+export type MedicalDocumentPersistenceStatus = z.infer<
+  typeof medicalDocumentPersistenceStatusSchema
+>;
+
+/** Legacy persisted rows only; new writes use attachment_context_only. */
+export const legacyMedicalDocumentPersistenceStatusSchema = z.literal("saved_health_document");
+
 export const medicalDocumentRecognitionEnvelopeSchema = z
   .object({
     category: z.literal("medical_document"),
@@ -144,6 +156,7 @@ export const medicalDocumentRecognitionEnvelopeSchema = z
     consentScopes: z.array(documentConsentScopeSchema).min(1),
     provenance: recognitionProvenanceSchema,
     wellnessContextOnlyNotice: z.string().min(1).max(240),
+    documentPersistenceStatus: medicalDocumentPersistenceStatusSchema.optional(),
   })
   .strict();
 
@@ -180,6 +193,19 @@ export const workoutAttachmentRecognitionEnvelopeSchema = z
 export type WorkoutAttachmentRecognitionEnvelope = z.infer<
   typeof workoutAttachmentRecognitionEnvelopeSchema
 >;
+
+export const storedMedicalDocumentRecognitionEnvelopeSchema =
+  medicalDocumentRecognitionEnvelopeSchema.extend({
+    documentPersistenceStatus: z
+      .union([medicalDocumentPersistenceStatusSchema, legacyMedicalDocumentPersistenceStatusSchema])
+      .optional(),
+  });
+
+export const storedChatAttachmentRecognitionEnvelopeSchema = z.discriminatedUnion("category", [
+  foodPhotoRecognitionEnvelopeSchema,
+  storedMedicalDocumentRecognitionEnvelopeSchema,
+  workoutAttachmentRecognitionEnvelopeSchema,
+]);
 
 export const chatAttachmentRecognitionEnvelopeSchema = z.discriminatedUnion("category", [
   foodPhotoRecognitionEnvelopeSchema,
@@ -329,16 +355,6 @@ export type GrantChatAttachmentConsentInput = z.infer<typeof grantChatAttachment
 
 export const chatAttachmentRecognitionResponseSchema = z.object({
   attachment: chatAttachmentRecordSchema,
-  proposalCandidates: z.array(
-    z.object({
-      intent: z.string().min(1).max(80),
-      targetDomain: z.string().min(1).max(40),
-      title: z.string().min(1).max(160),
-      reason: z.string().min(1).max(1000),
-      proposedChanges: z.unknown(),
-      attachmentRefId: z.string().uuid(),
-    }),
-  ),
 });
 
 export type ChatAttachmentRecognitionResponse = z.infer<
@@ -350,7 +366,6 @@ export const chatAttachmentOutcomeSchema = z.object({
   category: chatAttachmentCategorySchema,
   status: chatAttachmentStatusSchema,
   recognition: chatAttachmentRecognitionEnvelopeSchema.nullable(),
-  proposalCandidateCount: z.number().int().nonnegative().max(5),
 });
 
 export type ChatAttachmentOutcome = z.infer<typeof chatAttachmentOutcomeSchema>;
@@ -607,8 +622,17 @@ export function isChatAttachmentSendEligibleStatus(status: ChatAttachmentStatus)
   );
 }
 
-export function buildMedicalDocumentReviewPath(documentId: string): string {
-  return `/profile#documents?documentId=${documentId}`;
+export function isAttachmentContextOnlyMedicalRecognition(
+  recognition: Pick<
+    MedicalDocumentRecognitionEnvelope,
+    "provenance" | "documentPersistenceStatus" | "documentId"
+  >,
+): boolean {
+  return (
+    recognition.documentPersistenceStatus === "attachment_context_only" ||
+    recognition.provenance.source === "attachment_context_only" ||
+    recognition.documentId === ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID
+  );
 }
 
 export function isChatAttachmentExpired(
@@ -652,21 +676,33 @@ export function getChatAttachmentRecognitionEligibilityErrors(
   return errors;
 }
 
-export function sanitizeMedicalRecognitionForClient(
-  recognition: MedicalDocumentRecognitionEnvelope,
-): MedicalDocumentRecognitionEnvelope {
-  if (recognition.reviewStatus === "approved") {
-    return {
-      ...recognition,
-      documentReviewPath:
-        recognition.documentReviewPath ?? buildMedicalDocumentReviewPath(recognition.documentId),
-    };
+export function parseStoredChatAttachmentRecognition(
+  raw: unknown,
+): ChatAttachmentRecognitionEnvelope | null {
+  const parsed = storedChatAttachmentRecognitionEnvelopeSchema.safeParse(raw);
+
+  if (!parsed.success) {
+    return null;
   }
 
+  if (parsed.data.category === "medical_document") {
+    return sanitizeMedicalRecognitionForClient(parsed.data);
+  }
+
+  return parsed.data;
+}
+
+export function sanitizeMedicalRecognitionForClient(
+  recognition: z.infer<typeof storedMedicalDocumentRecognitionEnvelopeSchema>,
+): MedicalDocumentRecognitionEnvelope {
   return {
     ...recognition,
+    documentId: ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID,
+    parseStatus: "uploaded",
     summarySnippet: null,
-    documentReviewPath: buildMedicalDocumentReviewPath(recognition.documentId),
+    reviewStatus: null,
+    documentReviewPath: null,
+    documentPersistenceStatus: "attachment_context_only",
   };
 }
 

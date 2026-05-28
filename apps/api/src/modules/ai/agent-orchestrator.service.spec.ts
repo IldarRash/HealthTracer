@@ -1,10 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentContextPacket } from "@health/types";
-import { getCapabilityConfig } from "@health/types";
+import {
+  createFallbackMessageUnderstandingResult,
+  createFallbackTurnDecisionResult,
+  createFallbackPreprocessorResult,
+  turnDecisionRequestSchema,
+  turnDecisionOutputSchema,
+  turnDecisionResultSchema,
+  buildProposalExplainerTurnContext,
+  getCapabilityConfig,
+  messageUnderstandingOutputSchema,
+  messageUnderstandingRequestSchema,
+  messageUnderstandingResultSchema,
+} from "@health/types";
 import { ActionResolverService } from "./action-resolver.service.js";
 import { AgentOrchestratorService } from "./agent-orchestrator.service.js";
 import { ContextCompressionService } from "../coaching-context/context-compression.service.js";
 import { ContextExpansionPolicyService } from "../coaching-context/context-expansion-policy.service.js";
+import { ResponseModeExecutorService } from "./response-mode-executor.service.js";
 import { StubContextCompressionProvider } from "../coaching-context/stub-context-compression.provider.js";
 import { createAiPolicyTestStack } from "./test-ai-behavior-fixtures.js";
 import * as coachProviderFactory from "./coach-provider.factory.js";
@@ -13,8 +26,139 @@ import {
   LEGACY_BROAD_COACHING_CONTEXT_KEYS,
 } from "../coaching-context/agent-prompt-context.js";
 
+function createResponseModeExecutorService(
+  agentToolRegistryService: { executeTool: ReturnType<typeof vi.fn> },
+) {
+  return new ResponseModeExecutorService(
+    new ActionResolverService(),
+    agentToolRegistryService as never,
+  );
+}
+
 const SAFE_FALLBACK_REPLY =
   "I could not safely process that response. Please try again with a wellness-focused question.";
+
+function createFallbackUnderstandingResultForTests(
+  overrides: {
+    capabilityId?: "adjust_workout" | "general";
+    confidence?: number;
+    hintConfidence?: number;
+    source?: "llm" | "fallback";
+  } = {},
+) {
+  const request = messageUnderstandingRequestSchema.parse({
+    originalText: "Can you adapt my workout plan this week?",
+    normalizedText: "can you adapt my workout plan this week?",
+    preprocessor: createFallbackPreprocessorResult({
+      userMessage: "Can you adapt my workout plan this week?",
+    }),
+    attachmentContextSummaries: [],
+    recentMessageHints: [],
+    catalogHints: [],
+  });
+
+  if (overrides.source === "fallback") {
+    return createFallbackMessageUnderstandingResult(request, ["forced fallback"]);
+  }
+
+  return messageUnderstandingResultSchema.parse({
+    output: messageUnderstandingOutputSchema.parse({
+      signals: ["request_change"],
+      entities: [],
+      capabilityHints: [
+        {
+          capabilityId: overrides.capabilityId ?? "adjust_workout",
+          confidence: overrides.hintConfidence ?? 0.84,
+        },
+      ],
+      complexity: "moderate",
+      directCommand: { detected: false },
+      safetyFlags: ["fatigue"],
+      needsContext: ["active_workout_plan"],
+      confidence: overrides.confidence ?? 0.84,
+    }),
+    source: "llm",
+    validationErrors: [],
+  });
+}
+
+function createFallbackTurnDecisionResultForTests() {
+  const request = turnDecisionRequestSchema.parse({
+    originalText: "Can you adapt my workout plan this week?",
+    normalizedText: "can you adapt my workout plan this week",
+    preprocessor: createFallbackPreprocessorResult({
+      userMessage: "Can you adapt my workout plan this week?",
+    }),
+    attachmentContextSummaries: [],
+    recentMessageHints: [],
+    catalogHints: [],
+    availableTools: [],
+  });
+
+  return createFallbackTurnDecisionResult(request, ["forced fallback"]);
+}
+
+function createConfidentTurnDecisionResultForTests(
+  overrides: {
+    capabilityId?: "adjust_workout" | "adjust_nutrition" | "general" | "attachment_food_photo";
+    confidence?: number;
+    hintConfidence?: number;
+    source?: "llm" | "fallback";
+  } = {},
+) {
+  const request = turnDecisionRequestSchema.parse({
+    originalText: "Can you adapt my workout plan this week?",
+    normalizedText: "can you adapt my workout plan this week?",
+    preprocessor: createFallbackPreprocessorResult({
+      userMessage: "Can you adapt my workout plan this week?",
+    }),
+    attachmentContextSummaries: [],
+    recentMessageHints: [],
+    catalogHints: [],
+    availableTools: [],
+  });
+
+  if (overrides.source === "fallback") {
+    return createFallbackTurnDecisionResult(request, ["forced fallback"]);
+  }
+
+  return turnDecisionResultSchema.parse({
+    output: turnDecisionOutputSchema.parse({
+      signals: ["request_change"],
+      entities: [],
+      routeCapabilityHints: [
+        {
+          capabilityId: overrides.capabilityId ?? "adjust_workout",
+          confidence: overrides.hintConfidence ?? 0.84,
+        },
+      ],
+      complexity: "moderate",
+      directCommand: { detected: false },
+      safetyFlags: ["fatigue"],
+      contextNeeds: ["active_workout_plan"],
+      attachmentHints: [],
+      toolNeeds: [],
+      confidence: overrides.confidence ?? 0.84,
+    }),
+    source: "llm",
+    validationErrors: [],
+  });
+}
+
+function createTurnDecisionTestDeps(decideImpl?: ReturnType<typeof vi.fn>) {
+  return {
+    messagePreprocessorService: {
+      preprocess: vi.fn((input: { userMessage: string; hasAttachments?: boolean }) =>
+        createFallbackPreprocessorResult(input),
+      ),
+    },
+    turnDecisionService: {
+      decide:
+        decideImpl ??
+        vi.fn().mockResolvedValue(createConfidentTurnDecisionResultForTests()),
+    },
+  };
+}
 
 const LEGACY_LEAK_FIELDS = [
   "documentContext",
@@ -75,7 +219,12 @@ function createSlicePacket(
   };
 }
 
-function createOrchestratorWithCapturedProvider(contextPacket: AgentContextPacket) {
+function createOrchestratorWithCapturedProvider(
+  contextPacket: AgentContextPacket,
+  options?: {
+    decideImpl?: ReturnType<typeof vi.fn>;
+  },
+) {
   const generateAgentLoopStep = vi.fn().mockResolvedValue({
     kind: "final_answer",
     reply: "Here is a wellness-focused response you can review.",
@@ -84,17 +233,6 @@ function createOrchestratorWithCapturedProvider(contextPacket: AgentContextPacke
   const generateCoachResponse = vi.fn().mockResolvedValue({
     reply: "Here is a wellness-focused response you can review.",
     proposals: [],
-  });
-  const generateIntentRoute = vi.fn().mockResolvedValue({
-    catalogIntentId: "adjust_workout",
-    confidence: 0.84,
-    routingMethod: "llm_router",
-    requiredContextSlices: [
-      { type: "workout_adaptation", depth: "medium", timeRange: "14d" },
-      { type: "daily_checkin", depth: "small", timeRange: "7d" },
-    ],
-    safetyFlags: ["fatigue"],
-    expectedResponseMode: "recommendation_with_optional_proposal",
   });
 
   const coachingContextService = {
@@ -108,40 +246,42 @@ function createOrchestratorWithCapturedProvider(contextPacket: AgentContextPacke
     executeTool: vi.fn().mockResolvedValue({ tool: "getWeeklyProgressContext", ok: true, result: null }),
   };
 
-  const {
-    capabilityRegistryService,
-    responseModePolicyService,
-    contextBudgetPolicyService,
-    systemPlannerService,
-    aiBehaviorConfigService,
-  } = createAiPolicyTestStack();
+  const { capabilityRegistryService, systemPlannerService, aiBehaviorConfigService } =
+    createAiPolicyTestStack();
   const actionResolverService = new ActionResolverService();
   const contextCompressionService = new ContextCompressionService();
   const contextExpansionPolicyService = new ContextExpansionPolicyService();
+  const responseModeExecutorService = new ResponseModeExecutorService(
+    actionResolverService,
+    agentToolRegistryService as never,
+  );
+
+  const understandingDeps = createTurnDecisionTestDeps(options?.decideImpl);
 
   const service = new AgentOrchestratorService(
     coachingContextService as never,
     contextCompressionService,
     contextExpansionPolicyService,
-    agentToolRegistryService as never,
     systemPlannerService,
-    actionResolverService,
+    responseModeExecutorService,
     aiBehaviorConfigService,
+    understandingDeps.messagePreprocessorService as never,
+    understandingDeps.turnDecisionService as never,
   );
 
   Object.assign(service, {
-    provider: { generateCoachResponse, generateIntentRoute, generateAgentLoopStep },
+    provider: { generateCoachResponse, generateAgentLoopStep },
   });
 
   return {
     service,
     generateCoachResponse,
-    generateIntentRoute,
     generateAgentLoopStep,
     coachingContextService,
     agentToolRegistryService,
     capabilityRegistryService,
     systemPlannerService,
+    ...understandingDeps,
   };
 }
 
@@ -190,7 +330,13 @@ describe("AgentOrchestratorService provider context minimization", () => {
       });
 
       const { service, generateAgentLoopStep, coachingContextService } =
-        createOrchestratorWithCapturedProvider(contextPacket);
+        createOrchestratorWithCapturedProvider(contextPacket, {
+          decideImpl: vi.fn().mockResolvedValue(
+            createConfidentTurnDecisionResultForTests({
+              capabilityId: intent === "general" ? "general" : intent === "adjust_nutrition" ? "adjust_nutrition" : "adjust_workout",
+            }),
+          ),
+        });
 
       await service.orchestrateCoachTurn({
         auth: {
@@ -288,10 +434,9 @@ describe("AgentOrchestratorService routing", () => {
     vi.restoreAllMocks();
   });
 
-  it("invokes the llm router for normal text turns including previously rule-confident routes", async () => {
+  it("routes normal text turns through confident turn decision", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
-    const { service, generateIntentRoute, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
+    const { service, coachingContextService } = createOrchestratorWithCapturedProvider(contextPacket);
 
     await service.orchestrateCoachTurn({
       auth: {
@@ -303,12 +448,11 @@ describe("AgentOrchestratorService routing", () => {
       recentMessages: [],
     });
 
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
     expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ intent: "adjust_workout" }),
       expect.objectContaining({
-        routingMethod: "llm_router",
+        routingMethod: "unified_turn_decision",
       }),
       expect.objectContaining({
         contextBudget: expect.objectContaining({ profile: "default" }),
@@ -316,10 +460,19 @@ describe("AgentOrchestratorService routing", () => {
     );
   });
 
-  it("invokes the llm router once for ambiguous messages", async () => {
-    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
-    const { service, generateIntentRoute, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
+  it("falls back to general when turn decision confidence is low", async () => {
+    const contextPacket = createSlicePacket("general_chat", "general");
+    const decide = vi.fn().mockResolvedValue(
+      createConfidentTurnDecisionResultForTests({
+        capabilityId: "general",
+        confidence: 0.35,
+        source: "fallback",
+      }),
+    );
+    const { service, coachingContextService } = createOrchestratorWithCapturedProvider(
+      contextPacket,
+      { decideImpl: decide },
+    );
 
     const result = await service.orchestrateCoachTurn({
       auth: {
@@ -331,57 +484,19 @@ describe("AgentOrchestratorService routing", () => {
       recentMessages: [],
     });
 
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
+    expect(decide).toHaveBeenCalledTimes(1);
     expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       expect.objectContaining({
-        routingMethod: "llm_router",
-        requiredContextSlices: expect.arrayContaining([
-          expect.objectContaining({ type: "workout_adaptation" }),
-        ]),
+        routingMethod: "unified_turn_decision",
+        isConfident: false,
+        confidence: 0.35,
+        catalogIntentId: "general",
       }),
       expect.anything(),
     );
-    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(true);
-  });
-
-  it("invokes the llm router for nutrition adaptation text turns", async () => {
-    const contextPacket = createSlicePacket("nutrition_adaptation", "adjust_nutrition", {
-      activeNutritionPlan: {
-        title: "Macros",
-        summary: "Higher protein focus.",
-        caloriesPerDay: 2200,
-        proteinGrams: 160,
-        carbsGrams: 200,
-        fatGrams: 70,
-        hydrationLiters: 2.5,
-        preferences: [],
-        restrictions: [],
-      },
-    });
-    const { service, generateIntentRoute, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
-
-    await service.orchestrateCoachTurn({
-      auth: {
-        clerkUserId: "clerk-user",
-        email: "test@example.com",
-        displayName: "Test",
-      },
-      userMessage: "What should I eat for dinner tonight?",
-      recentMessages: [],
-    });
-
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
-    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        routingMethod: "llm_router",
-      }),
-      expect.anything(),
-    );
+    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(false);
   });
 
   it("filters final-answer proposals outside the active catalog allowlist before returning", async () => {
@@ -440,11 +555,10 @@ describe("AgentOrchestratorService routing", () => {
     expect(result.agentMetadata.safety.status).toBe("passed");
   });
 
-  it("uses final coach output for user-facing replies instead of router output", async () => {
+  it("uses final coach output for user-facing replies", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const coachReply = "Final coach reply with a reviewable proposal draft.";
-    const { service, generateAgentLoopStep, generateIntentRoute } =
-      createOrchestratorWithCapturedProvider(contextPacket);
+    const { service, generateAgentLoopStep } = createOrchestratorWithCapturedProvider(contextPacket);
 
     generateAgentLoopStep.mockResolvedValue({
       kind: "final_answer",
@@ -475,98 +589,15 @@ describe("AgentOrchestratorService routing", () => {
       recentMessages: [],
     });
 
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
     expect(generateAgentLoopStep).toHaveBeenCalledTimes(1);
     expect(result.output.reply).toBe(coachReply);
     expect(result.output.proposals).toHaveLength(1);
     expect(result.output.proposals[0]?.intent).toBe("adapt_workout_plan");
   });
 
-  it("falls back to the uncertain rule route when llm router output is invalid", async () => {
-    const contextPacket = createSlicePacket("general_chat", "general");
-    const { service, generateIntentRoute, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
-
-    generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "adjust_workout",
-      confidence: 0.86,
-      routingMethod: "llm_router",
-      requiredContextSlices: [
-        { type: "workout_adaptation", depth: "medium", timeRange: "14d" },
-      ],
-      safetyFlags: ["fatigue"],
-      expectedResponseMode: "recommendation_with_optional_proposal",
-      reply: "Skip training today.",
-    });
-
-    const result = await service.orchestrateCoachTurn({
-      auth: {
-        clerkUserId: "clerk-user",
-        email: "test@example.com",
-        displayName: "Test",
-      },
-      userMessage: "I feel completely off today. What should I do?",
-      recentMessages: [],
-    });
-
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
-    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        routingMethod: "llm_router",
-        isConfident: false,
-        confidence: 0.35,
-      }),
-      expect.anything(),
-    );
-    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(true);
-  });
-
-  it("falls back to the uncertain rule route when llm router returns attachment-family ids", async () => {
-    const contextPacket = createSlicePacket("general_chat", "general");
-    const { service, generateIntentRoute, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
-
-    generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "attachment_food_photo",
-      confidence: 0.95,
-      routingMethod: "llm_router",
-      requiredContextSlices: [
-        { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
-      ],
-      safetyFlags: [],
-      expectedResponseMode: "recommendation_with_optional_proposal",
-    });
-
-    const result = await service.orchestrateCoachTurn({
-      auth: {
-        clerkUserId: "clerk-user",
-        email: "test@example.com",
-        displayName: "Test",
-      },
-      userMessage: "What should I eat tonight?",
-      recentMessages: [],
-    });
-
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
-    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        routingMethod: "llm_router",
-        isConfident: false,
-        confidence: 0.35,
-      }),
-      expect.anything(),
-    );
-    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(true);
-  });
-
-  it("bypasses the llm router for proposal revision turns and passes revision context", async () => {
+  it("bypasses turn decision for proposal revision turns and passes revision context", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
-    const { service, generateIntentRoute, generateAgentLoopStep } =
-      createOrchestratorWithCapturedProvider(contextPacket);
+    const { service, generateAgentLoopStep } = createOrchestratorWithCapturedProvider(contextPacket);
 
     await service.orchestrateCoachTurn({
       auth: {
@@ -594,7 +625,7 @@ describe("AgentOrchestratorService routing", () => {
       },
     });
 
-    expect(generateIntentRoute).not.toHaveBeenCalled();
+    expect(generateAgentLoopStep).toHaveBeenCalled();
     const providerRequest = generateAgentLoopStep.mock.calls[0]?.[0] as {
       coachingContext: Record<string, unknown>;
     };
@@ -604,7 +635,7 @@ describe("AgentOrchestratorService routing", () => {
     });
   });
 
-  it("bypasses the llm router for proposal explainer turns and passes proposal context", async () => {
+  it("bypasses turn decision for proposal explainer turns and passes proposal context", async () => {
     const contextPacket = createSlicePacket("general_chat", "proposal_explainer");
     const workoutProposal = {
       intent: "adapt_workout_plan" as const,
@@ -623,13 +654,11 @@ describe("AgentOrchestratorService routing", () => {
       reply: "I suggested this because your recovery signals were low.",
       proposals: [workoutProposal],
     });
-    const generateIntentRoute = vi.fn();
     const generateCoachResponse = vi.fn();
 
     vi.spyOn(coachProviderFactory, "createCoachAiProvider").mockReturnValue({
       generateAgentLoopStep,
       generateCoachResponse,
-      generateIntentRoute,
     } as never);
 
     const coachingContextService = {
@@ -641,21 +670,36 @@ describe("AgentOrchestratorService routing", () => {
     const agentToolRegistryService = {
       executeTool: vi.fn(),
     };
-    const {
-      capabilityRegistryService,
-      responseModePolicyService,
-      contextBudgetPolicyService,
-      systemPlannerService,
-      aiBehaviorConfigService,
-    } = createAiPolicyTestStack();
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const understandingDeps = createTurnDecisionTestDeps(
+      vi.fn().mockResolvedValue(
+        turnDecisionResultSchema.parse({
+          output: turnDecisionOutputSchema.parse({
+            signals: ["question"],
+            entities: [],
+            routeCapabilityHints: [{ capabilityId: "review_progress", confidence: 0.9 }],
+            complexity: "complex",
+            directCommand: { detected: false },
+            safetyFlags: [],
+            contextNeeds: ["weekly_progress"],
+            attachmentHints: [],
+            toolNeeds: [],
+            confidence: 0.9,
+          }),
+          source: "llm",
+          validationErrors: [],
+        }),
+      ),
+    );
     const service = new AgentOrchestratorService(
       coachingContextService as never,
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
-      agentToolRegistryService as never,
       systemPlannerService,
-      new ActionResolverService(),
+      createResponseModeExecutorService(agentToolRegistryService as never),
       aiBehaviorConfigService,
+      understandingDeps.messagePreprocessorService as never,
+      understandingDeps.turnDecisionService as never,
     );
 
     const result = await service.orchestrateCoachTurn({
@@ -678,7 +722,7 @@ describe("AgentOrchestratorService routing", () => {
       },
     });
 
-    expect(generateIntentRoute).not.toHaveBeenCalled();
+    expect(generateAgentLoopStep).toHaveBeenCalled();
     const providerRequest = generateAgentLoopStep.mock.calls[0]?.[0] as {
       coachingContext: Record<string, unknown>;
       agentMetadata: {
@@ -700,8 +744,7 @@ describe("AgentOrchestratorService routing", () => {
 
   it("routes habit proposal revisions through longevity_overview context", async () => {
     const contextPacket = createSlicePacket("longevity_overview", "longevity_overview");
-    const { service, generateIntentRoute, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
+    const { service, coachingContextService } = createOrchestratorWithCapturedProvider(contextPacket);
 
     await service.orchestrateCoachTurn({
       auth: {
@@ -737,7 +780,6 @@ describe("AgentOrchestratorService routing", () => {
       },
     });
 
-    expect(generateIntentRoute).not.toHaveBeenCalled();
     expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ intent: "longevity_overview", purpose: "longevity_overview" }),
@@ -754,10 +796,28 @@ describe("AgentOrchestratorService routing", () => {
     );
   });
 
-  it("bypasses the llm router for attachment turns and routes to attachment families", async () => {
+  it("routes attachment turns through turn decision instead of the llm router", async () => {
     const contextPacket = createSlicePacket("nutrition_adaptation", "adjust_nutrition");
-    const { service, generateIntentRoute, generateAgentLoopStep, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
+    const decide = vi.fn().mockResolvedValue(
+      turnDecisionResultSchema.parse({
+        output: turnDecisionOutputSchema.parse({
+          signals: ["attachment_reference"],
+          entities: [],
+          routeCapabilityHints: [{ capabilityId: "attachment_food_photo", confidence: 0.86 }],
+          complexity: "moderate",
+          directCommand: { detected: false },
+          safetyFlags: [],
+          contextNeeds: ["attachment_context"],
+          attachmentHints: [],
+          toolNeeds: [],
+          confidence: 0.84,
+        }),
+        source: "llm",
+        validationErrors: [],
+      }),
+    );
+    const { service, generateAgentLoopStep, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket, { decideImpl: decide });
 
     const result = await service.orchestrateCoachTurn({
       auth: {
@@ -779,13 +839,13 @@ describe("AgentOrchestratorService routing", () => {
       },
     });
 
-    expect(generateIntentRoute).not.toHaveBeenCalled();
+    expect(decide).toHaveBeenCalled();
     expect(generateAgentLoopStep).toHaveBeenCalledTimes(1);
     expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       expect.objectContaining({
-        routingMethod: "attachment_family",
+        routingMethod: "unified_turn_decision",
         catalogIntentId: "attachment_food_photo",
       }),
       expect.anything(),
@@ -804,14 +864,32 @@ describe("AgentOrchestratorService routing", () => {
       ],
     });
     expect(result.agentMetadata.catalogIntentId).toBe("attachment_food_photo");
-    expect(result.agentMetadata.routing?.routingMethod).toBe("attachment_family");
+    expect(result.agentMetadata.routing?.routingMethod).toBe("unified_turn_decision");
     expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(false);
   });
 
-  it("routes mixed attachment turns by precedence and bypasses the llm router", async () => {
+  it("routes mixed attachment turns through confident turn decision", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
-    const { service, generateIntentRoute, generateAgentLoopStep, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
+    const decide = vi.fn().mockResolvedValue(
+      turnDecisionResultSchema.parse({
+        output: turnDecisionOutputSchema.parse({
+          signals: ["attachment_reference"],
+          entities: [],
+          routeCapabilityHints: [{ capabilityId: "attachment_workout", confidence: 0.86 }],
+          complexity: "moderate",
+          directCommand: { detected: false },
+          safetyFlags: [],
+          contextNeeds: ["attachment_context"],
+          attachmentHints: [],
+          toolNeeds: [],
+          confidence: 0.84,
+        }),
+        source: "llm",
+        validationErrors: [],
+      }),
+    );
+    const { service, generateAgentLoopStep, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket, { decideImpl: decide });
 
     const result = await service.orchestrateCoachTurn({
       auth: {
@@ -839,23 +917,23 @@ describe("AgentOrchestratorService routing", () => {
       },
     });
 
-    expect(generateIntentRoute).not.toHaveBeenCalled();
+    expect(decide).toHaveBeenCalled();
     expect(generateAgentLoopStep).toHaveBeenCalledTimes(1);
     expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       expect.objectContaining({
-        routingMethod: "attachment_family",
+        routingMethod: "unified_turn_decision",
         catalogIntentId: "attachment_workout",
       }),
       expect.anything(),
     );
     expect(result.agentMetadata.catalogIntentId).toBe("attachment_workout");
-    expect(result.agentMetadata.routing?.routingMethod).toBe("attachment_family");
+    expect(result.agentMetadata.routing?.routingMethod).toBe("unified_turn_decision");
     expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(false);
   });
 
-  it("passes prepared attachment proposal summaries into coaching context", async () => {
+  it("passes attachment context summaries without prepared proposals", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const { service, generateAgentLoopStep } = createOrchestratorWithCapturedProvider(
       contextPacket,
@@ -878,32 +956,36 @@ describe("AgentOrchestratorService routing", () => {
             recognition: { category: "workout_attachment", sessionLabel: "Volleyball training" },
           },
         ],
-        preparedProposals: [
+        contextSummaries: [
           {
-            intent: "create_today_checklist",
-            targetDomain: "today",
-            title: "Add today's workout to Today",
+            attachmentRefId: "c1000004-0000-4000-8000-000000000004",
+            category: "workout_attachment",
+            status: "ready",
+            routingCapabilityId: "attachment_workout",
+            contextHint: null,
+            recognitionPresent: true,
           },
         ],
       },
     });
 
     const providerRequest = generateAgentLoopStep.mock.calls[0]?.[0] as {
-      coachingContext: { attachmentTurn?: { preparedProposals?: unknown[] } };
+      coachingContext: { attachmentTurn?: Record<string, unknown> };
     };
 
-    expect(providerRequest.coachingContext.attachmentTurn?.preparedProposals).toEqual([
-      {
-        intent: "create_today_checklist",
-        targetDomain: "today",
-        title: "Add today's workout to Today",
-      },
-    ]);
+    expect(providerRequest.coachingContext.attachmentTurn).toMatchObject({
+      attachments: [
+        expect.objectContaining({
+          attachmentRefId: "c1000004-0000-4000-8000-000000000004",
+        }),
+      ],
+    });
+    expect(providerRequest.coachingContext.attachmentTurn).not.toHaveProperty("preparedProposals");
   });
 
-  it("passes intent-specific agentMetadata to the generation loop after llm catalog routing", async () => {
+  it("passes intent-specific agentMetadata to the generation loop after turn decision routing", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
-    const { service, generateIntentRoute, generateAgentLoopStep, coachingContextService } =
+    const { service, generateAgentLoopStep, coachingContextService } =
       createOrchestratorWithCapturedProvider(contextPacket);
     const capabilityConfig = getCapabilityConfig("adjust_workout");
 
@@ -917,12 +999,11 @@ describe("AgentOrchestratorService routing", () => {
       recentMessages: [],
     });
 
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
     expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ intent: "adjust_workout", purpose: "workout_adaptation" }),
       expect.objectContaining({
-        routingMethod: "llm_router",
+        routingMethod: "unified_turn_decision",
         catalogIntentId: "adjust_workout",
       }),
       expect.anything(),
@@ -987,11 +1068,12 @@ describe("AgentOrchestratorService routing", () => {
     });
   });
 
-  it("serializes router catalog through the capability registry", async () => {
+  it("invokes turn decision with registry-backed catalog hints", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
-    const { service, generateIntentRoute, capabilityRegistryService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
-    const serializeForRouter = vi.spyOn(capabilityRegistryService, "serializeForRouter");
+    const decide = vi.fn().mockResolvedValue(createConfidentTurnDecisionResultForTests());
+    const { service } = createOrchestratorWithCapturedProvider(contextPacket, {
+      decideImpl: decide,
+    });
 
     await service.orchestrateCoachTurn({
       auth: {
@@ -1003,10 +1085,9 @@ describe("AgentOrchestratorService routing", () => {
       recentMessages: [],
     });
 
-    expect(serializeForRouter).toHaveBeenCalledTimes(1);
-    expect(generateIntentRoute).toHaveBeenCalledWith(
+    expect(decide).toHaveBeenCalledWith(
       expect.objectContaining({
-        intentCatalog: capabilityRegistryService.serializeForRouter(),
+        recentMessages: [],
       }),
     );
   });
@@ -1038,19 +1119,17 @@ describe("AgentOrchestratorService routing", () => {
     });
   });
 
-  it("uses llm router when all attachments are unclassified instead of attachment-family routing", async () => {
+  it("falls back to general when unclassified attachments produce low-confidence turn decision", async () => {
     const contextPacket = createSlicePacket("general_chat", "general");
-    const { service, generateIntentRoute, generateAgentLoopStep, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
-
-    generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "general",
-      confidence: 0.72,
-      routingMethod: "llm_router",
-      requiredContextSlices: [{ type: "general_chat", depth: "small", timeRange: "7d" }],
-      safetyFlags: [],
-      expectedResponseMode: "advice_only",
-    });
+    const decide = vi.fn().mockResolvedValue(
+      createConfidentTurnDecisionResultForTests({
+        capabilityId: "general",
+        confidence: 0.35,
+        source: "fallback",
+      }),
+    );
+    const { service, generateAgentLoopStep, coachingContextService } =
+      createOrchestratorWithCapturedProvider(contextPacket, { decideImpl: decide });
 
     const result = await service.orchestrateCoachTurn({
       auth: {
@@ -1072,51 +1151,20 @@ describe("AgentOrchestratorService routing", () => {
       },
     });
 
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
+    expect(decide).toHaveBeenCalledTimes(1);
     expect(generateAgentLoopStep).toHaveBeenCalledTimes(1);
     expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       expect.objectContaining({
-        routingMethod: "llm_router",
+        routingMethod: "unified_turn_decision",
         catalogIntentId: "general",
       }),
       expect.anything(),
     );
-    expect(result.agentMetadata.routing?.routingMethod).toBe("llm_router");
-    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(true);
+    expect(result.agentMetadata.routing?.routingMethod).toBe("unified_turn_decision");
+    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(false);
     expect(result.agentMetadata.catalogIntentId).toBe("general");
-  });
-
-  it("falls back to the uncertain rule route when llm router provider throws", async () => {
-    const contextPacket = createSlicePacket("general_chat", "general");
-    const { service, generateIntentRoute, coachingContextService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
-
-    generateIntentRoute.mockRejectedValue(new Error("OpenAI intent router request failed."));
-
-    const result = await service.orchestrateCoachTurn({
-      auth: {
-        clerkUserId: "clerk-user",
-        email: "test@example.com",
-        displayName: "Test",
-      },
-      userMessage: "I feel completely off today. What should I do?",
-      recentMessages: [],
-    });
-
-    expect(generateIntentRoute).toHaveBeenCalledTimes(1);
-    expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        routingMethod: "llm_router",
-        isConfident: false,
-        confidence: 0.35,
-      }),
-      expect.anything(),
-    );
-    expect(result.agentMetadata.routing?.llmRouterInvoked).toBe(true);
   });
 });
 
@@ -1214,17 +1262,12 @@ describe("AgentOrchestratorService agent loop", () => {
 
   it("rejects disallowed tool requests without executing tools and returns a safe fallback", async () => {
     const contextPacket = createSlicePacket("general_chat", "general");
-    const { service, generateAgentLoopStep, generateIntentRoute, agentToolRegistryService } =
-      createOrchestratorWithCapturedProvider(contextPacket);
-
-    generateIntentRoute.mockResolvedValue({
-      catalogIntentId: "general",
-      confidence: 0.82,
-      routingMethod: "llm_router",
-      requiredContextSlices: [{ type: "general_chat", depth: "small", timeRange: "7d" }],
-      safetyFlags: [],
-      expectedResponseMode: "advice_only",
-    });
+    const { service, generateAgentLoopStep, agentToolRegistryService } =
+      createOrchestratorWithCapturedProvider(contextPacket, {
+        decideImpl: vi.fn().mockResolvedValue(
+          createConfidentTurnDecisionResultForTests({ capabilityId: "general" }),
+        ),
+      });
 
     const executeTool = vi.fn();
     Object.assign(agentToolRegistryService, { executeTool });
@@ -1279,7 +1322,6 @@ describe("AgentOrchestratorService provider failures", () => {
         generateAgentLoopStep: vi
           .fn()
           .mockRejectedValue(new Error("OpenAI coach provider request failed.")),
-        generateIntentRoute: vi.fn(),
         generateCoachResponse: vi.fn(),
       },
     });
@@ -1302,6 +1344,46 @@ describe("AgentOrchestratorService provider failures", () => {
       "OpenAI coach provider request failed.",
     );
     expect(result.parseErrors).toContain("OpenAI coach provider request failed.");
+  });
+
+  it("returns safe fallback without proposals when provider throws on attachment turns", async () => {
+    vi.spyOn(coachProviderFactory, "resolveAiCoachProviderMode").mockReturnValue("openai");
+
+    const contextPacket = createSlicePacket("nutrition_adaptation", "adjust_nutrition");
+    const { service } = createOrchestratorWithCapturedProvider(contextPacket);
+
+    Object.assign(service, {
+      provider: {
+        generateAgentLoopStep: vi
+          .fn()
+          .mockRejectedValue(new Error("OpenAI coach provider request failed.")),
+        generateCoachResponse: vi.fn(),
+      },
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Log this meal from the photo",
+      recentMessages: [],
+      attachmentTurn: {
+        attachments: [
+          {
+            attachmentRefId: "a1000001-0000-4000-8000-000000000002",
+            category: "food_photo",
+            status: "recognized",
+          },
+        ],
+      },
+    });
+
+    expect(result.output.reply).toBe(SAFE_FALLBACK_REPLY);
+    expect(result.output.proposals).toEqual([]);
+    expect(result.agentMetadata.safety.status).toBe("provider_error");
+    expect(result.agentMetadata.unifiedTurnDecision?.ran).toBe(true);
   });
 });
 
@@ -1330,14 +1412,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       proposals: [],
     });
     const generateCoachResponse = vi.fn();
-    const generateIntentRoute = vi.fn().mockResolvedValue({
-      catalogIntentId: "review_progress",
-      confidence: 0.9,
-      routingMethod: "llm_router",
-      requiredContextSlices: [{ type: "weekly_review", depth: "large", timeRange: "30d" }],
-      safetyFlags: [],
-      expectedResponseMode: "recommendation_with_optional_proposal",
-    });
 
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -1348,25 +1422,40 @@ describe("AgentOrchestratorService compression review flow", () => {
     const agentToolRegistryService = {
       executeTool: vi.fn(),
     };
-    const {
-      capabilityRegistryService,
-      responseModePolicyService,
-      contextBudgetPolicyService,
-      systemPlannerService,
-      aiBehaviorConfigService,
-    } = createAiPolicyTestStack();
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const understandingDeps = createTurnDecisionTestDeps(
+      vi.fn().mockResolvedValue(
+        turnDecisionResultSchema.parse({
+          output: turnDecisionOutputSchema.parse({
+            signals: ["question"],
+            entities: [],
+            routeCapabilityHints: [{ capabilityId: "review_progress", confidence: 0.9 }],
+            complexity: "complex",
+            directCommand: { detected: false },
+            safetyFlags: [],
+            contextNeeds: ["weekly_progress"],
+            attachmentHints: [],
+            toolNeeds: [],
+            confidence: 0.9,
+          }),
+          source: "llm",
+          validationErrors: [],
+        }),
+      ),
+    );
     const service = new AgentOrchestratorService(
       coachingContextService as never,
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
-      agentToolRegistryService as never,
       systemPlannerService,
-      new ActionResolverService(),
+      createResponseModeExecutorService(agentToolRegistryService as never),
       aiBehaviorConfigService,
+      understandingDeps.messagePreprocessorService as never,
+      understandingDeps.turnDecisionService as never,
     );
 
     Object.assign(service, {
-      provider: { generateCoachResponse, generateIntentRoute, generateAgentLoopStep },
+      provider: { generateCoachResponse, generateAgentLoopStep },
     });
 
     await service.orchestrateCoachTurn({
@@ -1430,14 +1519,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       proposals: [],
     });
     const generateCoachResponse = vi.fn();
-    const generateIntentRoute = vi.fn().mockResolvedValue({
-      catalogIntentId: "review_progress",
-      confidence: 0.9,
-      routingMethod: "llm_router",
-      requiredContextSlices: [{ type: "weekly_review", depth: "large", timeRange: "30d" }],
-      safetyFlags: [],
-      expectedResponseMode: "recommendation_with_optional_proposal",
-    });
 
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -1448,28 +1529,43 @@ describe("AgentOrchestratorService compression review flow", () => {
     const agentToolRegistryService = {
       executeTool: vi.fn(),
     };
-    const {
-      capabilityRegistryService,
-      responseModePolicyService,
-      contextBudgetPolicyService,
-      systemPlannerService,
-      aiBehaviorConfigService,
-    } = createAiPolicyTestStack();
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
     const failingProvider = {
       compress: vi.fn().mockRejectedValue(new Error("Primary compression provider unavailable")),
     };
+    const understandingDeps = createTurnDecisionTestDeps(
+      vi.fn().mockResolvedValue(
+        turnDecisionResultSchema.parse({
+          output: turnDecisionOutputSchema.parse({
+            signals: ["question"],
+            entities: [],
+            routeCapabilityHints: [{ capabilityId: "review_progress", confidence: 0.9 }],
+            complexity: "complex",
+            directCommand: { detected: false },
+            safetyFlags: [],
+            contextNeeds: ["weekly_progress"],
+            attachmentHints: [],
+            toolNeeds: [],
+            confidence: 0.9,
+          }),
+          source: "llm",
+          validationErrors: [],
+        }),
+      ),
+    );
     const service = new AgentOrchestratorService(
       coachingContextService as never,
       new ContextCompressionService(failingProvider as never, new StubContextCompressionProvider()),
       new ContextExpansionPolicyService(),
-      agentToolRegistryService as never,
       systemPlannerService,
-      new ActionResolverService(),
+      createResponseModeExecutorService(agentToolRegistryService as never),
       aiBehaviorConfigService,
+      understandingDeps.messagePreprocessorService as never,
+      understandingDeps.turnDecisionService as never,
     );
 
     Object.assign(service, {
-      provider: { generateCoachResponse, generateIntentRoute, generateAgentLoopStep },
+      provider: { generateCoachResponse, generateAgentLoopStep },
     });
 
     await service.orchestrateCoachTurn({
@@ -1523,4 +1619,713 @@ describe("AgentOrchestratorService compression review flow", () => {
       (loopRequest.coachingContext.agentContext as Record<string, unknown>).contextCompressionApplied,
     ).toBeUndefined();
   });
+});
+
+describe("AgentOrchestratorService turn decision integration", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("runs turn decision before planning for ambiguous text and records bounded metadata", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const decide = vi.fn().mockResolvedValue(createConfidentTurnDecisionResultForTests());
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "Here is a wellness-focused response you can review.",
+      proposals: [],
+    });
+
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Can you adapt my workout plan this week?",
+      recentMessages: [],
+    });
+
+    expect(decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachmentContextSummaries: [],
+        recentMessages: [],
+      }),
+    );
+    expect(result.agentMetadata.unifiedTurnDecision).toMatchObject({
+      ran: true,
+      source: "llm",
+    });
+    expect(result.agentMetadata.routing?.unifiedTurnDecisionInvoked).toBe(true);
+    expect(result.agentMetadata.routing?.routingMethod).toBe("unified_turn_decision");
+  });
+
+  it("skips turn decision for proposal explainer turns", async () => {
+    const contextPacket = createSlicePacket("general_chat", "proposal_explainer");
+    const decide = vi.fn();
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "Here is a wellness-focused response you can review.",
+      proposals: [],
+    });
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Why this proposal?",
+      recentMessages: [],
+      proposalExplainer: {
+        proposalId: "a1000001-0000-4000-8000-000000000001",
+        intent: "adapt_workout_plan",
+        targetDomain: "workout",
+        title: "Lighten leg day",
+        reason: "Recent poor sleep suggested a lighter session.",
+        status: "pending",
+        evidenceSummaries: [],
+        createdAt: "2026-05-27T10:00:00.000Z",
+      },
+    });
+
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("runs turn decision for classified attachment turns", async () => {
+    const contextPacket = createSlicePacket("nutrition_adaptation", "general");
+    const decide = vi.fn().mockResolvedValue(createConfidentTurnDecisionResultForTests());
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "Here is a wellness-focused response you can review.",
+      proposals: [],
+    });
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Shared attachment(s) for coaching review.",
+      recentMessages: [],
+      attachmentTurn: {
+        attachments: [
+          {
+            attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+            category: "food_photo",
+            status: "ready",
+          },
+        ],
+      },
+    });
+
+    expect(decide).toHaveBeenCalled();
+  });
+
+  it("skips turn decision for proposal revision turns", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const decide = vi.fn();
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "Here is a revised proposal draft for review.",
+      proposals: [],
+    });
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Please revise the proposal with these changes: keep one strength exercise.",
+      recentMessages: [],
+      proposalRevision: {
+        supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+        modificationFeedback: "Keep one strength exercise.",
+        originalProposal: {
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Adjust today's workout",
+          reason: "Recovery signals are low.",
+          proposedChanges: {
+            title: "Strength base",
+            summary: "Lighter session today.",
+            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+            notes: [],
+          },
+        },
+      },
+    });
+
+    expect(decide).not.toHaveBeenCalled();
+    expect(generateAgentLoopStep).toHaveBeenCalled();
+  });
+
+  it("invokes turn decision before planning and skips coach llm for direct read plans", async () => {
+    const contextPacket = createSlicePacket("general_chat", "general");
+    const decide = vi
+      .fn()
+      .mockResolvedValue(createConfidentTurnDecisionResultForTests({ source: "fallback" }));
+    const generateAgentLoopStep = vi.fn();
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "What is today?",
+      recentMessages: [],
+    });
+
+    expect(decide).toHaveBeenCalled();
+    expect(generateAgentLoopStep).not.toHaveBeenCalled();
+    expect(result.agentMetadata.responseModeExecution).toMatchObject({
+      executorMode: "deterministic_read",
+      llmInvoked: false,
+      delegatedToPreAiGate: true,
+    });
+    expect(result.agentMetadata.unifiedTurnDecision?.ran).toBe(true);
+  });
+
+  it("passes attachment context summaries into coach context when turn decision runs", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const decide = vi
+      .fn()
+      .mockResolvedValue(createConfidentTurnDecisionResultForTests({ source: "fallback" }));
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "Here is a wellness-focused response you can review.",
+      proposals: [],
+    });
+    const contextSummaries = [
+      {
+        attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+        category: "unclassified" as const,
+        status: "ready",
+        routingCapabilityId: null,
+        contextHint: "Awaiting classification.",
+        recognitionPresent: false,
+      },
+    ];
+
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Please review this upload",
+      recentMessages: [],
+      attachmentTurn: {
+        attachments: [
+          {
+            attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+            category: "unclassified",
+            status: "ready",
+          },
+        ],
+        contextSummaries,
+      },
+    });
+
+    expect(decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachmentContextSummaries: contextSummaries,
+      }),
+    );
+
+    const loopRequest = generateAgentLoopStep.mock.calls[0]?.[0] as {
+      coachingContext: Record<string, unknown>;
+    };
+
+    expect(loopRequest.coachingContext.attachmentTurn).toMatchObject({
+      contextSummaries,
+    });
+  });
+
+  it("falls back to general when turn decision confidence is low", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const decide = vi
+      .fn()
+      .mockResolvedValue(createConfidentTurnDecisionResultForTests({ source: "fallback" }));
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "Here is a wellness-focused response you can review.",
+      proposals: [],
+    });
+
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "I feel completely off today. What should I do?",
+      recentMessages: [],
+    });
+
+    expect(decide).toHaveBeenCalled();
+    expect(result.agentMetadata.routing?.routingMethod).toBe("unified_turn_decision");
+    expect(result.agentMetadata.catalogIntentId).toBe("general");
+    expect(result.agentMetadata.unifiedTurnDecision?.source).toBe("fallback");
+  });
+
+  it("uses turn decision for classified attachment turns", async () => {
+    const contextPacket = createSlicePacket("nutrition_adaptation", "general");
+    const decide = vi.fn().mockResolvedValue(
+      turnDecisionResultSchema.parse({
+        output: turnDecisionOutputSchema.parse({
+          signals: ["attachment_reference"],
+          entities: [],
+          routeCapabilityHints: [
+            { capabilityId: "attachment_food_photo", confidence: 0.86 },
+          ],
+          complexity: "moderate",
+          directCommand: { detected: false },
+          safetyFlags: [],
+          contextNeeds: ["attachment_context"],
+          attachmentHints: [],
+          toolNeeds: [],
+          confidence: 0.84,
+        }),
+        source: "llm",
+        validationErrors: [],
+      }),
+    );
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "I reviewed your meal photo.",
+      proposals: [],
+    });
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Log this meal",
+      recentMessages: [],
+      attachmentTurn: {
+        attachments: [
+          {
+            attachmentRefId: "a1000001-0000-4000-8000-000000000002",
+            category: "food_photo",
+            status: "recognized",
+          },
+        ],
+        contextSummaries: [
+          {
+            attachmentRefId: "a1000001-0000-4000-8000-000000000002",
+            category: "food_photo",
+            status: "recognized",
+            routingCapabilityId: "attachment_food_photo",
+            contextHint: "Lunch",
+            recognitionPresent: true,
+          },
+        ],
+      },
+    });
+
+    expect(decide).toHaveBeenCalled();
+    expect(result.agentMetadata.unifiedTurnDecision?.ran).toBe(true);
+    expect(result.agentMetadata.routing?.unifiedTurnDecisionInvoked).toBe(true);
+    expect(result.agentMetadata.routing?.routingMethod).toBe("unified_turn_decision");
+  });
+
+  it("uses turn decision for normal text turns", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const decide = vi.fn().mockResolvedValue(createConfidentTurnDecisionResultForTests());
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "Here is a wellness-focused response you can review.",
+      proposals: [],
+    });
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(decide);
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Can you adapt my workout plan this week?",
+      recentMessages: [],
+    });
+
+    expect(decide).toHaveBeenCalled();
+    expect(result.agentMetadata.unifiedTurnDecision?.ran).toBe(true);
+    expect(result.agentMetadata.routing?.routingMethod).toBe("unified_turn_decision");
+    expect(result.agentMetadata.catalogIntentId).toBe("adjust_workout");
+  });
+});
+
+describe("AgentOrchestratorService response mode execution", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("records llm invocation metadata for normal text turns", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+    const { service, generateAgentLoopStep } = createOrchestratorWithCapturedProvider(contextPacket);
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Can you adapt my workout plan this week?",
+      recentMessages: [],
+    });
+
+    expect(generateAgentLoopStep).toHaveBeenCalled();
+    expect(result.agentMetadata.responseModeExecution).toMatchObject({
+      llmInvoked: true,
+      expectedResponseMode: "recommendation_with_optional_proposal",
+    });
+    expect(result.agentMetadata.responseModeExecution?.executorMode).toBeTruthy();
+  });
+
+  it("still invokes llm for proposal explainer turns routed before orchestrator", async () => {
+    const contextPacket = createSlicePacket("general_chat", "proposal_explainer");
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "final_answer",
+      reply: "This proposal adjusts your workout volume.",
+      proposals: [],
+    });
+    const coachingContextService = {
+      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+        buildAgentPromptContextFromPacket(packet),
+      ),
+    };
+    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+    const turnDecisionDeps = createTurnDecisionTestDeps(vi.fn());
+    const service = new AgentOrchestratorService(
+      coachingContextService as never,
+      new ContextCompressionService(),
+      new ContextExpansionPolicyService(),
+      systemPlannerService,
+      createResponseModeExecutorService({ executeTool: vi.fn() }),
+      aiBehaviorConfigService,
+      turnDecisionDeps.messagePreprocessorService as never,
+      turnDecisionDeps.turnDecisionService as never,
+    );
+
+    Object.assign(service, {
+      provider: { generateAgentLoopStep },
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: {
+        clerkUserId: "clerk-user",
+        email: "test@example.com",
+        displayName: "Test",
+      },
+      userMessage: "Why this proposal?",
+      recentMessages: [],
+      proposalExplainer: buildProposalExplainerTurnContext({
+        proposalId: "a1000001-0000-4000-8000-000000000001",
+        intent: "adapt_workout_plan",
+        targetDomain: "workout",
+        title: "Adjust plan",
+        reason: "Recent fatigue suggested a lighter week.",
+        status: "pending",
+        evidenceRefs: [{ domain: "wellbeing", label: "Fatigue reported" }],
+        createdAt: new Date().toISOString(),
+      }),
+    });
+
+    expect(generateAgentLoopStep).toHaveBeenCalled();
+    expect(result.agentMetadata.responseModeExecution).toMatchObject({
+      executorMode: "single_llm",
+      llmInvoked: true,
+    });
+    expect(result.output.proposals).toEqual([]);
+  });
+
+  it.each([
+    ["workout adaptation", "Can you adapt my workout plan this week?", "proposal_flow", true],
+    ["direct read", "What is today?", "deterministic_read", false],
+    ["proposal explainer", "Why this proposal?", "single_llm", true],
+  ] as const)(
+    "records explicit executorMode and llmInvoked for %s turns",
+    async (_label, userMessage, expectedExecutorMode, expectsCoachLlm) => {
+      const contextPacket =
+        expectedExecutorMode === "single_llm"
+          ? createSlicePacket("general_chat", "proposal_explainer")
+          : expectedExecutorMode === "deterministic_read"
+            ? createSlicePacket("general_chat", "general")
+            : createSlicePacket("workout_adaptation", "adjust_workout");
+      const generateAgentLoopStep = vi.fn().mockResolvedValue({
+        kind: "final_answer",
+        reply: "Here is a wellness-focused response you can review.",
+        proposals: [],
+      });
+      const coachingContextService = {
+        buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+        toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
+          buildAgentPromptContextFromPacket(packet),
+        ),
+      };
+      const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+      const turnDecisionDeps = createTurnDecisionTestDeps(
+        vi.fn().mockResolvedValue(
+          expectedExecutorMode === "proposal_flow"
+            ? createConfidentTurnDecisionResultForTests()
+            : expectedExecutorMode === "deterministic_read"
+              ? createConfidentTurnDecisionResultForTests({ capabilityId: "general", source: "fallback", confidence: 0.35 })
+              : createConfidentTurnDecisionResultForTests({ source: "fallback" }),
+        ),
+      );
+      const service = new AgentOrchestratorService(
+        coachingContextService as never,
+        new ContextCompressionService(),
+        new ContextExpansionPolicyService(),
+        systemPlannerService,
+        createResponseModeExecutorService({ executeTool: vi.fn() }),
+        aiBehaviorConfigService,
+        turnDecisionDeps.messagePreprocessorService as never,
+        turnDecisionDeps.turnDecisionService as never,
+      );
+
+      Object.assign(service, {
+        provider: { generateAgentLoopStep },
+      });
+
+      const result = await service.orchestrateCoachTurn({
+        auth: {
+          clerkUserId: "clerk-user",
+          email: "test@example.com",
+          displayName: "Test",
+        },
+        userMessage,
+        recentMessages: [],
+        ...(expectedExecutorMode === "single_llm"
+          ? {
+              proposalExplainer: buildProposalExplainerTurnContext({
+                proposalId: "a1000001-0000-4000-8000-000000000001",
+                intent: "adapt_workout_plan",
+                targetDomain: "workout",
+                title: "Adjust plan",
+                reason: "Recent fatigue suggested a lighter week.",
+                status: "pending",
+                evidenceRefs: [{ domain: "wellbeing", label: "Fatigue reported" }],
+                createdAt: new Date().toISOString(),
+              }),
+            }
+          : {}),
+      });
+
+      expect(result.agentMetadata.responseModeExecution?.executorMode).toBe(expectedExecutorMode);
+      expect(result.agentMetadata.responseModeExecution?.llmInvoked).toBe(expectsCoachLlm);
+      if (expectsCoachLlm) {
+        expect(generateAgentLoopStep).toHaveBeenCalled();
+      } else {
+        expect(generateAgentLoopStep).not.toHaveBeenCalled();
+      }
+    },
+  );
 });

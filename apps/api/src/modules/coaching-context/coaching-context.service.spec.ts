@@ -530,7 +530,7 @@ describe("CoachingContextService", () => {
     expect(snapshot.activeHabitPlanSummary).not.toBeNull();
   });
 
-  it("builds bounded multi-slice context from llm router output", async () => {
+  it("builds bounded multi-slice context from unified turn decision routing", async () => {
     const service = createCoachingContextService();
 
     const packet = await service.buildAgentContext(
@@ -552,7 +552,7 @@ describe("CoachingContextService", () => {
         depth: "medium",
         timeRange: "14d",
         includeDocuments: false,
-        routingMethod: "llm_router",
+        routingMethod: "unified_turn_decision",
         requiredContextSlices: [
           { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
           { type: "daily_checkin", depth: "small", timeRange: "7d" },
@@ -565,8 +565,8 @@ describe("CoachingContextService", () => {
 
     expect(packet.supplementarySlices).toHaveLength(2);
     expect(packet.routing).toMatchObject({
-      routingMethod: "llm_router",
-      llmRouterInvoked: true,
+      routingMethod: "unified_turn_decision",
+      llmRouterInvoked: false,
       contextSliceCount: 3,
       safetyFlags: ["hunger", "fatigue"],
     });
@@ -597,7 +597,7 @@ describe("CoachingContextService", () => {
         depth: "large",
         timeRange: "90d",
         includeDocuments: true,
-        routingMethod: "llm_router",
+        routingMethod: "unified_turn_decision",
         requiredContextSlices: [
           {
             type: "health_context",
@@ -651,7 +651,7 @@ describe("CoachingContextService", () => {
         depth: "large",
         timeRange: "30d",
         includeDocuments: false,
-        routingMethod: "llm_router",
+        routingMethod: "unified_turn_decision",
         requiredContextSlices: [{ type: "general_chat", depth: "large", timeRange: "30d" }],
         safetyFlags: [],
         expectedResponseMode: "advice_only",

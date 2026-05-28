@@ -16,8 +16,6 @@ import { SystemPlannerService } from "../ai/system-planner.service.js";
 import { TodayService } from "../today/today.service.js";
 import { UsersService } from "../users/users.service.js";
 import {
-  DIRECT_PATH_MULTIPLE_PENDING_WORKOUTS_MESSAGE,
-  DIRECT_PATH_NO_PENDING_WORKOUT_MESSAGE,
   formatTodaySummaryReadMessage,
   formatWorkoutMarkedDoneMessage,
 } from "./direct-chat-path-formatters.js";
@@ -52,7 +50,8 @@ export class DirectChatPathService {
       return null;
     }
 
-    const outcome = await this.executeCandidate(input.auth, candidate);
+    const replyTemplates = this.aiBehaviorConfigService.getDirectPaths().replyTemplates;
+    const outcome = await this.executeCandidate(input.auth, candidate, replyTemplates);
 
     return {
       reply: outcome.message ?? "",
@@ -86,12 +85,13 @@ export class DirectChatPathService {
   private async executeCandidate(
     auth: ClerkAuthContext,
     candidate: DirectChatPathCandidate,
+    replyTemplates: ReturnType<AiBehaviorConfigService["getDirectPaths"]>["replyTemplates"],
   ): Promise<DirectChatPathOutcome> {
     switch (candidate.kind) {
       case "today_summary_read":
-        return this.executeTodaySummaryRead(auth, candidate.kind);
+        return this.executeTodaySummaryRead(auth, candidate.kind, replyTemplates);
       case "mark_today_workout_done":
-        return this.executeMarkTodayWorkoutDone(auth, candidate.kind);
+        return this.executeMarkTodayWorkoutDone(auth, candidate.kind, replyTemplates);
       default: {
         const _exhaustive: never = candidate.kind;
         return _exhaustive;
@@ -102,6 +102,7 @@ export class DirectChatPathService {
   private async executeTodaySummaryRead(
     auth: ClerkAuthContext,
     kind: DirectChatPathCandidate["kind"],
+    replyTemplates: ReturnType<AiBehaviorConfigService["getDirectPaths"]>["replyTemplates"],
   ): Promise<DirectChatPathOutcome> {
     const user = await this.usersService.resolveFromAuth(auth);
     const todayIsoDate = getTodayIsoDateInTimezone(user.timezone);
@@ -111,7 +112,7 @@ export class DirectChatPathService {
     return {
       kind,
       status,
-      message: formatTodaySummaryReadMessage(day, todayIsoDate),
+      message: formatTodaySummaryReadMessage(day, todayIsoDate, replyTemplates),
       refreshHints: this.resolveRefreshHints(kind, status),
     };
   }
@@ -119,6 +120,7 @@ export class DirectChatPathService {
   private async executeMarkTodayWorkoutDone(
     auth: ClerkAuthContext,
     kind: DirectChatPathCandidate["kind"],
+    replyTemplates: ReturnType<AiBehaviorConfigService["getDirectPaths"]>["replyTemplates"],
   ): Promise<DirectChatPathOutcome> {
     const user = await this.usersService.resolveFromAuth(auth);
     const todayIsoDate = getTodayIsoDateInTimezone(user.timezone);
@@ -129,7 +131,7 @@ export class DirectChatPathService {
       return {
         kind,
         status: "clarification_required",
-        message: DIRECT_PATH_NO_PENDING_WORKOUT_MESSAGE,
+        message: replyTemplates.markWorkoutDone.noPendingWorkoutMessage,
         refreshHints: [],
       };
     }
@@ -138,7 +140,7 @@ export class DirectChatPathService {
       return {
         kind,
         status: "clarification_required",
-        message: DIRECT_PATH_MULTIPLE_PENDING_WORKOUTS_MESSAGE,
+        message: replyTemplates.markWorkoutDone.multiplePendingWorkoutsMessage,
         refreshHints: [],
       };
     }
@@ -152,7 +154,7 @@ export class DirectChatPathService {
     return {
       kind,
       status,
-      message: formatWorkoutMarkedDoneMessage(targetItem.label),
+      message: formatWorkoutMarkedDoneMessage(targetItem.label, replyTemplates),
       refreshHints: this.resolveRefreshHints(kind, status),
     };
   }

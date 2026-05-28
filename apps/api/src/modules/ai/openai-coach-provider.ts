@@ -2,23 +2,26 @@ import type {
   CoachAiProvider,
   CoachAiLoopRequest,
   CoachAiRequest,
-  IntentRouterRequest,
 } from "@health/ai";
 import type {
   AgentLoopOutputInput,
   AiStructuredOutputInput,
   CompiledPromptTemplates,
-  LlmIntentRouterOutputInput,
+  MessageUnderstandingOutputInput,
+  MessageUnderstandingRequest,
+  TurnDecisionOutputInput,
+  TurnDecisionRequest,
 } from "@health/types";
 import {
   agentLoopOutputSchema,
   aiStructuredOutputSchema,
   getDefaultCompiledPromptTemplates,
-  llmIntentRouterOutputSchema,
-  normalizeContextSlicePlan,
-  serializeIntentCatalogForRouter,
+  mapTurnDecisionOutputFromMessageUnderstanding,
+  messageUnderstandingOutputSchema,
   validateAgentLoopOutputShape,
-  validateLlmRouterOutputShape,
+  turnDecisionOutputSchema,
+  validateMessageUnderstandingOutputShape,
+  validateTurnDecisionOutputShape,
 } from "@health/types";
 
 export class OpenAiCoachProviderMissingKeyError extends Error {
@@ -58,27 +61,52 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     this.promptTemplates = options.promptTemplates ?? getDefaultCompiledPromptTemplates();
   }
 
-  async generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput> {
-    const systemPrompt = buildOpenAiIntentRouterPrompt(request, this.promptTemplates);
+  async generateTurnDecision(request: TurnDecisionRequest): Promise<TurnDecisionOutputInput> {
+    const systemPrompt = buildOpenAiTurnDecisionPrompt(request, this.promptTemplates);
     const payload = await this.requestJsonCompletion(
       systemPrompt,
-      request.userMessage,
-      request.recentMessages,
+      request.normalizedText,
+      request.recentMessageHints,
     );
-    const shapeErrors = validateLlmRouterOutputShape(payload);
 
-    if (shapeErrors.length > 0) {
+    const turnDecisionErrors = validateTurnDecisionOutputShape(payload);
+
+    if (turnDecisionErrors.length === 0) {
+      return turnDecisionOutputSchema.parse(payload);
+    }
+
+    const messageUnderstandingErrors = validateMessageUnderstandingOutputShape(payload);
+
+    if (messageUnderstandingErrors.length > 0) {
       throw new Error(
-        `OpenAI intent router returned invalid structured output: ${shapeErrors.join(" ")}`,
+        `OpenAI turn decision returned invalid structured output: ${turnDecisionErrors.join(" ")}`,
       );
     }
 
-    const validated = llmIntentRouterOutputSchema.parse(payload);
+    return mapTurnDecisionOutputFromMessageUnderstanding(
+      messageUnderstandingOutputSchema.parse(payload),
+      request,
+    );
+  }
 
-    return {
-      ...validated,
-      requiredContextSlices: normalizeContextSlicePlan(validated.requiredContextSlices),
-    };
+  async generateMessageUnderstanding(
+    request: MessageUnderstandingRequest,
+  ): Promise<MessageUnderstandingOutputInput> {
+    const systemPrompt = buildOpenAiMessageUnderstandingPrompt(request, this.promptTemplates);
+    const payload = await this.requestJsonCompletion(
+      systemPrompt,
+      request.normalizedText,
+      request.recentMessageHints,
+    );
+    const shapeErrors = validateMessageUnderstandingOutputShape(payload);
+
+    if (shapeErrors.length > 0) {
+      throw new Error(
+        `OpenAI message understanding returned invalid structured output: ${shapeErrors.join(" ")}`,
+      );
+    }
+
+    return messageUnderstandingOutputSchema.parse(payload);
   }
 
   async generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput> {
@@ -113,7 +141,10 @@ export class OpenAiCoachProvider implements CoachAiProvider {
   private async requestJsonCompletion(
     systemPrompt: string,
     userMessage: string,
-    recentMessages: IntentRouterRequest["recentMessages"],
+    recentMessages: ReadonlyArray<{
+      role: "user" | "assistant" | "system";
+      content: string;
+    }>,
   ): Promise<unknown> {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -159,14 +190,31 @@ export class OpenAiCoachProvider implements CoachAiProvider {
   }
 }
 
-function buildOpenAiIntentRouterPrompt(
-  request: IntentRouterRequest,
+function buildOpenAiTurnDecisionPrompt(
+  request: TurnDecisionRequest,
   promptTemplates: CompiledPromptTemplates,
 ): string {
-  const catalog = request.intentCatalog ?? serializeIntentCatalogForRouter();
+  return promptTemplates.renderMessageUnderstanding({
+    normalizedText: request.normalizedText,
+    originalText: request.originalText,
+    preprocessorJson: JSON.stringify(request.preprocessor),
+    attachmentContextSummariesJson: JSON.stringify(request.attachmentContextSummaries),
+    recentMessageHintsJson: JSON.stringify(request.recentMessageHints),
+    catalogHintsJson: JSON.stringify(request.catalogHints),
+  });
+}
 
-  return promptTemplates.renderIntentRouter({
-    intentCatalogJson: JSON.stringify(catalog),
+function buildOpenAiMessageUnderstandingPrompt(
+  request: MessageUnderstandingRequest,
+  promptTemplates: CompiledPromptTemplates,
+): string {
+  return promptTemplates.renderMessageUnderstanding({
+    normalizedText: request.normalizedText,
+    originalText: request.originalText,
+    preprocessorJson: JSON.stringify(request.preprocessor),
+    attachmentContextSummariesJson: JSON.stringify(request.attachmentContextSummaries),
+    recentMessageHintsJson: JSON.stringify(request.recentMessageHints),
+    catalogHintsJson: JSON.stringify(request.catalogHints),
   });
 }
 
@@ -209,54 +257,8 @@ function buildOpenAiIntentLoopPrompt(
     safetyConstraints:
       metadata?.safetyConstraints?.join("\n- ") ??
       "Do not diagnose, prescribe, or claim to treat diseases.",
-    preparedAttachmentProposalsLine: buildPreparedAttachmentProposalPromptLine(
-      request.coachingContext,
-    ),
     coachingContextJson: JSON.stringify(request.coachingContext),
   });
-}
-
-function buildPreparedAttachmentProposalPromptLine(
-  coachingContext: Record<string, unknown>,
-): string {
-  const attachmentTurn = coachingContext.attachmentTurn;
-
-  if (!attachmentTurn || typeof attachmentTurn !== "object") {
-    return "Prepared attachment proposals: none";
-  }
-
-  const preparedProposals = (attachmentTurn as { preparedProposals?: unknown })
-    .preparedProposals;
-
-  if (!Array.isArray(preparedProposals) || preparedProposals.length === 0) {
-    return "Prepared attachment proposals: none";
-  }
-
-  const summaries = preparedProposals
-    .map((proposal) => {
-      if (!proposal || typeof proposal !== "object") {
-        return null;
-      }
-
-      const record = proposal as {
-        intent?: unknown;
-        title?: unknown;
-        targetDomain?: unknown;
-      };
-
-      if (typeof record.intent !== "string" || typeof record.title !== "string") {
-        return null;
-      }
-
-      return `${record.intent}: ${record.title}`;
-    })
-    .filter((summary): summary is string => summary != null);
-
-  if (summaries.length === 0) {
-    return "Prepared attachment proposals: none";
-  }
-
-  return `Prepared attachment proposals (already created server-side; mention briefly, do not duplicate): ${summaries.join("; ")}`;
 }
 
 function coerceOpenAiLoopOutput(value: unknown): AgentLoopOutputInput {

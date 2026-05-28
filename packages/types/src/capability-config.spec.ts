@@ -95,7 +95,7 @@ describe("capability config", () => {
     expect(explainer.compositionMetadata).toEqual(DEFAULT_CAPABILITY_COMPOSITION_METADATA);
   });
 
-  it("includes response metadata derived from catalog mapping", () => {
+  it("keeps legacy catalog defaultRoutingMethod metadata for compatibility", () => {
     const general = getCapabilityConfig("general");
     const foodPhoto = getCapabilityConfig("attachment_food_photo");
 

@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { DevChatAttachmentClassificationProvider } from "./dev-chat-attachment-classification.provider.js";
+import { createDefaultLocalChatAttachmentClassificationProvider } from "../ai/test-ai-behavior-fixtures.js";
 import { ChatAttachmentClassifierService } from "./chat-attachment-classifier.service.js";
 
 describe("ChatAttachmentClassifierService", () => {
-  const devProvider = new DevChatAttachmentClassificationProvider();
-  const devService = new ChatAttachmentClassifierService(devProvider);
+  const localProvider = createDefaultLocalChatAttachmentClassificationProvider();
+  const localService = new ChatAttachmentClassifierService(localProvider);
 
   it("classifies meal photos with inferred meal context", async () => {
-    const result = await devService.classify({
+    const result = await localService.classify({
       message: "второй прием пищи",
       attachment: {
         id: "a1000001-0000-4000-8000-000000000001",
@@ -25,7 +25,7 @@ describe("ChatAttachmentClassifierService", () => {
   });
 
   it("classifies training attachments from activity messages", async () => {
-    const result = await devService.classify({
+    const result = await localService.classify({
       message: "заполни активность",
       attachment: {
         id: "c1000001-0000-4000-8000-000000000001",
@@ -42,7 +42,7 @@ describe("ChatAttachmentClassifierService", () => {
   });
 
   it("classifies medical-signaled images for consent-first handling", async () => {
-    const result = await devService.classify({
+    const result = await localService.classify({
       message: "here are my lab results",
       attachment: {
         id: "d1000001-0000-4000-8000-000000000001",
@@ -60,7 +60,7 @@ describe("ChatAttachmentClassifierService", () => {
   });
 
   it("preserves user-selected workout category without reclassification", async () => {
-    const result = await devService.classify({
+    const result = await localService.classify({
       message: "",
       attachment: {
         id: "c1000002-0000-4000-8000-000000000002",
@@ -81,7 +81,7 @@ describe("ChatAttachmentClassifierService", () => {
   });
 
   it("does not default ambiguous jpeg uploads to food photo", async () => {
-    const result = await devService.classify({
+    const result = await localService.classify({
       message: "",
       attachment: {
         id: "u1000001-0000-4000-8000-000000000001",
@@ -187,7 +187,7 @@ describe("ChatAttachmentClassifierService", () => {
 
   it("does not bypass provider for upload-time ai_classified categories", () => {
     expect(
-      devService.shouldBypassProviderForAttachment({
+      localService.shouldBypassProviderForAttachment({
         category: "food_photo",
         categorySource: "ai_classified",
         consent: null,
@@ -197,7 +197,7 @@ describe("ChatAttachmentClassifierService", () => {
 
   it("bypasses provider for persisted user_selected categories", () => {
     expect(
-      devService.shouldBypassProviderForAttachment({
+      localService.shouldBypassProviderForAttachment({
         category: "workout_attachment",
         categorySource: "user_selected",
         consent: null,

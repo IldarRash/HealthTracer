@@ -463,7 +463,6 @@ export function ChatWorkspace() {
                     category: updatedAttachment.category,
                     status: updatedAttachment.status,
                     recognition: updatedAttachment.recognition,
-                    proposalCandidateCount: recognizeResult.data!.proposalCandidates.length,
                   }
                 : outcome,
             );
@@ -526,7 +525,6 @@ export function ChatWorkspace() {
           ...current,
           record: recognizeResult.data!.attachment,
           phase: "ready",
-          proposalCandidateCount: recognizeResult.data!.proposalCandidates.length,
         }));
       } catch (error) {
         updateComposerAttachment(draftInput.localId, (current) => ({

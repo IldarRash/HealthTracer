@@ -1,6 +1,9 @@
 {
   "version": 1,
   "capabilities": [],
+  "chat": {
+    "emptyAttachmentMessage": "Shared attachment(s) for coaching review."
+  },
   "directPaths": {
     "enabled": true,
     "confidence": 0.95,
@@ -153,7 +156,28 @@
           }
         ]
       }
-    ]
+    ],
+    "replyTemplates": {
+      "todaySummary": {
+        "introTemplate": "Here's your Today summary for {{dateLabel}}:",
+        "emptyChecklistLine": "Your checklist is empty for today.",
+        "checklistHeaderTemplate": "Checklist ({{completedRequired}}/{{totalRequired}} required done):",
+        "checklistItemLineTemplate": "- [{{statusLabel}}] {{label}} ({{kind}})",
+        "restDayLine": "Workout: Rest day",
+        "workoutLineTemplate": "Workout: {{title}} — {{status}}, {{exerciseCount}} exercise(s)",
+        "adherenceLineTemplate": "Adherence: {{percent}}% ({{completedRequired}} of {{totalRequired}} required items completed)",
+        "itemStatusLabels": {
+          "completed": "done",
+          "skipped": "skipped",
+          "pending": "pending"
+        }
+      },
+      "markWorkoutDone": {
+        "noPendingWorkoutMessage": "I couldn't find a pending workout on your Today checklist. Open Today to review your items.",
+        "multiplePendingWorkoutsMessage": "You have multiple pending workout items today. Open Today and mark the specific workout you completed.",
+        "markedDoneTemplate": "Marked \"{{label}}\" as done on your Today checklist."
+      }
+    }
   },
   "proposalRevisionRouting": {
     "confidence": 0.95,
@@ -251,16 +275,9 @@
   },
   "promptTemplates": {
     "templates": {
-      "openai_intent_router": {
-        "templateKey": "openai_intent_router",
-        "body": "You are an internal intent router for a wellness coaching product.\nReturn JSON only. Do not answer the user. Do not provide advice, proposals, or coaching text.\nChoose exactly one catalogIntentId from the provided intent catalog.\nAllowed JSON shape:\n{\"catalogIntentId\":\"general|ask_about_today|adjust_workout|adjust_nutrition|review_progress|longevity_overview|ask_health_context\",\"confidence\":0.0-1.0,\"routingMethod\":\"llm_router\",\"requiredContextSlices\":[{\"type\":\"general_chat|daily_checkin|workout_adaptation|nutrition_adaptation|weekly_review|longevity_overview|health_context\",\"depth\":\"small|medium|large\",\"timeRange\":\"7d|14d|30d|90d|1y\",\"includeDocuments\":false}],\"safetyFlags\":[\"fatigue|pain|sleep_issue|stress|hunger|schedule_conflict|health_context\"],\"expectedResponseMode\":\"advice_only|recommendation_with_optional_proposal|clarification_question\"}\nUse at most 3 context slices. Prefer medium depth. Disable documents unless health context is explicit.\nNever include reply, advice, answer, response, proposals, or user-facing text fields.\nIntent catalog:\n{{intentCatalogJson}}",
-        "placeholders": [
-          "intentCatalogJson"
-        ]
-      },
       "openai_coach_loop": {
         "templateKey": "openai_coach_loop",
-        "body": "You are an AI wellness coach for fitness, habits, nutrition, and recovery.\nRespond in the same language as the user's latest message.\nReturn JSON only with one of these shapes:\n{\"kind\":\"tool_request\",\"tool\":\"getUserContextSlice|getDocumentContext|getWeeklyProgressContext\",\"input\":{},\"rationale\":\"optional short reason\"}\n{\"kind\":\"final_answer\",\"reply\":\"string\",\"proposals\":[]}\nIteration {{iteration}} of {{maxIterations}}. Request additional context through allowed tools only when needed.\nIf enough context is available, return final_answer.\nNever mutate structured state directly. Plan changes must remain typed proposals requiring user approval.\nSelected intent: {{selectedIntentLabel}}\nIntent instructions: {{intentInstructions}}\nIntent safety guidance: {{intentSafetyGuidance}}\nAllowed tools: {{allowedTools}}\nAllowed proposal intents: {{allowedProposalIntents}}\nTask purpose: {{taskPurpose}}\nTask intent: {{taskIntent}}\nExpected response mode: {{expectedResponseMode}}\nSafety flags: {{safetyFlags}}\nMissing context notes: {{missingContextNotes}}\nPrior tool results: {{priorToolResultsJson}}\nGlobal safety constraints:\n- {{safetyConstraints}}\n{{preparedAttachmentProposalsLine}}\nStructured coaching context:\n{{coachingContextJson}}",
+        "body": "You are an AI wellness coach for fitness, habits, nutrition, and recovery.\nRespond in the same language as the user's latest message.\nReturn JSON only with one of these shapes:\n{\"kind\":\"tool_request\",\"tool\":\"getUserContextSlice|getDocumentContext|getWeeklyProgressContext\",\"input\":{},\"rationale\":\"optional short reason\"}\n{\"kind\":\"final_answer\",\"reply\":\"string\",\"proposals\":[]}\nIteration {{iteration}} of {{maxIterations}}. Request additional context through allowed tools only when needed.\nIf enough context is available, return final_answer.\nNever mutate structured state directly. Plan changes must remain typed proposals requiring user approval.\nSelected intent: {{selectedIntentLabel}}\nIntent instructions: {{intentInstructions}}\nIntent safety guidance: {{intentSafetyGuidance}}\nAllowed tools: {{allowedTools}}\nAllowed proposal intents: {{allowedProposalIntents}}\nTask purpose: {{taskPurpose}}\nTask intent: {{taskIntent}}\nExpected response mode: {{expectedResponseMode}}\nSafety flags: {{safetyFlags}}\nMissing context notes: {{missingContextNotes}}\nPrior tool results: {{priorToolResultsJson}}\nGlobal safety constraints:\n- {{safetyConstraints}}\nStructured coaching context:\n{{coachingContextJson}}",
         "placeholders": [
           "iteration",
           "maxIterations",
@@ -276,26 +293,22 @@
           "missingContextNotes",
           "priorToolResultsJson",
           "safetyConstraints",
-          "preparedAttachmentProposalsLine",
           "coachingContextJson"
+        ]
+      },
+      "openai_message_understanding": {
+        "templateKey": "openai_message_understanding",
+        "body": "You are an internal message understanding analyzer for a wellness coaching product.\nReturn JSON only. Do not answer the user. Do not provide advice, proposals, or coaching text.\nAnalyze the user's latest message plus deterministic preprocessor output and attachment summaries.\nAllowed JSON shape:\n{\"signals\":[\"question|request_change|information_share|feedback|clarification_needed|command_like|greeting|progress_update|attachment_reference|wellness_check_in\"],\"entities\":[{\"kind\":\"date|body_part|exercise|food|metric|goal|habit|symptom|other\",\"value\":\"string\",\"confidence\":0.0-1.0}],\"capabilityHints\":[{\"capabilityId\":\"catalog capability id\",\"confidence\":0.0-1.0,\"rationale\":\"optional short reason\"}],\"complexity\":\"simple|moderate|complex\",\"directCommand\":{\"detected\":true|false,\"kind\":\"today_summary_read|mark_today_workout_done|null\",\"confidence\":0.0-1.0},\"safetyFlags\":[\"fatigue|pain|sleep_issue|stress|hunger|schedule_conflict|health_context\"],\"needsContext\":[\"today_summary|active_workout_plan|active_nutrition_plan|weekly_progress|habit_plan|wellbeing_history|health_documents|attachment_context|recent_conversation\"],\"confidence\":0.0-1.0}\nUse capabilityHints only from the provided catalog hints when possible.\nNever include reply, advice, answer, response, proposals, catalogIntentId, routingMethod, or user-facing text fields.\nNormalized user message: {{normalizedText}}\nOriginal user message: {{originalText}}\nPreprocessor output: {{preprocessorJson}}\nAttachment context summaries: {{attachmentContextSummariesJson}}\nRecent message hints: {{recentMessageHintsJson}}\nCapability catalog hints: {{catalogHintsJson}}",
+        "placeholders": [
+          "normalizedText",
+          "originalText",
+          "preprocessorJson",
+          "attachmentContextSummariesJson",
+          "recentMessageHintsJson",
+          "catalogHintsJson"
         ]
       }
     }
-  },
-  "attachmentRouting": {
-    "categoryPriority": [
-      "medical_document",
-      "workout_attachment",
-      "food_photo"
-    ],
-    "categoryToCapability": {
-      "food_photo": "attachment_food_photo",
-      "workout_attachment": "attachment_workout",
-      "medical_document": "attachment_medical_document"
-    },
-    "defaultCapabilityId": "attachment_food_photo",
-    "confidence": 0.98,
-    "routingMethod": "attachment_family"
   },
   "proposalExplainer": {
     "capabilityId": "proposal_explainer",
