@@ -2,12 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
 import {
-  type RawAiProposal,
   WELLBEING_CRISIS_SUPPORT_COPY,
   WEEKLY_REVIEW_CHAT_PROMPT,
   getTodayIsoDateInTimezone,
 } from "@health/types";
-import { createAiPolicyTestStack, createDefaultAiBehaviorConfigService } from "../ai/test-ai-behavior-fixtures.js";
+import { createAiPolicyTestStack } from "../ai/test-ai-behavior-fixtures.js";
 import { DirectChatPathService } from "./direct-chat-path.service.js";
 import { ChatService } from "./chat.service.js";
 
@@ -54,19 +53,17 @@ function buildMockAttachmentTurnStageResult(input: {
   attachments: readonly Record<string, unknown>[];
 }) {
   return {
-    attachments: input.attachments,
-    contextSummaries: input.attachments.map((attachment) => ({
-      attachmentRefId: attachment.id,
-      category: attachment.category,
-      status: attachment.status,
-      routingCapabilityId: null,
-      contextHint: null,
-      recognitionPresent: attachment.recognition != null,
+    attachmentMetadata: input.attachments.map((attachment) => ({
+      refId: attachment.id,
+      category: attachment.category ?? "unclassified",
+      mimeType: attachment.mimeType ?? "image/jpeg",
+      consentState: attachment.consent != null ? "granted" : "none",
+      storageRef: attachment.storageKey ?? null,
     })),
     outcomes: input.attachments.map((attachment) => ({
       attachmentRefId: attachment.id,
-      category: attachment.category,
-      status: attachment.status,
+      category: attachment.category ?? "unclassified",
+      status: attachment.status ?? "ready",
       recognition: attachment.recognition ?? null,
     })),
   };
@@ -2047,7 +2044,7 @@ describe("ChatService", () => {
       expect(result.proposals).toHaveLength(1);
     });
 
-    it("passes classified attachment recognition into coach orchestration without generic router fields", async () => {
+    it("passes bounded attachment metadata into coach orchestration without generic router fields", async () => {
       const attachmentId = "a1000001-0000-4000-8000-000000000001";
       let capturedCoachInput: Record<string, unknown> | undefined;
 
@@ -2191,8 +2188,7 @@ describe("ChatService", () => {
           {
             attachmentRefId: attachmentId,
             category: "food_photo",
-            status: "ready",
-            recognition: attachmentRecord.recognition,
+            consentState: "none",
           },
         ],
       });
@@ -2706,7 +2702,6 @@ describe("ChatService", () => {
       let turnStageInput:
         | {
             messageId: string;
-            messageContent: string;
             attachmentRefIds: readonly string[];
           }
         | undefined;
@@ -2767,7 +2762,6 @@ describe("ChatService", () => {
           validateRefsForSend: async () => undefined,
           runTurnStages: async (input: {
             messageId: string;
-            messageContent: string;
             attachmentRefIds: readonly string[];
           }) => {
             expect(userMessageCreated).toBe(true);
@@ -2792,11 +2786,10 @@ describe("ChatService", () => {
       });
 
       expect(turnStageInput?.messageId).toBe("user-message-id");
-      expect(turnStageInput?.messageContent).toBe("Second meal");
       expect(turnStageInput?.attachmentRefIds).toEqual([attachmentId]);
     });
 
-    it("passes attachment contextSummaries to coach orchestration for Message Understanding", async () => {
+    it("passes bounded attachment metadata (no recognition envelope) to coach orchestration", async () => {
       const attachmentId = "a1000001-0000-4000-8000-000000000001";
       let capturedCoachInput: Record<string, unknown> | undefined;
 
@@ -2814,37 +2807,13 @@ describe("ChatService", () => {
         linkedDocumentId: null,
         linkedImageRefId: attachmentId,
         consent: null,
-        recognition: {
-          category: "food_photo" as const,
-          attachmentRefId: attachmentId,
-          analysis: {
-            candidates: [],
-            lowConfidenceNotice: null,
-          },
-          provenance: {
-            source: "dev_stub",
-            providerId: "dev_food_photo",
-            recognitionId: "b1000001-0000-4000-8000-000000000002",
-            confidence: "medium" as const,
-          },
-        },
+        recognition: null,
         failureReason: null,
         retentionPolicy: "ephemeral_recognition" as const,
         expiresAt: null,
         createdAt: "2026-05-26T12:00:00.000Z",
         updatedAt: "2026-05-26T12:00:00.000Z",
       };
-
-      const contextSummaries = [
-        {
-          attachmentRefId: attachmentId,
-          category: "food_photo" as const,
-          status: "ready" as const,
-          routingCapabilityId: "attachment_food_photo",
-          contextHint: "Recognition is ready; review proposal candidates before applying.",
-          recognitionPresent: true,
-        },
-      ];
 
       const service = createChatService({
         chatRepository: {
@@ -2897,10 +2866,8 @@ describe("ChatService", () => {
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
-          runTurnStages: async () => ({
-            ...buildMockAttachmentTurnStageResult({ attachments: [attachmentRecord] }),
-            contextSummaries,
-          }),
+          runTurnStages: async () =>
+            buildMockAttachmentTurnStageResult({ attachments: [attachmentRecord] }),
         },
       });
 
@@ -2909,9 +2876,18 @@ describe("ChatService", () => {
         attachmentRefIds: [attachmentId],
       });
 
+      // Bounded metadata only — no recognition envelope, no contextSummaries.
       expect(capturedCoachInput?.attachmentTurn).toMatchObject({
-        contextSummaries,
+        attachments: [
+          {
+            attachmentRefId: attachmentId,
+            category: "food_photo",
+            mimeType: "image/jpeg",
+            consentState: "none",
+          },
+        ],
       });
+      expect(capturedCoachInput?.attachmentTurn).not.toHaveProperty("contextSummaries");
     });
   });
 
@@ -3074,6 +3050,135 @@ describe("ChatService", () => {
       expect(createProposal).not.toHaveBeenCalled();
       expect(result.proposals).toEqual([]);
       expect(result.assistantMessage.content).toContain("recovery signals");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 7: consentRequired surfacing + no health_documents auto-persist
+  // ---------------------------------------------------------------------------
+
+  describe("consentRequired surfacing (Phase 7)", () => {
+    function buildMinimalChatServiceWithAiResult(aiResult: {
+      consentRequired?: boolean;
+      proposals?: unknown[];
+    }) {
+      return createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-05-30T10:00:00.000Z"),
+          }),
+          createProposal: async (
+            _userId: string,
+            _threadId: string,
+            _sourceMessageId: string | null,
+            proposal: unknown,
+            validationStatus: "valid" | "invalid" | "pending_validation",
+            validationErrors: string[],
+          ) => ({
+            id: "proposal-id",
+            userId: user.id,
+            threadId: thread.id,
+            sourceMessageId: "assistant-message-id",
+            ...(proposal as Record<string, unknown>),
+            status: "pending" as const,
+            validationStatus,
+            validationErrors,
+            userDecisionAt: null,
+            appliedReference: null,
+            createdAt: new Date("2026-05-30T10:00:00.000Z"),
+            updatedAt: new Date("2026-05-30T10:00:00.000Z"),
+          }),
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: {
+              reply: "Health context noted. I prepared a consent-gated proposal you can review.",
+              proposals: (aiResult.proposals ?? []) as never,
+            },
+            parseErrors: [],
+            replySafetyErrors: [],
+            consentRequired: aiResult.consentRequired,
+            agentMetadata: {
+              provider: "stub" as const,
+              intent: "general" as const,
+              catalogIntentId: "general" as const,
+              purpose: "general_chat" as const,
+              depth: "small" as const,
+              timeRange: "7d" as const,
+              toolsInvoked: [],
+              safety: { status: "passed" as const, blockedReasons: [], constraintsApplied: [] },
+              citations: [],
+            },
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+      });
+    }
+
+    it("surfaces consentRequired=true on the chat turn result when the AI result carries it", async () => {
+      const service = buildMinimalChatServiceWithAiResult({ consentRequired: true });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Please review my health document and suggest next steps.",
+      });
+
+      // consentRequired must be surfaced to the caller so the UI can prompt for consent.
+      expect(result.consentRequired).toBe(true);
+      // No health_documents are auto-persisted — proposals flow through the normal
+      // proposal validation + accept path. The proposals array may be empty or contain
+      // a consent-gated proposal record; no auto-applied health_documents row exists.
+      // (The intent type union does not include an auto-persist variant by design.)
+      expect(Array.isArray(result.proposals)).toBe(true);
+    });
+
+    it("does not set consentRequired on the chat turn result when the AI result has consentRequired=false", async () => {
+      const service = buildMinimalChatServiceWithAiResult({ consentRequired: false });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Can you adapt my workout plan this week?",
+      });
+
+      // consentRequired must NOT be set (falsy / absent) for normal non-consent turns.
+      expect(result.consentRequired).toBeFalsy();
+    });
+
+    it("does not set consentRequired on the chat turn result when the AI result is undefined", async () => {
+      const service = buildMinimalChatServiceWithAiResult({ consentRequired: undefined });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Can you adjust my nutrition plan?",
+      });
+
+      expect(result.consentRequired).toBeFalsy();
     });
   });
 });

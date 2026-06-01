@@ -1,4 +1,8 @@
-import { loadAiBehaviorConfig, loadAttachmentBehaviorConfig } from "@health/ai-behavior";
+import {
+  loadAiBehaviorConfig,
+  loadAttachmentBehaviorConfig,
+  loadDomainConfigs,
+} from "@health/ai-behavior";
 import type {
   AiBehaviorConfig,
   AiBehaviorConfigLoadResult,
@@ -12,6 +16,9 @@ import type {
   ContextBudgetsBehaviorConfig,
   DeterministicProposalTriggersConfig,
   DirectPathsBehaviorConfig,
+  DomainConfigBundle,
+  DomainConfigLoadResult,
+  DomainConfigLoadSource,
   PromptTemplatesBehaviorConfig,
   ProposalExplainerBehaviorConfig,
   ProposalRevisionRoutingConfig,
@@ -22,12 +29,14 @@ import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 
 export const AI_BEHAVIOR_CONFIG_PRELOAD = Symbol("AI_BEHAVIOR_CONFIG_PRELOAD");
 export const ATTACHMENT_BEHAVIOR_CONFIG_PRELOAD = Symbol("ATTACHMENT_BEHAVIOR_CONFIG_PRELOAD");
+export const DOMAIN_CONFIG_PRELOAD = Symbol("DOMAIN_CONFIG_PRELOAD");
 
 @Injectable()
 export class AiBehaviorConfigService {
   private readonly logger = new Logger(AiBehaviorConfigService.name);
   readonly loadResult: AiBehaviorConfigLoadResult;
   readonly attachmentLoadResult: AttachmentBehaviorConfigLoadResult;
+  readonly domainConfigLoadResult: DomainConfigLoadResult;
   private compiledPromptTemplates: CompiledPromptTemplates;
 
   constructor(
@@ -37,6 +46,9 @@ export class AiBehaviorConfigService {
     @Optional()
     @Inject(ATTACHMENT_BEHAVIOR_CONFIG_PRELOAD)
     attachmentPreload?: AttachmentBehaviorConfigLoadResult,
+    @Optional()
+    @Inject(DOMAIN_CONFIG_PRELOAD)
+    domainConfigPreload?: DomainConfigLoadResult,
   ) {
     this.loadResult =
       preload ??
@@ -47,6 +59,11 @@ export class AiBehaviorConfigService {
       attachmentPreload ??
       loadAttachmentBehaviorConfig({
         configPath: process.env.ATTACHMENT_BEHAVIOR_CONFIG_PATH,
+      });
+    this.domainConfigLoadResult =
+      domainConfigPreload ??
+      loadDomainConfigs({
+        configDir: process.env.DOMAIN_CONFIG_DIR,
       });
     this.compiledPromptTemplates = compilePromptTemplates(this.loadResult.config.promptTemplates);
 
@@ -66,12 +83,24 @@ export class AiBehaviorConfigService {
       this.logger.error(error);
     }
 
+    for (const warning of this.domainConfigLoadResult.warnings) {
+      this.logger.warn(warning);
+    }
+
+    for (const error of this.domainConfigLoadResult.errors) {
+      this.logger.error(error);
+    }
+
     if (this.loadResult.source === "file") {
       this.logger.log("Loaded repo-backed AI behavior config from file.");
     }
 
     if (this.attachmentLoadResult.source === "file") {
       this.logger.log("Loaded repo-backed attachment behavior config from file.");
+    }
+
+    if (this.domainConfigLoadResult.source === "file") {
+      this.logger.log("Loaded repo-backed domain configs from file.");
     }
   }
 
@@ -145,5 +174,21 @@ export class AiBehaviorConfigService {
 
   getDeterministicProposalTriggers(): DeterministicProposalTriggersConfig {
     return this.loadResult.config.deterministicProposalTriggers;
+  }
+
+  getDomainConfigs(): DomainConfigBundle {
+    return this.domainConfigLoadResult.configs;
+  }
+
+  getDomainConfigLoadSource(): DomainConfigLoadSource {
+    return this.domainConfigLoadResult.source;
+  }
+
+  getDomainConfigLoadErrors(): readonly string[] {
+    return this.domainConfigLoadResult.errors;
+  }
+
+  getDomainConfigLoadWarnings(): readonly string[] {
+    return this.domainConfigLoadResult.warnings;
   }
 }

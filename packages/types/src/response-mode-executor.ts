@@ -52,7 +52,7 @@ export interface ResolveResponseModeExecutorModeInput {
   allowedProposalIntents: readonly string[];
   allowedTools: readonly string[];
   directPathCandidate?: DirectChatPathCandidate | null;
-  messageUnderstandingDirectCommand?: boolean;
+  turnDecisionDirectCommand?: boolean;
 }
 
 const DETERMINISTIC_EXECUTOR_MODES = new Set<ResponseModeExecutorMode>([
@@ -100,7 +100,7 @@ export function resolveResponseModeExecutorMode(
     return resolveDirectPathExecutorMode(input.directPathCandidate);
   }
 
-  if (input.messageUnderstandingDirectCommand) {
+  if (input.turnDecisionDirectCommand) {
     return "deterministic_write";
   }
 

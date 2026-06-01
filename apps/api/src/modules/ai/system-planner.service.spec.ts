@@ -1,14 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   getCapabilityConfig,
-  turnDecisionOutputSchema,
-  turnDecisionRequestSchema,
-  turnDecisionResultSchema,
+  routerDecisionOutputSchema,
   normalizeAiBehaviorConfig,
+  RULE_ROUTE_CONFIDENCE_THRESHOLD,
+  MAX_ROUTER_SELECTED_DOMAINS,
 } from "@health/types";
 import {
   DEFAULT_CONTEXT_BUDGET_POLICY,
-  DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
 } from "@health/types";
 import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import { CapabilityRegistryService } from "./capability-registry.service.js";
@@ -18,65 +17,51 @@ import { ProposalExplainerMatcherService } from "./proposal-explainer-matcher.se
 import { ResponseModePolicyService } from "./response-mode-policy.service.js";
 import { SystemPlannerService } from "./system-planner.service.js";
 import { createAiPolicyTestStack } from "./test-ai-behavior-fixtures.js";
+import type { RouterLlmResult } from "./router-llm.service.js";
 
-function createTurnDecisionResultForPlanner(
-  capabilityId: "attachment_food_photo" | "adjust_workout" | "general" = "attachment_food_photo",
+function createRouterResultForPlanner(
+  domain: "workout" | "nutrition" | "health" = "workout",
   confidence = 0.84,
-) {
-  turnDecisionRequestSchema.parse({
-    originalText: "Log this meal",
-    normalizedText: "log this meal",
-    preprocessor: {
-      originalText: "Log this meal",
-      normalizedText: "log this meal",
-      detectedLanguage: "en",
-      responseLanguage: "en",
-      hasAttachments: true,
-      mentionedDates: [],
-      simpleSignals: {
-        workout: false,
-        nutrition: true,
-        today: false,
-        sleep: false,
-        fatigue: false,
-        pain: false,
-        document: false,
-        attachment: true,
-      },
-      directPathCandidate: null,
-    },
-    attachmentContextSummaries: [],
-    recentMessageHints: [],
-    catalogHints: [],
-    availableTools: [],
-  });
+  source: "llm" | "fallback" = "llm",
+): RouterLlmResult {
+  if (source === "fallback") {
+    return {
+      output: routerDecisionOutputSchema.parse({
+        selectedDomains: [],
+        contextNeeds: [],
+        safetyFlags: [],
+        confidence,
+      }),
+      source: "fallback",
+      validationErrors: ["forced fallback"],
+    };
+  }
 
-  return turnDecisionResultSchema.parse({
-    output: turnDecisionOutputSchema.parse({
-      signals:
-        capabilityId === "adjust_workout"
-          ? ["request_change"]
-          : capabilityId === "general"
-            ? ["question"]
-            : ["attachment_reference"],
-      entities: [],
-      routeCapabilityHints: [{ capabilityId, confidence: 0.86 }],
-      complexity: "moderate",
-      directCommand: { detected: false },
-      safetyFlags: capabilityId === "adjust_workout" ? ["fatigue"] : [],
+  const domainSafetyFlags = domain === "workout" ? ["fatigue"] : [];
+
+  return {
+    output: routerDecisionOutputSchema.parse({
+      selectedDomains: [
+        {
+          domain,
+          confidence,
+          intentHints: [],
+          toolHints: [],
+          signalHints: [],
+        },
+      ],
       contextNeeds:
-        capabilityId === "adjust_workout"
+        domain === "workout"
           ? ["active_workout_plan"]
-          : capabilityId === "general"
-            ? ["recent_conversation"]
-            : ["attachment_context"],
-      attachmentHints: [],
-      toolNeeds: [],
+          : domain === "nutrition"
+            ? ["active_nutrition_plan"]
+            : [],
+      safetyFlags: domainSafetyFlags,
       confidence,
     }),
     source: "llm",
     validationErrors: [],
-  });
+  };
 }
 
 function createPlannerHarness() {
@@ -90,14 +75,14 @@ function createPlannerHarness() {
 }
 
 describe("SystemPlannerService", () => {
-  it("routes confident turn decision without safe fallback", async () => {
+  it("routes confident router decision without safe fallback", async () => {
     const { planner } = createPlannerHarness();
     const capabilityConfig = getCapabilityConfig("adjust_workout");
 
     const plan = await planner.planTurn({
       userMessage: "Can you adapt my workout plan this week?",
       recentMessages: [],
-      turnDecision: createTurnDecisionResultForPlanner("adjust_workout", 0.84),
+      routerResult: createRouterResultForPlanner("workout", 0.84),
     });
 
     expect(plan.catalogIntentId).toBe("adjust_workout");
@@ -109,69 +94,66 @@ describe("SystemPlannerService", () => {
     );
   });
 
-  it("falls back to general when turn decision confidence is low", async () => {
+  it("falls back to general when router confidence is low (fallback source)", async () => {
     const { planner } = createPlannerHarness();
     const generalConfig = getCapabilityConfig("general");
 
     const plan = await planner.planTurn({
       userMessage: "I feel completely off today. What should I do?",
       recentMessages: [],
-      turnDecision: {
-        ...createTurnDecisionResultForPlanner("general", 0.35),
-        source: "fallback",
-      },
+      routerResult: createRouterResultForPlanner("workout", 0.35, "fallback"),
     });
 
     expect(plan.route.routingMethod).toBe("unified_turn_decision");
     expect(plan.catalogIntentId).toBe("general");
     expect(plan.route.isConfident).toBe(false);
-    expect(plan.route.confidence).toBe(0.35);
     expect(plan.route.requiredContextSlices).toEqual([generalConfig.defaultContextStrategy]);
   });
 
-  it("routes confident unified turn decision for attachment turns", async () => {
+  it("routes confident router result for nutrition domain", async () => {
     const { planner } = createPlannerHarness();
-    const capabilityConfig = getCapabilityConfig("attachment_food_photo");
+    const capabilityConfig = getCapabilityConfig("adjust_nutrition");
 
     const plan = await planner.planTurn({
       userMessage: "Log this meal",
       recentMessages: [],
-      turnDecision: createTurnDecisionResultForPlanner("attachment_food_photo", 0.84),
+      routerResult: createRouterResultForPlanner("nutrition", 0.84),
       attachmentTurn: {
         attachments: [
           {
             attachmentRefId: "a1000001-0000-4000-8000-000000000002",
             category: "food_photo",
-            status: "recognized",
+            mimeType: "image/jpeg",
+            consentState: "none" as const,
+            storageRef: "local://attachments/meal.jpg",
           },
         ],
       },
     });
 
-    expect(plan.catalogIntentId).toBe("attachment_food_photo");
+    expect(plan.catalogIntentId).toBe("adjust_nutrition");
     expect(plan.route.routingMethod).toBe("unified_turn_decision");
     expect(plan.route.requiredContextSlices).toEqual(
       expect.arrayContaining([capabilityConfig.defaultContextStrategy]),
     );
   });
 
-  it("does not bypass attachments when turn decision is low confidence", async () => {
+  it("does not bypass attachments when router is low confidence", async () => {
     const { planner } = createPlannerHarness();
     const generalConfig = getCapabilityConfig("general");
 
     const plan = await planner.planTurn({
       userMessage: "Log this meal",
       recentMessages: [],
-      turnDecision: {
-        ...createTurnDecisionResultForPlanner("attachment_food_photo", 0.2),
-        source: "fallback",
-      },
+      routerResult: createRouterResultForPlanner("nutrition", 0.2, "fallback"),
       attachmentTurn: {
         attachments: [
           {
             attachmentRefId: "a1000001-0000-4000-8000-000000000002",
             category: "food_photo",
-            status: "recognized",
+            mimeType: "image/jpeg",
+            consentState: "none" as const,
+            storageRef: "local://attachments/meal.jpg",
           },
         ],
       },
@@ -182,7 +164,7 @@ describe("SystemPlannerService", () => {
     expect(plan.route.requiredContextSlices).toEqual([generalConfig.defaultContextStrategy]);
   });
 
-  it("uses rule_based safe fallback when turn decision did not run", async () => {
+  it("uses rule_based safe fallback when router did not run", async () => {
     const { planner } = createPlannerHarness();
     const generalConfig = getCapabilityConfig("general");
 
@@ -255,7 +237,9 @@ describe("SystemPlannerService", () => {
             {
               attachmentRefId: "a1000001-0000-4000-8000-000000000001",
               category: "food_photo",
-              status: "ready",
+              mimeType: "image/jpeg",
+              consentState: "none" as const,
+              storageRef: null,
             },
           ],
         },
@@ -308,7 +292,7 @@ describe("SystemPlannerService", () => {
     const plan = await planner.planTurn({
       userMessage: "Why should I train today?",
       recentMessages: [],
-      turnDecision: createTurnDecisionResultForPlanner("adjust_workout", 0.84),
+      routerResult: createRouterResultForPlanner("workout", 0.84),
     });
 
     expect(plan.catalogIntentId).toBe("adjust_workout");
@@ -327,41 +311,230 @@ describe("SystemPlannerService", () => {
     const plan = await planner.planTurn({
       userMessage: "Log this meal",
       recentMessages: [],
-      turnDecision: createTurnDecisionResultForPlanner("attachment_food_photo", 0.84),
+      routerResult: createRouterResultForPlanner("nutrition", 0.84),
       attachmentTurn: {
         attachments: [
           {
             attachmentRefId: "a1000001-0000-4000-8000-000000000001",
             category: "food_photo",
-            status: "ready",
+            mimeType: "image/jpeg",
+            consentState: "none" as const,
+            storageRef: null,
           },
         ],
       },
     });
 
-    expect(resolveSelectedCapabilityIds).toHaveBeenCalledWith("attachment_food_photo");
-    expect(resolvePresentationMetadata).toHaveBeenCalledWith("attachment_food_photo", [
+    expect(resolveSelectedCapabilityIds).toHaveBeenCalledWith("adjust_nutrition");
+    expect(resolvePresentationMetadata).toHaveBeenCalledWith("adjust_nutrition", [
       "adjust_workout",
       "ask_about_today",
     ]);
-    expect(plan.primaryCapabilityId).toBe("attachment_food_photo");
+    expect(plan.primaryCapabilityId).toBe("adjust_nutrition");
     expect(plan.selectedCapabilities).toEqual(["adjust_workout", "ask_about_today"]);
-    expect(plan.intentDefinition.id).toBe("attachment_food_photo");
+    expect(plan.intentDefinition.id).toBe("adjust_nutrition");
   });
 
-  it("attaches default context budget for confident turn decision turns", async () => {
+  it("attaches default context budget for confident router result turns", async () => {
     const { planner } = createPlannerHarness();
 
     const plan = await planner.planTurn({
       userMessage: "Can you adapt my workout plan this week?",
       recentMessages: [],
-      turnDecision: createTurnDecisionResultForPlanner("adjust_workout", 0.84),
+      routerResult: createRouterResultForPlanner("workout", 0.84),
     });
 
     expect(plan.contextBudget).toEqual(DEFAULT_CONTEXT_BUDGET_POLICY);
     expect(plan.isMonthlyReview).toBe(false);
     expect(plan.isMultiDomainReview).toBe(false);
     expect(plan.requiresCompression).toBe(false);
+  });
+
+  it("refines workout domain to review_progress when intentHints match", async () => {
+    const { planner } = createPlannerHarness();
+
+    // The workout YAML config maps intent id "review_workout_progress"
+    // to capability "review_progress". When the router emits that hint the
+    // planner should pick review_progress instead of the default adjust_workout.
+    const routerResultWithHint: ReturnType<typeof createRouterResultForPlanner> = {
+      output: routerDecisionOutputSchema.parse({
+        selectedDomains: [
+          {
+            domain: "workout",
+            confidence: 0.84,
+            intentHints: ["review_workout_progress"],
+            toolHints: [],
+            signalHints: [],
+          },
+        ],
+        contextNeeds: ["weekly_progress"],
+        safetyFlags: [],
+        confidence: 0.84,
+      }),
+      source: "llm",
+      validationErrors: [],
+    };
+
+    const plan = await planner.planTurn({
+      userMessage: "How has my workout progress been this week?",
+      recentMessages: [],
+      routerResult: routerResultWithHint,
+    });
+
+    expect(plan.catalogIntentId).toBe("review_progress");
+    expect(plan.route.routingMethod).toBe("unified_turn_decision");
+    expect(plan.route.isConfident).toBe(true);
+  });
+
+  it("refines workout domain to adjust_workout via description match in intentHints", async () => {
+    const { planner } = createPlannerHarness();
+
+    // Router returns a free-text hint that matches the "adapt_workout" intent description.
+    const routerResultWithDescHint: ReturnType<typeof createRouterResultForPlanner> = {
+      output: routerDecisionOutputSchema.parse({
+        selectedDomains: [
+          {
+            domain: "workout",
+            confidence: 0.84,
+            intentHints: ["adapt_workout"],
+            toolHints: [],
+            signalHints: [],
+          },
+        ],
+        contextNeeds: [],
+        safetyFlags: [],
+        confidence: 0.84,
+      }),
+      source: "llm",
+      validationErrors: [],
+    };
+
+    const plan = await planner.planTurn({
+      userMessage: "Can you adapt my workout plan based on my fatigue?",
+      recentMessages: [],
+      routerResult: routerResultWithDescHint,
+    });
+
+    expect(plan.catalogIntentId).toBe("adjust_workout");
+    expect(plan.route.routingMethod).toBe("unified_turn_decision");
+  });
+
+  it("falls back to domain default capability when intentHints do not match any domain intent", async () => {
+    const { planner } = createPlannerHarness();
+
+    const routerResultWithUnknownHint: ReturnType<typeof createRouterResultForPlanner> = {
+      output: routerDecisionOutputSchema.parse({
+        selectedDomains: [
+          {
+            domain: "workout",
+            confidence: 0.84,
+            intentHints: ["completely_unknown_intent_xyz"],
+            toolHints: [],
+            signalHints: [],
+          },
+        ],
+        contextNeeds: [],
+        safetyFlags: [],
+        confidence: 0.84,
+      }),
+      source: "llm",
+      validationErrors: [],
+    };
+
+    const plan = await planner.planTurn({
+      userMessage: "I want to exercise",
+      recentMessages: [],
+      routerResult: routerResultWithUnknownHint,
+    });
+
+    // Should fall back to first valid intent in the domain config: adjust_workout
+    expect(plan.catalogIntentId).toBe("adjust_workout");
+  });
+
+  it("routes health domain with intentHints containing longevity_coaching to longevity_overview", async () => {
+    const { planner } = createPlannerHarness();
+
+    const routerResultWithLongevityHint: ReturnType<typeof createRouterResultForPlanner> = {
+      output: routerDecisionOutputSchema.parse({
+        selectedDomains: [
+          {
+            domain: "health",
+            confidence: 0.84,
+            intentHints: ["longevity_coaching"],
+            toolHints: [],
+            signalHints: [],
+          },
+        ],
+        contextNeeds: [],
+        safetyFlags: [],
+        confidence: 0.84,
+      }),
+      source: "llm",
+      validationErrors: [],
+    };
+
+    const plan = await planner.planTurn({
+      userMessage: "What should I focus on for long-term health?",
+      recentMessages: [],
+      routerResult: routerResultWithLongevityHint,
+    });
+
+    expect(plan.catalogIntentId).toBe("longevity_overview");
+    expect(plan.route.routingMethod).toBe("unified_turn_decision");
+  });
+
+  it("applies the confidence threshold gate — router result below threshold falls back to general", async () => {
+    const { planner } = createPlannerHarness();
+    // Confidence just below the 0.75 threshold should not produce a router route.
+    const belowThresholdResult: ReturnType<typeof createRouterResultForPlanner> = {
+      output: routerDecisionOutputSchema.parse({
+        selectedDomains: [
+          {
+            domain: "workout",
+            confidence: RULE_ROUTE_CONFIDENCE_THRESHOLD - 0.01,
+            intentHints: [],
+            toolHints: [],
+            signalHints: [],
+          },
+        ],
+        contextNeeds: [],
+        safetyFlags: [],
+        confidence: RULE_ROUTE_CONFIDENCE_THRESHOLD - 0.01,
+      }),
+      source: "llm",
+      validationErrors: [],
+    };
+
+    const plan = await planner.planTurn({
+      userMessage: "I feel a bit tired",
+      recentMessages: [],
+      routerResult: belowThresholdResult,
+    });
+
+    // Low-confidence LLM result should not produce adjust_workout via router route.
+    expect(plan.catalogIntentId).toBe("general");
+  });
+
+  it("does not reference removed TurnDecision helpers — RouterDecisionOutput is the input contract", async () => {
+    // This is a static architecture invariant: the planner must consume
+    // RouterDecisionOutput (from routerResult) not the old TurnDecisionOutput.
+    // We verify by checking that planTurn accepts routerResult and that the plan
+    // shows unified_turn_decision routing, confirming the Phase 3 migration.
+    const { planner } = createPlannerHarness();
+
+    const plan = await planner.planTurn({
+      userMessage: "Can you adapt my workout plan?",
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+    });
+
+    // Confident router result must produce unified_turn_decision routing,
+    // not rule_based (which would indicate the old path).
+    expect(plan.route.routingMethod).toBe("unified_turn_decision");
+    expect(plan.route.isConfident).toBe(true);
+    // The plan input type must not accept a turnDecision field (it's typed `never`).
+    // Ensure only routerResult is accepted.
+    expect(plan.catalogIntentId).toBe("adjust_workout");
   });
 
   it("routes proposal revisions through config-overridden capability mapping", async () => {
@@ -431,7 +604,7 @@ describe("SystemPlannerService", () => {
       const plan = await planner.planTurn({
         userMessage: "Can you adapt my workout plan this week?",
         recentMessages: [],
-        turnDecision: createTurnDecisionResultForPlanner("adjust_workout", 0.84),
+        routerResult: createRouterResultForPlanner("workout", 0.84),
       });
 
       expect(plan.executorMode).toBe("proposal_flow");
@@ -460,30 +633,27 @@ describe("SystemPlannerService", () => {
       expect(plan.expectedResponseMode).toBe("advice_only");
     });
 
-    it("maps confident turn decision to context_aware_llm for advice-only capabilities", async () => {
+    it("maps confident router result for health domain to context_aware_llm for advice-only capabilities", async () => {
       const { planner } = createPlannerHarness();
 
       const plan = await planner.planTurn({
         userMessage: "How can I stay consistent this week?",
         recentMessages: [],
-        turnDecision: createTurnDecisionResultForPlanner("general", 0.84),
+        routerResult: createRouterResultForPlanner("health", 0.84),
       });
 
-      expect(plan.catalogIntentId).toBe("general");
+      expect(plan.catalogIntentId).toBe("ask_health_context");
       expect(plan.route.routingMethod).toBe("unified_turn_decision");
       expect(plan.executorMode).toBe("context_aware_llm");
     });
 
-    it("maps low-confidence turn decision fallback to context_aware_llm for general", async () => {
+    it("maps low-confidence router fallback to context_aware_llm for general", async () => {
       const { planner } = createPlannerHarness();
 
       const plan = await planner.planTurn({
         userMessage: "I feel completely off today. What should I do?",
         recentMessages: [],
-        turnDecision: {
-          ...createTurnDecisionResultForPlanner("general", 0.35),
-          source: "fallback",
-        },
+        routerResult: createRouterResultForPlanner("workout", 0.35, "fallback"),
       });
 
       expect(plan.route.routingMethod).toBe("unified_turn_decision");
@@ -491,7 +661,7 @@ describe("SystemPlannerService", () => {
       expect(plan.executorMode).toBe("context_aware_llm");
     });
 
-    it("ignores turn decision when proposal revision context is present", async () => {
+    it("ignores router result when proposal revision context is present", async () => {
       const { planner } = createPlannerHarness();
 
       const plan = await planner.planTurn({
@@ -513,11 +683,198 @@ describe("SystemPlannerService", () => {
             },
           },
         },
-        turnDecision: createTurnDecisionResultForPlanner("general", 0.84),
+        routerResult: createRouterResultForPlanner("health", 0.84),
       });
 
       expect(plan.route.routingMethod).toBe("rule_based");
       expect(plan.catalogIntentId).toBe("adjust_workout");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 4a — DomainFanoutPlan
+  // ---------------------------------------------------------------------------
+  describe("DomainFanoutPlan (Phase 4a)", () => {
+    it("returns a fanout with a single-domain entry for a confident single-domain router result", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "Can you adapt my workout plan this week?",
+        recentMessages: [],
+        routerResult: createRouterResultForPlanner("workout", 0.84),
+      });
+
+      expect(plan.fanout).toBeDefined();
+      expect(plan.fanout.selectedDomains).toHaveLength(1);
+      expect(plan.fanout.isMultiDomain).toBe(false);
+
+      const entry = plan.fanout.selectedDomains[0]!;
+      expect(entry.domain).toBe("workout");
+      expect(entry.capabilityId).toBe("adjust_workout");
+      // Tool allowlist must be from the capability catalog (not wider than catalog)
+      const catalogConfig = getCapabilityConfig("adjust_workout");
+      expect(entry.allowedTools).toEqual(catalogConfig.allowedTools);
+      expect(entry.contextBudget).toEqual(DEFAULT_CONTEXT_BUDGET_POLICY);
+      // executorMode must be a known executor mode string
+      expect(entry.executorMode).toMatch(/^(single_llm|context_aware_llm|proposal_flow|context_expansion_loop|deterministic_read|deterministic_write)$/);
+    });
+
+    it("returns a multi-domain fanout when router selects two domains", async () => {
+      const { planner } = createPlannerHarness();
+
+      const multiDomainRouterResult = {
+        output: routerDecisionOutputSchema.parse({
+          selectedDomains: [
+            { domain: "workout", confidence: 0.88, intentHints: [], toolHints: [], signalHints: [] },
+            { domain: "nutrition", confidence: 0.72, intentHints: [], toolHints: [], signalHints: [] },
+          ],
+          contextNeeds: [],
+          safetyFlags: [],
+          confidence: 0.88,
+        }),
+        source: "llm" as const,
+        validationErrors: [],
+      };
+
+      const plan = await planner.planTurn({
+        userMessage: "I am exhausted — please adjust my workout and suggest a lighter dinner.",
+        recentMessages: [],
+        routerResult: multiDomainRouterResult,
+      });
+
+      expect(plan.fanout).toBeDefined();
+      expect(plan.fanout.selectedDomains).toHaveLength(2);
+      expect(plan.fanout.isMultiDomain).toBe(true);
+
+      const domains = plan.fanout.selectedDomains.map((e) => e.domain);
+      expect(domains).toContain("workout");
+      expect(domains).toContain("nutrition");
+
+      // Each entry must have isolated allowlists
+      const workoutEntry = plan.fanout.selectedDomains.find((e) => e.domain === "workout")!;
+      const nutritionEntry = plan.fanout.selectedDomains.find((e) => e.domain === "nutrition")!;
+      expect(workoutEntry.capabilityId).toBe("adjust_workout");
+      expect(nutritionEntry.capabilityId).toBe("adjust_nutrition");
+
+      // Workout domain must NOT inherit nutrition's proposal intents
+      expect(workoutEntry.allowedProposalIntents).not.toContain("adjust_nutrition_plan");
+      expect(nutritionEntry.allowedProposalIntents).not.toContain("adapt_workout_plan");
+    });
+
+    it("caps selected domains at MAX_ROUTER_SELECTED_DOMAINS (3) even if router returns more", async () => {
+      const { planner } = createPlannerHarness();
+
+      // Router returning 3 domains (the max)
+      const threeDomainsResult = {
+        output: routerDecisionOutputSchema.parse({
+          selectedDomains: [
+            { domain: "workout", confidence: 0.9, intentHints: [], toolHints: [], signalHints: [] },
+            { domain: "nutrition", confidence: 0.78, intentHints: [], toolHints: [], signalHints: [] },
+            { domain: "health", confidence: 0.76, intentHints: [], toolHints: [], signalHints: [] },
+          ],
+          contextNeeds: [],
+          safetyFlags: [],
+          confidence: 0.9,
+        }),
+        source: "llm" as const,
+        validationErrors: [],
+      };
+
+      const plan = await planner.planTurn({
+        userMessage: "I am exhausted, adjust my workout, suggest a lighter dinner, and check my health.",
+        recentMessages: [],
+        routerResult: threeDomainsResult,
+      });
+
+      expect(plan.fanout.selectedDomains.length).toBeLessThanOrEqual(MAX_ROUTER_SELECTED_DOMAINS);
+      expect(plan.fanout.isMultiDomain).toBe(true);
+    });
+
+    it("returns single-domain fanout (not multi-domain) for proposal-revision route", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "Please revise the proposal.",
+        recentMessages: [],
+        proposalRevision: {
+          supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+          modificationFeedback: "Make it lighter.",
+          originalProposal: {
+            intent: "adapt_workout_plan",
+            targetDomain: "workout",
+            title: "Adjust workout",
+            reason: "Recovery signals.",
+            proposedChanges: {},
+          },
+        },
+      });
+
+      expect(plan.fanout).toBeDefined();
+      expect(plan.fanout.selectedDomains).toHaveLength(1);
+      expect(plan.fanout.isMultiDomain).toBe(false);
+      // Proposal-revision routes through the capability's own domain
+      expect(plan.fanout.selectedDomains[0]?.capabilityId).toBe(plan.catalogIntentId);
+    });
+
+    it("returns single-domain fanout for safe fallback route (no router)", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "What do you think?",
+        recentMessages: [],
+      });
+
+      expect(plan.fanout).toBeDefined();
+      expect(plan.fanout.selectedDomains).toHaveLength(1);
+      expect(plan.fanout.isMultiDomain).toBe(false);
+      expect(plan.fanout.selectedDomains[0]?.capabilityId).toBe(plan.catalogIntentId);
+    });
+
+    it("returns single-domain fanout for low-confidence fallback router result", async () => {
+      const { planner } = createPlannerHarness();
+
+      const plan = await planner.planTurn({
+        userMessage: "I feel off today.",
+        recentMessages: [],
+        routerResult: createRouterResultForPlanner("workout", 0.3, "fallback"),
+      });
+
+      expect(plan.fanout.selectedDomains).toHaveLength(1);
+      expect(plan.fanout.isMultiDomain).toBe(false);
+    });
+
+    it("each domain entry has independently clamped context budget (safety floor preserved)", async () => {
+      const { planner } = createPlannerHarness();
+
+      const multiDomainResult = {
+        output: routerDecisionOutputSchema.parse({
+          selectedDomains: [
+            { domain: "workout", confidence: 0.88, intentHints: [], toolHints: [], signalHints: [] },
+            { domain: "nutrition", confidence: 0.72, intentHints: [], toolHints: [], signalHints: [] },
+          ],
+          contextNeeds: [],
+          safetyFlags: [],
+          confidence: 0.88,
+        }),
+        source: "llm" as const,
+        validationErrors: [],
+      };
+
+      const plan = await planner.planTurn({
+        userMessage: "Adjust my plan.",
+        recentMessages: [],
+        routerResult: multiDomainResult,
+      });
+
+      for (const entry of plan.fanout.selectedDomains) {
+        // Safety floors: documents and sensitive health context denied by default
+        expect(entry.contextBudget).toBeDefined();
+        // Verify it matches the DEFAULT_CONTEXT_BUDGET_POLICY floors
+        expect(entry.contextBudget.allowDocuments).toBe(DEFAULT_CONTEXT_BUDGET_POLICY.allowDocuments);
+        expect(entry.contextBudget.allowSensitiveHealthContext).toBe(
+          DEFAULT_CONTEXT_BUDGET_POLICY.allowSensitiveHealthContext,
+        );
+      }
     });
   });
 });

@@ -11,6 +11,12 @@ export const nutritionProvenanceLabelSchema = z.enum([
   "user_manual",
   "recipe_recommendation",
   "dev_stub",
+  /**
+   * Produced by the nutrition domain LLM when it analyzes a food photo directly
+   * via the multimodal (vision) path. Replaces the legacy food_photo_analysis
+   * provenance that was tied to the deleted FoodPhotoAnalysisService.
+   */
+  "vision_llm_estimate",
 ]);
 
 export type NutritionProvenanceLabel = z.infer<typeof nutritionProvenanceLabelSchema>;
@@ -147,6 +153,9 @@ export type NutritionIncidentRecord = z.infer<typeof nutritionIncidentRecordSche
 const PHOTO_BACKED_PROVENANCE_SOURCES = new Set<NutritionProvenanceLabel>([
   "food_photo_analysis",
   "dev_stub",
+  // vision_llm_estimate: produced by the nutrition domain LLM multimodal path.
+  // Image-ref ownership validation must fire for proposals with this source.
+  "vision_llm_estimate",
 ]);
 
 export type OwnedFoodPhotoAnalysisRef = {
@@ -154,35 +163,72 @@ export type OwnedFoodPhotoAnalysisRef = {
   imageRefId: string;
 };
 
+/**
+ * Validate image-ref ownership for a log_nutrition_incident proposal.
+ *
+ * Two ownership paths:
+ *
+ * 1. `food_photo_analysis` / `dev_stub` provenance — historical path: the image
+ *    ref must match a stored analysis record owned by the user
+ *    (`ownedAnalyses`).
+ *
+ * 2. `vision_llm_estimate` provenance — the nutrition domain LLM analysed the
+ *    food photo directly via the multimodal pipeline; no analysis record is
+ *    created.  Ownership is established by the chat attachment upload perimeter
+ *    instead: each imageRef.id must appear in `ownedChatAttachmentIds`.
+ *    The `analysisId` check is intentionally skipped for this provenance
+ *    because no analysis record is ever written.
+ */
 export function getNutritionIncidentImageRefOwnershipErrors(
   payload: LogNutritionIncidentProposalPayload,
   ownedAnalyses: OwnedFoodPhotoAnalysisRef[],
+  ownedChatAttachmentIds?: readonly string[],
 ): string[] {
   const errors: string[] = [];
 
-  if (PHOTO_BACKED_PROVENANCE_SOURCES.has(payload.provenance.source)) {
-    if (payload.imageRefs.length === 0) {
-      errors.push(
-        "proposedChanges.imageRefs: Photo-backed nutrition incidents require at least one analyzed image reference.",
-      );
-    }
+  if (!PHOTO_BACKED_PROVENANCE_SOURCES.has(payload.provenance.source)) {
+    return errors;
+  }
 
-    if (payload.provenance.analysisId) {
-      const matchingAnalysis = ownedAnalyses.find(
-        (analysis) => analysis.analysisId === payload.provenance.analysisId,
-      );
+  if (payload.imageRefs.length === 0) {
+    errors.push(
+      "proposedChanges.imageRefs: Photo-backed nutrition incidents require at least one analyzed image reference.",
+    );
+  }
 
-      if (!matchingAnalysis) {
+  // vision_llm_estimate: ownership is against the chat attachment upload perimeter,
+  // not stored analysis records.  The analysisId analysis-record check is skipped
+  // because the LLM path never writes an analysis row.
+  if (payload.provenance.source === "vision_llm_estimate") {
+    const attachmentIds = new Set(ownedChatAttachmentIds ?? []);
+
+    for (const [index, ref] of payload.imageRefs.entries()) {
+      if (!attachmentIds.has(ref.id)) {
         errors.push(
-          "proposedChanges.provenance.analysisId: Food photo analysis was not found for this user.",
-        );
-      } else if (
-        !payload.imageRefs.some((ref) => ref.id === matchingAnalysis.imageRefId)
-      ) {
-        errors.push(
-          "proposedChanges.provenance.analysisId: Food photo analysis does not match the referenced image.",
+          `proposedChanges.imageRefs[${index}].id: Image reference was not found as an owned chat attachment for this user.`,
         );
       }
+    }
+
+    return errors;
+  }
+
+  // food_photo_analysis / dev_stub provenance: validate against stored analysis records.
+  if (payload.provenance.analysisId) {
+    const matchingAnalysis = ownedAnalyses.find(
+      (analysis) => analysis.analysisId === payload.provenance.analysisId,
+    );
+
+    if (!matchingAnalysis) {
+      errors.push(
+        "proposedChanges.provenance.analysisId: Food photo analysis was not found for this user.",
+      );
+    } else if (
+      !payload.imageRefs.some((ref) => ref.id === matchingAnalysis.imageRefId)
+    ) {
+      errors.push(
+        "proposedChanges.provenance.analysisId: Food photo analysis does not match the referenced image.",
+      );
     }
   }
 

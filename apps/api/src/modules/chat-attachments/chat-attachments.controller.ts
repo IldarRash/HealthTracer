@@ -1,7 +1,6 @@
 import {
   createChatAttachmentSchema,
   grantChatAttachmentConsentSchema,
-  recognizeChatAttachmentSchema,
 } from "@health/types";
 import {
   Body,
@@ -67,16 +66,4 @@ export class ChatAttachmentsController {
     );
   }
 
-  @Post(":attachmentId/recognize")
-  recognizeAttachment(
-    @CurrentAuth() auth: ClerkAuthContext,
-    @Param("attachmentId") attachmentId: string,
-    @Body() body: unknown,
-  ) {
-    return this.chatAttachmentsService.recognizeAttachment(
-      auth,
-      attachmentId,
-      parseBody(recognizeChatAttachmentSchema, body),
-    );
-  }
 }

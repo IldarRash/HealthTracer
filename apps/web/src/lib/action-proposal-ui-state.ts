@@ -29,6 +29,7 @@ export const NUTRITION_CONFIDENCE_LABELS: Record<NutritionConfidenceBand, string
 
 export const NUTRITION_PROVENANCE_LABELS: Record<NutritionProvenance["source"], string> = {
   food_photo_analysis: "Food photo analysis",
+  vision_llm_estimate: "Vision estimate",
   text_estimate: "Text estimate",
   user_manual: "Manual entry",
   recipe_recommendation: "Saved recipe estimate",

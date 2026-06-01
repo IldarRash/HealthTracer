@@ -6,7 +6,6 @@ import {
   contextSlicePurposeSchema,
   contextTimeRangeSchema,
   expectedResponseModeSchema,
-  type AttachmentCatalogIntentId,
   type CatalogIntentId,
 } from "./agent-context.js";
 import { classifiedChatAttachmentCategorySchema } from "./chat-attachments.js";
@@ -42,7 +41,7 @@ import {
   directPathReplyTemplatesSchema,
 } from "./direct-chat-path-replies.js";
 import { buildDefaultPromptTemplateEntries } from "./prompt-template-renderer.js";
-import { resolvePrimaryAttachmentCatalogIntentFromRouting } from "./attachment-routing-resolver.js";
+
 import {
   DEFAULT_PROPOSAL_EXPLAINER_NEGATIVE_PATTERNS,
   DEFAULT_PROPOSAL_EXPLAINER_POSITIVE_PATTERNS,
@@ -220,12 +219,6 @@ export type PromptTemplatesBehaviorConfig = z.infer<typeof promptTemplatesBehavi
 
 export const attachmentRoutingConfigSchema = z.object({
   categoryPriority: z.array(classifiedChatAttachmentCategorySchema).min(1).max(10),
-  // Legacy flag-off capability hints; unified pipeline uses the same map for context hints only.
-  categoryToCapability: z.object({
-    food_photo: catalogIntentIdSchema,
-    workout_attachment: catalogIntentIdSchema,
-    medical_document: catalogIntentIdSchema,
-  }),
   defaultCapabilityId: catalogIntentIdSchema,
   confidence: z.number().min(0).max(1).default(0.98),
   routingMethod: z.literal("attachment_family").default("attachment_family"),
@@ -410,11 +403,6 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
     },
     attachmentRouting: {
       categoryPriority: ["medical_document", "workout_attachment", "food_photo"],
-      categoryToCapability: {
-        food_photo: "attachment_food_photo",
-        workout_attachment: "attachment_workout",
-        medical_document: "attachment_medical_document",
-      },
       defaultCapabilityId: "attachment_food_photo",
       confidence: 0.98,
       routingMethod: "attachment_family",
@@ -584,10 +572,6 @@ export function normalizeAiBehaviorConfig(
     attachmentRouting: {
       ...defaults.attachmentRouting,
       ...partial?.attachmentRouting,
-      categoryToCapability: {
-        ...defaults.attachmentRouting.categoryToCapability,
-        ...partial?.attachmentRouting?.categoryToCapability,
-      },
     },
     proposalExplainer: {
       ...defaults.proposalExplainer,
@@ -710,24 +694,6 @@ export function resolveProposalRevisionCapabilityId(
   }
 
   return config.fallbackCapabilityId;
-}
-
-export function resolvePrimaryAttachmentCapabilityId(
-  config: AttachmentRoutingConfig,
-  categories: ReadonlyArray<z.infer<typeof classifiedChatAttachmentCategorySchema>>,
-): CatalogIntentId {
-  return resolvePrimaryAttachmentCatalogIntentFromRouting(
-    {
-      categoryPriority: config.categoryPriority,
-      categoryToCapability: {
-        food_photo: config.categoryToCapability.food_photo as AttachmentCatalogIntentId,
-        workout_attachment: config.categoryToCapability.workout_attachment as AttachmentCatalogIntentId,
-        medical_document: config.categoryToCapability.medical_document as AttachmentCatalogIntentId,
-      },
-      defaultCapabilityId: config.defaultCapabilityId as AttachmentCatalogIntentId,
-    },
-    categories,
-  ) as CatalogIntentId;
 }
 
 export function resolveDirectPathRefreshHintsFromConfig(

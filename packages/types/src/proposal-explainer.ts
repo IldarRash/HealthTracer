@@ -2,10 +2,8 @@ import { z } from "zod";
 import { normalizePreprocessorText } from "./message-preprocessor.js";
 import {
   detectProposalExplainerRequest as detectProposalExplainerRequestFromMatcher,
-  detectProposalExplainerRequestFromConfig,
   type DetectProposalExplainerRequestOptions,
 } from "./proposal-explainer-matcher.js";
-import { PROPOSAL_EXPLAINER_NO_PROPOSAL_REPLY } from "./proposal-explainer-default-patterns.js";
 
 export type { DetectProposalExplainerRequestOptions } from "./proposal-explainer-matcher.js";
 

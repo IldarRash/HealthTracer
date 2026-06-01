@@ -2,7 +2,6 @@ import type {
   ChatAttachmentCategory,
   ChatAttachmentCategorySource,
   CreateChatAttachmentInput,
-  DocumentConsentScope,
 } from "@health/types";
 import { readFileAsBase64 } from "./document-upload";
 import {
@@ -103,15 +102,4 @@ export async function buildChatAttachmentUploadPayload(input: {
   }
 
   return { ok: true, payload: base };
-}
-
-export function resolveRecognizeConsentScopes(
-  category: ChatAttachmentCategory,
-  consentScopes: readonly DocumentConsentScope[],
-): DocumentConsentScope[] | undefined {
-  if (category !== "medical_document") {
-    return undefined;
-  }
-
-  return consentScopes.length > 0 ? [...consentScopes] : undefined;
 }

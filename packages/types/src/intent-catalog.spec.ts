@@ -8,8 +8,6 @@ import {
   getIntentCatalogEntry,
   intentCatalogEntrySchema,
   listRouterCatalogEntries,
-  resolveAttachmentCatalogIntentId,
-  resolvePrimaryAttachmentCatalogIntentId,
   serializeIntentCatalogForRouter,
 } from "./intent-catalog.js";
 
@@ -25,22 +23,6 @@ describe("intent catalog", () => {
     expect(routerEntries.every((entry) => entry.kind === "normal")).toBe(true);
     expect(routerEntries.some((entry) => entry.id === "attachment_food_photo")).toBe(false);
     expect(routerEntries.some((entry) => entry.id === "proposal_explainer")).toBe(false);
-  });
-
-  it("maps attachment categories to attachment catalog intents", () => {
-    expect(resolveAttachmentCatalogIntentId("food_photo")).toBe("attachment_food_photo");
-    expect(resolveAttachmentCatalogIntentId("workout_attachment")).toBe("attachment_workout");
-    expect(resolveAttachmentCatalogIntentId("medical_document")).toBe(
-      "attachment_medical_document",
-    );
-  });
-
-  it("prefers medical attachment families when categories are mixed", () => {
-    expect(
-      resolvePrimaryAttachmentCatalogIntentId({
-        categories: ["food_photo", "medical_document"],
-      }),
-    ).toBe("attachment_medical_document");
   });
 
   it("serializes router guidance for turn decision catalog hints", () => {

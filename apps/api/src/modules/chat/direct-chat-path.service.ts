@@ -74,7 +74,9 @@ export class DirectChatPathService {
               {
                 attachmentRefId: "direct-path-blocked",
                 category: "unclassified",
-                status: "ready",
+                mimeType: "application/octet-stream",
+                consentState: "none",
+                storageRef: null,
               },
             ],
           }

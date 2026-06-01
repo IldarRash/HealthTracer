@@ -1,4 +1,3 @@
-import type { ClassifiedChatAttachmentCategory } from "./chat-attachment-classification.js";
 import type {
   ChatAttachmentCategory,
   ChatAttachmentCategorySource,
@@ -46,40 +45,6 @@ export function resolveProvisionalUploadCategorySource(input: {
     return resolveCreateAttachmentCategorySource({
       categorySource: input.inputCategorySource,
     });
-  }
-
-  return "ai_classified";
-}
-
-export function resolveSendTimeAttachmentCategory(input: {
-  attachmentCategory: ChatAttachmentCategory;
-  attachmentCategorySource?: ChatAttachmentCategorySource;
-  consentScopes?: readonly string[] | undefined;
-  classificationCategory: ClassifiedChatAttachmentCategory;
-}): ClassifiedChatAttachmentCategory {
-  if (
-    isTrustedUserSelectedChatAttachmentUpload({
-      category: input.attachmentCategory,
-      categorySource: input.attachmentCategorySource,
-      consentScopes: input.consentScopes,
-    })
-  ) {
-    return input.attachmentCategory as ClassifiedChatAttachmentCategory;
-  }
-
-  return input.classificationCategory;
-}
-
-export function resolveSendTimeCategorySource(input: {
-  previousCategorySource?: ChatAttachmentCategorySource;
-  resolvedCategory: ChatAttachmentCategory;
-}): ChatAttachmentCategorySource {
-  if (input.previousCategorySource === "user_selected") {
-    return "user_selected";
-  }
-
-  if (isUnclassifiedChatAttachmentCategory(input.resolvedCategory)) {
-    return input.previousCategorySource ?? "default_unclassified";
   }
 
   return "ai_classified";

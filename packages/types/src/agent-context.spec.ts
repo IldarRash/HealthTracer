@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { AgentSafetyFlag } from "./agent-context.js";
 import {
   agentContextPacketSchema,
   agentToolCallRequestSchema,

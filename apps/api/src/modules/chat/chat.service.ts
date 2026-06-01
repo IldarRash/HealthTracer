@@ -127,17 +127,14 @@ export class ChatService {
     const attachmentTurnResult =
       attachmentRefIds.length > 0
         ? await this.chatTurnAttachmentStageService.runTurnStages({
-            auth,
             userId: user.id,
             threadId,
             messageId: userMessage.id,
-            messageContent,
             attachmentRefIds,
-            todayIsoDate,
           })
         : null;
 
-    const attachmentRecords = attachmentTurnResult?.attachments ?? [];
+    const attachmentMetadata = attachmentTurnResult?.attachmentMetadata ?? [];
 
     const crisisEvaluation = evaluateWellbeingCrisisFromText(messageContent);
 
@@ -256,20 +253,16 @@ export class ChatService {
       ...(explainerPreAi.kind === "with_proposal"
         ? { proposalExplainer: explainerPreAi.context }
         : {}),
-      ...(attachmentRecords.length > 0
+      ...(attachmentMetadata.length > 0
         ? {
             attachmentTurn: {
-              attachments: attachmentRecords.map((attachment) => ({
-                attachmentRefId: attachment.id,
-                category: attachment.category,
-                status: attachment.status,
-                recognition: attachment.recognition,
+              attachments: attachmentMetadata.map((meta) => ({
+                attachmentRefId: meta.refId,
+                category: meta.category,
+                mimeType: meta.mimeType,
+                consentState: meta.consentState,
+                storageRef: meta.storageRef,
               })),
-              ...(attachmentTurnResult?.contextSummaries.length
-                ? {
-                    contextSummaries: attachmentTurnResult.contextSummaries,
-                  }
-                : {}),
             } satisfies AttachmentTurnContext,
           }
         : {}),
@@ -308,6 +301,7 @@ export class ChatService {
     }) as RawAiProposal[];
 
     const attachmentOutcomes = attachmentTurnResult?.outcomes ?? [];
+
 
     if (
       shouldTriggerRecipeRecommendationRequest(
@@ -449,6 +443,7 @@ export class ChatService {
       assistantMessage: toChatMessage(assistantMessage),
       proposals: createdProposals,
       ...(attachmentOutcomes.length > 0 ? { attachmentOutcomes } : {}),
+      ...(generated.consentRequired === true ? { consentRequired: true } : {}),
     };
   }
 }

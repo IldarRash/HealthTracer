@@ -12,7 +12,6 @@ import {
   grantChatAttachmentConsent,
   listChatThreads,
   listProposals,
-  recognizeChatAttachment,
   sendChatMessage,
   uploadChatAttachment,
 } from "../../lib/api";
@@ -31,15 +30,11 @@ import {
   type ChatAttachmentOutcomeDisplay,
   type ChatComposerAttachmentDraft,
 } from "../../lib/chat-attachment-ui-state";
-import {
-  buildChatAttachmentUploadPayload,
-  resolveRecognizeConsentScopes,
-} from "../../lib/chat-attachment-upload";
+import { buildChatAttachmentUploadPayload } from "../../lib/chat-attachment-upload";
 import {
   getDirectChatPathRefreshHints,
   resolveChatMessageDirectPathFeedback,
 } from "../../lib/chat-direct-path-ui-state";
-import { DOCUMENT_CONSENT_VERSION } from "../../lib/documents-ui-state";
 import {
   createOptimisticUserMessage,
   formatChatTimestamp,
@@ -440,18 +435,7 @@ export function ChatWorkspace() {
           return;
         }
 
-        const recognizeResult = await recognizeChatAttachment(token, attachmentRefId, {});
-
-        if (recognizeResult.error || !recognizeResult.data) {
-          updatePendingMedicalConsent(attachmentRefId, (current) => ({
-            ...current,
-            isGranting: false,
-            error: recognizeResult.error ?? "Document could not be processed after consent.",
-          }));
-          return;
-        }
-
-        const updatedAttachment = recognizeResult.data.attachment;
+        const updatedAttachment = consentResult.data;
         setAttachmentOutcomesByMessageId((current) => {
           const next: Record<string, ChatAttachmentOutcomeDisplay[]> = {};
 
@@ -484,57 +468,6 @@ export function ChatWorkspace() {
       }
     },
     [getToken, pendingMedicalConsentByAttachmentId, updatePendingMedicalConsent],
-  );
-
-  const recognizeAttachmentDraft = useCallback(
-    async (draftInput: ChatComposerAttachmentDraft) => {
-      if (!draftInput.attachmentId) {
-        return;
-      }
-
-      updateComposerAttachment(draftInput.localId, (current) => ({
-        ...current,
-        phase: "recognizing",
-        error: null,
-      }));
-
-      try {
-        const token = await getToken();
-        if (!token) {
-          throw new Error("Clerk session token is unavailable.");
-        }
-
-        const recognizeResult = await recognizeChatAttachment(token, draftInput.attachmentId, {
-          consentScopes: resolveRecognizeConsentScopes(
-            draftInput.category,
-            draftInput.consentScopes,
-          ),
-          consentVersion: DOCUMENT_CONSENT_VERSION,
-        });
-
-        if (recognizeResult.error || !recognizeResult.data) {
-          updateComposerAttachment(draftInput.localId, (current) => ({
-            ...current,
-            phase: "uploaded",
-            error: recognizeResult.error ?? "Attachment could not be recognized.",
-          }));
-          return;
-        }
-
-        updateComposerAttachment(draftInput.localId, (current) => ({
-          ...current,
-          record: recognizeResult.data!.attachment,
-          phase: "ready",
-        }));
-      } catch (error) {
-        updateComposerAttachment(draftInput.localId, (current) => ({
-          ...current,
-          phase: "uploaded",
-          error: error instanceof Error ? error.message : "Attachment recognition failed.",
-        }));
-      }
-    },
-    [getToken, updateComposerAttachment],
   );
 
   const sendMessageMutation = useMutation({
@@ -948,9 +881,6 @@ export function ChatWorkspace() {
                 }}
                 onGrantConsentAndRecognize={(localId) => {
                   void grantConsentAndRetry(localId);
-                }}
-                onRecognizeDraft={(draft) => {
-                  void recognizeAttachmentDraft(draft);
                 }}
               />
               <div className="chat-composer-controls">

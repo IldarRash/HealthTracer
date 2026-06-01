@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   applyAttachmentBehaviorSafetyFloors,
   buildDefaultAttachmentBehaviorConfig,
-  buildFoodPhotoRecognitionInstruction,
   normalizeAttachmentBehaviorConfig,
   resolveLoadedAttachmentBehaviorConfig,
   safeParseAttachmentBehaviorConfig,
@@ -20,10 +19,7 @@ describe("attachment behavior config", () => {
     expect(defaults.turnStages.order).toEqual([
       "validate_refs",
       "link_to_message",
-      "classify",
       "apply_upload_disposition",
-      "recognize",
-      "prepare_attachment_context",
     ]);
   });
 
@@ -66,19 +62,6 @@ describe("attachment behavior config", () => {
     expect(loaded.config).toEqual(defaults);
     expect(loaded.errors.length).toBeGreaterThan(0);
     expect(loaded.warnings).toContain("Invalid attachment behavior config; using built-in defaults.");
-  });
-
-  it("builds food photo recognition instruction from config prompts", () => {
-    const config = buildDefaultAttachmentBehaviorConfig();
-    const instruction = buildFoodPhotoRecognitionInstruction({
-      prompts: config.recognition.prompts.foodPhoto,
-      mealContextLabel: "Lunch",
-      boundedMessage: "Here is my meal",
-    });
-
-    expect(instruction).toBe(
-      "Estimate meal items and macros from this food photo. Meal context: Lunch. User message (bounded): Here is my meal",
-    );
   });
 
   it("normalizes partial config onto defaults", () => {

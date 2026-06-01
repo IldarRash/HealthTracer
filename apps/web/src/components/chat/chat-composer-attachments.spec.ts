@@ -40,9 +40,9 @@ const FORBIDDEN_ATTACHMENT_TERMS = [
 ];
 
 describe("chat composer attachments wiring", () => {
-  it("wires upload, consent, optional recognize, and send with attachment refs", () => {
+  it("wires upload, consent, and send with attachment refs (recognize endpoint removed)", () => {
     expect(chatWorkspaceSource).toContain("uploadChatAttachment");
-    expect(chatWorkspaceSource).toContain("recognizeChatAttachment");
+    expect(chatWorkspaceSource).not.toContain("recognizeChatAttachment");
     expect(chatWorkspaceSource).toContain("grantChatAttachmentConsent");
     expect(chatWorkspaceSource).toContain("attachmentRefIds");
     expect(chatWorkspaceSource).toContain("ChatComposerAttachments");

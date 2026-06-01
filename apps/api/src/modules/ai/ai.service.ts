@@ -27,6 +27,13 @@ export interface GeneratedCoachResponse {
   parseErrors: string[];
   replySafetyErrors: string[];
   agentMetadata: AgentTurnMetadata;
+  /**
+   * Whether the AI pipeline resolved a consent-gated outcome (e.g. a medical
+   * document save proposal). When true, ChatService surfaces a distinct consent
+   * prompt flag in the turn response. Nothing is auto-persisted.
+   * Only set on fan-out turns; undefined otherwise.
+   */
+  consentRequired?: boolean;
 }
 
 @Injectable()
@@ -43,6 +50,9 @@ export class AiService {
       parseErrors: orchestrated.parseErrors,
       replySafetyErrors: orchestrated.replySafetyErrors,
       agentMetadata: orchestrated.agentMetadata,
+      ...(orchestrated.consentRequired !== undefined
+        ? { consentRequired: orchestrated.consentRequired }
+        : {}),
     };
   }
 

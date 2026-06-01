@@ -17,12 +17,9 @@ import type {
   ResponseModeExecutorMode,
 } from "@health/types";
 import {
-  buildBoundedUnifiedTurnDecisionMetadata,
   buildResponseModeExecutionMetadata,
-  shouldSuppressAttachmentProposalSideChannel,
   isDeterministicResponseModeExecutorMode,
   resolveResponseModeExecutorLoopPolicy,
-  resolveResponseModeExecutorMode,
   type ResponseModeExecutorLoopPolicy,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
@@ -31,7 +28,7 @@ import { ActionResolverService } from "./action-resolver.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
 import type { CoachIntentDefinitionMetadata } from "./capability-intent-definition.adapter.js";
 import { resolveAiCoachProviderMode } from "./coach-provider.factory.js";
-import type { TurnDecisionService } from "./turn-decision.service.js";
+import type { RouterLlmResult } from "./router-llm.service.js";
 import type { CapabilityPlanResult } from "./system-planner.service.js";
 import type { OrchestrateCoachTurnInput } from "./agent-orchestrator.service.js";
 
@@ -47,9 +44,9 @@ export interface ResponseModeExecutorTurnInput {
   contextPacket: AgentContextPacket;
   coachingContext: Record<string, unknown>;
   capabilityTurnMetadata: AgentTurnCapabilityPresentation;
-  turnDecisionTurn: {
-    turnDecisionRan: boolean;
-    turnDecision?: Awaited<ReturnType<TurnDecisionService["decide"]>>;
+  routerTurn: {
+    routerRan: boolean;
+    routerResult?: RouterLlmResult;
   };
   directPathCandidate?: ReturnType<
     import("./system-planner.service.js").SystemPlannerService["classifyDirectPathCandidate"]
@@ -72,34 +69,14 @@ export class ResponseModeExecutorService {
     private readonly agentToolRegistryService: AgentToolRegistryService,
   ) {}
 
-  resolveExecutorMode(
-    plan: CapabilityPlanResult,
-    options?: {
-      directPathCandidate?: ResponseModeExecutorTurnInput["directPathCandidate"];
-      messageUnderstandingDirectCommand?: boolean;
-    },
-  ): ResponseModeExecutorMode {
-    return resolveResponseModeExecutorMode({
-      route: plan.route,
-      expectedResponseMode: plan.expectedResponseMode,
-      requiresCompression: plan.requiresCompression,
-      allowedProposalIntents: plan.intentDefinition.allowedProposalIntents,
-      allowedTools: plan.intentDefinition.allowedTools,
-      directPathCandidate: options?.directPathCandidate ?? null,
-      messageUnderstandingDirectCommand: options?.messageUnderstandingDirectCommand,
-    });
-  }
-
   async execute(input: ResponseModeExecutorTurnInput): Promise<ResponseModeExecutorTurnResult> {
     const { plan, orchestratorInput, contextPacket, coachingContext } = input;
     const { route, intentDefinition } = plan;
     const capabilityTurnMetadata = input.capabilityTurnMetadata;
 
-    const executorMode = this.resolveExecutorMode(plan, {
-      directPathCandidate: input.directPathCandidate,
-      messageUnderstandingDirectCommand:
-        input.turnDecisionTurn.turnDecision?.output.directCommand.detected,
-    });
+    // Use the executor mode computed by SystemPlannerService rather than recomputing it;
+    // planner and executor use the same inputs (classifyDirectPathCandidate, turnDecision).
+    const executorMode = plan.executorMode;
 
     const loopPolicy = resolveResponseModeExecutorLoopPolicy(executorMode);
 
@@ -118,7 +95,7 @@ export class ResponseModeExecutorService {
       route,
       intentDefinition,
       capabilityTurnMetadata,
-      turnDecisionTurn: input.turnDecisionTurn,
+      routerTurn: input.routerTurn,
       provider: input.provider,
       executorMode,
       loopPolicy,
@@ -142,7 +119,10 @@ export class ResponseModeExecutorService {
       loopPolicy: ResponseModeExecutorLoopPolicy;
     },
   ): ResponseModeExecutorTurnResult {
-    const baseMetadata = this.buildBaseMetadata(input);
+    const baseMetadata = this.buildBaseMetadata({
+      ...input,
+      turnDecisionTurn: this.toTurnDecisionTurnCompat(input.routerTurn),
+    });
     const responseModeExecution = buildResponseModeExecutionMetadata({
       executorMode: params.executorMode,
       llmInvoked: false,
@@ -182,7 +162,7 @@ export class ResponseModeExecutorService {
     route: IntentRouteResult;
     intentDefinition: CoachIntentDefinitionMetadata;
     capabilityTurnMetadata: AgentTurnCapabilityPresentation;
-    turnDecisionTurn: ResponseModeExecutorTurnInput["turnDecisionTurn"];
+    routerTurn: ResponseModeExecutorTurnInput["routerTurn"];
     provider: CoachAiProvider;
     executorMode: ResponseModeExecutorMode;
     loopPolicy: ResponseModeExecutorLoopPolicy;
@@ -193,8 +173,6 @@ export class ResponseModeExecutorService {
       coachingContext: inputCoachingContext,
       route,
       intentDefinition,
-      capabilityTurnMetadata,
-      turnDecisionTurn,
       provider,
       executorMode,
       loopPolicy,
@@ -206,45 +184,18 @@ export class ResponseModeExecutorService {
       loopPolicy,
     });
 
-    const providerMode = resolveAiCoachProviderMode();
     const toolsInvoked: AgentToolName[] = [];
     const priorToolResults: AgentToolCallResult[] = [];
     let loopIterations = 0;
     const maxLoopIterations = loopPolicy.maxLoopIterations;
 
-    const baseMetadata = {
-      provider: providerMode,
-      intent: route.intent,
-      catalogIntentId: route.catalogIntentId,
-      primaryCapabilityId: capabilityTurnMetadata.primaryCapabilityId,
-      selectedCapabilityIds: [...capabilityTurnMetadata.selectedCapabilityIds],
-      capabilityPresentation: capabilityTurnMetadata,
-      purpose: contextPacket.purpose,
-      depth: contextPacket.depth,
-      timeRange: contextPacket.timeRange,
+    // Build baseMetadata once using the shared toolsInvoked array so mutations
+    // (push) are reflected in the final agentMetadata without re-building.
+    const baseMetadata = this.buildBaseMetadata(
+      { ...params, turnDecisionTurn: this.toTurnDecisionTurnCompat(params.routerTurn) },
       toolsInvoked,
-      citations: mapContextSourceRefsToAgentCitations(contextPacket.sourceRefs),
-      routing: {
-        confidence: route.confidence,
-        routingMethod: route.routingMethod,
-        llmRouterInvoked: false,
-        messageUnderstandingInvoked: false,
-        unifiedTurnDecisionInvoked: turnDecisionTurn.turnDecisionRan,
-        catalogIntentId: route.catalogIntentId,
-        safetyFlags: route.safetyFlags,
-        expectedResponseMode: route.expectedResponseMode,
-        contextSliceCount: route.requiredContextSlices.length,
-        maxLoopIterations,
-      },
-      messageUnderstanding: { ran: false },
-      unifiedTurnDecision: {
-        ...buildBoundedUnifiedTurnDecisionMetadata({
-          ran: turnDecisionTurn.turnDecisionRan,
-          result: turnDecisionTurn.turnDecision,
-        }),
-      },
-      missingContextNotes: contextPacket.missingContextNotes,
-    };
+      maxLoopIterations,
+    );
 
     const agentMetadataBase = {
       purpose: contextPacket.purpose,
@@ -293,88 +244,39 @@ export class ResponseModeExecutorService {
         }
 
         if (parsedLoop.value.kind === "tool_request") {
-          if (!loopPolicy.allowToolLoop) {
-            return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
-              parseErrors: [
-                `Executor mode "${executorMode}" does not allow tool loops; return final_answer in one step.`,
-              ],
-              replySafetyErrors: [],
-              safetyStatus: "parse_failed",
-            });
-          }
-
-          const toolAllowed = intentDefinition.allowedTools.includes(parsedLoop.value.tool);
-
-          if (!toolAllowed) {
-            return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
-              parseErrors: [
-                `Requested tool "${parsedLoop.value.tool}" is not allowed for intent "${route.catalogIntentId}".`,
-              ],
-              replySafetyErrors: [],
-              safetyStatus: "parse_failed",
-            });
-          }
-
-          const toolResult = await this.agentToolRegistryService.executeTool(input.auth, {
-            tool: parsedLoop.value.tool,
-            input: parsedLoop.value.input ?? {},
+          const toolIterationResult = await this.executeToolIteration({
+            toolRequest: parsedLoop.value,
+            loopPolicy,
+            executorMode,
+            intentDefinition,
+            route,
+            auth: input.auth,
+            toolsInvoked,
+            priorToolResults,
+            coachingContext,
+            baseMetadata,
+            contextPacket,
+            loopIterations,
           });
 
-          priorToolResults.push(toolResult);
-
-          if (toolResult.ok) {
-            toolsInvoked.push(toolResult.tool);
-            coachingContext.toolResults = priorToolResults;
+          if (toolIterationResult !== null) {
+            return toolIterationResult;
           }
 
           continue;
         }
 
-        const coerced = coerceAgentLoopFinalAnswer(parsedLoop.value);
-
-        if (!coerced) {
-          return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
-            parseErrors: ["Agent loop final_answer could not be coerced into structured output."],
-            replySafetyErrors: [],
-            safetyStatus: "parse_failed",
-          });
-        }
-
-        const replySafetyErrors = validateReplySafety(coerced.reply);
-
-        if (replySafetyErrors.length > 0) {
-          return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
-            parseErrors: [],
-            replySafetyErrors,
-            safetyStatus: "reply_blocked",
-            blockedReasons: replySafetyErrors,
-          });
-        }
-
-        const resolvedOutput = this.actionResolverService.resolveProposalOnlyOutput({
-          output: coerced,
-          catalogIntentId: route.catalogIntentId,
-          allowedProposalIntents: intentDefinition.allowedProposalIntents,
+        const finalResult = this.validateAndResolveFinalAnswer({
+          finalAnswer: parsedLoop.value,
+          route,
+          intentDefinition,
+          baseMetadata,
+          contextPacket,
+          toolsInvoked,
+          loopIterations,
         });
 
-        return {
-          output: resolvedOutput,
-          parseErrors: [],
-          replySafetyErrors: [],
-          agentMetadata: {
-            ...baseMetadata,
-            toolsInvoked,
-            routing: {
-              ...baseMetadata.routing,
-              loopIterations,
-            },
-            safety: {
-              status: "passed",
-              blockedReasons: [],
-              constraintsApplied: contextPacket.safetyConstraints,
-            },
-          },
-        };
+        return finalResult;
       }
 
       return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
@@ -397,10 +299,195 @@ export class ResponseModeExecutorService {
     }
   }
 
-  private buildBaseMetadata(input: ResponseModeExecutorTurnInput) {
-    const { plan, contextPacket, capabilityTurnMetadata, turnDecisionTurn } = input;
-    const { route } = plan;
+  /**
+   * Handles a tool_request step within the agent loop.
+   * Returns a failure result if the tool cannot be executed, or null to continue the loop.
+   */
+  private async executeToolIteration(params: {
+    toolRequest: { tool: AgentToolName; input?: Record<string, unknown> };
+    loopPolicy: ResponseModeExecutorLoopPolicy;
+    executorMode: ResponseModeExecutorMode;
+    intentDefinition: CoachIntentDefinitionMetadata;
+    route: IntentRouteResult;
+    auth: OrchestrateCoachTurnInput["auth"];
+    toolsInvoked: AgentToolName[];
+    priorToolResults: AgentToolCallResult[];
+    coachingContext: Record<string, unknown>;
+    baseMetadata: ReturnType<ResponseModeExecutorService["buildBaseMetadata"]>;
+    contextPacket: AgentContextPacket;
+    loopIterations: number;
+  }): Promise<Omit<ResponseModeExecutorTurnResult, "responseModeExecution"> | null> {
+    const {
+      toolRequest,
+      loopPolicy,
+      executorMode,
+      intentDefinition,
+      route,
+      auth,
+      toolsInvoked,
+      priorToolResults,
+      coachingContext,
+      baseMetadata,
+      contextPacket,
+      loopIterations,
+    } = params;
+
+    if (!loopPolicy.allowToolLoop) {
+      return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+        parseErrors: [
+          `Executor mode "${executorMode}" does not allow tool loops; return final_answer in one step.`,
+        ],
+        replySafetyErrors: [],
+        safetyStatus: "parse_failed",
+      });
+    }
+
+    const toolAllowed = intentDefinition.allowedTools.includes(toolRequest.tool);
+
+    if (!toolAllowed) {
+      return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+        parseErrors: [
+          `Requested tool "${toolRequest.tool}" is not allowed for intent "${route.catalogIntentId}".`,
+        ],
+        replySafetyErrors: [],
+        safetyStatus: "parse_failed",
+      });
+    }
+
+    const toolResult = await this.agentToolRegistryService.executeTool(auth, {
+      tool: toolRequest.tool,
+      input: toolRequest.input ?? {},
+    });
+
+    priorToolResults.push(toolResult);
+
+    if (toolResult.ok) {
+      toolsInvoked.push(toolResult.tool);
+      coachingContext.toolResults = priorToolResults;
+    }
+
+    return null;
+  }
+
+  /**
+   * Coerces, safety-validates, and resolves the final_answer from the agent loop.
+   * Returns either a success result or a failure result (never throws).
+   */
+  private validateAndResolveFinalAnswer(params: {
+    finalAnswer: { kind: "final_answer"; reply: string; proposals?: Record<string, unknown>[] };
+    route: IntentRouteResult;
+    intentDefinition: CoachIntentDefinitionMetadata;
+    baseMetadata: ReturnType<ResponseModeExecutorService["buildBaseMetadata"]>;
+    contextPacket: AgentContextPacket;
+    toolsInvoked: AgentToolName[];
+    loopIterations: number;
+  }): Omit<ResponseModeExecutorTurnResult, "responseModeExecution"> {
+    const {
+      finalAnswer,
+      route,
+      intentDefinition,
+      baseMetadata,
+      contextPacket,
+      toolsInvoked,
+      loopIterations,
+    } = params;
+
+    const coerced = coerceAgentLoopFinalAnswer(finalAnswer);
+
+    if (!coerced) {
+      return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+        parseErrors: ["Agent loop final_answer could not be coerced into structured output."],
+        replySafetyErrors: [],
+        safetyStatus: "parse_failed",
+      });
+    }
+
+    const replySafetyErrors = validateReplySafety(coerced.reply);
+
+    if (replySafetyErrors.length > 0) {
+      return this.buildFailureResult(baseMetadata, contextPacket, loopIterations, {
+        parseErrors: [],
+        replySafetyErrors,
+        safetyStatus: "reply_blocked",
+        blockedReasons: replySafetyErrors,
+      });
+    }
+
+    const resolvedOutput = this.actionResolverService.resolveProposalOnlyOutput({
+      output: coerced,
+      catalogIntentId: route.catalogIntentId,
+      allowedProposalIntents: intentDefinition.allowedProposalIntents,
+    });
+
+    return this.buildSuccessResult({
+      output: resolvedOutput,
+      baseMetadata,
+      contextPacket,
+      toolsInvoked,
+      loopIterations,
+    });
+  }
+
+  private buildSuccessResult(params: {
+    output: AiStructuredOutput;
+    baseMetadata: ReturnType<ResponseModeExecutorService["buildBaseMetadata"]>;
+    contextPacket: AgentContextPacket;
+    toolsInvoked: AgentToolName[];
+    loopIterations: number;
+  }): Omit<ResponseModeExecutorTurnResult, "responseModeExecution"> {
+    const { output, baseMetadata, contextPacket, toolsInvoked, loopIterations } = params;
+
+    return {
+      output,
+      parseErrors: [],
+      replySafetyErrors: [],
+      agentMetadata: {
+        ...baseMetadata,
+        toolsInvoked,
+        routing: {
+          ...baseMetadata.routing,
+          loopIterations,
+        },
+        safety: {
+          status: "passed",
+          blockedReasons: [],
+          constraintsApplied: contextPacket.safetyConstraints,
+        },
+      },
+    };
+  }
+
+  private buildBaseMetadata(
+    input: {
+      route?: IntentRouteResult;
+      plan?: CapabilityPlanResult;
+      contextPacket: AgentContextPacket;
+      capabilityTurnMetadata: AgentTurnCapabilityPresentation;
+      turnDecisionTurn: {
+        turnDecisionRan: boolean;
+        turnDecision?: { source: "llm" | "fallback"; output: { confidence: number }; validationErrors: string[] };
+      };
+      executorMode?: ResponseModeExecutorMode;
+    },
+    toolsInvoked?: AgentToolName[],
+    maxLoopIterations?: number,
+  ) {
+    const isTurnInput = "plan" in input && input.plan !== undefined;
+    const route = isTurnInput ? input.plan!.route : input.route!;
+    const contextPacket = input.contextPacket;
+    const capabilityTurnMetadata = input.capabilityTurnMetadata;
+    const turnDecisionTurn = input.turnDecisionTurn;
     const providerMode = resolveAiCoachProviderMode();
+
+    const resolvedMaxLoopIterations =
+      maxLoopIterations ??
+      resolveResponseModeExecutorLoopPolicy(
+        (isTurnInput ? input.plan!.executorMode : input.executorMode) ?? "single_llm",
+      ).maxLoopIterations;
+
+    // llmRouterInvoked is true when the router ran and returned an LLM result (source="llm").
+    const llmRouterInvoked =
+      turnDecisionTurn.turnDecisionRan && turnDecisionTurn.turnDecision?.source === "llm";
 
     return {
       provider: providerMode,
@@ -412,30 +499,55 @@ export class ResponseModeExecutorService {
       purpose: contextPacket.purpose,
       depth: contextPacket.depth,
       timeRange: contextPacket.timeRange,
-      toolsInvoked: [] as AgentToolName[],
+      toolsInvoked: toolsInvoked ?? ([] as AgentToolName[]),
       citations: mapContextSourceRefsToAgentCitations(contextPacket.sourceRefs),
       routing: {
         confidence: route.confidence,
         routingMethod: route.routingMethod,
-        llmRouterInvoked: false,
-        messageUnderstandingInvoked: false,
+        llmRouterInvoked: llmRouterInvoked ?? false,
         unifiedTurnDecisionInvoked: turnDecisionTurn.turnDecisionRan,
         catalogIntentId: route.catalogIntentId,
         safetyFlags: route.safetyFlags,
         expectedResponseMode: route.expectedResponseMode,
         contextSliceCount: route.requiredContextSlices.length,
-        maxLoopIterations: resolveResponseModeExecutorLoopPolicy(
-          input.plan.executorMode ?? "single_llm",
-        ).maxLoopIterations,
+        maxLoopIterations: resolvedMaxLoopIterations,
       },
-      messageUnderstanding: { ran: false },
       unifiedTurnDecision: {
-        ...buildBoundedUnifiedTurnDecisionMetadata({
-          ran: turnDecisionTurn.turnDecisionRan,
-          result: turnDecisionTurn.turnDecision,
-        }),
+        ran: turnDecisionTurn.turnDecisionRan,
+        ...(turnDecisionTurn.turnDecision
+          ? {
+              source: turnDecisionTurn.turnDecision.source,
+              confidence: turnDecisionTurn.turnDecision.output.confidence,
+              routingMethod: "unified_turn_decision" as const,
+              ...(turnDecisionTurn.turnDecision.validationErrors.length > 0
+                ? { validationErrorCount: turnDecisionTurn.turnDecision.validationErrors.length }
+                : {}),
+            }
+          : {}),
       },
       missingContextNotes: contextPacket.missingContextNotes,
+    };
+  }
+
+  /**
+   * Converts RouterLlmResult into the shape expected by buildBaseMetadata's turnDecisionTurn.
+   * This provides backward compatibility for the metadata produced by the executor.
+   */
+  private toTurnDecisionTurnCompat(routerTurn: ResponseModeExecutorTurnInput["routerTurn"]): {
+    turnDecisionRan: boolean;
+    turnDecision?: { source: "llm" | "fallback"; output: { confidence: number }; validationErrors: string[] };
+  } {
+    if (!routerTurn.routerRan || !routerTurn.routerResult) {
+      return { turnDecisionRan: routerTurn.routerRan };
+    }
+
+    return {
+      turnDecisionRan: true,
+      turnDecision: {
+        source: routerTurn.routerResult.source,
+        output: { confidence: routerTurn.routerResult.output.confidence },
+        validationErrors: [...routerTurn.routerResult.validationErrors],
+      },
     };
   }
 
@@ -480,12 +592,9 @@ export class ResponseModeExecutorService {
       blockedReasons?: string[];
     },
   ): Omit<ResponseModeExecutorTurnResult, "responseModeExecution"> {
-    const blockedFallback = shouldSuppressAttachmentProposalSideChannel({
-      unifiedTurnDecisionRan: baseMetadata.unifiedTurnDecision?.ran === true,
-      safetyStatus: failure.safetyStatus,
-      parseErrors: failure.parseErrors,
-      replySafetyErrors: failure.replySafetyErrors,
-    });
+    // Suppress attachment-proposal side-channel when the router ran and the turn failed.
+    // All callers pass a non-passing safetyStatus, so the gate reduces to routerRan.
+    const blockedFallback = baseMetadata.unifiedTurnDecision?.ran === true;
 
     return {
       output: { reply: SAFE_FALLBACK_REPLY, proposals: [] },

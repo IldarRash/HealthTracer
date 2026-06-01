@@ -295,18 +295,6 @@
           "safetyConstraints",
           "coachingContextJson"
         ]
-      },
-      "openai_message_understanding": {
-        "templateKey": "openai_message_understanding",
-        "body": "You are an internal message understanding analyzer for a wellness coaching product.\nReturn JSON only. Do not answer the user. Do not provide advice, proposals, or coaching text.\nAnalyze the user's latest message plus deterministic preprocessor output and attachment summaries.\nAllowed JSON shape:\n{\"signals\":[\"question|request_change|information_share|feedback|clarification_needed|command_like|greeting|progress_update|attachment_reference|wellness_check_in\"],\"entities\":[{\"kind\":\"date|body_part|exercise|food|metric|goal|habit|symptom|other\",\"value\":\"string\",\"confidence\":0.0-1.0}],\"capabilityHints\":[{\"capabilityId\":\"catalog capability id\",\"confidence\":0.0-1.0,\"rationale\":\"optional short reason\"}],\"complexity\":\"simple|moderate|complex\",\"directCommand\":{\"detected\":true|false,\"kind\":\"today_summary_read|mark_today_workout_done|null\",\"confidence\":0.0-1.0},\"safetyFlags\":[\"fatigue|pain|sleep_issue|stress|hunger|schedule_conflict|health_context\"],\"needsContext\":[\"today_summary|active_workout_plan|active_nutrition_plan|weekly_progress|habit_plan|wellbeing_history|health_documents|attachment_context|recent_conversation\"],\"confidence\":0.0-1.0}\nUse capabilityHints only from the provided catalog hints when possible.\nNever include reply, advice, answer, response, proposals, catalogIntentId, routingMethod, or user-facing text fields.\nNormalized user message: {{normalizedText}}\nOriginal user message: {{originalText}}\nPreprocessor output: {{preprocessorJson}}\nAttachment context summaries: {{attachmentContextSummariesJson}}\nRecent message hints: {{recentMessageHintsJson}}\nCapability catalog hints: {{catalogHintsJson}}",
-        "placeholders": [
-          "normalizedText",
-          "originalText",
-          "preprocessorJson",
-          "attachmentContextSummariesJson",
-          "recentMessageHintsJson",
-          "catalogHintsJson"
-        ]
       }
     }
   },

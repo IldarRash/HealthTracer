@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { buildDefaultAiBehaviorConfig } from "./ai-behavior-config.js";
 import {
   compilePromptTemplates,
   renderPromptTemplateBody,
@@ -102,19 +101,4 @@ describe("prompt template renderer", () => {
     expect(rendered).toBeNull();
   });
 
-  it("renders default message understanding template with required placeholders", () => {
-    const compiled = compilePromptTemplates(buildDefaultAiBehaviorConfig().promptTemplates);
-    const rendered = compiled.renderMessageUnderstanding({
-      normalizedText: "should i train today?",
-      originalText: "Should I train today?",
-      preprocessorJson: '{"simpleSignals":{"workout":true}}',
-      attachmentContextSummariesJson: "[]",
-      recentMessageHintsJson: "[]",
-      catalogHintsJson: '[{"id":"general"}]',
-    });
-
-    expect(rendered).toContain("message understanding analyzer");
-    expect(rendered).toContain("should i train today?");
-    expect(rendered).toContain('[{"id":"general"}]');
-  });
 });

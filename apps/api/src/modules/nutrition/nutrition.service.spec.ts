@@ -77,7 +77,6 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -104,7 +103,6 @@ describe("NutritionService", () => {
         appendRevision: async () => ({ id: "rev-append-2" }),
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -122,7 +120,6 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
-      {} as never,
     );
 
     await expect(
@@ -139,7 +136,6 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
-      {} as never,
     );
 
     await expect(service.getCurrentActivePlan(auth as never)).resolves.toEqual({
@@ -152,7 +148,6 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
-      {} as never,
     );
 
     await expect(service.getAdherenceForDate(auth as never, "2026-05-22")).resolves.toEqual({
@@ -181,7 +176,6 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     const first = await service.upsertAdherenceForDate(auth as never, "2026-05-22", {
@@ -201,7 +195,6 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
-      {} as never,
     );
 
     await expect(
@@ -235,7 +228,6 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     await service.getAdherenceForDate(auth as never, "2026-05-22");
@@ -280,7 +272,6 @@ describe("NutritionService", () => {
           updatedAt: "2026-05-22T12:00:00.000Z",
         }),
       } as never,
-      {} as never,
     );
 
     const response = await service.upsertAdherenceForToday(auth as never, {
@@ -329,7 +320,6 @@ describe("NutritionService", () => {
           updatedAt: "2026-05-22T12:00:00.000Z",
         }),
       } as never,
-      {} as never,
     );
 
     await service.getAdherenceForToday(auth as never);
@@ -342,7 +332,6 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
-      {} as never,
     );
 
     await expect(service.getNutritionDayDetail(auth as never, "2026-05-22")).resolves.toBeNull();
@@ -361,7 +350,6 @@ describe("NutritionService", () => {
         }),
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     await expect(service.getNutritionDayDetail(auth as never, "2026-05-22")).resolves.toBeNull();
@@ -430,7 +418,6 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     const detail = await service.getNutritionDayDetail(auth as never, "2026-05-22");
@@ -449,7 +436,6 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
-      {} as never,
     );
 
     await expect(
@@ -473,7 +459,6 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     await service.upsertAdherenceForDate(auth as never, "2026-05-22", {
@@ -505,7 +490,6 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     const incidentId = await service.applyNutritionIncidentProposal(
@@ -543,7 +527,6 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     const incidentId = await service.applyNutritionIncidentProposal(
@@ -575,7 +558,6 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
-      {} as never,
     );
 
     await expect(

@@ -5,13 +5,11 @@ import {
   aiMetricsContextSummarySchema,
   aiProposalSchema,
   chatAttachmentRecordSchema,
-  chatAttachmentRecognitionResponseSchema,
   chatMessageSchema,
   chatThreadSchema,
   chatTurnResponseSchema,
   createChatAttachmentSchema,
   grantChatAttachmentConsentSchema,
-  recognizeChatAttachmentSchema,
   sendChatMessageSchema,
   completeWorkoutSessionSchema,
   connectDeviceSchema,
@@ -29,8 +27,6 @@ import {
   habitPlanRevisionsResponseSchema,
   nutritionAdherenceResponseSchema,
   nutritionPlanRevisionSchema,
-  foodPhotoAnalysisRequestSchema,
-  foodPhotoAnalysisResultSchema,
   proposalDecisionSchema,
   proposalModifyResponseSchema,
   upsertNutritionAdherenceSchema,
@@ -53,14 +49,12 @@ import {
   type AiMetricsContextSummary,
   type AiProposal,
   type ChatAttachmentRecord,
-  type ChatAttachmentRecognitionResponse,
   type ChatMessage,
   type ChatThread,
   type ChatTurnResponse,
   type DirectChatPathRefreshHint,
   type CreateChatAttachmentInput,
   type GrantChatAttachmentConsentInput,
-  type RecognizeChatAttachmentInput,
   type SendChatMessageInput,
   type ConnectDeviceInput,
   type DeviceConnection,
@@ -76,8 +70,6 @@ import {
   type HealthMetricSnapshot,
   type ListHealthMetricAggregatesQuery,
   type ListHealthMetricSnapshotsQuery,
-  type FoodPhotoAnalysisRequest,
-  type FoodPhotoAnalysisResult,
   type NutritionAdherenceResponse,
   type NutritionPlanRevision,
   type UpsertNutritionAdherenceInput,
@@ -420,20 +412,6 @@ export async function grantChatAttachmentConsent(
   );
 }
 
-export async function recognizeChatAttachment(
-  token: string,
-  attachmentId: string,
-  input: RecognizeChatAttachmentInput = {},
-): Promise<ApiResult<ChatAttachmentRecognitionResponse>> {
-  const body = recognizeChatAttachmentSchema.parse(input);
-  return apiFetch(
-    `/chat/attachments/${encodeURIComponent(attachmentId)}/recognize`,
-    token,
-    chatAttachmentRecognitionResponseSchema,
-    { method: "POST", body },
-  );
-}
-
 export async function listProposals(
   token: string,
   threadId?: string,
@@ -462,17 +440,6 @@ export async function decideProposal(
       : {}),
   });
   return apiFetch(`/proposals/${proposalId}/decision`, token, aiProposalSchema, {
-    method: "POST",
-    body,
-  });
-}
-
-export async function analyzeFoodPhoto(
-  token: string,
-  input: FoodPhotoAnalysisRequest,
-): Promise<ApiResult<FoodPhotoAnalysisResult>> {
-  const body = foodPhotoAnalysisRequestSchema.parse(input);
-  return apiFetch("/nutrition/food-photo/analyze", token, foodPhotoAnalysisResultSchema, {
     method: "POST",
     body,
   });

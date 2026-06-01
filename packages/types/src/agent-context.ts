@@ -523,61 +523,6 @@ export type AgentTurnCapabilityPresentation = z.infer<
   typeof agentTurnCapabilityPresentationSchema
 >;
 
-export const agentMessageUnderstandingMetadataSchema = z.object({
-  ran: z.boolean(),
-  source: z.enum(["llm", "fallback"]).optional(),
-  confidence: z.number().min(0).max(1).optional(),
-  signals: z
-    .array(
-      z.enum([
-        "question",
-        "request_change",
-        "information_share",
-        "feedback",
-        "clarification_needed",
-        "command_like",
-        "greeting",
-        "progress_update",
-        "attachment_reference",
-        "wellness_check_in",
-      ]),
-    )
-    .max(10)
-    .optional(),
-  capabilityHints: z
-    .array(
-      z.object({
-        capabilityId: catalogIntentIdSchema,
-        confidence: z.number().min(0).max(1),
-      }),
-    )
-    .max(3)
-    .optional(),
-  complexity: z.enum(["simple", "moderate", "complex"]).optional(),
-  needsContext: z
-    .array(
-      z.enum([
-        "today_summary",
-        "active_workout_plan",
-        "active_nutrition_plan",
-        "weekly_progress",
-        "habit_plan",
-        "wellbeing_history",
-        "health_documents",
-        "attachment_context",
-        "recent_conversation",
-      ]),
-    )
-    .max(10)
-    .optional(),
-  safetyFlags: z.array(agentSafetyFlagSchema).max(10).optional(),
-  validationErrorCount: z.number().int().min(0).max(20).optional(),
-});
-
-export type AgentMessageUnderstandingMetadata = z.infer<
-  typeof agentMessageUnderstandingMetadataSchema
->;
-
 export const agentUnifiedTurnDecisionMetadataSchema = z.object({
   ran: z.boolean(),
   source: z.enum(["llm", "fallback"]).optional(),
@@ -605,7 +550,6 @@ export const agentTurnMetadataSchema = z.object({
   safety: agentSafetyMetadataSchema,
   citations: z.array(agentCitationSchema).max(10).default([]),
   routing: agentRoutingMetadataSchema.optional(),
-  messageUnderstanding: agentMessageUnderstandingMetadataSchema.optional(),
   unifiedTurnDecision: agentUnifiedTurnDecisionMetadataSchema.optional(),
   responseModeExecution: z
     .object({

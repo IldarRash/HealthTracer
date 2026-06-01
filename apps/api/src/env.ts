@@ -20,6 +20,7 @@ export const apiEnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
   CORS_ORIGINS: z.string().min(1).optional(),
+  DOMAIN_CONFIG_DIR: z.string().min(1).optional(),
 });
 
 const parsedEnv = validateEnv(apiEnvSchema);

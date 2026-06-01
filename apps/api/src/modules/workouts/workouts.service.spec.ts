@@ -1382,3 +1382,209 @@ describe("WorkoutsService", () => {
     expect(createPlanCalled).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 6: calorie-on-workout — revision preservation
+// ---------------------------------------------------------------------------
+
+describe("WorkoutsService — calorie revision preservation (Phase 6)", () => {
+  /**
+   * When an adapt_workout_plan proposal carries estimatedSessionCalorieBurn +
+   * calorieEstimateProvenance, the accepted payload that is passed to
+   * appendRevision / createPlanWithRevision MUST include both fields unchanged.
+   * These tests verify that the apply path does not strip or reset the calorie fields.
+   */
+
+  const payloadWithCalorie: WorkoutPlanProposalChanges = {
+    title: "Recovery plan",
+    summary: "Lighter session after fatigue signals.",
+    days: [
+      {
+        weekday: "monday",
+        focus: "Recovery",
+        exercises: [
+          {
+            exerciseId: "b1000001-0000-4000-8000-000000000016",
+            snapshot: {
+              name: "Goblet Squat",
+              primaryMuscles: ["quads", "glutes"],
+              equipment: ["dumbbell", "kettlebell"],
+            },
+            sets: 3,
+            reps: "8-10",
+            restBetweenSetsSeconds: 90,
+          },
+        ],
+      },
+    ],
+    notes: [],
+    estimatedSessionCalorieBurn: 280,
+    calorieEstimateProvenance: "workout_llm",
+  };
+
+  it("carries estimatedSessionCalorieBurn and provenance into a new revision on adapt", async () => {
+    let persistedPayload: WorkoutPlanProposalChanges | undefined;
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => ({ id: "plan-calorie-1" }),
+        appendRevision: async (
+          _planId: string,
+          nextPayload: WorkoutPlanProposalChanges,
+        ) => {
+          persistedPayload = nextPayload;
+          return { id: "rev-calorie-1" };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    const reference = await service.applyWorkoutPlanProposal(
+      userId,
+      payloadWithCalorie,
+      "Adapting plan with calorie estimate from workout LLM.",
+      "adapt_workout_plan",
+    );
+
+    expect(reference).toBe("workout_revision:rev-calorie-1");
+    expect(persistedPayload?.estimatedSessionCalorieBurn).toBe(280);
+    expect(persistedPayload?.calorieEstimateProvenance).toBe("workout_llm");
+  });
+
+  it("carries estimatedSessionCalorieBurn and provenance into a brand-new plan revision", async () => {
+    let persistedPayload: WorkoutPlanProposalChanges | undefined;
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => null,
+        createPlanWithRevision: async (
+          _userId: string,
+          nextPayload: WorkoutPlanProposalChanges,
+        ) => {
+          persistedPayload = nextPayload;
+          return { revision: { id: "rev-calorie-2" } };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    const reference = await service.applyWorkoutPlanProposal(
+      userId,
+      payloadWithCalorie,
+      "Creating plan with calorie estimate.",
+      "create_workout_plan",
+    );
+
+    expect(reference).toBe("workout_revision:rev-calorie-2");
+    expect(persistedPayload?.estimatedSessionCalorieBurn).toBe(280);
+    expect(persistedPayload?.calorieEstimateProvenance).toBe("workout_llm");
+  });
+
+  it("creates a revision WITHOUT calorie fields when none were in the proposal", async () => {
+    let persistedPayload: WorkoutPlanProposalChanges | undefined;
+
+    const payloadNoCalorie: WorkoutPlanProposalChanges = {
+      ...payloadWithCalorie,
+      estimatedSessionCalorieBurn: undefined,
+      calorieEstimateProvenance: undefined,
+    };
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => ({ id: "plan-calorie-3" }),
+        appendRevision: async (
+          _planId: string,
+          nextPayload: WorkoutPlanProposalChanges,
+        ) => {
+          persistedPayload = nextPayload;
+          return { id: "rev-calorie-3" };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    await service.applyWorkoutPlanProposal(
+      userId,
+      payloadNoCalorie,
+      "Adaptation without calorie estimate.",
+      "adapt_workout_plan",
+    );
+
+    expect(persistedPayload?.estimatedSessionCalorieBurn).toBeUndefined();
+    expect(persistedPayload?.calorieEstimateProvenance).toBeUndefined();
+  });
+
+  it("carries user_manual provenance unmodified into the revision", async () => {
+    let persistedPayload: WorkoutPlanProposalChanges | undefined;
+
+    const payloadUserManual: WorkoutPlanProposalChanges = {
+      ...payloadWithCalorie,
+      estimatedSessionCalorieBurn: 450,
+      calorieEstimateProvenance: "user_manual",
+    };
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => ({ id: "plan-calorie-4" }),
+        appendRevision: async (
+          _planId: string,
+          nextPayload: WorkoutPlanProposalChanges,
+        ) => {
+          persistedPayload = nextPayload;
+          return { id: "rev-calorie-4" };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    await service.applyWorkoutPlanProposal(
+      userId,
+      payloadUserManual,
+      "User manually set calorie estimate.",
+      "adapt_workout_plan",
+    );
+
+    expect(persistedPayload?.estimatedSessionCalorieBurn).toBe(450);
+    expect(persistedPayload?.calorieEstimateProvenance).toBe("user_manual");
+  });
+
+  it("does NOT strip the calorie estimate when provenance is also present (apply path passes them through)", async () => {
+    // The calorie pair constraint (calorie requires provenance and vice-versa) is enforced
+    // by ProposalValidationService.getChangesSchemaForIntent → getWorkoutProposalDomainErrors
+    // BEFORE applyWorkoutPlanProposal is ever called.
+    // WorkoutsService.applyWorkoutPlanProposal is the "apply already-validated proposal" path
+    // and does not re-validate the pair constraint — it only calls getWorkoutPlanDomainErrors.
+    // This test verifies that valid calorie fields flow through untouched.
+    let persistedPayload: WorkoutPlanProposalChanges | undefined;
+
+    const service = new WorkoutsService(
+      {
+        findActivePlanByUserId: async () => ({ id: "plan-calorie-5" }),
+        appendRevision: async (
+          _planId: string,
+          nextPayload: WorkoutPlanProposalChanges,
+        ) => {
+          persistedPayload = nextPayload;
+          return { id: "rev-calorie-5" };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    await service.applyWorkoutPlanProposal(
+      userId,
+      payloadWithCalorie,
+      "Apply already-validated calorie proposal.",
+      "adapt_workout_plan",
+    );
+
+    // Both fields must survive the apply path unchanged.
+    expect(persistedPayload?.estimatedSessionCalorieBurn).toBe(280);
+    expect(persistedPayload?.calorieEstimateProvenance).toBe("workout_llm");
+  });
+});

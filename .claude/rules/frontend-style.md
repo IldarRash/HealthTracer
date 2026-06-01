@@ -1,0 +1,12 @@
+# Frontend Style
+
+Applies to `apps/web`, `apps/mobile`, `packages/ui`.
+
+- Use functional React components with strict TypeScript.
+- Use Next.js App Router for web and Expo Router for mobile.
+- Keep business logic out of components; call API clients and shared contracts instead.
+- Use TanStack Query for server state and local component state only for UI concerns.
+- Every user-facing async screen needs loading, error, empty, and success states.
+- Prefer accessible components, semantic labels, keyboard-friendly web UI, and mobile-first layouts.
+- Use Tailwind or shadcn-style primitives on web and NativeWind patterns on mobile.
+- Do not add HealthKit or Health Connect in MVP 1.

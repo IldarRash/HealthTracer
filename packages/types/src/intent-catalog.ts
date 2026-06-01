@@ -2,7 +2,6 @@ import { z } from "zod";
 import type {
   AgentIntent,
   AgentToolName,
-  AttachmentCatalogIntentId,
   CatalogIntentId,
   ContextSliceRequest,
 } from "./agent-context.js";
@@ -12,13 +11,6 @@ import {
   buildContextSliceRequestForIntent,
   catalogIntentIdSchema,
 } from "./agent-context.js";
-import type { ClassifiedChatAttachmentCategory } from "./chat-attachment-classification.js";
-import {
-  DEFAULT_ATTACHMENT_ROUTING_POLICY,
-  resolvePrimaryAttachmentCatalogIntentFromRouting,
-  type AttachmentRoutingPolicy,
-} from "./attachment-routing-resolver.js";
-
 const PROPOSAL_INTENT_VALUES = [
   "update_profile",
   "create_goal",
@@ -366,24 +358,6 @@ export function listRouterCatalogEntries(): IntentCatalogEntry[] {
 
 export function isCatalogIntentId(value: string): value is CatalogIntentId {
   return catalogIntentIdSchema.safeParse(value).success;
-}
-
-/** Historical tests and config parity; production uses attachments.json routing hints. */
-export function resolveAttachmentCatalogIntentId(
-  category: ClassifiedChatAttachmentCategory,
-  routing: AttachmentRoutingPolicy = DEFAULT_ATTACHMENT_ROUTING_POLICY,
-): AttachmentCatalogIntentId {
-  return routing.categoryToCapability[category];
-}
-
-export function resolvePrimaryAttachmentCatalogIntentId(input: {
-  categories: ReadonlyArray<ClassifiedChatAttachmentCategory>;
-  routing?: AttachmentRoutingPolicy;
-}): AttachmentCatalogIntentId {
-  return resolvePrimaryAttachmentCatalogIntentFromRouting(
-    input.routing ?? DEFAULT_ATTACHMENT_ROUTING_POLICY,
-    input.categories,
-  );
 }
 
 export function getAllowedToolsForCatalogIntent(

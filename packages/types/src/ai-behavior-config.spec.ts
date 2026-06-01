@@ -4,7 +4,6 @@ import {
   mergeCapabilityConfigOverrides,
   normalizeAiBehaviorConfig,
   resolveLoadedAiBehaviorConfig,
-  resolvePrimaryAttachmentCapabilityId,
   resolveProposalRevisionCapabilityId,
   safeParseAiBehaviorConfig,
   validateAiBehaviorConfig,
@@ -20,7 +19,6 @@ import {
   DEFAULT_CONTEXT_BUDGET_POLICY,
   DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
 } from "./context-budget.js";
-import { resolvePrimaryAttachmentCatalogIntentId } from "./intent-catalog.js";
 
 describe("ai behavior config", () => {
   it("builds defaults that validate", () => {
@@ -81,35 +79,6 @@ describe("ai behavior config", () => {
     ).toBe("general");
   });
 
-  it("matches existing attachment routing priority semantics", () => {
-    const config = buildDefaultAiBehaviorConfig();
-
-    expect(
-      resolvePrimaryAttachmentCapabilityId(config.attachmentRouting, [
-        "food_photo",
-        "workout_attachment",
-      ]),
-    ).toBe("attachment_workout");
-    expect(
-      resolvePrimaryAttachmentCapabilityId(config.attachmentRouting, [
-        "food_photo",
-        "medical_document",
-      ]),
-    ).toBe("attachment_medical_document");
-    expect(
-      resolvePrimaryAttachmentCapabilityId(config.attachmentRouting, ["food_photo"]),
-    ).toBe("attachment_food_photo");
-    expect(
-      resolvePrimaryAttachmentCatalogIntentId({
-        categories: ["food_photo", "workout_attachment"],
-      }),
-    ).toBe(
-      resolvePrimaryAttachmentCapabilityId(config.attachmentRouting, [
-        "food_photo",
-        "workout_attachment",
-      ]),
-    );
-  });
 
   it("preserves capability catalog size when no overrides are present", () => {
     const defaults = buildDefaultAiBehaviorConfig();
@@ -158,7 +127,6 @@ describe("ai behavior config", () => {
         ...buildDefaultAiBehaviorConfig(),
         attachmentRouting: {
           categoryPriority: ["food_photo"],
-          categoryToCapability: buildDefaultAiBehaviorConfig().attachmentRouting.categoryToCapability,
           defaultCapabilityId: "attachment_food_photo",
           confidence: 0.98,
           routingMethod: "attachment_family",
@@ -169,21 +137,6 @@ describe("ai behavior config", () => {
     expect(loaded.warnings).toContain(
       "attachmentRouting in ai-behavior.json is deprecated and ignored at runtime; configure routing in attachments.json instead.",
     );
-  });
-
-  it("changes attachment routing priority from config without code changes", () => {
-    const config = normalizeAiBehaviorConfig({
-      attachmentRouting: {
-        categoryPriority: ["food_photo", "medical_document", "workout_attachment"],
-      },
-    } as Partial<AiBehaviorConfig>);
-
-    expect(
-      resolvePrimaryAttachmentCapabilityId(config.attachmentRouting, [
-        "workout_attachment",
-        "food_photo",
-      ]),
-    ).toBe("attachment_food_photo");
   });
 
   it("changes proposal revision routing from config without code changes", () => {

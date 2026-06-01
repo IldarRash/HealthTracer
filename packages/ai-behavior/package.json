@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@health/types": "workspace:*"
-  },
-  "devDependencies": {}
+    "@health/types": "workspace:*",
+    "yaml": "^2.9.0"
+  }
 }

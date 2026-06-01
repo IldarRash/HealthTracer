@@ -1,23 +1,16 @@
 import type {
   ChatAttachmentRecord,
-  ChatAttachmentRecognitionResponse,
   CreateChatAttachmentInput,
   GrantChatAttachmentConsentInput,
-  RecognizeChatAttachmentInput,
 } from "@health/types";
 import {
   getChatAttachmentMimeTypeError,
-  getChatAttachmentRecognitionEligibilityErrors,
   getChatAttachmentRetentionPolicy,
   getChatAttachmentSizeError,
   getMedicalAttachmentConsentErrors,
-  getProvisionalAttachmentMimeTypeError,
-  getProvisionalAttachmentSizeError,
   isChatAttachmentExpired,
   isChatAttachmentImageMimeType,
   isTrustedUserSelectedChatAttachmentUpload,
-  resolveProvisionalUploadCategorySource,
-  resolveProvisionalUploadDisposition,
 } from "@health/types";
 import type { ChatAttachmentUploadClassificationMeta } from "@health/types";
 import {
@@ -34,8 +27,6 @@ import { ChatRepository } from "../chat/chat.repository.js";
 import { UsersService } from "../users/users.service.js";
 import { resolveAttachmentRetentionPolicyFromBehavior } from "./attachment-behavior-policy.helpers.js";
 import { toChatAttachmentRecord, toOwnedChatAttachmentRef } from "./chat-attachment.mapper.js";
-import { ChatAttachmentClassifierService } from "./chat-attachment-classifier.service.js";
-import { ChatAttachmentRecognitionService } from "./chat-attachment-recognition.service.js";
 import { ChatAttachmentsRepository } from "./chat-attachments.repository.js";
 import { buildMedicalAttachmentConsent } from "./medical-document-attachment-recognizer.js";
 import {
@@ -51,8 +42,6 @@ export class ChatAttachmentsService {
   constructor(
     private readonly chatAttachmentsRepository: ChatAttachmentsRepository,
     private readonly chatRepository: ChatRepository,
-    private readonly chatAttachmentRecognitionService: ChatAttachmentRecognitionService,
-    private readonly chatAttachmentClassifierService: ChatAttachmentClassifierService,
     private readonly usersService: UsersService,
     private readonly aiBehaviorConfigService: AiBehaviorConfigService,
   ) {
@@ -76,16 +65,18 @@ export class ChatAttachmentsService {
     }
 
     if (
-      isTrustedUserSelectedChatAttachmentUpload({
+      !isTrustedUserSelectedChatAttachmentUpload({
         category: input.category ?? "unclassified",
         categorySource: input.categorySource,
         consentScopes: input.consentScopes,
       })
     ) {
-      return this.createTrustedUserSelectedAttachment(user.id, input, content);
+      throw new BadRequestException(
+        "Provisional unclassified uploads are no longer supported. Use category and categorySource to declare the attachment type before upload.",
+      );
     }
 
-    return this.createClassifiedProvisionalAttachment(user.id, input, content);
+    return this.createTrustedUserSelectedAttachment(user.id, input, content);
   }
 
   private async createTrustedUserSelectedAttachment(
@@ -140,94 +131,12 @@ export class ChatAttachmentsService {
       retentionPolicy: this.resolveRetentionPolicy(category),
     });
 
-    return this.toRecordWithUploadMeta(row, {
-      providerId: "user_selected",
-      method: "user_selected",
-    });
-  }
-
-  private async createClassifiedProvisionalAttachment(
-    userId: string,
-    input: CreateChatAttachmentInput,
-    content: Buffer,
-  ): Promise<ChatAttachmentRecord> {
-    const mimeError = getProvisionalAttachmentMimeTypeError(input.mimeType);
-
-    if (mimeError) {
-      throw new BadRequestException(mimeError);
-    }
-
-    const sizeError = getProvisionalAttachmentSizeError(content.byteLength);
-
-    if (sizeError) {
-      throw new BadRequestException(sizeError);
-    }
-
-    if (input.consentScopes?.length) {
-      throw new BadRequestException(
-        "Consent scopes apply only after a medical document category is assigned.",
-      );
-    }
-
-    const attachmentId = crypto.randomUUID();
-    const classification = await this.chatAttachmentClassifierService.classify({
-      message: "",
-      attachment: {
-        id: attachmentId,
-        filename: input.filename,
-        mimeType: input.mimeType,
-        category: "unclassified",
-        consent: null,
-        storageKey: null,
-      },
-      content,
-      categorySource: input.categorySource,
-    });
-
-    const disposition = resolveProvisionalUploadDisposition({
-      classification,
-      attachmentId,
-    });
-
-    let storageKey: string | null = null;
-
-    if (disposition.shouldPersistContent) {
-      storageKey = await this.storage.store(userId, attachmentId, content, input.mimeType);
-    }
-
-    const row = await this.chatAttachmentsRepository.create({
-      id: attachmentId,
-      userId,
-      threadId: input.threadId ?? null,
-      category: disposition.category,
-      categorySource: resolveProvisionalUploadCategorySource({
-        dispositionCategory: disposition.category,
-        inputCategorySource: input.categorySource,
-      }),
-      status: disposition.status,
-      filename: input.filename,
-      mimeType: input.mimeType,
-      fileSizeBytes: content.byteLength,
-      storageKey,
-      linkedImageRefId: disposition.linkedImageRefId,
-      consent: null,
-      failureReason: disposition.failureReason,
-      retentionPolicy: disposition.retentionPolicy,
-    });
-
-    return this.toRecordWithUploadMeta(row, {
-      providerId: classification.classificationProviderId ?? "unknown",
-      method: classification.classificationMethod ?? "unknown",
-    });
-  }
-
-  private toRecordWithUploadMeta(
-    row: Awaited<ReturnType<ChatAttachmentsRepository["create"]>>,
-    meta: ChatAttachmentUploadClassificationMeta,
-  ): ChatAttachmentRecord {
     return {
       ...toChatAttachmentRecord(row),
-      uploadClassificationMeta: meta,
+      uploadClassificationMeta: {
+        providerId: "user_selected",
+        method: "user_selected",
+      } satisfies ChatAttachmentUploadClassificationMeta,
     };
   }
 
@@ -366,90 +275,6 @@ export class ChatAttachmentsService {
     }
 
     return toChatAttachmentRecord(updated);
-  }
-
-  async recognizeAttachment(
-    auth: ClerkAuthContext,
-    attachmentId: string,
-    input: RecognizeChatAttachmentInput,
-  ): Promise<ChatAttachmentRecognitionResponse> {
-    const user = await this.usersService.resolveFromAuth(auth);
-    const existing = await this.chatAttachmentsRepository.findByIdForUser(user.id, attachmentId);
-
-    if (!existing) {
-      throw new NotFoundException("Chat attachment not found.");
-    }
-
-    const existingRecord = toChatAttachmentRecord(existing);
-
-    if (isChatAttachmentExpired(existingRecord)) {
-      throw new BadRequestException("Attachment recognition reference has expired.");
-    }
-
-    const category = existingRecord.category;
-
-    if (input.consentScopes && category === "medical_document") {
-      await this.grantConsent(auth, attachmentId, {
-        consentScopes: input.consentScopes,
-        consentVersion: input.consentVersion ?? "v1",
-        documentType: input.documentType,
-        documentTitle: input.documentTitle,
-        fileContentBase64: input.fileContentBase64,
-      });
-    }
-
-    const refreshedForValidation = await this.chatAttachmentsRepository.findByIdForUser(
-      user.id,
-      attachmentId,
-    );
-
-    if (!refreshedForValidation) {
-      throw new NotFoundException("Chat attachment not found.");
-    }
-
-    const attachmentForValidation = toChatAttachmentRecord(refreshedForValidation);
-    const eligibilityErrors = getChatAttachmentRecognitionEligibilityErrors(attachmentForValidation);
-
-    if (eligibilityErrors.length > 0) {
-      throw new BadRequestException(eligibilityErrors.join(" "));
-    }
-
-    await this.chatAttachmentsRepository.update(user.id, attachmentId, {
-      status: "recognizing",
-      failureReason: null,
-    });
-
-    const refreshed = await this.chatAttachmentsRepository.findByIdForUser(user.id, attachmentId);
-
-    if (!refreshed) {
-      throw new NotFoundException("Chat attachment not found.");
-    }
-
-    const refreshedAttachment = toChatAttachmentRecord(refreshed);
-
-    const outcome = await this.chatAttachmentRecognitionService.recognizeAttachment({
-      auth,
-      userId: user.id,
-      attachment: refreshedAttachment,
-      category,
-      storage: this.storage,
-    });
-
-    const updated = await this.chatAttachmentsRepository.update(user.id, attachmentId, {
-      status: outcome.status,
-      recognition: outcome.recognition,
-      failureReason: outcome.failureReason,
-      linkedDocumentId: outcome.linkedDocumentId,
-      expiresAt: outcome.expiresAt,
-    });
-
-    if (!updated) {
-      throw new NotFoundException("Chat attachment not found.");
-    }
-
-    return {
-      attachment: toChatAttachmentRecord(updated),
-    };
   }
 
   async assertOwnedAttachmentRefs(

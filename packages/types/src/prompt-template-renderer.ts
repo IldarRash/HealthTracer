@@ -1,10 +1,14 @@
 import type { PromptTemplatesBehaviorConfig } from "./ai-behavior-config.js";
 import {
   DEFAULT_PROMPT_TEMPLATE_BODIES,
+  DOMAIN_HEALTH_TEMPLATE_KEY,
+  DOMAIN_NUTRITION_TEMPLATE_KEY,
+  DOMAIN_WORKOUT_TEMPLATE_KEY,
+  FINAL_DECISION_TEMPLATE_KEY,
   OPENAI_COACH_LOOP_TEMPLATE_KEY,
-  OPENAI_MESSAGE_UNDERSTANDING_TEMPLATE_KEY,
   PROMPT_TEMPLATE_KEYS,
   PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS,
+  ROUTER_DECISION_TEMPLATE_KEY,
   type PromptTemplateKey,
 } from "./prompt-template-defaults.js";
 
@@ -22,13 +26,45 @@ export type CompiledPromptTemplate = {
 export type CompiledPromptTemplates = {
   readonly templates: Readonly<Record<PromptTemplateKey, CompiledPromptTemplate>>;
   renderCoachLoop(values: PromptTemplateRenderValues): string;
-  renderMessageUnderstanding(values: {
+  // Parallel-domain pipeline render helpers
+  renderRouterDecision(values: {
     normalizedText: string;
     originalText: string;
+    detectedLanguage: string;
     preprocessorJson: string;
-    attachmentContextSummariesJson: string;
+    attachmentHintsJson: string;
     recentMessageHintsJson: string;
-    catalogHintsJson: string;
+    availableDomainsJson: string;
+    safetyGuardrailsJson: string;
+  }): string;
+  renderDomainStep(
+    domain: "workout" | "nutrition" | "health",
+    values: {
+      domain: string;
+      userMessage: string;
+      iteration: string;
+      maxIterations: string;
+      priorToolResultsJson: string;
+      coachingContextJson: string;
+      allowedTools: string;
+      allowedProposalIntents: string;
+      safetyFlags: string;
+      safetyConstraints: string;
+      /**
+       * Compact JSON summary of attachment context (category, MIME, consent state,
+       * hasImage). "none" when no attachments are present for this domain step.
+       * The full image content is sent via the multimodal user content array —
+       * this summary tells the LLM what is present without embedding the data URI.
+       */
+      attachmentContextJson: string;
+    },
+  ): string;
+  renderFinalDecision(values: {
+    userMessage: string;
+    domainOutputsJson: string;
+    actionVariantCatalogJson: string;
+    safetyFlags: string;
+    safetyConstraints: string;
   }): string;
 };
 
@@ -135,15 +171,43 @@ export function compilePromptTemplates(
         values,
       )!;
     },
-    renderMessageUnderstanding(values) {
-      const rendered = templates[OPENAI_MESSAGE_UNDERSTANDING_TEMPLATE_KEY].render(values);
+    renderRouterDecision(values) {
+      const rendered = templates[ROUTER_DECISION_TEMPLATE_KEY].render(values);
 
       if (rendered != null) {
         return rendered;
       }
 
       return renderPromptTemplateBody(
-        DEFAULT_PROMPT_TEMPLATE_BODIES[OPENAI_MESSAGE_UNDERSTANDING_TEMPLATE_KEY],
+        DEFAULT_PROMPT_TEMPLATE_BODIES[ROUTER_DECISION_TEMPLATE_KEY],
+        values,
+      )!;
+    },
+    renderDomainStep(domain, values) {
+      const key =
+        domain === "workout"
+          ? DOMAIN_WORKOUT_TEMPLATE_KEY
+          : domain === "nutrition"
+            ? DOMAIN_NUTRITION_TEMPLATE_KEY
+            : DOMAIN_HEALTH_TEMPLATE_KEY;
+
+      const rendered = templates[key].render(values);
+
+      if (rendered != null) {
+        return rendered;
+      }
+
+      return renderPromptTemplateBody(DEFAULT_PROMPT_TEMPLATE_BODIES[key], values)!;
+    },
+    renderFinalDecision(values) {
+      const rendered = templates[FINAL_DECISION_TEMPLATE_KEY].render(values);
+
+      if (rendered != null) {
+        return rendered;
+      }
+
+      return renderPromptTemplateBody(
+        DEFAULT_PROMPT_TEMPLATE_BODIES[FINAL_DECISION_TEMPLATE_KEY],
         values,
       )!;
     },

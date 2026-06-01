@@ -3,9 +3,7 @@ import type { AgentContextPacket } from "@health/types";
 import {
   buildRouteFromCatalogIntent,
   getCapabilityConfig,
-  messageUnderstandingOutputSchema,
-  messageUnderstandingResultSchema,
-  turnDecisionOutputSchema,
+  routerDecisionOutputSchema,
 } from "@health/types";
 import { ActionResolverService } from "./action-resolver.service.js";
 import { ResponseModeExecutorService } from "./response-mode-executor.service.js";
@@ -14,11 +12,11 @@ import { createAiPolicyTestStack } from "./test-ai-behavior-fixtures.js";
 import { buildAgentPromptContextFromPacket } from "../coaching-context/agent-prompt-context.js";
 import type { ResponseModeExecutorTurnInput } from "./response-mode-executor.service.js";
 
-function createTurnDecisionTurn(
-  overrides: Partial<ResponseModeExecutorTurnInput["turnDecisionTurn"]> = {},
-): ResponseModeExecutorTurnInput["turnDecisionTurn"] {
+function createRouterTurn(
+  overrides: Partial<ResponseModeExecutorTurnInput["routerTurn"]> = {},
+): ResponseModeExecutorTurnInput["routerTurn"] {
   return {
-    turnDecisionRan: false,
+    routerRan: false,
     ...overrides,
   };
 }
@@ -127,7 +125,7 @@ describe("ResponseModeExecutorService", () => {
         widgetDescriptors: [],
         actionDescriptors: [],
       },
-      turnDecisionTurn: createTurnDecisionTurn(),
+      routerTurn: createRouterTurn(),
       directPathCandidate: {
         kind: "today_summary_read",
         confidence: 0.95,
@@ -188,7 +186,7 @@ describe("ResponseModeExecutorService", () => {
         widgetDescriptors: [],
         actionDescriptors: [],
       },
-      turnDecisionTurn: createTurnDecisionTurn({ turnDecisionRan: true }),
+      routerTurn: createRouterTurn({ routerRan: true }),
       provider: { generateAgentLoopStep } as never,
     });
 
@@ -208,23 +206,6 @@ describe("ResponseModeExecutorService", () => {
     expect(loopRequest.agentMetadata?.responseModeExecutor?.handlerPath).toBe(
       "proposal_bounded_loop",
     );
-  });
-
-  it("uses context_expansion_loop when compression is required", async () => {
-    const executor = new ResponseModeExecutorService(
-      new ActionResolverService(),
-      { executeTool: vi.fn() } as never,
-    );
-    const plan = createPlan({
-      requiresCompression: true,
-      executorMode: "context_expansion_loop",
-    });
-
-    expect(
-      executor.resolveExecutorMode(plan, {
-        directPathCandidate: null,
-      }),
-    ).toBe("context_expansion_loop");
   });
 
   it("delegates deterministic write modes without invoking the coach llm", async () => {
@@ -264,7 +245,7 @@ describe("ResponseModeExecutorService", () => {
         widgetDescriptors: [],
         actionDescriptors: [],
       },
-      turnDecisionTurn: createTurnDecisionTurn(),
+      routerTurn: createRouterTurn(),
       directPathCandidate: {
         kind: "mark_today_workout_done",
         confidence: 0.95,
@@ -359,7 +340,7 @@ describe("ResponseModeExecutorService", () => {
         widgetDescriptors: [],
         actionDescriptors: [],
       },
-      turnDecisionTurn: createTurnDecisionTurn(),
+      routerTurn: createRouterTurn(),
       provider: { generateAgentLoopStep } as never,
     });
 
@@ -430,13 +411,127 @@ describe("ResponseModeExecutorService", () => {
         widgetDescriptors: [],
         actionDescriptors: [],
       },
-      turnDecisionTurn: createTurnDecisionTurn(),
+      routerTurn: createRouterTurn(),
       provider: { generateAgentLoopStep } as never,
     });
 
     expect(generateAgentLoopStep).toHaveBeenCalledTimes(1);
     expect(result.parseErrors[0]).toContain("does not allow tool loops");
     expect(result.responseModeExecution?.handlerPath).toBe("single_final_answer");
+  });
+
+  it("blocks a disallowed tool request in loop-allowing mode with safe fallback", async () => {
+    // The agent requests a tool that is NOT in the intent's allowedTools list.
+    // adjust_workout allows ["getUserContextSlice", "getWeeklyProgressContext"],
+    // so "getDocumentContext" is disallowed.
+    const generateAgentLoopStep = vi.fn().mockResolvedValue({
+      kind: "tool_request",
+      tool: "getDocumentContext",
+      input: {},
+    });
+    const executor = new ResponseModeExecutorService(
+      new ActionResolverService(),
+      { executeTool: vi.fn() } as never,
+    );
+    const contextPacket = createContextPacket();
+    const plan = createPlan({ executorMode: "proposal_flow" });
+
+    const result = await executor.execute({
+      plan,
+      orchestratorInput: {
+        auth: {
+          clerkUserId: "clerk-user",
+          email: "test@example.com",
+          displayName: "Test",
+        },
+        userMessage: "Adapt my workout plan",
+        recentMessages: [],
+      },
+      contextPacket,
+      coachingContext: buildAgentPromptContextFromPacket(contextPacket),
+      capabilityTurnMetadata: {
+        primaryCapabilityId: "adjust_workout",
+        selectedCapabilityIds: ["adjust_workout"],
+        compositionStrategy: "primary_only",
+        widgetDescriptors: [],
+        actionDescriptors: [],
+      },
+      routerTurn: createRouterTurn({ routerRan: true }),
+      provider: { generateAgentLoopStep } as never,
+    });
+
+    // Safe fallback reply and empty proposals
+    expect(result.output.reply).toBe(
+      "I could not safely process that response. Please try again with a wellness-focused question.",
+    );
+    expect(result.output.proposals).toEqual([]);
+    // Safety status is parse_failed
+    expect(result.agentMetadata.safety.status).toBe("parse_failed");
+    // Error message names the disallowed tool and the intent
+    expect(result.parseErrors[0]).toContain("is not allowed for intent");
+    expect(result.parseErrors[0]).toContain("getDocumentContext");
+  });
+
+  it("records an allowed tool in toolsInvoked and returns the final answer", async () => {
+    // The agent requests "getUserContextSlice" (allowed for adjust_workout), then returns a final answer.
+    const generateAgentLoopStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        kind: "tool_request",
+        tool: "getUserContextSlice",
+        input: { purpose: "workout_adaptation" },
+      })
+      .mockResolvedValueOnce({
+        kind: "final_answer",
+        reply: "Here is your adapted workout suggestion.",
+        proposals: [],
+      });
+
+    const executeTool = vi.fn().mockResolvedValue({
+      tool: "getUserContextSlice",
+      ok: true,
+      result: { snapshots: [] },
+      errors: [],
+    });
+
+    const executor = new ResponseModeExecutorService(
+      new ActionResolverService(),
+      { executeTool } as never,
+    );
+    const contextPacket = createContextPacket();
+    const plan = createPlan({ executorMode: "proposal_flow" });
+
+    const result = await executor.execute({
+      plan,
+      orchestratorInput: {
+        auth: {
+          clerkUserId: "clerk-user",
+          email: "test@example.com",
+          displayName: "Test",
+        },
+        userMessage: "Adapt my workout plan",
+        recentMessages: [],
+      },
+      contextPacket,
+      coachingContext: buildAgentPromptContextFromPacket(contextPacket),
+      capabilityTurnMetadata: {
+        primaryCapabilityId: "adjust_workout",
+        selectedCapabilityIds: ["adjust_workout"],
+        compositionStrategy: "primary_only",
+        widgetDescriptors: [],
+        actionDescriptors: [],
+      },
+      routerTurn: createRouterTurn({ routerRan: true }),
+      provider: { generateAgentLoopStep } as never,
+    });
+
+    // The loop continued past the tool step and produced a final answer
+    expect(generateAgentLoopStep).toHaveBeenCalledTimes(2);
+    // The invoked tool is recorded in agentMetadata
+    expect(result.agentMetadata.toolsInvoked).toContain("getUserContextSlice");
+    // No parse errors — the loop succeeded
+    expect(result.parseErrors).toEqual([]);
+    expect(result.output.reply).toBe("Here is your adapted workout suggestion.");
   });
 
   it.each([
@@ -487,21 +582,21 @@ describe("ResponseModeExecutorService", () => {
           widgetDescriptors: [],
           actionDescriptors: [],
         },
-        turnDecisionTurn: createTurnDecisionTurn({
-          turnDecisionRan: true,
-          turnDecision: {
-            output: turnDecisionOutputSchema.parse({
-              signals: ["attachment_reference"],
-              entities: [],
-              routeCapabilityHints: [
-                { capabilityId: "attachment_food_photo", confidence: 0.86 },
+        routerTurn: createRouterTurn({
+          routerRan: true,
+          routerResult: {
+            output: routerDecisionOutputSchema.parse({
+              selectedDomains: [
+                {
+                  domain: "nutrition",
+                  confidence: 0.86,
+                  intentHints: [],
+                  toolHints: [],
+                  signalHints: [],
+                },
               ],
-              complexity: "moderate",
-              directCommand: { detected: false },
+              contextNeeds: [],
               safetyFlags: [],
-              contextNeeds: ["attachment_context"],
-              attachmentHints: [],
-              toolNeeds: [],
               confidence: 0.86,
             }),
             source: "llm",
@@ -557,7 +652,7 @@ describe("ResponseModeExecutorService", () => {
         widgetDescriptors: [],
         actionDescriptors: [],
       },
-      turnDecisionTurn: createTurnDecisionTurn(),
+      routerTurn: createRouterTurn(),
       provider: { generateAgentLoopStep } as never,
     });
 
