@@ -13,9 +13,7 @@
         "allowedMimeTypes": [
           "image/jpeg",
           "image/png",
-          "image/webp",
-          "text/plain",
-          "application/pdf"
+          "image/webp"
         ],
         "maxBytes": 10000000,
         "label": "Unclassified upload"
@@ -33,8 +31,6 @@
       {
         "category": "medical_document",
         "allowedMimeTypes": [
-          "text/plain",
-          "application/pdf",
           "image/jpeg",
           "image/png",
           "image/webp"
@@ -47,9 +43,7 @@
         "allowedMimeTypes": [
           "image/jpeg",
           "image/png",
-          "image/webp",
-          "application/pdf",
-          "text/plain"
+          "image/webp"
         ],
         "maxBytes": 10000000,
         "label": "Workout attachment"
@@ -58,9 +52,7 @@
     "provisionalUploadMimeTypes": [
       "image/jpeg",
       "image/png",
-      "image/webp",
-      "text/plain",
-      "application/pdf"
+      "image/webp"
     ],
     "maxProvisionalBytes": 10000000
   },
