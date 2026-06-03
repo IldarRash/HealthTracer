@@ -2055,3 +2055,17 @@ export {
   type FinalDecisionOutputInput,
   type FinalDecisionRequest,
 } from "./final-decision.js";
+export {
+  createCheckoutSessionResponseSchema,
+  createPortalSessionResponseSchema,
+  entitlementSchema,
+  subscriptionStatusSchema,
+  subscriptionSummarySchema,
+  subscriptionTierSchema,
+  type CreateCheckoutSessionResponse,
+  type CreatePortalSessionResponse,
+  type Entitlement,
+  type SubscriptionStatus,
+  type SubscriptionSummary,
+  type SubscriptionTier,
+} from "./billing.js";

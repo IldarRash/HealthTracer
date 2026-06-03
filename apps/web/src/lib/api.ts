@@ -42,6 +42,10 @@ import {
   userRecipeRecommendationSchema,
   workoutPlanRevisionSchema,
   workoutSessionSchema,
+  subscriptionSummarySchema,
+  entitlementSchema,
+  createCheckoutSessionResponseSchema,
+  createPortalSessionResponseSchema,
   type ActiveHabitPlanResponse,
   type ActiveNutritionPlanResponse,
   type ActiveWorkoutPlanResponse,
@@ -147,6 +151,10 @@ import {
   type WellbeingCheckInHistoryResponse,
   type WellbeingCheckInResponse,
   type WellbeingCheckInUpsertResponse,
+  type SubscriptionSummary,
+  type Entitlement,
+  type CreateCheckoutSessionResponse,
+  type CreatePortalSessionResponse,
 } from "@health/types";
 import { z } from "zod";
 import { clientApiBaseUrl } from "../env";
@@ -223,6 +231,8 @@ export const apiQueryKeys = {
   wellbeingAggregatesPrefix: ["wellbeing-aggregates"] as const,
   recoveryContext: (date: string) => ["recovery-context", date] as const,
   recoveryContextPrefix: ["recovery-context"] as const,
+  billingSubscription: ["billing-subscription"] as const,
+  billingEntitlement: ["billing-entitlement"] as const,
 } as const;
 
 const syncHealthMetricsResultSchema = z.object({
@@ -1321,6 +1331,36 @@ export async function previewCorrelationInsights(
     token,
     correlationInsightPreviewResponseSchema,
   );
+}
+
+export async function getSubscription(
+  token: string,
+): Promise<ApiResult<SubscriptionSummary>> {
+  return apiFetch("/billing/subscription", token, subscriptionSummarySchema);
+}
+
+export async function getEntitlement(
+  token: string,
+): Promise<ApiResult<Entitlement>> {
+  return apiFetch("/billing/entitlement", token, entitlementSchema);
+}
+
+export async function createBillingCheckoutSession(
+  token: string,
+): Promise<ApiResult<CreateCheckoutSessionResponse>> {
+  return apiFetch("/billing/checkout-session", token, createCheckoutSessionResponseSchema, {
+    method: "POST",
+    body: {},
+  });
+}
+
+export async function createBillingPortalSession(
+  token: string,
+): Promise<ApiResult<CreatePortalSessionResponse>> {
+  return apiFetch("/billing/portal-session", token, createPortalSessionResponseSchema, {
+    method: "POST",
+    body: {},
+  });
 }
 
 type ApiFetchOptions = {

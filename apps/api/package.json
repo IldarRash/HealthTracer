@@ -27,6 +27,7 @@
     "postgres": "^3.4.9",
     "reflect-metadata": "latest",
     "rxjs": "latest",
+    "stripe": "^22.2.0",
     "zod": "latest"
   },
   "devDependencies": {

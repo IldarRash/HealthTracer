@@ -20,6 +20,10 @@ import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiService } from "../ai/ai.service.js";
 import type { AttachmentTurnContext } from "../ai/agent-orchestrator.service.js";
 import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
+import {
+  AiMessageQuotaExceededError,
+  EntitlementsService,
+} from "../billing/entitlements.service.js";
 import { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { ChatTurnAttachmentStageService } from "../chat-attachments/chat-turn-attachment-stage.service.js";
 import { ProgressWeeklyReviewService } from "../progress/progress-weekly-review.service.js";
@@ -50,6 +54,7 @@ export class ChatService {
     private readonly directChatPathService: DirectChatPathService,
     private readonly proposalExplainerService: ProposalExplainerService,
     private readonly aiBehaviorConfigService: AiBehaviorConfigService,
+    private readonly entitlementsService: EntitlementsService,
   ) {}
 
   async listThreads(auth: ClerkAuthContext): Promise<ChatThread[]> {
@@ -251,6 +256,43 @@ export class ChatService {
       };
     }
 
+    // Quota gate: enforce free-tier daily AI message limit.
+    // Placed after all pre-AI early returns (crisis, proposal-explainer, direct-path)
+    // so non-LLM turns do not consume quota.
+    try {
+      await this.entitlementsService.assertAiMessageAllowed(user.id, todayIsoDate);
+    } catch (error) {
+      if (error instanceof AiMessageQuotaExceededError) {
+        const quotaReply =
+          "You've reached today's free AI message limit — upgrade to Pro for unlimited coaching.";
+        const assistantMessage = await this.chatRepository.createMessage(
+          threadId,
+          "assistant",
+          quotaReply,
+          {
+            quota: { limitReached: true, tier: "free" },
+          },
+        );
+
+        const title =
+          thread.title ??
+          (existingMessages.length === 0 ? truncateTitle(messageContent) : undefined);
+
+        await this.chatRepository.touchThread(threadId, title);
+
+        const updatedThread = await this.chatRepository.findThreadById(user.id, threadId);
+
+        return {
+          thread: toChatThread(updatedThread ?? thread),
+          userMessage: toChatMessage(userMessage),
+          assistantMessage: toChatMessage(assistantMessage),
+          proposals: [],
+        };
+      }
+
+      throw error;
+    }
+
     const isWeeklyReviewTurn = isWeeklyReviewChatMessage(input.content);
     const todayCheckIn = await this.wellbeingCheckInsService.getCheckInForDate(
       auth,
@@ -284,6 +326,17 @@ export class ChatService {
           }
         : {}),
     });
+
+    // Record AI message usage after a successful LLM response (not on error).
+    // Awaited so the per-day counter is consistent before the next request is
+    // served (closes the sequential check-then-act quota-bypass window). A
+    // bookkeeping failure must not break an already-generated chat response, so
+    // the increment error is swallowed rather than surfaced to the user.
+    try {
+      await this.entitlementsService.recordAiMessageUsage(user.id, todayIsoDate);
+    } catch {
+      // Usage increment failed — intentionally not surfaced to the user.
+    }
 
     let proposalsToPersist: RawAiProposal[] = generated.output.proposals;
     let weeklyReviewMetadata: Record<string, unknown> | undefined;
