@@ -6,10 +6,7 @@ import {
   type CoachDirectActionAttempt,
   type ActionResolverFinalDecisionInput,
 } from "./action-resolver.service.js";
-import {
-  PLAIN_REPLY_ACTION_VARIANT_ID,
-  MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
-} from "./action-variant-catalog.service.js";
+import { PLAIN_REPLY_ACTION_VARIANT_ID } from "./action-variant-catalog.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
 
 const WORKOUT_PROPOSAL = {
@@ -256,48 +253,6 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
     });
   });
 
-  describe("consent-gated medical_document_save path", () => {
-    it("returns consentRequired=true when selectedAction is medical_document_save", () => {
-      const result = resolveDecision(
-        {
-          selectedAction: MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
-          proposals: [],
-          consentRequired: true,
-        },
-        [makeDomainEntry("health", [])],
-      );
-      expect(result.consentRequired).toBe(true);
-    });
-
-    it("does NOT auto-persist: returns proposals filtered to union allowlist (empty for health domain)", () => {
-      // The medical_document_save variant has empty allowedProposalIntents in the health domain.
-      // ActionResolver must not generate or auto-persist health_documents rows.
-      const result = resolveDecision(
-        {
-          selectedAction: MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
-          proposals: [WORKOUT_PROPOSAL],
-          consentRequired: true,
-        },
-        [makeDomainEntry("health", [])],
-      );
-      // WORKOUT_PROPOSAL is out of the health domain's allowlist (empty) → filtered out.
-      // This is the structural floor that prevents auto-persist.
-      expect(result.proposals).toHaveLength(0);
-    });
-
-    it("medical_document_save does not block consentRequired from proposals", () => {
-      // When a medical domain has proposals in its allowlist, they pass through consent-gated.
-      const result = resolveDecision(
-        {
-          selectedAction: MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
-          proposals: [],
-          consentRequired: true,
-        },
-        [],
-      );
-      expect(result.consentRequired).toBe(true);
-    });
-  });
 
   describe("mutation safety", () => {
     it("does not mutate the input proposals array", () => {
@@ -330,38 +285,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
 
       const result = resolver.resolveFinalDecisionOutput({
         finalDecision: {
-          reply: "Consent required.",
-          selectedAction: MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
+          reply: "A plain reply.",
+          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
           proposals: [],
-          consentRequired: true,
+          consentRequired: false,
         },
-        selectedDomains: [makeDomainEntry("health", [])],
+        selectedDomains: [makeDomainEntry("workout", [])],
       });
 
-      // consentRequired=true is surfaced but no persist happens — the result is a
-      // plain value object with no DB interaction possible (no async, no side effects).
-      expect(result.consentRequired).toBe(true);
+      // plain_reply produces no proposals — the result is a plain value object
+      // with no DB interaction possible (no async, no side effects).
+      expect(result.consentRequired).toBe(false);
       expect(result.proposals).toHaveLength(0);
-      // The reply is returned unchanged from the decision-maker.
-      expect(result.reply).toBe("Consent required.");
-    });
-
-    it("medical_document_save path returns proposals=[] for empty allowlist (structural persist prevention)", () => {
-      // The structural prevention: the health domain's allowedProposalIntents is empty,
-      // so even if the decision-maker included proposals, they are filtered to nothing.
-      // This is the code-level floor that makes auto-persist structurally impossible.
-      const result = resolveDecision(
-        {
-          selectedAction: MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
-          proposals: [WORKOUT_PROPOSAL, NUTRITION_PROPOSAL],
-          consentRequired: true,
-        },
-        [makeDomainEntry("health", [])],
-      );
-      // All proposals filtered because health domain has no allowedProposalIntents.
-      expect(result.proposals).toHaveLength(0);
-      // consentRequired is preserved so the caller can surface the consent flow.
-      expect(result.consentRequired).toBe(true);
+      expect(result.reply).toBe("A plain reply.");
     });
   });
 });
@@ -535,20 +471,20 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
     expect(result.proposals).toHaveLength(0);
   });
 
-  it("consent-gated medical path does not stamp workout calorie onto health proposals", () => {
+  it("plain_reply path does not stamp workout calorie (no proposals produced)", () => {
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
-        reply: "Consent needed.",
-        selectedAction: MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
+        reply: "Just a reply.",
+        selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
         proposals: [],
-        consentRequired: true,
+        consentRequired: false,
       },
-      selectedDomains: [makeDomainEntry("health", [])],
-      workoutCalorieEstimate: 280, // Must be ignored on this path
+      selectedDomains: [makeDomainEntry("workout", [])],
+      workoutCalorieEstimate: 280,
     });
 
-    // medical_document_save path returns early, calorie stamping is not reached.
-    expect(result.consentRequired).toBe(true);
+    // plain_reply produces no proposals at all — no stamping occurs.
+    expect(result.consentRequired).toBe(false);
     expect(result.proposals).toHaveLength(0);
   });
 

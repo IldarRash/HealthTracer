@@ -1,6 +1,5 @@
 import {
   createChatAttachmentSchema,
-  grantChatAttachmentConsentSchema,
 } from "@health/types";
 import {
   Body,
@@ -51,19 +50,6 @@ export class ChatAttachmentsController {
     );
 
     return new StreamableFile(content, { type: mimeType });
-  }
-
-  @Post(":attachmentId/consent")
-  grantConsent(
-    @CurrentAuth() auth: ClerkAuthContext,
-    @Param("attachmentId") attachmentId: string,
-    @Body() body: unknown,
-  ) {
-    return this.chatAttachmentsService.grantConsent(
-      auth,
-      attachmentId,
-      parseBody(grantChatAttachmentConsentSchema, body),
-    );
   }
 
 }

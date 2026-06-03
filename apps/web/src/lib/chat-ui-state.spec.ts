@@ -77,6 +77,7 @@ describe("chat UI state", () => {
           content: "Welcome back.",
           metadata: {},
           createdAt: "2026-05-22T11:00:00.000Z",
+          attachments: [],
         },
       ],
       optimistic,
@@ -144,6 +145,7 @@ describe("chat UI state", () => {
         content: "Welcome back.",
         metadata: {},
         createdAt: "2026-05-22T11:00:00.000Z",
+        attachments: [],
       },
     ];
 

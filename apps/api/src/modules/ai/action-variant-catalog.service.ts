@@ -17,21 +17,10 @@
  *      The union cannot exceed MAX_CATALOG_ENTRIES. Each entry maps directly to
  *      a CatalogProposalIntent so ActionResolver can re-validate it.
  *
- *   3. "medical_document_save" is included ONLY when ALL of the following are
- *      true this turn (consent-gated by code, not by config):
- *        a. A medical attachment is present in the turn context.
- *        b. The attachment status is "consent_granted" (not just present).
- *      If either condition is absent the variant is NOT added. The decision-maker
- *      cannot infer or fabricate consent; the gate is checked against the
- *      attachment context metadata passed to the orchestrator.
- *
  * Safety floors (must not be weakened):
  *   - This service NEVER widens beyond the union of the selected domains'
- *     clamped allowedProposalIntents + the two reserved variants above.
+ *     clamped allowedProposalIntents + the reserved plain_reply variant.
  *   - Duplicate intent ids are deduplicated (first occurrence wins).
- *   - The "medical_document_save" variant carries requiresConsent:true and is
- *     structurally distinct from any CatalogProposalIntent; ActionResolver gates
- *     it separately and will never auto-persist a health_documents row.
  */
 
 import type { ActionVariant } from "@health/types";
@@ -46,14 +35,6 @@ import type { DomainFanoutEntry } from "./system-planner.service.js";
 
 /** Always included: the decision-maker selects this to produce a plain reply. */
 export const PLAIN_REPLY_ACTION_VARIANT_ID = "plain_reply" as const;
-
-/**
- * Consent-gated medical document save. Included ONLY when a medical attachment
- * is present AND the user has granted consent this turn.
- * ActionResolver NEVER auto-persists a health_documents row — it surfaces a
- * consent-gated proposal that the user must accept explicitly.
- */
-export const MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID = "medical_document_save" as const;
 
 // Maximum number of entries in the catalog passed to the decision-maker.
 // Keeps the LLM context bounded; the union of allowedProposalIntents is
@@ -73,26 +54,6 @@ export interface BuildActionVariantCatalogInput {
    * have widened them).
    */
   selectedDomains: readonly DomainFanoutEntry[];
-
-  /**
-   * Attachment context for this turn. Used to decide whether the
-   * consent-gated medical_document_save variant is eligible.
-   */
-  attachmentContext?: ActionVariantCatalogAttachmentContext;
-}
-
-/**
- * Minimal attachment metadata needed for the medical-save gate.
- * The orchestrator extracts this from AttachmentTurnContextItem before
- * calling buildCatalog.
- */
-export interface ActionVariantCatalogAttachmentContext {
-  /**
-   * Whether any attachment in this turn has category === "medical_document"
-   * AND status === "consent_granted". Both conditions must be true.
-   * The status check is the code-level consent gate.
-   */
-  hasMedicalAttachmentWithConsentGranted: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,35 +104,7 @@ export class ActionVariantCatalogService {
       }
     }
 
-    // 3. Consent-gated medical_document_save — only when fully eligible.
-    //    Gate: medical attachment present + consent_granted status.
-    if (
-      input.attachmentContext?.hasMedicalAttachmentWithConsentGranted === true &&
-      !seenIds.has(MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID) &&
-      catalog.length < MAX_CATALOG_ENTRIES
-    ) {
-      catalog.push({
-        id: MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
-        label: "Save medical document (consent required)",
-        description:
-          "Propose saving this medical document to the user's health record. " +
-          "Requires explicit user consent — the document is NEVER auto-persisted. " +
-          "Only eligible when the user has already granted consent for this attachment.",
-        requiresConsent: true,
-      });
-    }
-
     return catalog;
-  }
-
-  /**
-   * Check whether the medical_document_save variant would be eligible for a
-   * given attachment context. Used by tests and the orchestrator.
-   */
-  isMedicalSaveEligible(
-    attachmentContext: ActionVariantCatalogAttachmentContext | undefined,
-  ): boolean {
-    return attachmentContext?.hasMedicalAttachmentWithConsentGranted === true;
   }
 }
 

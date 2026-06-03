@@ -82,43 +82,6 @@ function createService(deps: {
   };
 }
 
-function createRepositoryWithStatefulAttachment(baseAttachment: Record<string, unknown>) {
-  const normalizeDate = (value: unknown) =>
-    value instanceof Date ? value : new Date(value as string);
-
-  let state = {
-    ...baseAttachment,
-    createdAt: normalizeDate(baseAttachment.createdAt),
-    updatedAt: normalizeDate(baseAttachment.updatedAt),
-    ...(baseAttachment.expiresAt != null
-      ? { expiresAt: normalizeDate(baseAttachment.expiresAt) }
-      : {}),
-  };
-
-  return {
-    findByIdForUser: vi.fn(async () => state),
-    update: vi.fn(async (_userId: string, _id: string, patch: unknown) => {
-      const patchRecord = patch as Record<string, unknown>;
-      state = {
-        ...state,
-        ...patchRecord,
-        ...(patchRecord.createdAt != null
-          ? { createdAt: normalizeDate(patchRecord.createdAt) }
-          : {}),
-        ...(patchRecord.updatedAt != null
-          ? { updatedAt: normalizeDate(patchRecord.updatedAt) }
-          : {}),
-        ...(patchRecord.expiresAt != null
-          ? { expiresAt: normalizeDate(patchRecord.expiresAt) }
-          : {}),
-      };
-      return state;
-    }),
-    listByIdsForUser: vi.fn(async () => []),
-  };
-}
-
-
 describe("ChatAttachmentsService", () => {
   beforeEach(() => {
     vi.spyOn(LocalChatAttachmentStorageAdapter.prototype, "read").mockResolvedValue(
@@ -130,69 +93,42 @@ describe("ChatAttachmentsService", () => {
     vi.restoreAllMocks();
   });
 
-  it("rejects provisional unclassified uploads (classifier removed)", async () => {
-    const { service } = createService({});
-
-    await expect(
-      service.createAttachment(auth, {
-        filename: "meal.jpg",
-        mimeType: "image/jpeg",
-        fileContentBase64: "dGVzdA==",
-        consentVersion: "v1",
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it("stores explicit user-selected food photo uploads", async () => {
+  it("stores an image upload as unclassified (context-only, no category declaration required)", async () => {
     const storeSpy = vi.spyOn(LocalChatAttachmentStorageAdapter.prototype, "store");
     const { service, chatAttachmentsRepository } = createService({});
 
     const record = await service.createAttachment(auth, {
-      category: "food_photo",
-      categorySource: "user_selected",
       filename: "meal.jpg",
       mimeType: "image/jpeg",
       fileContentBase64: "dGVzdA==",
-      consentVersion: "v1",
     });
 
     expect(storeSpy).toHaveBeenCalledOnce();
     expect(chatAttachmentsRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        category: "food_photo",
-        categorySource: "user_selected",
+        category: "unclassified",
+        categorySource: "default_unclassified",
         status: "queued",
         storageKey: expect.stringMatching(/^5d6e7f84/),
-        linkedImageRefId: expect.any(String),
       }),
     );
-    expect(record.category).toBe("food_photo");
-    expect(record.uploadClassificationMeta?.providerId).toBe("user_selected");
+    expect(record.category).toBe("unclassified");
+    expect(record.status).toBe("queued");
   });
 
-  it("stores explicit user-selected workout uploads", async () => {
+  it("stores a PNG image upload successfully", async () => {
     const storeSpy = vi.spyOn(LocalChatAttachmentStorageAdapter.prototype, "store");
-    const { service, chatAttachmentsRepository } = createService({});
+    const { service } = createService({});
 
     const record = await service.createAttachment(auth, {
-      category: "workout_attachment",
-      categorySource: "user_selected",
-      filename: "volleyball-practice.jpg",
-      mimeType: "image/jpeg",
+      filename: "workout-photo.png",
+      mimeType: "image/png",
       fileContentBase64: "dGVzdA==",
-      consentVersion: "v1",
     });
 
     expect(storeSpy).toHaveBeenCalledOnce();
-    expect(chatAttachmentsRepository.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        category: "workout_attachment",
-        categorySource: "user_selected",
-        status: "queued",
-        storageKey: expect.stringMatching(/^5d6e7f84/),
-      }),
-    );
-    expect(record.uploadClassificationMeta?.method).toBe("user_selected");
+    expect(record.mimeType).toBe("image/png");
+    expect(record.category).toBe("unclassified");
   });
 
   it("rejects unsupported MIME types on upload", async () => {
@@ -203,9 +139,68 @@ describe("ChatAttachmentsService", () => {
         filename: "report.exe",
         mimeType: "application/octet-stream",
         fileContentBase64: "dGVzdA==",
-        consentVersion: "v1",
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects PDF MIME type (deferred; images only for now)", async () => {
+    const { service } = createService({});
+
+    await expect(
+      service.createAttachment(auth, {
+        filename: "labs.pdf",
+        mimeType: "application/pdf",
+        fileContentBase64: "dGVzdA==",
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects text/plain MIME type — images only, no document upload supported", async () => {
+    const { service } = createService({});
+
+    await expect(
+      service.createAttachment(auth, {
+        filename: "notes.txt",
+        mimeType: "text/plain",
+        fileContentBase64: "dGVzdA==",
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("upload resolves to queued status — no upfront consent gate, no needs_consent on create", async () => {
+    vi.spyOn(LocalChatAttachmentStorageAdapter.prototype, "store");
+    const { service } = createService({});
+
+    // No category declaration, no consent scopes — just an image. Must succeed.
+    const record = await service.createAttachment(auth, {
+      filename: "health-snap.jpg",
+      mimeType: "image/jpeg",
+      fileContentBase64: "dGVzdA==",
+    });
+
+    // Must be queued (not needs_consent). No upfront gate applies.
+    expect(record.status).toBe("queued");
+    expect(record.category).toBe("unclassified");
+    // consent is null — no consent was required or collected on create.
+    expect(record.consent).toBeNull();
+  });
+
+  it("createAttachment does NOT insert a health_documents row — attachment stays as chat record only", async () => {
+    // The attachment pipeline must never auto-persist health_documents from an image upload.
+    // This guards against accidental reintroduction of the removed auto-persist path.
+    const healthDocumentsInsert = vi.fn();
+    const { service, chatAttachmentsRepository } = createService({});
+
+    await service.createAttachment(auth, {
+      filename: "my-scan.jpg",
+      mimeType: "image/jpeg",
+      fileContentBase64: "dGVzdA==",
+    });
+
+    // chatAttachmentsRepository.create was called (attachment row created).
+    expect(chatAttachmentsRepository.create).toHaveBeenCalledOnce();
+    // healthDocumentsInsert was never called (no health_documents auto-persist).
+    expect(healthDocumentsInsert).not.toHaveBeenCalled();
   });
 
   it("rejects oversized uploads", async () => {
@@ -214,28 +209,9 @@ describe("ChatAttachmentsService", () => {
 
     await expect(
       service.createAttachment(auth, {
-        category: "food_photo",
         filename: "meal.jpg",
         mimeType: "image/jpeg",
         fileContentBase64: oversized,
-        consentVersion: "v1",
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it("rejects medical uploads without upload_storage consent", async () => {
-    const { service } = createService({});
-
-    await expect(
-      service.createAttachment(auth, {
-        category: "medical_document",
-        filename: "labs.pdf",
-        mimeType: "application/pdf",
-        fileContentBase64: "dGVzdA==",
-        consentVersion: "v1",
-        documentType: "lab_report",
-        documentTitle: "Labs",
-        consentScopes: ["parse_ocr"],
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -251,129 +227,6 @@ describe("ChatAttachmentsService", () => {
       service.assertOwnedAttachmentRefs(user.id, ["a1000001-0000-4000-8000-000000000001"]),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
-
-  it("grantConsent applies only to medical document attachments", async () => {
-    const { service } = createService({
-      chatAttachmentsRepository: {
-        findByIdForUser: vi.fn(async () => ({
-          id: "a1000001-0000-4000-8000-000000000001",
-          userId: user.id,
-          category: "food_photo",
-          status: "ready",
-          filename: "meal.jpg",
-          mimeType: "image/jpeg",
-          fileSizeBytes: 4,
-          storageKey: "local://attachments/meal.jpg",
-          linkedDocumentId: null,
-          linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
-          consent: null,
-          recognition: null,
-          failureReason: null,
-          retentionPolicy: "ephemeral_recognition",
-          expiresAt: null,
-          threadId: null,
-          messageId: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })),
-      },
-    });
-
-    await expect(
-      service.grantConsent(auth, "a1000001-0000-4000-8000-000000000001", {
-        consentScopes: ["upload_storage"],
-        consentVersion: "v1",
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it("grantConsent accepts document metadata and re-upload for purged medical attachments", async () => {
-    const { service, chatAttachmentsRepository } = createService({
-      chatAttachmentsRepository: createRepositoryWithStatefulAttachment({
-        id: "d1000002-0000-4000-8000-000000000002",
-        userId: user.id,
-        threadId: null,
-        messageId: null,
-        category: "medical_document",
-        status: "needs_consent",
-        filename: "scan.jpg",
-        mimeType: "image/jpeg",
-        fileSizeBytes: 4,
-        storageKey: null,
-        linkedDocumentId: null,
-        linkedImageRefId: null,
-        consent: null,
-        recognition: null,
-        failureReason:
-          "Explicit consent is required before processing medical documents in chat.",
-        retentionPolicy: "document_consent_rules",
-        expiresAt: null,
-        createdAt: "2026-05-26T12:00:00.000Z",
-        updatedAt: "2026-05-26T12:00:00.000Z",
-      }),
-    });
-
-    const record = await service.grantConsent(auth, "d1000002-0000-4000-8000-000000000002", {
-      consentScopes: ["upload_storage", "parse_ocr"],
-      consentVersion: "v1",
-      documentType: "lab_report",
-      documentTitle: "Lab screenshot",
-      fileContentBase64: "dGVzdA==",
-    });
-
-    expect(chatAttachmentsRepository.update).toHaveBeenCalledWith(
-      user.id,
-      "d1000002-0000-4000-8000-000000000002",
-      expect.objectContaining({
-        status: "queued",
-        storageKey: expect.stringMatching(/^5d6e7f84/),
-        consent: expect.objectContaining({
-          documentType: "lab_report",
-          documentTitle: "Lab screenshot",
-          consentScopes: ["upload_storage", "parse_ocr"],
-        }),
-      }),
-    );
-    expect(record.status).toBe("queued");
-    expect(record.consent?.documentType).toBe("lab_report");
-  });
-
-  it("grantConsent rejects purged medical attachments without re-upload content", async () => {
-    const { service } = createService({
-      chatAttachmentsRepository: createRepositoryWithStatefulAttachment({
-        id: "d1000002-0000-4000-8000-000000000002",
-        userId: user.id,
-        threadId: null,
-        messageId: null,
-        category: "medical_document",
-        status: "needs_consent",
-        filename: "scan.jpg",
-        mimeType: "image/jpeg",
-        fileSizeBytes: 4,
-        storageKey: null,
-        linkedDocumentId: null,
-        linkedImageRefId: null,
-        consent: null,
-        recognition: null,
-        failureReason:
-          "Explicit consent is required before processing medical documents in chat.",
-        retentionPolicy: "document_consent_rules",
-        expiresAt: null,
-        createdAt: "2026-05-26T12:00:00.000Z",
-        updatedAt: "2026-05-26T12:00:00.000Z",
-      }),
-    });
-
-    await expect(
-      service.grantConsent(auth, "d1000002-0000-4000-8000-000000000002", {
-        consentScopes: ["upload_storage", "parse_ocr"],
-        consentVersion: "v1",
-        documentType: "lab_report",
-        documentTitle: "Lab screenshot",
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
 
   it("getAttachment throws when attachment is not owned", async () => {
     const { service } = createService({
@@ -419,6 +272,177 @@ describe("ChatAttachmentsService", () => {
     await expect(
       service.assertOwnedAttachmentRefs(user.id, ["a1000001-0000-4000-8000-000000000001"]),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  describe("getMessageDisplayAttachments", () => {
+    const userId = user.id;
+    const messageId = "m1000001-0000-4000-8000-000000000001";
+
+    function buildAttachmentRow(overrides: Partial<{
+      id: string;
+      messageId: string | null;
+      mimeType: string;
+      storageKey: string | null;
+      retentionPolicy: string;
+      expiresAt: Date | null;
+      category: string;
+      status: string;
+      filename: string;
+    }> = {}) {
+      return {
+        id: "a1000001-0000-4000-8000-000000000001",
+        userId,
+        threadId: "t1000001-0000-4000-8000-000000000001",
+        messageId,
+        category: "food_photo",
+        categorySource: "user_selected",
+        status: "ready",
+        filename: "food.jpg",
+        mimeType: "image/jpeg",
+        fileSizeBytes: 10000,
+        storageKey: "local://attachments/food.jpg",
+        linkedDocumentId: null,
+        linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
+        consent: null,
+        recognition: null,
+        failureReason: null,
+        retentionPolicy: "ephemeral_recognition",
+        expiresAt: null,
+        createdAt: new Date("2026-05-27T12:00:00.000Z"),
+        updatedAt: new Date("2026-05-27T12:00:00.000Z"),
+        ...overrides,
+      };
+    }
+
+    it("returns hasViewableContent=true for a present non-expired image attachment", async () => {
+      const row = buildAttachmentRow({ storageKey: "local://attachments/food.jpg", mimeType: "image/jpeg", expiresAt: null });
+      const { service } = createService({
+        chatAttachmentsRepository: { listByMessageIds: vi.fn(async () => [row]) },
+      });
+
+      const result = await service.getMessageDisplayAttachments(userId, [messageId]);
+      const metas = result.get(messageId) ?? [];
+
+      expect(metas).toHaveLength(1);
+      expect(metas[0]?.hasViewableContent).toBe(true);
+    });
+
+    it("returns hasViewableContent=false for a non-image (PDF) attachment", async () => {
+      const row = buildAttachmentRow({
+        mimeType: "application/pdf",
+        storageKey: "local://attachments/doc.pdf",
+        category: "workout_attachment",
+        filename: "workout.pdf",
+      });
+      const { service } = createService({
+        chatAttachmentsRepository: { listByMessageIds: vi.fn(async () => [row]) },
+      });
+
+      const result = await service.getMessageDisplayAttachments(userId, [messageId]);
+      const metas = result.get(messageId) ?? [];
+
+      expect(metas[0]?.hasViewableContent).toBe(false);
+    });
+
+    it("returns hasViewableContent=false when storageKey is null (purged/needs_consent)", async () => {
+      const row = buildAttachmentRow({
+        storageKey: null,
+        mimeType: "image/jpeg",
+        status: "needs_consent",
+        category: "medical_document",
+      });
+      const { service } = createService({
+        chatAttachmentsRepository: { listByMessageIds: vi.fn(async () => [row]) },
+      });
+
+      const result = await service.getMessageDisplayAttachments(userId, [messageId]);
+      const metas = result.get(messageId) ?? [];
+
+      expect(metas[0]?.hasViewableContent).toBe(false);
+    });
+
+    it("returns hasViewableContent=false for an expired ephemeral image attachment", async () => {
+      const row = buildAttachmentRow({
+        storageKey: "local://attachments/food.jpg",
+        mimeType: "image/jpeg",
+        retentionPolicy: "ephemeral_recognition",
+        expiresAt: new Date("2020-01-01T00:00:00.000Z"),
+      });
+      const { service } = createService({
+        chatAttachmentsRepository: { listByMessageIds: vi.fn(async () => [row]) },
+      });
+
+      const result = await service.getMessageDisplayAttachments(userId, [messageId]);
+      const metas = result.get(messageId) ?? [];
+
+      expect(metas[0]?.hasViewableContent).toBe(false);
+    });
+
+    it("returns an empty map when messageIds is empty", async () => {
+      const listByMessageIds = vi.fn(async () => []);
+      const { service } = createService({
+        chatAttachmentsRepository: { listByMessageIds },
+      });
+
+      const result = await service.getMessageDisplayAttachments(userId, []);
+
+      expect(result.size).toBe(0);
+      expect(listByMessageIds).not.toHaveBeenCalled();
+    });
+
+    it("groups multiple attachments under their respective message IDs", async () => {
+      const msgId2 = "m2000002-0000-4000-8000-000000000002";
+      const row1 = buildAttachmentRow({ id: "a1000001-0000-4000-8000-000000000001", messageId });
+      const row2 = buildAttachmentRow({
+        id: "a2000002-0000-4000-8000-000000000002",
+        messageId: msgId2,
+        storageKey: null,
+        status: "needs_consent",
+        mimeType: "image/jpeg",
+        category: "medical_document",
+      });
+      const { service } = createService({
+        chatAttachmentsRepository: { listByMessageIds: vi.fn(async () => [row1, row2]) },
+      });
+
+      const result = await service.getMessageDisplayAttachments(userId, [messageId, msgId2]);
+
+      expect(result.get(messageId)).toHaveLength(1);
+      expect(result.get(msgId2)).toHaveLength(1);
+      expect(result.get(messageId)?.[0]?.hasViewableContent).toBe(true);
+      expect(result.get(msgId2)?.[0]?.hasViewableContent).toBe(false);
+    });
+
+    it("issues a single batched query regardless of how many messageIds are passed", async () => {
+      const listByMessageIds = vi.fn(async () => []);
+      const { service } = createService({
+        chatAttachmentsRepository: { listByMessageIds },
+      });
+
+      await service.getMessageDisplayAttachments(userId, [
+        "m1000001-0000-4000-8000-000000000001",
+        "m2000002-0000-4000-8000-000000000002",
+        "m3000003-0000-4000-8000-000000000003",
+      ]);
+
+      expect(listByMessageIds).toHaveBeenCalledTimes(1);
+    });
+
+    it("never exposes storageKey, consent, recognition, or bytes on the returned metadata", async () => {
+      const row = buildAttachmentRow({ storageKey: "local://attachments/food.jpg" });
+      const { service } = createService({
+        chatAttachmentsRepository: { listByMessageIds: vi.fn(async () => [row]) },
+      });
+
+      const result = await service.getMessageDisplayAttachments(userId, [messageId]);
+      const meta = result.get(messageId)?.[0];
+
+      expect(meta).toBeDefined();
+      expect(meta).not.toHaveProperty("storageKey");
+      expect(meta).not.toHaveProperty("consent");
+      expect(meta).not.toHaveProperty("recognition");
+      expect(meta).not.toHaveProperty("fileContentBase64");
+    });
   });
 
 });

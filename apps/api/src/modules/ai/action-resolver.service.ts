@@ -12,10 +12,7 @@ import {
   workoutPlanProposalChangesSchema,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
-import {
-  MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
-  PLAIN_REPLY_ACTION_VARIANT_ID,
-} from "./action-variant-catalog.service.js";
+import { PLAIN_REPLY_ACTION_VARIANT_ID } from "./action-variant-catalog.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
 
 /** Reserved for future coach payloads; Phase 2 never executes these. */
@@ -69,6 +66,12 @@ export type ActionResolverFinalDecisionResult = {
    * Whether the decision required explicit user consent (e.g. medical document save).
    * When true, proposals will contain a consent-gated proposal and NO health_documents
    * row is auto-persisted. The proposal must be explicitly accepted by the user.
+   *
+   * NOTE: `consentRequired` is currently produced (forwarded from the LLM output) but not
+   * consumed by any client or enforced by a gate in this service. It is surfaced in the
+   * ChatTurnResponse for the deferred medical special-save flow (proposal-driven,
+   * domain-LLM recognition → consent-gated proposal → accept → persist health_document).
+   * Do not remove the plumbing; add enforcement when the deferred flow is implemented.
    */
   consentRequired: boolean;
 };
@@ -86,8 +89,6 @@ export class ActionResolverService {
    * Safety invariants (must not be weakened):
    *  - proposals are filtered to the UNION of the selected domains' allowedProposalIntents.
    *  - "plain_reply" produces no proposals.
-   *  - "medical_document_save" produces a consent-gated proposal outcome — it
-   *    NEVER auto-persists a health_documents row.
    *  - estimatedSessionCalorieBurn is ONLY stamped from workoutCalorieEstimate, which
    *    must have been sourced exclusively from the workout domain LLM by the caller.
    *    The decision-maker LLM and non-workout domains must never set this.
@@ -114,25 +115,7 @@ export class ActionResolverService {
       };
     }
 
-    // Consent-gated medical document save:
-    // Emit the proposals from the decision-maker as a consent-gated outcome.
-    // ActionResolver NEVER auto-persists a health_documents row — the proposal
-    // must be accepted by the user through the normal proposal-accept flow.
-    if (selectedAction === MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID) {
-      return {
-        reply: finalDecision.reply,
-        // proposals from the decision-maker carry the consent-gated data;
-        // filter them to the union allowlist (they should be empty for this variant,
-        // but we apply the filter as a safety floor regardless).
-        proposals: filterProposalsToAllowedIntents(
-          [...unionAllowedIntents] as CatalogProposalIntent[],
-          finalDecision.proposals as AiStructuredOutput["proposals"],
-        ),
-        consentRequired: true,
-      };
-    }
-
-    // All other actions: filter proposals to the union allowlist, then stamp
+    // Filter proposals to the union allowlist, then stamp
     // the workout calorie estimate onto any workout-plan proposals.
     // The decision-maker's proposals come from domain LLMs; re-filtering here is
     // a defense-in-depth measure — the allowlist is the code-level floor.

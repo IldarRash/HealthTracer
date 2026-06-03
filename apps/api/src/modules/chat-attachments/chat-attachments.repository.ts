@@ -90,6 +90,22 @@ export class ChatAttachmentsRepository {
       );
   }
 
+  async listByMessageIds(userId: string, messageIds: readonly string[]) {
+    if (messageIds.length === 0) {
+      return [];
+    }
+
+    return this.db
+      .select()
+      .from(chatAttachments)
+      .where(
+        and(
+          eq(chatAttachments.userId, userId),
+          inArray(chatAttachments.messageId, [...messageIds]),
+        ),
+      );
+  }
+
   async update(
     userId: string,
     attachmentId: string,

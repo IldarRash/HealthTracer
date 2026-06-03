@@ -3333,10 +3333,10 @@ describe("AgentOrchestratorService — consentRequired surfacing (Phase 7)", () 
       domainSignals: [],
     });
 
-    // Decision-maker selects a consent-gated action.
+    // Decision-maker emits consentRequired=true (e.g. user wants to save a context attachment).
     generateFinalDecision.mockResolvedValue({
       reply: "I noticed some health context. Please review the consent-gated proposal.",
-      selectedAction: "medical_document_save",
+      selectedAction: "ask_health_context",
       proposals: [],
       consentRequired: true,
     });

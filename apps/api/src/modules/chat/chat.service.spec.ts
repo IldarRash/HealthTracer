@@ -47,7 +47,9 @@ const noopRecipesService = {
   packChatRecipeRecommendationProposal: async () => null,
 } as never;
 
-const noopChatAttachmentsService = {} as never;
+const noopChatAttachmentsService = {
+  getMessageDisplayAttachments: async () => new Map(),
+} as never;
 
 function buildMockAttachmentTurnStageResult(input: {
   attachments: readonly Record<string, unknown>[];
@@ -3179,6 +3181,209 @@ describe("ChatService", () => {
       });
 
       expect(result.consentRequired).toBeFalsy();
+    });
+  });
+
+  describe("attachment display metadata on message DTOs", () => {
+    const attachmentId = "a1000001-0000-4000-8000-000000000001";
+    const attachmentMeta = {
+      attachmentRefId: attachmentId,
+      filename: "food.jpg",
+      mimeType: "image/jpeg",
+      category: "food_photo" as const,
+      status: "ready" as const,
+      hasViewableContent: true,
+    };
+
+    function makeMessage(id: string, role: "user" | "assistant" = "user") {
+      return {
+        id,
+        threadId: thread.id,
+        role,
+        content: "Hello",
+        metadata: {},
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      };
+    }
+
+    it("getThread populates attachments on messages via a single batched load", async () => {
+      const msgId = "msg-001-user";
+      const listByMessageIdsCalls: string[][] = [];
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [makeMessage(msgId, "user")],
+          touchThread: async () => undefined,
+        },
+        usersService: { resolveFromAuth: async () => user },
+        aiService: {} as never,
+        proposalValidationService: {} as never,
+        chatAttachmentsService: {
+          getMessageDisplayAttachments: async (userId: string, ids: string[]) => {
+            listByMessageIdsCalls.push(ids);
+            const map = new Map<string, typeof attachmentMeta[]>();
+            map.set(msgId, [attachmentMeta]);
+            return map;
+          },
+        },
+      });
+
+      const result = await service.getThread(auth, thread.id);
+
+      expect(result.messages).toHaveLength(1);
+      expect(result.messages[0]?.attachments).toHaveLength(1);
+      expect(result.messages[0]?.attachments[0]?.hasViewableContent).toBe(true);
+      // batched: called once for all messages, not once per message
+      expect(listByMessageIdsCalls).toHaveLength(1);
+      expect(listByMessageIdsCalls[0]).toContain(msgId);
+    });
+
+    it("getThread returns empty attachments array for messages with no linked attachments", async () => {
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [makeMessage("msg-002")],
+          touchThread: async () => undefined,
+        },
+        usersService: { resolveFromAuth: async () => user },
+        aiService: {} as never,
+        proposalValidationService: {} as never,
+        chatAttachmentsService: {
+          getMessageDisplayAttachments: async () => new Map(),
+        },
+      });
+
+      const result = await service.getThread(auth, thread.id);
+
+      expect(result.messages[0]?.attachments).toEqual([]);
+    });
+
+    it("sendMessage returns populated attachments on userMessage when attachments are linked", async () => {
+      const userMsgId = "user-msg-with-attachment";
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? userMsgId : "assistant-msg",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          }),
+          createProposal: async () => { throw new Error("not needed"); },
+          touchThread: async () => undefined,
+        },
+        usersService: { resolveFromAuth: async () => user },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "Got your photo.", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () => ({
+            attachmentMetadata: [
+              { refId: attachmentId, category: "food_photo", mimeType: "image/jpeg", consentState: "none", storageRef: "local://x" },
+            ],
+            outcomes: [],
+          }),
+        },
+        chatAttachmentsService: {
+          getMessageDisplayAttachments: async (_userId: string, ids: string[]) => {
+            const map = new Map<string, typeof attachmentMeta[]>();
+            if (ids.includes(userMsgId)) {
+              map.set(userMsgId, [attachmentMeta]);
+            }
+            return map;
+          },
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "",
+        attachmentRefIds: [attachmentId],
+      });
+
+      expect(result.userMessage.attachments).toHaveLength(1);
+      expect(result.userMessage.attachments[0]?.attachmentRefId).toBe(attachmentId);
+      expect(result.userMessage.attachments[0]?.hasViewableContent).toBe(true);
+    });
+
+    it("sendMessage userMessage has empty attachments when no attachmentRefIds are passed", async () => {
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-msg-no-attach" : "assistant-msg",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          }),
+          createProposal: async () => { throw new Error("not needed"); },
+          touchThread: async () => undefined,
+        },
+        usersService: { resolveFromAuth: async () => user },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "Hello!", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "How should I train today?",
+      });
+
+      expect(result.userMessage.attachments).toEqual([]);
     });
   });
 });

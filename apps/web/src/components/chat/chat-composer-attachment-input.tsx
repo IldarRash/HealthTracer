@@ -6,7 +6,6 @@ import {
   CHAT_ATTACHMENT_CATEGORY_HINT,
   createChatComposerAttachmentDraft,
   MAX_CHAT_COMPOSER_ATTACHMENTS,
-  shouldAutoProcessChatAttachmentOnSelect,
   type ChatComposerAttachmentDraft,
 } from "../../lib/chat-attachment-ui-state";
 import { FileInputTrigger } from "../ui";
@@ -38,8 +37,9 @@ export function ChatComposerAttachmentInput({
 
     onAttachmentsChange([...attachments, ...nextDrafts]);
 
+    // Always auto-upload: images upload immediately on select with no gating.
     for (const draft of nextDrafts) {
-      if (shouldAutoProcessChatAttachmentOnSelect(draft)) {
+      if (!draft.localValidationError) {
         onProcessDraft(draft);
       }
     }
@@ -53,7 +53,7 @@ export function ChatComposerAttachmentInput({
       accept={CHAT_ATTACHMENT_ACCEPT}
       multiple
       disabled={fileInputDisabled}
-      labelText="Attach food photo, wellness document, or workout file"
+      labelText="Attach image for coaching context"
       buttonLabel="Attach"
       hintText={CHAT_ATTACHMENT_CATEGORY_HINT}
       className="chat-composer-attachment-input"

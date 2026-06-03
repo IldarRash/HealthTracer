@@ -9,7 +9,6 @@ import {
   chatThreadSchema,
   chatTurnResponseSchema,
   createChatAttachmentSchema,
-  grantChatAttachmentConsentSchema,
   sendChatMessageSchema,
   completeWorkoutSessionSchema,
   connectDeviceSchema,
@@ -54,7 +53,6 @@ import {
   type ChatTurnResponse,
   type DirectChatPathRefreshHint,
   type CreateChatAttachmentInput,
-  type GrantChatAttachmentConsentInput,
   type SendChatMessageInput,
   type ConnectDeviceInput,
   type DeviceConnection,
@@ -352,64 +350,6 @@ export async function uploadChatAttachment(
     method: "POST",
     body,
   });
-}
-
-export async function getChatAttachment(
-  token: string,
-  attachmentId: string,
-): Promise<ApiResult<ChatAttachmentRecord>> {
-  return apiFetch(
-    `/chat/attachments/${encodeURIComponent(attachmentId)}`,
-    token,
-    chatAttachmentRecordSchema,
-  );
-}
-
-export async function fetchChatAttachmentContentBlob(
-  token: string,
-  attachmentId: string,
-): Promise<ApiResult<Blob>> {
-  const requestId = createRequestId();
-  const path = `/chat/attachments/${encodeURIComponent(attachmentId)}/content`;
-
-  try {
-    const response = await fetch(`${clientApiBaseUrl}${path}`, {
-      cache: "no-store",
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        [REQUEST_ID_HEADER]: requestId,
-      },
-    });
-
-    const responseRequestId = resolveResponseRequestId(requestId, response);
-
-    if (!response.ok) {
-      const errorBody = await readResponseBody(response);
-      return buildApiErrorResult(
-        parseApiErrorBody(path, response.status, errorBody),
-        responseRequestId,
-      );
-    }
-
-    return { data: await response.blob(), requestId: responseRequestId };
-  } catch {
-    return buildApiErrorResult(`${path} could not be loaded`, requestId);
-  }
-}
-
-export async function grantChatAttachmentConsent(
-  token: string,
-  attachmentId: string,
-  input: GrantChatAttachmentConsentInput,
-): Promise<ApiResult<ChatAttachmentRecord>> {
-  const body = grantChatAttachmentConsentSchema.parse(input);
-  return apiFetch(
-    `/chat/attachments/${encodeURIComponent(attachmentId)}/consent`,
-    token,
-    chatAttachmentRecordSchema,
-    { method: "POST", body },
-  );
 }
 
 export async function listProposals(

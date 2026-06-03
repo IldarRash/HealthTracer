@@ -88,12 +88,30 @@ File: `apps/api/src/modules/chat/chat.mapper.ts`
 
 Maps database rows to API chat DTOs.
 
-## Stage 1: Attachment Context (context-only)
+## Stage 1: Attachment Context (context-only, images only)
 
 Attachments are **bounded context** for the same pipeline used by text-only
 messages. There is **no recognition or classification machinery** — the multimodal
-router and domain LLMs read the attachment content directly. The chat-attachments
-module keeps only the consent/ownership/storage perimeter.
+router and domain LLMs read the image content directly. The chat-attachments
+module keeps only the ownership/storage/retention perimeter.
+
+Attachments are **images only** (`image/jpeg`, `image/png`, `image/webp`); the
+PDF/text document upload flow is **deferred** (not implemented). There is **no
+upfront classification** (no food/workout/medical category picker, no
+`categorySource` "declare before upload" machinery) and **no upfront consent gate**
+— an image uploads freely and is sent to the LLM as context, and the multimodal LLM
+recognizes what it is.
+
+> **Temporary, intentional safety relaxation (recorded so code↔doc don't drift):**
+> image content — including a photo of a medical document — now reaches the LLM
+> (OpenAI) **before any consent**. This consciously removes the previous
+> "medical content only when `consentState === 'granted'`" code floor, **for now**.
+> The pre-upload medical/MIME consent gate and the `needs_consent` upload disposition
+> are gone (see "Removed Legacy Paths"). Floors that still hold: the context-budget
+> `allowDocuments=false` floor (about DB `health_documents` slices, **not** the
+> uploaded image) stays, there is **no** auto-persist or parsing of `health_documents`
+> from an attachment, and legacy DB columns for category/recognition/status remain
+> readable but are not used for runtime branching.
 
 ### `ChatTurnAttachmentStageService`
 
@@ -103,13 +121,14 @@ Runs the **plumbing stages only**:
 
 - `validate_refs`: checks ownership and send eligibility.
 - `link_to_message`: links attachments to the chat message and thread.
-- `apply_upload_disposition`: applies category, retention, consent, and storage
-  disposition. **Medical consent gate:** when the user-declared category /
-  document-type + MIME indicate a medical document and consent is absent, the stage
-  purges stored content and marks the attachment `needs_consent`.
+- `apply_upload_disposition`: applies a **trivial generic retention disposition** —
+  it resolves the configured retention policy for the attachment's category and
+  passes the image through unchanged otherwise. There is **no consent gate, no
+  medical purge, and no category reclassification** at this stage.
 
-The `classify`, `recognize`, and `prepare_attachment_context` stages and the removed
-`prepare_proposal_candidates` stage **must not be reintroduced**.
+The `classify`, `recognize`, and `prepare_attachment_context` stages, the removed
+`prepare_proposal_candidates` stage, and the removed pre-upload classification /
+consent gate **must not be reintroduced**.
 
 ### `ChatAttachmentsService`
 
@@ -130,21 +149,32 @@ The former recognition/meal-context/capability-hint helpers are removed.
 
 File: `apps/api/src/modules/chat-attachments/medical-document-attachment-recognizer.ts`
 
-The recognition builder was removed; this file is retained **only** for the consent
-metadata helpers `buildMedicalAttachmentConsent` and `parseMedicalUploadMetadata`,
-which record the user-declared document type/title on the attachment consent record.
-The medical consent gate itself (`isMedicalAttachmentByDeclarationOrMime`) lives in
-`chat-turn-attachment-stage.service.ts` and keys off the **user-declared
-category/document-type + MIME** — no LLM classifier.
+The recognition builder **and** the upload-time medical consent gate
+(`isMedicalAttachmentByDeclarationOrMime`) were removed. This file is retained
+**only** for the consent metadata helpers `buildMedicalAttachmentConsent` and
+`parseMedicalUploadMetadata`, which record a user-declared document type/title on a
+consent record. They are no longer wired into a pre-upload gate; the deferred
+medical **special save** (below) is where they will be re-used.
 
 ### What the pipeline receives
 
 `ChatService` passes the raw attachment refs + minimal metadata (category, MIME,
-consent state, storage ref) into the orchestrator. The router LLM sees "an
-attachment of type X is present"; the selected domain LLMs receive the bounded
-attachment content as context and produce typed proposals (nutrition calories,
-workout adjustments, a consent-gated medical-save proposal, etc.). No
-`contextSummaries` / recognition envelope is produced.
+storage ref) into the orchestrator. An attachment goes to **all** router-selected
+domains — there is no per-domain category-relevance filter. The selected domain LLMs
+receive the bounded image content as context and produce typed proposals (nutrition
+calories, workout adjustments, etc.). No `contextSummaries` / recognition envelope is
+produced, and there is no consent-gated medical-save proposal variant (that is
+deferred — see below).
+
+### Deferred follow-up (LATER, not implemented)
+
+These are intentionally **not** built yet:
+
+- PDF/text document upload + a document-content path to the LLM.
+- The LLM-recognized medical **special save**: a domain recognition signal → a
+  consent-gated save **proposal** → on accept, with consent, persist a
+  `health_document`. Until that lands, no attachment path may create or parse a
+  `health_document`.
 
 ## Stage 2: Code-Owned Pre-AI Gates
 
@@ -456,8 +486,6 @@ File: `apps/api/src/modules/ai/action-resolver.service.ts`
 Resolves the decision-maker's selected action against the active capability
 allowlist and the action-variant catalog, producing one of:
 
-- a **consent-gated medical-save proposal** (never an auto-persisted
-  `health_document`)
 - a **workout proposal** with numeric prescription fields (the user sets their own
   completion time) plus a calorie-burn estimate copied from the workout domain LLM
   with provenance `workout_llm`
@@ -618,9 +646,14 @@ Schemas and defaults:
 ## Safety Boundaries
 
 - Crisis support is code-owned and bypasses all LLMs.
-- Medical attachments are consent-gated at upload by the **user-declared
-  category/document-type + MIME** (no LLM classifier); content is context-only and a
-  save is a **consent-gated proposal** — never an auto-persisted `health_document`.
+- Attachments are **images only and context-only**: no upfront classification and
+  **no upfront consent gate**. **Temporary, intentional relaxation (for now):** image
+  content — including a photo of a medical document — reaches the LLM (OpenAI)
+  **before any consent**, consciously removing the previous "medical content only
+  when consent is granted" code floor. Floors that still hold: there is **no**
+  auto-persist or parsing of a `health_document` from an attachment, and the
+  context-budget `allowDocuments=false` floor (DB `health_documents` slices, not the
+  uploaded image) is unchanged.
 - Context budgets deny document and sensitive health context by default, re-applied
   to every per-domain packet; config cannot relax these floors.
 - The router output is clamped to known domains, capabilities, and tools, and may
@@ -663,14 +696,26 @@ The following files/exports were deleted and are no longer active runtime paths:
 - `prepare_proposal_candidates`, attachment `proposalCandidates`, `preparedProposals`,
   `buildProposalCandidates`, `mergeAttachmentProposals`.
 - automatic `health_documents` creation from chat attachment recognition.
+- The **pre-upload classification + consent gate**: the food/workout/medical category
+  picker, the `categorySource` "declare before upload" machinery
+  (`isTrustedUserSelectedChatAttachmentUpload`, `resolveProvisionalUploadCategorySource`,
+  `resolveCreateAttachmentCategorySource`), the upload-time medical consent gate
+  (`isMedicalAttachmentByDeclarationOrMime`), and the `needs_consent` upload
+  disposition. Uploads are now image-only; an image is sent to the LLM as context with
+  no upfront classification or consent.
+- The per-domain attachment **category-relevance filter** (an attachment now reaches
+  all router-selected domains) and the consent-gated `medical_document_save`
+  action-variant (dropped from `ActionVariantCatalogService`). The
+  LLM-recognized medical special save is **deferred**, not removed permanently.
 
 Some historical enum values and parse compatibility remain only so old stored
 metadata can still be read safely:
 
 - `agentRoutingMethodSchema` keeps the deprecated `llm_router`, `message_understanding`,
   and `attachment_family` values alongside the production `unified_turn_decision` value.
-- The `unified_turn_decision` agent metadata block and the `recognition` column on
-  `chat_attachment` rows remain for reading historically persisted data.
+- The `unified_turn_decision` agent metadata block and the `recognition`,
+  `categorySource`, `category`, and `status` columns on `chat_attachment` rows remain
+  **readable** for historically persisted data but are not used for runtime branching.
 
 These compatibility shims are removable only behind a stated DB migration that backfills
 or drops the historical rows; do not delete them otherwise.

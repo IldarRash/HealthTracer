@@ -24,9 +24,11 @@
  *     domain_answer and lives in the domain outputs passed in — this service does
  *     not copy or forward it; that is Phase 6 work for ActionResolver.
  *
- *  5. The medical_document_save variant is consent-gated at catalog build time
- *     (ActionVariantCatalogService). This service does not check consent again;
- *     it simply passes the catalog as-is. ActionResolver re-filters on resolve.
+ *  5. There is currently no consent-gated action variant in the catalog.
+ *     The `consentRequired` field is an LLM-set boolean forwarded by the decision-maker;
+ *     it is surfaced to callers but not re-checked here. The deferred medical special-save
+ *     flow (proposal-driven, domain-LLM recognition → consent-gated proposal → accept →
+ *     persist health_document) will use a different mechanism when implemented.
  *
  *  6. This service NEVER calls the orchestrator, domain executors, or repositories.
  *     It is a pure synthesis step: domain outputs in, final decision out.

@@ -1,26 +1,23 @@
 import { describe, expect, it } from "vitest";
 import type { ChatAttachmentOutcome, ChatAttachmentRecord } from "@health/types";
 import {
-  applyChatAttachmentCategoryChange,
-  buildChatAttachmentConsentScopeItems,
-  canPreviewRecognizeChatAttachmentDraft,
+  buildOptimisticAttachmentDisplays,
   canSendChatComposer,
-  canSubmitMedicalAttachmentDraft,
+  CHAT_ATTACHMENT_ACCEPT,
+  CHAT_ATTACHMENT_FAILED_COPY,
   CHAT_ATTACHMENT_PRIVACY_NOTICE,
+  CHAT_ATTACHMENT_UNSUPPORTED_COPY,
+  chatAttachmentStatusLabel,
   createChatComposerAttachmentDraft,
-  enrichAttachmentOutcomesWithProposalContext,
-  getMedicalAttachmentDraftErrors,
-  guessChatAttachmentCategory,
-  isAmbiguousFoodOrWorkoutImage,
+  FOOD_PHOTO_LOW_CONFIDENCE_COPY,
   isChatAttachmentSendEligible,
-  isLikelyMedicalDocumentFile,
+  isChatComposerAttachmentProcessing,
   MEDICAL_ATTACHMENT_NEEDS_REVIEW_COPY,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
+  MESSAGE_FIRST_ATTACHMENT_COPY,
   normalizeAttachmentMimeType,
-  resolveAttachmentOutcomeConfidenceLabel,
+  resolveAttachmentDisplayStatus,
   resolveAttachmentOutcomeFallbackCopy,
-  shouldAutoProcessChatAttachmentOnSelect,
-  toggleChatAttachmentConsentScope,
   validateChatAttachmentFile,
   WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY,
   type ChatComposerAttachmentDraft,
@@ -63,113 +60,47 @@ function createReadyRecord(
 }
 
 describe("chat attachment UI state", () => {
-  it("starts all attachments as unclassified with non-user-selected category source", () => {
-    const workoutPhoto = createMockFile("gym-session.jpg", "image/jpeg");
-
-    expect(isAmbiguousFoodOrWorkoutImage(workoutPhoto)).toBe(true);
-    const workoutDraft = createChatComposerAttachmentDraft(workoutPhoto);
-    expect(workoutDraft.category).toBe("unclassified");
-    expect(workoutDraft.categorySource).toBe("default_unclassified");
-    expect(shouldAutoProcessChatAttachmentOnSelect(workoutDraft)).toBe(true);
-
+  it("creates draft with no category fields — images only", () => {
     const mealPhoto = createMockFile("meal.jpg", "image/jpeg");
-    const mealDraft = createChatComposerAttachmentDraft(mealPhoto);
-    expect(mealDraft.category).toBe("unclassified");
-    expect(mealDraft.categorySource).toBe("default_unclassified");
-    expect(shouldAutoProcessChatAttachmentOnSelect(mealDraft)).toBe(true);
+    const draft = createChatComposerAttachmentDraft(mealPhoto);
+
+    expect(draft.phase).toBe("local");
+    expect(draft.localValidationError).toBeNull();
+    expect(draft.previewUrl).toBeNull(); // JSDOM has no URL.createObjectURL
   });
 
-  it("keeps wellness document MIME types unclassified until the user selects a category", () => {
+  it("rejects non-image MIME types at validation", () => {
     const pdfFile = createMockFile("lab.pdf", "application/pdf");
-    const pdfDraft = createChatComposerAttachmentDraft(pdfFile);
+    const error = validateChatAttachmentFile(pdfFile);
+    expect(error).toMatch(/Unsupported MIME/);
 
-    expect(isLikelyMedicalDocumentFile(pdfFile)).toBe(true);
-    expect(pdfDraft.category).toBe("unclassified");
-    expect(pdfDraft.categorySource).toBe("mime_inferred");
-    expect(shouldAutoProcessChatAttachmentOnSelect(pdfDraft)).toBe(true);
-
-    const textFile = createMockFile("plan.txt", "text/plain");
-    const textDraft = createChatComposerAttachmentDraft(textFile);
-    expect(textDraft.category).toBe("unclassified");
-    expect(textDraft.categorySource).toBe("mime_inferred");
-    expect(shouldAutoProcessChatAttachmentOnSelect(textDraft)).toBe(true);
+    const txtFile = createMockFile("plan.txt", "text/plain");
+    const txtError = validateChatAttachmentFile(txtFile);
+    expect(txtError).toMatch(/Unsupported MIME/);
   });
 
-  it("allows auto-processing for corrected workout files after optional category change", () => {
-    const planFile = createMockFile("program.txt", "text/plain");
-    const workoutDraft = applyChatAttachmentCategoryChange(
-      createChatComposerAttachmentDraft(createMockFile("session.jpg", "image/jpeg")),
-      "workout_attachment",
-    );
-
-    expect(isAmbiguousFoodOrWorkoutImage(planFile)).toBe(false);
-    expect(workoutDraft.categorySource).toBe("user_selected");
-    expect(shouldAutoProcessChatAttachmentOnSelect(workoutDraft)).toBe(true);
-    expect(shouldAutoProcessChatAttachmentOnSelect(createChatComposerAttachmentDraft(planFile))).toBe(
-      true,
-    );
+  it("accepts image/jpeg, image/png, image/webp and rejects everything else", () => {
+    expect(validateChatAttachmentFile(createMockFile("a.jpg", "image/jpeg"))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.png", "image/png"))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.webp", "image/webp"))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.pdf", "application/pdf"))).not.toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.txt", "text/plain"))).not.toBeNull();
   });
 
-  it("blocks auto-upload for user-selected medical attachments until consent is provided", () => {
-    const medicalDraft = applyChatAttachmentCategoryChange(
-      createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
-      "medical_document",
-    );
-
-    expect(medicalDraft.categorySource).toBe("user_selected");
-    expect(shouldAutoProcessChatAttachmentOnSelect(medicalDraft)).toBe(false);
-  });
-
-  it("blocks optional preview recognition for unclassified uploads", () => {
-    const unclassifiedDraft: ChatComposerAttachmentDraft = {
-      ...createChatComposerAttachmentDraft(createMockFile("meal.jpg", "image/jpeg")),
-      phase: "uploaded",
-    };
-
-    expect(unclassifiedDraft.category).toBe("unclassified");
-    expect(canPreviewRecognizeChatAttachmentDraft(unclassifiedDraft)).toBe(false);
-
-    const foodDraft = applyChatAttachmentCategoryChange(unclassifiedDraft, "food_photo");
-    expect(foodDraft.categorySource).toBe("user_selected");
-    expect(canPreviewRecognizeChatAttachmentDraft({ ...foodDraft, phase: "uploaded" })).toBe(true);
-  });
-
-  it("guesses categories from MIME types and supports category correction validation", () => {
-    expect(guessChatAttachmentCategory(createMockFile("meal.jpg", "image/jpeg"))).toBe(
-      "food_photo",
-    );
-    expect(guessChatAttachmentCategory(createMockFile("lab.pdf", "application/pdf"))).toBe(
-      "medical_document",
-    );
-    expect(guessChatAttachmentCategory(createMockFile("plan.txt", "text/plain"))).toBe(
-      "medical_document",
-    );
-
-    const workoutFile = createMockFile("session.txt", "text/plain");
-    expect(validateChatAttachmentFile(workoutFile, "workout_attachment")).toBeNull();
-    expect(validateChatAttachmentFile(workoutFile, "food_photo")).toMatch(/Unsupported MIME/);
+  it("CHAT_ATTACHMENT_ACCEPT contains only image types", () => {
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain("image/jpeg");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain("image/png");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain("image/webp");
+    expect(CHAT_ATTACHMENT_ACCEPT).not.toContain("application/pdf");
+    expect(CHAT_ATTACHMENT_ACCEPT).not.toContain("text/plain");
+    expect(CHAT_ATTACHMENT_ACCEPT).not.toContain(".pdf");
+    expect(CHAT_ATTACHMENT_ACCEPT).not.toContain(".txt");
   });
 
   it("normalizes file extensions when browser MIME is missing", () => {
     expect(normalizeAttachmentMimeType(createMockFile("meal.jpeg", ""))).toBe("image/jpeg");
-    expect(normalizeAttachmentMimeType(createMockFile("notes.pdf", ""))).toBe("application/pdf");
-  });
-
-  it("requires medical consent, title, and upload_storage before submit", () => {
-    const draft = applyChatAttachmentCategoryChange(
-      createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
-      "medical_document",
-    );
-    draft.documentTitle = "";
-
-    expect(draft.consentScopes).toEqual([]);
-    expect(canSubmitMedicalAttachmentDraft(draft)).toBe(false);
-    expect(getMedicalAttachmentDraftErrors(draft).join(" ")).toMatch(/consent/i);
-    expect(getMedicalAttachmentDraftErrors(draft).join(" ")).toMatch(/title/i);
-
-    draft.documentTitle = "Lab results";
-    draft.consentScopes = ["upload_storage"];
-    expect(canSubmitMedicalAttachmentDraft(draft)).toBe(true);
+    expect(normalizeAttachmentMimeType(createMockFile("photo.png", ""))).toBe("image/png");
+    expect(normalizeAttachmentMimeType(createMockFile("img.webp", ""))).toBe("image/webp");
   });
 
   it("blocks send while attachments are local or actively processing", () => {
@@ -197,7 +128,7 @@ describe("chat attachment UI state", () => {
     ).toBe(false);
   });
 
-  it("allows send for queued uploaded attachments without pre-send recognition", () => {
+  it("allows send for queued uploaded attachments", () => {
     const queuedDraft = {
       ...createChatComposerAttachmentDraft(createMockFile("meal.jpg", "image/jpeg")),
       attachmentId: "a1000001-0000-4000-8000-000000000001",
@@ -242,30 +173,6 @@ describe("chat attachment UI state", () => {
     );
   });
 
-  it("enriches food outcomes with meal context from linked proposals", () => {
-    const outcomes: ChatAttachmentOutcome[] = [
-      {
-        attachmentRefId: "a1000001-0000-4000-8000-000000000001",
-        category: "food_photo",
-        status: "ready",
-        recognition: null,
-      },
-    ];
-
-    const enriched = enrichAttachmentOutcomesWithProposalContext(outcomes, [
-      {
-        intent: "log_nutrition_incident",
-        proposedChanges: {
-          attachmentRefId: "a1000001-0000-4000-8000-000000000001",
-          mealContextLabel: "Second meal",
-        },
-      },
-    ]);
-
-    expect(enriched[0]?.mealContextLabel).toBe("Second meal");
-    expect(resolveAttachmentOutcomeConfidenceLabel(enriched[0]!)).toBeNull();
-  });
-
   it("returns category-specific fallback copy without clinical language", () => {
     const foodOutcome: ChatAttachmentOutcome = {
       attachmentRefId: "a1000001-0000-4000-8000-000000000001",
@@ -280,141 +187,153 @@ describe("chat attachment UI state", () => {
     expect(fallback?.toLowerCase()).not.toContain("treatment");
   });
 
-  it("uses wellness-only copy for medical attachments", () => {
+  it("uses context-only, wellness-only copy for attachments", () => {
     expect(MEDICAL_ATTACHMENT_WELLNESS_NOTICE.toLowerCase()).toContain("wellness");
     expect(MEDICAL_ATTACHMENT_WELLNESS_NOTICE.toLowerCase()).toContain("coaching context");
     expect(CHAT_ATTACHMENT_PRIVACY_NOTICE.toLowerCase()).not.toContain("clinical");
+    expect(CHAT_ATTACHMENT_PRIVACY_NOTICE.toLowerCase()).not.toContain("classified");
+    expect(CHAT_ATTACHMENT_PRIVACY_NOTICE.toLowerCase()).not.toContain("recognized");
+    expect(CHAT_ATTACHMENT_PRIVACY_NOTICE.toLowerCase()).toContain("context");
   });
 
-  it("revalidates MIME allowlists when category is corrected", () => {
-    const pdfFile = createMockFile("notes.pdf", "application/pdf");
-    expect(validateChatAttachmentFile(pdfFile, "medical_document")).toBeNull();
-    expect(validateChatAttachmentFile(pdfFile, "food_photo")).toMatch(/Unsupported MIME/);
+  // --- Context-only invariant regression guards ---
 
-    const textFile = createMockFile("session.txt", "text/plain");
-    expect(validateChatAttachmentFile(textFile, "workout_attachment")).toBeNull();
-    expect(validateChatAttachmentFile(textFile, "medical_document")).toBeNull();
-  });
-
-  it("blocks send while medical consent is pending", () => {
-    const draft = {
-      ...createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
-      category: "medical_document" as const,
-      attachmentId: "d1000001-0000-4000-8000-000000000001",
-      phase: "needs_consent" as const,
-      record: createReadyRecord({
-        category: "medical_document",
-        status: "needs_consent",
-      }),
-    };
-
-    expect(canSendChatComposer({ draftText: "", attachments: [draft], isSendPending: false })).toBe(
-      false,
-    );
-  });
-
-  it("allows send for needs_review medical attachments after recognition", () => {
-    const draft = {
-      ...createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
-      category: "medical_document" as const,
-      attachmentId: "d1000001-0000-4000-8000-000000000001",
-      phase: "ready" as const,
-      record: createReadyRecord({
-        category: "medical_document",
-        status: "needs_review",
-      }),
-    };
-
-    expect(isChatAttachmentSendEligible(draft.record, draft)).toBe(true);
-    expect(canSendChatComposer({ draftText: "", attachments: [draft], isSendPending: false })).toBe(
-      true,
-    );
-  });
-
-  it("returns medical and workout fallback copy without clinical language", () => {
-    const medicalOutcome: ChatAttachmentOutcome = {
-      attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-      category: "medical_document",
-      status: "needs_review",
-      recognition: null,
-    };
-
-    expect(resolveAttachmentOutcomeFallbackCopy(medicalOutcome)).toBe(
+  it("all user-facing composer copy constants are free of recognition/classification wording", () => {
+    const copyConstants = [
+      CHAT_ATTACHMENT_PRIVACY_NOTICE,
+      MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
+      FOOD_PHOTO_LOW_CONFIDENCE_COPY,
+      WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY,
       MEDICAL_ATTACHMENT_NEEDS_REVIEW_COPY,
-    );
+      CHAT_ATTACHMENT_UNSUPPORTED_COPY,
+      CHAT_ATTACHMENT_FAILED_COPY,
+      MESSAGE_FIRST_ATTACHMENT_COPY,
+    ];
 
-    const workoutOutcome: ChatAttachmentOutcome = {
-      attachmentRefId: "c1000001-0000-4000-8000-000000000001",
-      category: "workout_attachment",
-      status: "low_confidence",
-      recognition: {
-        category: "workout_attachment",
-        attachmentRefId: "c1000001-0000-4000-8000-000000000001",
-        attachmentKind: "exercise_photo",
-        sessionLabel: "Session",
-        sessionDate: null,
-        exercises: [],
-        suggestedIntent: "log_session_context",
-        planDraftTitle: null,
-        provenance: {
-          source: "dev_stub",
-          providerId: "dev_workout_attachment",
-          recognitionId: "f1000001-0000-4000-8000-000000000002",
-          confidence: "low",
-        },
-        manualFallbackNotice: "Describe the workout in text.",
-      },
-    };
-
-    const workoutFallback = resolveAttachmentOutcomeFallbackCopy(workoutOutcome);
-    expect(workoutFallback).toMatch(/workout/i);
-    expect(workoutFallback?.toLowerCase()).not.toContain("diagnosis");
-    expect(WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY.toLowerCase()).not.toContain("treatment");
+    for (const copy of copyConstants) {
+      expect(copy).not.toMatch(/recogniz|classif/i);
+    }
   });
 
-  it("keeps upload_storage required when toggling medical consent scopes", () => {
-    expect(toggleChatAttachmentConsentScope([], "upload_storage")).toEqual(["upload_storage"]);
-    expect(toggleChatAttachmentConsentScope(["upload_storage"], "parse_ocr")).toEqual([
-      "upload_storage",
-      "parse_ocr",
-    ]);
-    expect(toggleChatAttachmentConsentScope(["upload_storage", "parse_ocr"], "upload_storage")).toEqual(
-      ["parse_ocr"],
-    );
+  it("resolveAttachmentDisplayStatus never returns 'recognizing' for any local draft phase", () => {
+    const baseDraft = createChatComposerAttachmentDraft(createMockFile("meal.jpg", "image/jpeg"));
+    const phases: ChatComposerAttachmentDraft["phase"][] = [
+      "local",
+      "uploading",
+      "uploaded",
+      "ready",
+      "error",
+    ];
+
+    for (const phase of phases) {
+      const draft: ChatComposerAttachmentDraft = {
+        ...baseDraft,
+        phase,
+        record: phase === "ready" ? createReadyRecord({ status: "ready" }) : null,
+        attachmentId: phase === "ready" ? "a1000001-0000-4000-8000-000000000001" : null,
+      };
+
+      const displayStatus = resolveAttachmentDisplayStatus(draft);
+      expect(displayStatus).not.toBe("recognizing");
+      expect(chatAttachmentStatusLabel(displayStatus)).not.toBe("Recognizing");
+    }
   });
 
-  it("does not preselect or lock required consent scopes in the checklist", () => {
-    const items = buildChatAttachmentConsentScopeItems([]);
-    const uploadScope = items.find((item) => item.id === "upload_storage");
+  it("isChatComposerAttachmentProcessing and isChatAttachmentSendEligible produce correct results across surviving draft phases", () => {
+    const baseDraft = createChatComposerAttachmentDraft(createMockFile("meal.jpg", "image/jpeg"));
 
-    expect(uploadScope?.enabled).toBe(false);
-    expect(uploadScope?.label).toContain("(required)");
-    expect(JSON.stringify(items)).not.toContain('"required":true');
-  });
+    // local: processing=false, send-eligible=false (no attachmentId)
+    const localDraft: ChatComposerAttachmentDraft = { ...baseDraft, phase: "local", record: null, attachmentId: null };
+    expect(isChatComposerAttachmentProcessing(localDraft)).toBe(false);
+    expect(isChatAttachmentSendEligible(null, localDraft)).toBe(false);
 
-  it("resets upload state and consent when category is corrected after processing", () => {
+    // uploading: processing=true, send-eligible=false
+    const uploadingDraft: ChatComposerAttachmentDraft = { ...baseDraft, phase: "uploading", record: null, attachmentId: null };
+    expect(isChatComposerAttachmentProcessing(uploadingDraft)).toBe(true);
+    expect(isChatAttachmentSendEligible(null, uploadingDraft)).toBe(false);
+
+    // uploaded (queued record): processing=false, send-eligible=true
+    const uploadedRecord = createReadyRecord({ status: "queued" });
     const uploadedDraft: ChatComposerAttachmentDraft = {
-      ...applyChatAttachmentCategoryChange(
-        createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf")),
-        "medical_document",
-      ),
-      documentTitle: "Lab results",
-      consentScopes: ["upload_storage", "parse_ocr"],
-      attachmentId: "d1000001-0000-4000-8000-000000000001",
-      record: createReadyRecord({
-        category: "medical_document",
-        status: "needs_review",
-      }),
+      ...baseDraft,
+      phase: "uploaded",
+      record: uploadedRecord,
+      attachmentId: "a1000001-0000-4000-8000-000000000001",
+    };
+    expect(isChatComposerAttachmentProcessing(uploadedDraft)).toBe(false);
+    expect(isChatAttachmentSendEligible(uploadedRecord, uploadedDraft)).toBe(true);
+
+    // ready (ready record): processing=false, send-eligible=true
+    const readyRecord = createReadyRecord({ status: "ready" });
+    const readyDraft: ChatComposerAttachmentDraft = {
+      ...baseDraft,
       phase: "ready",
+      record: readyRecord,
+      attachmentId: "a1000001-0000-4000-8000-000000000001",
+    };
+    expect(isChatComposerAttachmentProcessing(readyDraft)).toBe(false);
+    expect(isChatAttachmentSendEligible(readyRecord, readyDraft)).toBe(true);
+
+    // error: processing=false, send-eligible=false
+    const errorDraft: ChatComposerAttachmentDraft = {
+      ...baseDraft,
+      phase: "error",
+      record: null,
+      attachmentId: "a1000001-0000-4000-8000-000000000001",
+      error: "Upload failed",
+    };
+    expect(isChatComposerAttachmentProcessing(errorDraft)).toBe(false);
+    expect(isChatAttachmentSendEligible(null, errorDraft)).toBe(false);
+  });
+
+  it("buildOptimisticAttachmentDisplays returns previews for send-eligible attachments", () => {
+    const queuedDraft: ChatComposerAttachmentDraft = {
+      ...createChatComposerAttachmentDraft(createMockFile("meal.jpg", "image/jpeg")),
+      attachmentId: "a1000001-0000-4000-8000-000000000001",
+      record: createReadyRecord({ status: "queued", category: "unclassified" }),
+      phase: "uploaded",
     };
 
-    const resetDraft = applyChatAttachmentCategoryChange(uploadedDraft, "food_photo");
+    const displays = buildOptimisticAttachmentDisplays([queuedDraft]);
+    expect(displays).toHaveLength(1);
+    expect(displays[0]?.attachmentRefId).toBe("a1000001-0000-4000-8000-000000000001");
+    expect(displays[0]?.category).toBeNull();
+    expect(displays[0]?.status).toBeNull();
+  });
 
-    expect(resetDraft.category).toBe("food_photo");
-    expect(resetDraft.categorySource).toBe("user_selected");
-    expect(resetDraft.consentScopes).toEqual([]);
-    expect(resetDraft.attachmentId).toBeNull();
-    expect(resetDraft.record).toBeNull();
-    expect(resetDraft.phase).toBe("local");
+  // --- No category picker / no pre-upload consent gate in the state layer ---
+
+  it("createChatComposerAttachmentDraft produces no categoryOverride, preUploadConsentRequired, or consentScopes fields", () => {
+    // The removed upfront classification and consent gate must not reappear as state fields.
+    const draft = createChatComposerAttachmentDraft(createMockFile("meal.jpg", "image/jpeg"));
+
+    expect(draft).not.toHaveProperty("categoryOverride");
+    expect(draft).not.toHaveProperty("preUploadConsentRequired");
+    expect(draft).not.toHaveProperty("consentScopes");
+    expect(draft).not.toHaveProperty("selectedCategory");
+    expect(draft).not.toHaveProperty("recognitionStatus");
+  });
+
+  it("validateChatAttachmentFile uses image-only MIME list — no PDF or text/plain slip-through", () => {
+    // Exhaustive check: every non-image type must be rejected.
+    const nonImageTypes = [
+      "application/pdf",
+      "text/plain",
+      "application/msword",
+      "application/octet-stream",
+      "video/mp4",
+      "audio/mpeg",
+    ];
+
+    for (const mimeType of nonImageTypes) {
+      const error = validateChatAttachmentFile(createMockFile("file", mimeType));
+      expect(error, `Expected ${mimeType} to be rejected`).not.toBeNull();
+      expect(error).toMatch(/Unsupported MIME/);
+    }
+
+    // All three supported image types pass.
+    expect(validateChatAttachmentFile(createMockFile("a.jpg", "image/jpeg"))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.png", "image/png"))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.webp", "image/webp"))).toBeNull();
   });
 });

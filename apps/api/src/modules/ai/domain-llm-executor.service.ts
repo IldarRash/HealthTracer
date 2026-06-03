@@ -193,9 +193,8 @@ export class DomainLlmExecutorService {
     const coachingContext: Record<string, unknown> = { ...input.coachingContext };
 
     // Build bounded attachment context for this domain step.
-    // Safety: medical_document items are only included when consentState === "granted".
-    // imageDataUri is populated below via readImageDataUris for nutrition/health domains
-    // with image-MIME attachments and a non-null storageRef.
+    // All attachments flow to every selected domain; imageDataUri is populated
+    // below for nutrition/health domains with image-MIME attachments.
     const attachmentContext = await this.buildAttachmentContextWithImages(
       orchestratorInput.attachmentTurn?.attachments,
       domain,
@@ -373,7 +372,6 @@ export class DomainLlmExecutorService {
    * populated for eligible image attachments on the nutrition and health domains.
    *
    * Safety floors (never relaxable):
-   *  - medical_document items are excluded unless consentState === "granted".
    *  - Only image/* MIME types are loaded; non-image MIMEs are skipped.
    *  - Only domains that perform multimodal analysis (nutrition, health) get
    *    imageDataUri populated; the workout domain does not need vision content.
@@ -381,6 +379,8 @@ export class DomainLlmExecutorService {
    *    the OpenAI vision per-request size limit.
    *  - Storage read failures are logged and skipped — the turn degrades to
    *    text-only metadata rather than blocking the entire domain loop.
+   *  - allowDocuments=false context-budget floor is enforced by CoachingContextService
+   *    upstream; this method does not relax it.
    */
   private async buildAttachmentContextWithImages(
     attachments: ReadonlyArray<AttachmentTurnContextItem> | undefined,
@@ -494,75 +494,37 @@ export class DomainLlmExecutorService {
 /**
  * Build bounded attachment context for a domain step request.
  *
- * Safety constraints (enforced here, not relaxable by callers):
- *  - medical_document items with consentState !== "granted" are excluded.
- *    A medical attachment without consent is purged/blocked by
- *    apply_upload_disposition; this is a defense-in-depth check so a
- *    non-purged medical attachment cannot reach the LLM without consent.
+ * Attachments are images-only and context-only. All attachments from the turn
+ * are passed to every selected domain — the domain LLM decides relevance based
+ * on its own prompt and allowlists. No category-based domain filter, no upfront
+ * medical consent gate (that gate has been removed per the locked architecture).
+ *
+ * Safety constraints (still enforced):
  *  - imageDataUri is NOT populated here. The instance method
  *    buildAttachmentContextWithImages calls this helper then loads image bytes
  *    from ChatAttachmentsService for nutrition/health domains.
  *    The stub provider path leaves imageDataUri absent (no external calls).
- *  - Returns undefined (absent field on the request) when no relevant
- *    attachments are present for this domain so the Zod schema does not
- *    require an empty array.
- *
- * Domain filtering:
- *  - nutrition: receives food_photo and unclassified image attachments.
- *  - health: receives medical_document (consent-gated) and workout_attachment.
- *  - workout: receives workout_attachment.
- *  - All domains receive all attachments as bounded metadata — the domain LLM
- *    only acts on what its prompt and allowlists permit.
+ *  - allowDocuments=false context-budget floor is enforced by CoachingContextService
+ *    before this service runs; this function does not relax it.
+ *  - Returns undefined (absent field on the request) when no attachments are
+ *    present so the Zod schema does not require an empty array.
  */
 function buildDomainAttachmentContext(
   attachments: ReadonlyArray<AttachmentTurnContextItem> | undefined,
-  domain: RouterDomain,
+  _domain: RouterDomain,
 ): DomainAttachmentContext | undefined {
   if (!attachments || attachments.length === 0) {
     return undefined;
   }
 
-  // Filter attachments relevant to this domain, enforcing consent gate for medical.
-  const items = attachments
-    .filter((a) => {
-      // Hard safety floor: exclude medical_document unless consent is explicitly granted.
-      if (a.category === "medical_document" && a.consentState !== "granted") {
-        return false;
-      }
-
-      // Domain-to-category relevance filter:
-      // - nutrition: food_photo, unclassified (may be food), general images
-      // - health: medical_document (consent-gated above), workout_attachment for context
-      // - workout: workout_attachment, unclassified
-      // - All domains see their relevant types; irrelevant types are excluded to
-      //   keep the per-domain context bounded.
-      if (domain === "nutrition") {
-        return a.category === "food_photo" || a.category === "unclassified";
-      }
-
-      if (domain === "health") {
-        return a.category === "medical_document" || a.category === "workout_attachment";
-      }
-
-      if (domain === "workout") {
-        return a.category === "workout_attachment" || a.category === "unclassified";
-      }
-
-      // Default: include all for unknown domains (fallback; should not happen).
-      return true;
-    })
-    .map((a) => ({
-      attachmentRefId: a.attachmentRefId,
-      category: a.category as string,
-      mimeType: a.mimeType,
-      consentState: a.consentState,
-      storageRef: a.storageRef,
-      // imageDataUri is populated by buildAttachmentContextWithImages after this function returns.
-    }));
-
-  if (items.length === 0) {
-    return undefined;
-  }
+  const items = attachments.map((a) => ({
+    attachmentRefId: a.attachmentRefId,
+    category: a.category as string,
+    mimeType: a.mimeType,
+    consentState: a.consentState,
+    storageRef: a.storageRef,
+    // imageDataUri is populated by buildAttachmentContextWithImages after this function returns.
+  }));
 
   return { items };
 }

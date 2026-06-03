@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatThread } from "@health/types";
+import type { ChatMessage, ChatMessageAttachmentMeta, ChatThread } from "@health/types";
 import type { ChatMessageRow, ChatThreadRow } from "./chat.repository.js";
 
 export function toChatThread(row: ChatThreadRow): ChatThread {
@@ -11,7 +11,10 @@ export function toChatThread(row: ChatThreadRow): ChatThread {
   };
 }
 
-export function toChatMessage(row: ChatMessageRow): ChatMessage {
+export function toChatMessage(
+  row: ChatMessageRow,
+  attachments: ChatMessageAttachmentMeta[] = [],
+): ChatMessage {
   return {
     id: row.id,
     threadId: row.threadId,
@@ -19,5 +22,6 @@ export function toChatMessage(row: ChatMessageRow): ChatMessage {
     content: row.content,
     metadata: row.metadata,
     createdAt: row.createdAt.toISOString(),
+    attachments,
   };
 }

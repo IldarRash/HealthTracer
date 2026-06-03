@@ -582,7 +582,9 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     );
   });
 
-  it("excludes food_photo from the workout domain step (domain-to-category filter)", async () => {
+  it("includes food_photo in the workout domain step request (no domain-to-category filter)", async () => {
+    // Attachments are context-only: all attachments flow to every selected domain.
+    // The domain LLM decides relevance based on its own prompt and allowlists.
     const capturedRequest = vi.fn().mockResolvedValue({
       kind: "domain_answer",
       domain: "workout",
@@ -622,13 +624,19 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     expect(capturedRequest).toHaveBeenCalled();
     const stepRequest = capturedRequest.mock.calls[0]?.[0] as {
-      attachmentContext?: { items: unknown[] };
+      attachmentContext?: { items: Array<{ category: string }> };
     };
-    // food_photo is NOT relevant to the workout domain — attachment context is absent.
-    expect(stepRequest.attachmentContext).toBeUndefined();
+    // All attachments reach every domain — domain LLM decides relevance.
+    expect(stepRequest.attachmentContext).toBeDefined();
+    expect(stepRequest.attachmentContext?.items).toHaveLength(1);
+    expect(stepRequest.attachmentContext?.items[0]?.category).toBe("food_photo");
   });
 
-  it("excludes medical_document without consent from all domain step requests (hard safety floor)", async () => {
+  it("includes image attachment regardless of consentState (consent gate removed for images)", async () => {
+    // Per the locked architecture, the upfront-consent gate for images is removed.
+    // Images flow to every selected domain; the domain LLM reads content directly.
+    // The allowDocuments=false context-budget floor (for DB health_documents slices)
+    // is still enforced upstream by CoachingContextService.
     const capturedRequest = vi.fn().mockResolvedValue({
       kind: "domain_answer",
       domain: "health",
@@ -650,15 +658,15 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
       contextPacket: makeContextPacket("health_context", "ask_health_context"),
       coachingContext: {},
       orchestratorInput: makeOrchestratorInput({
-        userMessage: "Review my health document.",
+        userMessage: "Review my health image.",
         attachmentTurn: {
           attachments: [
             {
               attachmentRefId: "m1000001-0000-4000-8000-000000000001",
               category: "medical_document",
-              mimeType: "application/pdf",
-              consentState: "needs_consent",  // No consent — must be excluded.
-              storageRef: null,
+              mimeType: "image/jpeg",
+              consentState: "needs_consent",  // No consent — still included in context-only mode.
+              storageRef: "local://attachments/scan.jpg",
             },
           ],
         },
@@ -668,13 +676,17 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     expect(capturedRequest).toHaveBeenCalled();
     const stepRequest = capturedRequest.mock.calls[0]?.[0] as {
-      attachmentContext?: { items: unknown[] };
+      attachmentContext?: { items: Array<{ category: string; consentState: string }> };
     };
-    // medical_document without granted consent must NOT appear in attachment context.
-    expect(stepRequest.attachmentContext).toBeUndefined();
+    // Attachment reaches the domain LLM regardless of consentState.
+    expect(stepRequest.attachmentContext).toBeDefined();
+    expect(stepRequest.attachmentContext?.items).toHaveLength(1);
+    expect(stepRequest.attachmentContext?.items[0]?.category).toBe("medical_document");
+    expect(stepRequest.attachmentContext?.items[0]?.consentState).toBe("needs_consent");
   });
 
-  it("includes medical_document with granted consent in health domain step request", async () => {
+  it("includes image attachment regardless of category or consentState in all domain steps", async () => {
+    // All categories (including formerly-consent-gated medical_document) flow to all domains.
     const capturedRequest = vi.fn().mockResolvedValue({
       kind: "domain_answer",
       domain: "health",
@@ -702,9 +714,9 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
             {
               attachmentRefId: "m2000001-0000-4000-8000-000000000001",
               category: "medical_document",
-              mimeType: "application/pdf",
-              consentState: "granted",  // Consent granted — should be included.
-              storageRef: "local://attachments/lab-results.pdf",
+              mimeType: "image/jpeg",
+              consentState: "granted",
+              storageRef: "local://attachments/lab-scan.jpg",
             },
           ],
         },
@@ -937,5 +949,95 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     };
     // No attachments — field must be absent (undefined), not an empty object.
     expect(stepRequest.attachmentContext).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // All 3 selected domains receive the SAME attachment (no domain-category filter)
+  // -------------------------------------------------------------------------
+
+  it("all three selected domains (workout, nutrition, health) receive the same image attachment context", async () => {
+    // This test runs three separate domain loops (mirroring the orchestrator's Promise.all)
+    // with the same attachment, asserting that the attachment context is threaded into every domain.
+    // The domain LLM decides relevance — no category-based filter exists.
+    const sharedAttachment = {
+      attachmentRefId: "a1111111-0000-4000-8000-000000000001",
+      category: "unclassified" as const,
+      mimeType: "image/jpeg",
+      consentState: "none" as const,
+      storageRef: "local://attachments/img.jpg",
+    };
+
+    const attachmentTurn = { attachments: [sharedAttachment] };
+
+    const makeCapturingProvider = (domain: "workout" | "nutrition" | "health") => {
+      const fn = vi.fn().mockResolvedValue({
+        kind: "domain_answer",
+        domain,
+        summary: `${domain} reviewed.`,
+        candidateProposals: [],
+        domainSignals: [],
+      });
+
+      return {
+        fn,
+        provider: {
+          generateDomainStep: fn,
+          generateAgentLoopStep: vi.fn(),
+          generateCoachResponse: vi.fn(),
+          generateRouterDecision: vi.fn(),
+          generateFinalDecision: vi.fn(),
+        } as unknown as CoachAiProvider,
+      };
+    };
+
+    const workoutProvider = makeCapturingProvider("workout");
+    const nutritionProvider = makeCapturingProvider("nutrition");
+    const healthProvider = makeCapturingProvider("health");
+
+    const orchestratorInput = makeOrchestratorInput({
+      userMessage: "How does this affect my fitness goals?",
+      attachmentTurn,
+    });
+
+    // Run all three domain loops in parallel (mirrors orchestrator).
+    await Promise.all([
+      service.runDomainLoop({
+        domainEntry: makeDomainEntry("workout"),
+        contextPacket: makeContextPacket("workout_adaptation", "adjust_workout"),
+        coachingContext: {},
+        orchestratorInput,
+        provider: workoutProvider.provider,
+      }),
+      service.runDomainLoop({
+        domainEntry: makeDomainEntry("nutrition"),
+        contextPacket: makeContextPacket("nutrition_adaptation", "adjust_nutrition"),
+        coachingContext: {},
+        orchestratorInput,
+        provider: nutritionProvider.provider,
+      }),
+      service.runDomainLoop({
+        domainEntry: makeDomainEntry("health", ["getUserContextSlice"]),
+        contextPacket: makeContextPacket("health_context", "ask_health_context"),
+        coachingContext: {},
+        orchestratorInput,
+        provider: healthProvider.provider,
+      }),
+    ]);
+
+    type StepReq = { attachmentContext?: { items: Array<{ attachmentRefId: string; category: string }> } };
+
+    const workoutReq = workoutProvider.fn.mock.calls[0]?.[0] as StepReq;
+    const nutritionReq = nutritionProvider.fn.mock.calls[0]?.[0] as StepReq;
+    const healthReq = healthProvider.fn.mock.calls[0]?.[0] as StepReq;
+
+    // Every domain must receive the attachment context — no domain-to-category gate.
+    expect(workoutReq.attachmentContext?.items).toHaveLength(1);
+    expect(workoutReq.attachmentContext?.items[0]?.attachmentRefId).toBe(sharedAttachment.attachmentRefId);
+
+    expect(nutritionReq.attachmentContext?.items).toHaveLength(1);
+    expect(nutritionReq.attachmentContext?.items[0]?.attachmentRefId).toBe(sharedAttachment.attachmentRefId);
+
+    expect(healthReq.attachmentContext?.items).toHaveLength(1);
+    expect(healthReq.attachmentContext?.items[0]?.attachmentRefId).toBe(sharedAttachment.attachmentRefId);
   });
 });

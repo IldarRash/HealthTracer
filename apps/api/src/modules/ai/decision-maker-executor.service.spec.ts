@@ -122,6 +122,9 @@ describe("DecisionMakerExecutorService", () => {
     });
 
     it("forwards the action-variant catalog to the provider unchanged", async () => {
+      // Uses a synthetic catalog entry to verify the service is catalog-agnostic:
+      // it forwards whatever catalog it receives without modification. The
+      // "synthetic_consent_variant" id does not correspond to any real catalog entry.
       let capturedRequest: FinalDecisionRequest | undefined;
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
@@ -131,7 +134,7 @@ describe("DecisionMakerExecutorService", () => {
       };
       const catalog = [
         { id: "plain_reply", label: "Plain reply", requiresConsent: false },
-        { id: "medical_document_save", label: "Medical save", requiresConsent: true },
+        { id: "synthetic_consent_variant", label: "Synthetic consent entry (test-only)", requiresConsent: true },
       ];
       await service.execute({
         ...makeInput(),
@@ -307,9 +310,11 @@ describe("DecisionMakerExecutorService", () => {
 
   describe("consentRequired forwarding", () => {
     it("preserves consentRequired=true when provider returns it", async () => {
+      // Uses a synthetic selectedAction id: no real catalog produces "synthetic_consent_variant".
+      // The test verifies the service forwards consentRequired as-is (it is catalog-agnostic).
       const providerOutput: FinalDecisionOutputInput = {
         reply: "Consent is required to save this medical document.",
-        selectedAction: "medical_document_save",
+        selectedAction: "synthetic_consent_variant",
         proposals: [],
         consentRequired: true,
       };

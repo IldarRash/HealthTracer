@@ -81,10 +81,15 @@ export class ChatService {
     }
 
     const messages = await this.chatRepository.listMessagesByThreadId(threadId);
+    const messageIds = messages.map((m) => m.id);
+    const attachmentsByMessage = await this.chatAttachmentsService.getMessageDisplayAttachments(
+      user.id,
+      messageIds,
+    );
 
     return {
       thread: toChatThread(thread),
-      messages: messages.map(toChatMessage),
+      messages: messages.map((m) => toChatMessage(m, attachmentsByMessage.get(m.id) ?? [])),
     };
   }
 
@@ -136,6 +141,18 @@ export class ChatService {
 
     const attachmentMetadata = attachmentTurnResult?.attachmentMetadata ?? [];
 
+    // Build display attachments for the user message after turn stages have linked them.
+    // This is a single batched query scoped to this message only.
+    const getUserMessageDisplayAttachments = async () => {
+      if (attachmentRefIds.length === 0) {
+        return [];
+      }
+      const map = await this.chatAttachmentsService.getMessageDisplayAttachments(user.id, [
+        userMessage.id,
+      ]);
+      return map.get(userMessage.id) ?? [];
+    };
+
     const crisisEvaluation = evaluateWellbeingCrisisFromText(messageContent);
 
     if (crisisEvaluation.shouldShowCrisisSupport && crisisEvaluation.copy) {
@@ -159,7 +176,7 @@ export class ChatService {
 
       return {
         thread: toChatThread(updatedThread ?? thread),
-        userMessage: toChatMessage(userMessage),
+        userMessage: toChatMessage(userMessage, await getUserMessageDisplayAttachments()),
         assistantMessage: toChatMessage(assistantMessage),
         proposals: [],
       };
@@ -195,7 +212,7 @@ export class ChatService {
 
       return {
         thread: toChatThread(updatedThread ?? thread),
-        userMessage: toChatMessage(userMessage),
+        userMessage: toChatMessage(userMessage, await getUserMessageDisplayAttachments()),
         assistantMessage: toChatMessage(assistantMessage),
         proposals: [],
       };
@@ -228,7 +245,7 @@ export class ChatService {
 
       return {
         thread: toChatThread(updatedThread ?? thread),
-        userMessage: toChatMessage(userMessage),
+        userMessage: toChatMessage(userMessage, await getUserMessageDisplayAttachments()),
         assistantMessage: toChatMessage(assistantMessage),
         proposals: [],
       };
@@ -439,10 +456,14 @@ export class ChatService {
 
     return {
       thread: toChatThread(updatedThread ?? thread),
-      userMessage: toChatMessage(userMessage),
+      userMessage: toChatMessage(userMessage, await getUserMessageDisplayAttachments()),
       assistantMessage: toChatMessage(assistantMessage),
       proposals: createdProposals,
       ...(attachmentOutcomes.length > 0 ? { attachmentOutcomes } : {}),
+      // consentRequired is produced (from ActionResolver → LLM output) but not currently
+      // consumed by any client gate. It is surfaced here for the deferred medical special-save
+      // flow (proposal-driven recognition → consent-gated proposal → accept → persist
+      // health_document). Do not remove — add enforcement when that flow is implemented.
       ...(generated.consentRequired === true ? { consentRequired: true } : {}),
     };
   }

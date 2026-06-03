@@ -5,8 +5,6 @@ import type {
 } from "@health/types";
 import {
   DEFAULT_ATTACHMENT_TURN_STAGE_ORDER,
-  MEDICAL_ATTACHMENT_CONSENT_REQUIRED_REASON,
-  SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
   getChatAttachmentOwnershipErrors,
   getChatAttachmentSendEligibilityErrors,
 } from "@health/types";
@@ -29,29 +27,6 @@ type TurnStageState = {
   behavior: AttachmentBehaviorConfig;
   attachments: ChatAttachmentRecord[];
 };
-
-/**
- * Returns true when the attachment's user-declared category or MIME type
- * indicates a medical document that requires consent before storage.
- *
- * This is the consent-gate trigger based solely on user-declared category/
- * document-type + MIME captured at upload — no LLM classifier required.
- * PDF and plain-text MIMEs are exclusively in the health-document set and
- * are not shared with food photos or workout attachments.
- */
-function isMedicalAttachmentByDeclarationOrMime(attachment: ChatAttachmentRecord): boolean {
-  if (attachment.category === "medical_document") {
-    return true;
-  }
-
-  if (attachment.category === "unclassified") {
-    return (SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES as readonly string[]).includes(
-      attachment.mimeType,
-    );
-  }
-
-  return false;
-}
 
 @Injectable()
 export class ChatTurnAttachmentStageService {
@@ -202,84 +177,33 @@ export class ChatTurnAttachmentStageService {
   }
 
   /**
-   * Applies category, retention, consent, and storage disposition.
+   * Applies retention disposition for image attachments.
    *
-   * Medical consent gate: when the user-declared category/document-type + MIME
-   * indicate a medical document and consent is absent, stored content is purged
-   * and the attachment is marked `needs_consent`. No LLM classification is used.
+   * Attachments are images-only and context-only. No consent gate, no medical
+   * purge, no category reclassification. Each attachment receives the configured
+   * retention policy for its category and is passed through unchanged otherwise.
    */
   private async runApplyUploadDisposition(state: TurnStageState): Promise<void> {
     const processed: ChatAttachmentRecord[] = [];
 
     for (const attachment of state.attachments) {
-      if (!isMedicalAttachmentByDeclarationOrMime(attachment)) {
-        // Non-medical attachment: ensure retention policy is set and pass through.
-        if (attachment.category !== "unclassified") {
-          const retentionPolicy = resolveAttachmentRetentionPolicyFromBehavior(
-            attachment.category,
-            state.behavior,
-          );
+      const retentionPolicy = resolveAttachmentRetentionPolicyFromBehavior(
+        attachment.category,
+        state.behavior,
+      );
 
-          if (retentionPolicy !== attachment.retentionPolicy) {
-            const updated = await this.chatAttachmentsService.applyTurnStageUpdate(
-              state.userId,
-              attachment.id,
-              { retentionPolicy },
-            );
-
-            processed.push(updated);
-            continue;
-          }
-        }
-
-        processed.push(attachment);
-        continue;
-      }
-
-      // Medical attachment gate — user-declared category or exclusively-medical MIME.
-      if (!attachment.consent) {
-        await this.chatAttachmentsService.purgeStoredContent(attachment.storageKey);
-
+      if (retentionPolicy !== attachment.retentionPolicy) {
         const updated = await this.chatAttachmentsService.applyTurnStageUpdate(
           state.userId,
           attachment.id,
-          {
-            category: "medical_document",
-            categorySource: attachment.categorySource === "user_selected"
-              ? "user_selected"
-              : "mime_inferred",
-            status: "needs_consent",
-            storageKey: null,
-            retentionPolicy: resolveAttachmentRetentionPolicyFromBehavior(
-              "medical_document",
-              state.behavior,
-            ),
-            failureReason: MEDICAL_ATTACHMENT_CONSENT_REQUIRED_REASON,
-          },
+          { retentionPolicy },
         );
 
         processed.push(updated);
         continue;
       }
 
-      // Medical attachment with existing consent — ensure it is properly categorised.
-      const updated = await this.chatAttachmentsService.applyTurnStageUpdate(
-        state.userId,
-        attachment.id,
-        {
-          category: "medical_document",
-          categorySource: attachment.categorySource === "user_selected"
-            ? "user_selected"
-            : "mime_inferred",
-          retentionPolicy: resolveAttachmentRetentionPolicyFromBehavior(
-            "medical_document",
-            state.behavior,
-          ),
-          failureReason: null,
-        },
-      );
-
-      processed.push(updated);
+      processed.push(attachment);
     }
 
     state.attachments = processed;

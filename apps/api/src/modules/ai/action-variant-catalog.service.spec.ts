@@ -5,19 +5,15 @@
  *  - plain_reply is always present and always first
  *  - proposal intent variants are the union of selected domains' allowedProposalIntents
  *  - no duplicates even when two domains share an intent
- *  - medical_document_save is ONLY present when hasMedicalAttachmentWithConsentGranted=true
- *  - medical_document_save is absent when no attachment context is provided
- *  - medical_document_save is absent when consent is not granted
  *  - catalog is capped at MAX_CATALOG_ENTRIES (20)
  *  - empty selectedDomains still returns plain_reply
- *  - requiresConsent is true only on the medical_document_save variant
+ *  - requiresConsent is false on all proposal intent variants
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { DEFAULT_CONTEXT_BUDGET_POLICY } from "@health/types";
 import {
   ActionVariantCatalogService,
   PLAIN_REPLY_ACTION_VARIANT_ID,
-  MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
   type BuildActionVariantCatalogInput,
 } from "./action-variant-catalog.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
@@ -95,41 +91,12 @@ describe("ActionVariantCatalogService", () => {
     expect(adaptCount).toBe(1);
   });
 
-  it("excludes medical_document_save when no attachment context is provided", () => {
+  it("does not include medical_document_save variant (removed per context-only architecture)", () => {
     const catalog = service.buildCatalog({
       selectedDomains: [makeDomainEntry("health", [])],
     });
     const ids = catalog.map((v) => v.id);
-    expect(ids).not.toContain(MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID);
-  });
-
-  it("excludes medical_document_save when hasMedicalAttachmentWithConsentGranted=false", () => {
-    const catalog = service.buildCatalog({
-      selectedDomains: [makeDomainEntry("health", [])],
-      attachmentContext: { hasMedicalAttachmentWithConsentGranted: false },
-    });
-    const ids = catalog.map((v) => v.id);
-    expect(ids).not.toContain(MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID);
-  });
-
-  it("includes medical_document_save when hasMedicalAttachmentWithConsentGranted=true", () => {
-    const catalog = service.buildCatalog({
-      selectedDomains: [makeDomainEntry("health", [])],
-      attachmentContext: { hasMedicalAttachmentWithConsentGranted: true },
-    });
-    const ids = catalog.map((v) => v.id);
-    expect(ids).toContain(MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID);
-  });
-
-  it("medical_document_save has requiresConsent=true", () => {
-    const catalog = service.buildCatalog({
-      selectedDomains: [],
-      attachmentContext: { hasMedicalAttachmentWithConsentGranted: true },
-    });
-    const medicalSave = catalog.find(
-      (v) => v.id === MEDICAL_DOCUMENT_SAVE_ACTION_VARIANT_ID,
-    );
-    expect(medicalSave?.requiresConsent).toBe(true);
+    expect(ids).not.toContain("medical_document_save");
   });
 
   it("proposal intent variants have requiresConsent=false", () => {
@@ -144,30 +111,17 @@ describe("ActionVariantCatalogService", () => {
     // Create 25 unique fake intent ids to force the cap
     const manyIntents = Array.from({ length: 25 }, (_, i) => `intent_${i}`);
     const catalog = service.buildCatalog({
-      selectedDomains: [
-        // Cast to string[] to simulate a domain with many allowed intents
-        makeDomainEntry("workout", manyIntents),
-      ],
-      attachmentContext: { hasMedicalAttachmentWithConsentGranted: true },
+      selectedDomains: [makeDomainEntry("workout", manyIntents)],
     });
     expect(catalog.length).toBeLessThanOrEqual(20);
   });
 
-  describe("isMedicalSaveEligible", () => {
-    it("returns false when attachmentContext is undefined", () => {
-      expect(service.isMedicalSaveEligible(undefined)).toBe(false);
+  it("catalog starts with plain_reply followed by domain intents", () => {
+    const catalog = service.buildCatalog({
+      selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
     });
-
-    it("returns false when hasMedicalAttachmentWithConsentGranted=false", () => {
-      expect(
-        service.isMedicalSaveEligible({ hasMedicalAttachmentWithConsentGranted: false }),
-      ).toBe(false);
-    });
-
-    it("returns true when hasMedicalAttachmentWithConsentGranted=true", () => {
-      expect(
-        service.isMedicalSaveEligible({ hasMedicalAttachmentWithConsentGranted: true }),
-      ).toBe(true);
-    });
+    expect(catalog[0]?.id).toBe(PLAIN_REPLY_ACTION_VARIANT_ID);
+    expect(catalog[1]?.id).toBe("adapt_workout_plan");
+    expect(catalog).toHaveLength(2);
   });
 });

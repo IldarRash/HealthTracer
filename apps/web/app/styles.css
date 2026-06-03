@@ -1602,10 +1602,37 @@ dd {
   white-space: pre-wrap;
 }
 
-.message-proposals {
+.chat-bubble__content .message-proposals {
+  border-top: 1px solid var(--color-border-default);
   display: grid;
   gap: var(--space-3);
   margin-top: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+.chat-bubble__content .proposal-card {
+  background: transparent;
+  border-color: var(--color-border-default);
+  box-shadow: none;
+}
+
+.chat-bubble__content .proposal-card.status-accepted,
+.chat-bubble__content .proposal-card.status-valid {
+  border-color: var(--color-status-success-border);
+}
+
+.chat-bubble__content .proposal-card.status-rejected,
+.chat-bubble__content .proposal-card.status-invalid {
+  border-color: var(--color-status-error-border);
+}
+
+.chat-bubble__content .proposal-card.status-superseded {
+  background: var(--color-surface-inset);
+  border-color: var(--color-border-default);
+}
+
+.chat-bubble__content .proposal-card.status-pending {
+  border-left-color: var(--color-status-pending-border);
 }
 
 .chat-weekly-review-summary {

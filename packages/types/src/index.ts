@@ -21,7 +21,7 @@ import {
 import { recoveryContextSourceRefSchema, recoveryProgressAggregateSchema } from "./recovery.js";
 import { todayChecklistPayloadSchema } from "./today.js";
 import { captureWellbeingCheckinProposalPayloadSchema } from "./chat-action-proposals.js";
-import { chatAttachmentOutcomeSchema } from "./chat-attachments.js";
+import { chatAttachmentOutcomeSchema, chatMessageAttachmentMetaSchema } from "./chat-attachments.js";
 import { logNutritionIncidentProposalPayloadSchema } from "./nutrition-incidents.js";
 import {
   recipeConfidenceBandSchema,
@@ -245,6 +245,8 @@ export const chatMessageSchema = z.object({
   content: z.string().min(1).max(8000),
   metadata: z.record(z.string(), z.unknown()).default({}),
   createdAt: isoDateTimeSchema,
+  /** Display-only attachment metadata populated from linked chat_attachments rows. No bytes, storageKey, consent, or recognition payloads. */
+  attachments: z.array(chatMessageAttachmentMetaSchema).default([]),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;

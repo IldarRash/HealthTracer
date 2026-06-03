@@ -23,10 +23,7 @@ import { ContextCompressionService } from "../coaching-context/context-compressi
 import { ContextExpansionPolicyService } from "../coaching-context/context-expansion-policy.service.js";
 import { mapContextSourceRefsToAgentCitations } from "../coaching-context/agent-prompt-context.js";
 import { ActionResolverService } from "./action-resolver.service.js";
-import {
-  ActionVariantCatalogService,
-  type ActionVariantCatalogAttachmentContext,
-} from "./action-variant-catalog.service.js";
+import { ActionVariantCatalogService } from "./action-variant-catalog.service.js";
 import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import { createCoachAiProvider, resolveAiCoachProviderMode } from "./coach-provider.factory.js";
 import { DecisionMakerExecutorService } from "./decision-maker-executor.service.js";
@@ -332,12 +329,9 @@ export class AgentOrchestratorService {
       .filter((r) => r.result.degraded)
       .map((r) => r.domain);
 
-    // Build the action-variant catalog from the selected domains' clamped allowlists
-    // plus the consent-gated medical-save variant when eligible.
-    const attachmentContext = buildAttachmentContextForCatalog(input.attachmentTurn);
+    // Build the action-variant catalog from the selected domains' clamped allowlists.
     const actionVariantCatalog = this.actionVariantCatalogService.buildCatalog({
       selectedDomains,
-      attachmentContext,
     });
 
     // Collect domain outputs for the decision-maker (only domain_answer entries).
@@ -771,27 +765,3 @@ function extractWorkoutCalorieEstimate(
   return undefined;
 }
 
-/**
- * Extract attachment context for the action-variant catalog from the
- * OrchestrateCoachTurnInput attachmentTurn.
- *
- * Safety gate: medical_document_save is eligible ONLY when:
- *   a. A medical_document attachment is present.
- *   b. That attachment's consentState is "granted".
- * Both conditions must be true — this is the code-level consent gate.
- * The consentState is set by apply_upload_disposition keyed on the user-declared
- * category/document-type + MIME (no LLM classifier).
- */
-function buildAttachmentContextForCatalog(
-  attachmentTurn: OrchestrateCoachTurnInput["attachmentTurn"],
-): ActionVariantCatalogAttachmentContext | undefined {
-  if (!attachmentTurn?.attachments.length) {
-    return undefined;
-  }
-
-  const hasMedicalAttachmentWithConsentGranted = attachmentTurn.attachments.some(
-    (a) => a.category === "medical_document" && a.consentState === "granted",
-  );
-
-  return { hasMedicalAttachmentWithConsentGranted };
-}
