@@ -3,7 +3,7 @@
 # Railway service: health-api
 # Build from repo root:
 #   docker build -f apps/api/Dockerfile .
-# Redeploy trigger: TS test fixture fix (2026-05-25)
+# Redeploy trigger: add @health/ai-behavior workspace manifest to deps stage (2026-06-03)
 #
 # The API runs TypeScript source via @swc-node/register because workspace
 # packages export TS entrypoints. A compiled-only image can be added later.
@@ -24,6 +24,7 @@ COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 COPY apps/mobile/package.json ./apps/mobile/
 COPY packages/ai/package.json ./packages/ai/
+COPY packages/ai-behavior/package.json ./packages/ai-behavior/
 COPY packages/config/package.json ./packages/config/
 COPY packages/db/package.json ./packages/db/
 COPY packages/types/package.json ./packages/types/
