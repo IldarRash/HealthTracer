@@ -1,9 +1,16 @@
 import {
   createChatAttachmentSchema,
-  grantChatAttachmentConsentSchema,
-  recognizeChatAttachmentSchema,
 } from "@health/types";
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  Post,
+  StreamableFile,
+  UseGuards,
+} from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { ClerkAuthGuard } from "../../auth.guard.js";
 import { parseBody } from "../../common/zod.js";
@@ -31,29 +38,18 @@ export class ChatAttachmentsController {
     return this.chatAttachmentsService.getAttachment(auth, attachmentId);
   }
 
-  @Post(":attachmentId/consent")
-  grantConsent(
+  @Get(":attachmentId/content")
+  @Header("Cache-Control", "private, no-store")
+  async getAttachmentContent(
     @CurrentAuth() auth: ClerkAuthContext,
     @Param("attachmentId") attachmentId: string,
-    @Body() body: unknown,
   ) {
-    return this.chatAttachmentsService.grantConsent(
+    const { content, mimeType } = await this.chatAttachmentsService.getAttachmentContent(
       auth,
       attachmentId,
-      parseBody(grantChatAttachmentConsentSchema, body),
     );
+
+    return new StreamableFile(content, { type: mimeType });
   }
 
-  @Post(":attachmentId/recognize")
-  recognizeAttachment(
-    @CurrentAuth() auth: ClerkAuthContext,
-    @Param("attachmentId") attachmentId: string,
-    @Body() body: unknown,
-  ) {
-    return this.chatAttachmentsService.recognizeAttachment(
-      auth,
-      attachmentId,
-      parseBody(recognizeChatAttachmentSchema, body),
-    );
-  }
 }

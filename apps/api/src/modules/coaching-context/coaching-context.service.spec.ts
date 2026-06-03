@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { getTodayIsoDateInTimezone, getWeekStartIsoDate } from "@health/types";
+import {
+  DEFAULT_CONTEXT_BUDGET_POLICY,
+  DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
+  getTodayIsoDateInTimezone,
+  getWeekStartIsoDate,
+} from "@health/types";
 import { CoachingContextService } from "./coaching-context.service.js";
+import { ContextBudgetPolicyService } from "./context-budget-policy.service.js";
+import { createDefaultAiBehaviorConfigService } from "../ai/test-ai-behavior-fixtures.js";
 
 const auth = {
   clerkUserId: "clerk-user-1",
@@ -68,6 +75,7 @@ function createCoachingContextService(overrides: {
   habitsService?: Record<string, unknown>;
 } = {}) {
   return new CoachingContextService(
+    new ContextBudgetPolicyService(createDefaultAiBehaviorConfigService()),
     {
       resolveFromAuth: async () => ({
         id: userId,
@@ -522,7 +530,7 @@ describe("CoachingContextService", () => {
     expect(snapshot.activeHabitPlanSummary).not.toBeNull();
   });
 
-  it("builds bounded multi-slice context from llm router output", async () => {
+  it("builds bounded multi-slice context from unified turn decision routing", async () => {
     const service = createCoachingContextService();
 
     const packet = await service.buildAgentContext(
@@ -537,13 +545,14 @@ describe("CoachingContextService", () => {
       },
       {
         intent: "adjust_nutrition",
+        catalogIntentId: "adjust_nutrition",
         confidence: 0.84,
         isConfident: true,
         purpose: "nutrition_adaptation",
         depth: "medium",
         timeRange: "14d",
         includeDocuments: false,
-        routingMethod: "llm_router",
+        routingMethod: "unified_turn_decision",
         requiredContextSlices: [
           { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
           { type: "daily_checkin", depth: "small", timeRange: "7d" },
@@ -556,13 +565,102 @@ describe("CoachingContextService", () => {
 
     expect(packet.supplementarySlices).toHaveLength(2);
     expect(packet.routing).toMatchObject({
-      routingMethod: "llm_router",
-      llmRouterInvoked: true,
+      routingMethod: "unified_turn_decision",
+      llmRouterInvoked: false,
       contextSliceCount: 3,
       safetyFlags: ["hunger", "fatigue"],
     });
     expect(packet.missingContextNotes).toContain(
       "No active nutrition plan is available for nutrition adaptation.",
+    );
+  });
+
+  it("enforces context budget when building agent context", async () => {
+    const service = createCoachingContextService();
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "Summarize my health documents and training context.",
+        intent: "ask_health_context",
+        purpose: "health_context",
+        depth: "large",
+        timeRange: "90d",
+        includeDocuments: true,
+      },
+      {
+        intent: "ask_health_context",
+        catalogIntentId: "ask_health_context",
+        confidence: 0.9,
+        isConfident: true,
+        purpose: "health_context",
+        depth: "large",
+        timeRange: "90d",
+        includeDocuments: true,
+        routingMethod: "unified_turn_decision",
+        requiredContextSlices: [
+          {
+            type: "health_context",
+            depth: "large",
+            timeRange: "90d",
+            includeDocuments: true,
+          },
+          { type: "nutrition_adaptation", depth: "large", timeRange: "90d" },
+          { type: "daily_checkin", depth: "large", timeRange: "90d" },
+          { type: "general_chat", depth: "large", timeRange: "90d" },
+        ],
+        safetyFlags: [],
+        expectedResponseMode: "recommendation_with_optional_proposal",
+      },
+      {
+        contextBudget: {
+          ...DEFAULT_CONTEXT_BUDGET_POLICY,
+          maxSlices: 1,
+        },
+      },
+    );
+
+    expect(packet.supplementarySlices).toHaveLength(0);
+    expect(packet.slice.documentContext).toBeUndefined();
+    expect(packet.slice.ragResults).toBeUndefined();
+    expect(packet.missingContextNotes.some((note) => note.includes("truncated"))).toBe(true);
+    expect(
+      packet.missingContextNotes.some((note) => note.includes("document expansion denied")),
+    ).toBe(true);
+  });
+
+  it("records compression requirement for deep review budgets", async () => {
+    const service = createCoachingContextService();
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "Give me a monthly review across domains.",
+        intent: "general",
+        purpose: "general_chat",
+        depth: "large",
+        timeRange: "30d",
+        includeDocuments: false,
+      },
+      {
+        intent: "general",
+        catalogIntentId: "general",
+        confidence: 0.9,
+        isConfident: true,
+        purpose: "general_chat",
+        depth: "large",
+        timeRange: "30d",
+        includeDocuments: false,
+        routingMethod: "unified_turn_decision",
+        requiredContextSlices: [{ type: "general_chat", depth: "large", timeRange: "30d" }],
+        safetyFlags: [],
+        expectedResponseMode: "advice_only",
+      },
+      { contextBudget: DEEP_REVIEW_CONTEXT_BUDGET_POLICY },
+    );
+
+    expect(packet.missingContextNotes).toContain(
+      "Large review context requires compression before full historical detail is available.",
     );
   });
 });

@@ -104,6 +104,74 @@ describe("nutrition incident contracts", () => {
     expect(getNutritionIncidentImageRefOwnershipErrors(basePayload, [])).toEqual([]);
   });
 
+  describe("vision_llm_estimate provenance — chat attachment ownership path", () => {
+    const ownedAttachmentId = "c1000001-0000-4000-8000-000000000001";
+
+    const visionPayload = logNutritionIncidentProposalPayloadSchema.parse({
+      ...basePayload,
+      provenance: { source: "vision_llm_estimate" },
+      imageRefs: [{ id: ownedAttachmentId }],
+    });
+
+    it("accepts imageRefs that are in the ownedChatAttachmentIds list", () => {
+      const errors = getNutritionIncidentImageRefOwnershipErrors(
+        visionPayload,
+        [],
+        [ownedAttachmentId],
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects imageRefs that are NOT in the ownedChatAttachmentIds list (IDOR guard)", () => {
+      const errors = getNutritionIncidentImageRefOwnershipErrors(visionPayload, [], []);
+
+      expect(errors).toContain(
+        "proposedChanges.imageRefs[0].id: Image reference was not found as an owned chat attachment for this user.",
+      );
+    });
+
+    it("rejects vision_llm_estimate with empty imageRefs", () => {
+      const noImagePayload = logNutritionIncidentProposalPayloadSchema.parse({
+        ...basePayload,
+        provenance: { source: "vision_llm_estimate" },
+        imageRefs: [],
+      });
+
+      const errors = getNutritionIncidentImageRefOwnershipErrors(noImagePayload, [], []);
+
+      expect(errors).toContain(
+        "proposedChanges.imageRefs: Photo-backed nutrition incidents require at least one analyzed image reference.",
+      );
+    });
+
+    it("does NOT consult ownedAnalyses for vision_llm_estimate (no analysis records exist)", () => {
+      // Even if ownedAnalyses contains a matching imageRefId, it must be ignored
+      // for vision_llm_estimate — the check is against chat attachments only.
+      const spoofedAnalyses = [{ analysisId: "fake-analysis", imageRefId: ownedAttachmentId }];
+
+      // Without ownedChatAttachmentIds the ref is rejected (ownedAnalyses not consulted)
+      const errorsWithoutAttachmentIds = getNutritionIncidentImageRefOwnershipErrors(
+        visionPayload,
+        spoofedAnalyses,
+        [],
+      );
+
+      expect(errorsWithoutAttachmentIds).toContain(
+        "proposedChanges.imageRefs[0].id: Image reference was not found as an owned chat attachment for this user.",
+      );
+
+      // With ownedChatAttachmentIds the ref is accepted
+      const errorsWithAttachmentIds = getNutritionIncidentImageRefOwnershipErrors(
+        visionPayload,
+        spoofedAnalyses,
+        [ownedAttachmentId],
+      );
+
+      expect(errorsWithAttachmentIds).toEqual([]);
+    });
+  });
+
   it("accepts recipe recommendation provenance without photo image refs", () => {
     const payload = logNutritionIncidentProposalPayloadSchema.parse({
       ...basePayload,

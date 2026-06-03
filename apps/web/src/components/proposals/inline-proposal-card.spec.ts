@@ -61,19 +61,20 @@ describe("WellbeingCheckinProposalCard", () => {
 });
 
 describe("NutritionIncidentProposalCard", () => {
-  it("supports photo analysis, estimate preview, meal context, and low-confidence review gating", () => {
-    expect(nutritionProposalSource).toContain("analyzeFoodPhoto");
-    expect(nutritionProposalSource).toContain("Analyzing photo");
+  it("supports estimate preview, meal context, and low-confidence review gating", () => {
+    // Food photo analysis was removed in Phase 8: POST /nutrition/food-photo/analyze was
+    // deleted from the backend. Photos are now analyzed server-side via the chat/LLM
+    // nutrition flow. Follow-up: re-add food photo capture in the chat message composer.
+    expect(nutritionProposalSource).not.toContain("analyzeFoodPhoto");
+    expect(nutritionProposalSource).not.toContain("Analyzing photo");
+    expect(nutritionProposalSource).not.toContain('accept="image/*"');
     expect(nutritionProposalSource).toContain("Meal context:");
     expect(nutritionProposalSource).toContain("mealContextLabel");
     expect(nutritionProposalSource).toContain("buildNutritionIncidentAcceptPayload");
     expect(nutritionProposalSource).toContain("getNutritionIncidentAcceptBlockReason");
     expect(nutritionProposalSource).toContain("nutritionConfidenceNotice");
-    expect(nutritionProposalSource).toContain('accept="image/*"');
     expect(nutritionProposalSource).toContain("nutrition plan targets are unchanged");
     expect(nutritionProposalSource).toContain("useInlineProposalActions");
-    expect(nutritionProposalSource).toContain("analysisError");
-    expect(nutritionProposalSource).toContain("edit the estimate manually");
     expect(nutritionProposalSource).toContain("\n              Modify\n");
     expect(nutritionProposalSource).toContain("\n              Reject\n");
   });

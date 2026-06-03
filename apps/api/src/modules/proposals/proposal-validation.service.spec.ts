@@ -2109,4 +2109,156 @@ describe("ProposalValidationService", () => {
       expect(errors).toEqual([]);
     });
   });
+
+  describe("vision_llm_estimate imageRef ownership via chat attachments", () => {
+    const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+    const ownedAttachmentId = "a1000001-0000-4000-8000-000000000001";
+    const foreignAttachmentId = "a1000002-0000-4000-8000-000000000002";
+
+    const visionLlmPayload = {
+      incidentDateTime: "2026-05-26T18:00:00.000Z",
+      items: [{ name: "Chicken salad", calories: 450 }],
+      estimatedCalories: 450,
+      estimatedMacros: { proteinGrams: 35, carbsGrams: 20, fatGrams: 18 },
+      confidence: "medium" as const,
+      provenance: { source: "vision_llm_estimate" as const },
+      imageRefs: [{ id: ownedAttachmentId }],
+    };
+
+    it("accepts a vision_llm_estimate proposal whose imageRef is an owned chat attachment", async () => {
+      // The owned attachment row returned by chatAttachmentsRepository
+      const chatAttachmentsRepository = {
+        listByIdsForUser: async (_uid: string, ids: readonly string[]) =>
+          ids.includes(ownedAttachmentId)
+            ? [{ id: ownedAttachmentId, userId, category: "food_photo", status: "ready" }]
+            : [],
+      };
+
+      const service = new ProposalValidationService(
+        { summaryExistsForUser: async () => true, findTrendsOwnedByUser: async () => [] } as never,
+        { findInaccessibleExerciseIds: async () => [] } as never,
+        { getHabitTemplateReferenceErrors: async () => [] } as never,
+        { findApprovedSignalById: async () => null, findCorrelationEligibleSignalById: async () => null } as never,
+        { buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }) } as never,
+        { listByUserId: async () => [] } as never,
+        { computeAndPersistSnapshot: async () => ({ id: "snap-1", band: "moderate_load" }) } as never,
+        { findActivePlanByUserId: async () => null, findRevisionById: async () => null } as never,
+        { findByUserId: async () => ({ timezone: "UTC" }) } as never,
+        { findActivePlanByUserId: async () => null, findActiveRevisionByPlanId: async () => null } as never,
+        { findByUserAndDate: async () => null } as never,
+        {
+          listOwnedFoodPhotoAnalysesByImageRefIds: async () => [],
+          findFoodPhotoAnalysisByIdForUser: async () => null,
+          findActivePlanByUserId: async () => null,
+          findRevisionOwnedByUser: async () => null,
+        } as never,
+        { findRecommendationById: async () => null } as never,
+        chatAttachmentsRepository as never,
+      );
+
+      const errors = await service.validateNutritionIncidentImageRefOwnership(
+        userId,
+        "log_nutrition_incident",
+        visionLlmPayload,
+      );
+
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects a vision_llm_estimate proposal whose imageRef is NOT an owned chat attachment", async () => {
+      // Repository returns empty: the attachment is not owned by this user (IDOR guard)
+      const chatAttachmentsRepository = {
+        listByIdsForUser: async () => [],
+      };
+
+      const service = new ProposalValidationService(
+        { summaryExistsForUser: async () => true, findTrendsOwnedByUser: async () => [] } as never,
+        { findInaccessibleExerciseIds: async () => [] } as never,
+        { getHabitTemplateReferenceErrors: async () => [] } as never,
+        { findApprovedSignalById: async () => null, findCorrelationEligibleSignalById: async () => null } as never,
+        { buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }) } as never,
+        { listByUserId: async () => [] } as never,
+        { computeAndPersistSnapshot: async () => ({ id: "snap-1", band: "moderate_load" }) } as never,
+        { findActivePlanByUserId: async () => null, findRevisionById: async () => null } as never,
+        { findByUserId: async () => ({ timezone: "UTC" }) } as never,
+        { findActivePlanByUserId: async () => null, findActiveRevisionByPlanId: async () => null } as never,
+        { findByUserAndDate: async () => null } as never,
+        {
+          listOwnedFoodPhotoAnalysesByImageRefIds: async () => [],
+          findFoodPhotoAnalysisByIdForUser: async () => null,
+          findActivePlanByUserId: async () => null,
+          findRevisionOwnedByUser: async () => null,
+        } as never,
+        { findRecommendationById: async () => null } as never,
+        chatAttachmentsRepository as never,
+      );
+
+      const payloadWithForeignRef = {
+        ...visionLlmPayload,
+        imageRefs: [{ id: foreignAttachmentId }],
+      };
+
+      const errors = await service.validateNutritionIncidentImageRefOwnership(
+        userId,
+        "log_nutrition_incident",
+        payloadWithForeignRef,
+      );
+
+      expect(errors).toContain(
+        `proposedChanges.imageRefs[0].id: Image reference was not found as an owned chat attachment for this user.`,
+      );
+    });
+
+    it("still rejects food_photo_analysis provenance with unowned analysis records (existing path unchanged)", async () => {
+      const chatAttachmentsRepository = {
+        listByIdsForUser: async () => [],
+      };
+
+      const service = new ProposalValidationService(
+        { summaryExistsForUser: async () => true, findTrendsOwnedByUser: async () => [] } as never,
+        { findInaccessibleExerciseIds: async () => [] } as never,
+        { getHabitTemplateReferenceErrors: async () => [] } as never,
+        { findApprovedSignalById: async () => null, findCorrelationEligibleSignalById: async () => null } as never,
+        { buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }) } as never,
+        { listByUserId: async () => [] } as never,
+        { computeAndPersistSnapshot: async () => ({ id: "snap-1", band: "moderate_load" }) } as never,
+        { findActivePlanByUserId: async () => null, findRevisionById: async () => null } as never,
+        { findByUserId: async () => ({ timezone: "UTC" }) } as never,
+        { findActivePlanByUserId: async () => null, findActiveRevisionByPlanId: async () => null } as never,
+        { findByUserAndDate: async () => null } as never,
+        {
+          listOwnedFoodPhotoAnalysesByImageRefIds: async () => [],
+          findFoodPhotoAnalysisByIdForUser: async () => null,
+          findActivePlanByUserId: async () => null,
+          findRevisionOwnedByUser: async () => null,
+        } as never,
+        { findRecommendationById: async () => null } as never,
+        chatAttachmentsRepository as never,
+      );
+
+      const errors = await service.validateNutritionIncidentImageRefOwnership(
+        userId,
+        "log_nutrition_incident",
+        {
+          incidentDateTime: "2026-05-26T18:00:00.000Z",
+          items: [{ name: "Pizza slice", calories: 280 }],
+          estimatedCalories: 280,
+          estimatedMacros: { proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+          confidence: "medium",
+          provenance: {
+            source: "food_photo_analysis",
+            analysisId: "b1000001-0000-4000-8000-000000000002",
+          },
+          imageRefs: [{ id: ownedAttachmentId }],
+        },
+      );
+
+      expect(errors).toContain(
+        "proposedChanges.provenance.analysisId: Food photo analysis was not found for this user.",
+      );
+      expect(errors).toContain(
+        "proposedChanges.imageRefs[0].id: Image reference was not analyzed for this user.",
+      );
+    });
+  });
 });

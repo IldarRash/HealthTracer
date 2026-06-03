@@ -169,6 +169,21 @@ export class ProposalValidationService {
     }
 
     const imageRefIds = parsed.data.imageRefs.map((ref) => ref.id);
+
+    // vision_llm_estimate: the nutrition domain LLM analysed the food photo directly
+    // via the multimodal pipeline — no FoodPhotoAnalysis records exist.  Ownership is
+    // established by the chat attachment upload perimeter: each imageRef.id must be an
+    // attachment the user uploaded (already ownership-checked at upload time).
+    if (parsed.data.provenance.source === "vision_llm_estimate") {
+      const ownedAttachmentRows = imageRefIds.length > 0
+        ? await this.chatAttachmentsRepository.listByIdsForUser(userId, imageRefIds)
+        : [];
+      const ownedChatAttachmentIds = ownedAttachmentRows.map((row) => row.id);
+
+      return getNutritionIncidentImageRefOwnershipErrors(parsed.data, [], ownedChatAttachmentIds);
+    }
+
+    // food_photo_analysis / dev_stub: validate against stored analysis records.
     const analysisIds = parsed.data.provenance.analysisId ? [parsed.data.provenance.analysisId] : [];
     const ownedAnalyses = await this.nutritionRepository.listOwnedFoodPhotoAnalysesByImageRefIds(
       userId,

@@ -112,6 +112,13 @@ export const workoutPlanExerciseSchema = z.object({
     .nullable()
     .optional(),
   notes: z.string().min(1).max(500).nullable().optional(),
+  /**
+   * LLM-sourced approximate calorie burn for this exercise (kcal).
+   * Populated by ActionResolver from the workout domain LLM's estimate and
+   * carried into plan revisions. Max 5 000 kcal per exercise is a sane ceiling.
+   * Never set by the decision-maker, nutrition domain, or any user-facing form.
+   */
+  estimatedCalorieBurn: z.number().int().nonnegative().max(5000).optional(),
   /** Populated at read/materialization time; not persisted on revisions. */
   catalog: exerciseCatalogMetadataSchema.optional(),
 });
@@ -175,12 +182,39 @@ export type WorkoutPlanAdaptationMetadata = z.infer<
   typeof workoutPlanAdaptationMetadataSchema
 >;
 
+/**
+ * Enum for who provided the session calorie estimate.
+ * - 'workout_llm'  — populated by ActionResolver from the workout domain LLM's
+ *                    domain_answer.workoutCalorieEstimate; the only valid
+ *                    programmatic source.
+ * - 'user_manual'  — user explicitly entered or overrode the value.
+ * The decision-maker LLM and all non-workout domain LLMs must NEVER set this.
+ */
+export const calorieEstimateProvenanceSchema = z.enum(["workout_llm", "user_manual"]);
+
+export type CalorieEstimateProvenance = z.infer<typeof calorieEstimateProvenanceSchema>;
+
 export const workoutPlanPayloadSchema = z.object({
   title: z.string().min(1).max(160),
   summary: z.string().min(1).max(1000),
   days: z.array(workoutPlanDaySchema).min(1).max(14),
   notes: z.array(z.string().min(1).max(240)).max(20).default([]),
   adaptationMetadata: workoutPlanAdaptationMetadataSchema.optional(),
+  /**
+   * LLM-sourced approximate calorie burn for the whole session (kcal).
+   * Populated by ActionResolver from the workout domain LLM only.
+   * Max 20 000 kcal is an intentionally high ceiling to accommodate long
+   * endurance sessions; domain validation enforces a saner practical max.
+   * Revisions carry this field so accepted proposals preserve the estimate.
+   * If present, calorieEstimateProvenance MUST also be set.
+   */
+  estimatedSessionCalorieBurn: z.number().int().nonnegative().max(20000).optional(),
+  /**
+   * Who provided estimatedSessionCalorieBurn. Required whenever
+   * estimatedSessionCalorieBurn is present (enforced in
+   * getWorkoutProposalDomainErrors).
+   */
+  calorieEstimateProvenance: calorieEstimateProvenanceSchema.optional(),
 });
 
 export type WorkoutPlanPayload = z.infer<typeof workoutPlanPayloadSchema>;
@@ -229,6 +263,13 @@ export const workoutSessionExerciseExecutionSchema = z.object({
   perceivedEffort: z.number().int().min(1).max(10).nullable().optional(),
   perceivedDifficulty: z.number().int().min(1).max(10).nullable().optional(),
   discomfortFlag: z.boolean().nullable().optional(),
+  /**
+   * How long the user actually spent on this exercise, in minutes.
+   * USER-SET ONLY — never populated by any LLM or proposal.
+   * Set on the session completion/feedback path; not part of the plan payload.
+   * Max 600 min (10 h) is a generous upper bound for edge cases.
+   */
+  userCompletionTimeMinutes: z.number().int().positive().max(600).nullable().optional(),
 });
 
 export type WorkoutSessionExerciseExecution = z.infer<
@@ -855,8 +896,49 @@ export function getWorkoutProposalDomainErrors(
           `workout: ${path} must not include both exerciseId and pendingExerciseRef.`,
         );
       }
+
+      // Bound per-exercise calorie estimate.
+      if (entry.estimatedCalorieBurn !== undefined) {
+        if (!Number.isInteger(entry.estimatedCalorieBurn) || entry.estimatedCalorieBurn < 0) {
+          errors.push(
+            `workout: ${path}.estimatedCalorieBurn must be a non-negative integer.`,
+          );
+        } else if (entry.estimatedCalorieBurn > 5000) {
+          errors.push(
+            `workout: ${path}.estimatedCalorieBurn must not exceed 5 000 kcal.`,
+          );
+        }
+      }
     });
   });
+
+  // Validate session-level calorie estimate fields on the payload.
+  const sessionCalorie = changes.estimatedSessionCalorieBurn;
+  const sessionProvenance = changes.calorieEstimateProvenance;
+
+  if (sessionCalorie !== undefined) {
+    if (!Number.isInteger(sessionCalorie) || sessionCalorie < 0) {
+      errors.push(
+        "workout: estimatedSessionCalorieBurn must be a non-negative integer.",
+      );
+    } else if (sessionCalorie > 20000) {
+      errors.push(
+        "workout: estimatedSessionCalorieBurn must not exceed 20 000 kcal.",
+      );
+    }
+
+    if (sessionProvenance === undefined) {
+      errors.push(
+        "workout: calorieEstimateProvenance must be present when estimatedSessionCalorieBurn is set.",
+      );
+    }
+  }
+
+  if (sessionProvenance !== undefined && sessionCalorie === undefined) {
+    errors.push(
+      "workout: calorieEstimateProvenance must not be set without estimatedSessionCalorieBurn.",
+    );
+  }
 
   return errors;
 }

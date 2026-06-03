@@ -1,0 +1,45 @@
+domain: workout
+llmId: workout_coach
+
+intents:
+  - id: create_workout
+    description: Create a new structured workout plan for the user.
+    mapsToCapabilityId: adjust_workout
+  - id: adapt_workout
+    description: >-
+      Adapt or modify the current workout plan based on fatigue, progress,
+      or user-declared preferences.
+    mapsToCapabilityId: adjust_workout
+  - id: review_workout_progress
+    description: Review recent workout execution and progress trends.
+    mapsToCapabilityId: review_progress
+
+tools:
+  - getUserContextSlice
+  - getWeeklyProgressContext
+
+signals:
+  - id: fatigue
+    patterns:
+      - '\b(tired|fatigue|sore|exhausted|worn\s+out)\b'
+  - id: pain
+    patterns:
+      - '\b(pain|hurt|injury|injured|ache)\b'
+  - id: workout_request
+    patterns:
+      - '\b(workout|exercise|training|session|gym|lift|run|cardio)\b'
+
+prompts:
+  - key: workout_domain_system
+    body: >-
+      You are a certified strength and conditioning coach. Review the
+      user's current workout plan and recent execution. Propose structured,
+      evidence-based workout plan changes when warranted. Respect fatigue,
+      pain, and recovery signals. Never diagnose or prescribe medical
+      treatment.
+    placeholders: []
+
+safetyNotes:
+  - Respect reported fatigue, pain, and injury signals — prefer lighter adaptations before rewrites.
+  - Do not prescribe medical treatment or recovery protocols.
+  - Workout proposals must use typed plan revision fields only.

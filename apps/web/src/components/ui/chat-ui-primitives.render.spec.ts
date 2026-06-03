@@ -86,6 +86,7 @@ describe("Chat UI primitive contracts", () => {
     expect(privacySource).toContain("FileInputTrigger");
     expect(privacySource).toContain("ConsentScopeChecklist");
     expect(stylesSource).toContain(".chat-composer-attachments");
+    expect(stylesSource).toContain(".chat-composer-attachments__chips");
     expect(stylesSource).toContain(".chat-attachment-outcomes");
   });
 });

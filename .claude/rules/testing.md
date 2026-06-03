@@ -1,0 +1,11 @@
+# Testing
+
+Test runner is **vitest**. See CLAUDE.md for single-file / `-t` invocation.
+
+- Test the behavior changed by the current task, not unrelated framework defaults.
+- Add unit tests for domain services and pure helpers.
+- Add integration tests when behavior crosses API, service, repository, or database boundaries.
+- Test Zod schemas for API inputs and AI structured outputs.
+- Test workout and nutrition revision behavior.
+- For AI changes, cover: valid output, invalid output, unsafe intent, and accepted proposal revision creation.
+- Run the narrowest useful test or typecheck command before summarizing.

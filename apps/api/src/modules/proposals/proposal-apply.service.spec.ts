@@ -221,6 +221,55 @@ describe("ProposalApplyService", () => {
     });
   });
 
+  it("persist calorie fields from adapt_workout_plan_from_progress nested plan into the new revision", async () => {
+    // When ActionResolver stamps estimatedSessionCalorieBurn onto the nested .plan of
+    // an adapt_workout_plan_from_progress proposal, the apply path must carry those
+    // calorie fields into the new revision unchanged.
+    // The proposal-apply.service extracts changes.plan and passes it to
+    // applyWorkoutPlanProposal, so the calorie fields must be forwarded as-is.
+    let capturedPayload: unknown;
+
+    const service = new ProposalApplyService(
+      {} as never, // profilesService
+      {} as never, // goalsService
+      {
+        applyWorkoutPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+        ) => {
+          capturedPayload = payload;
+          return "workout_revision:rev-progress-calorie";
+        },
+      } as never, // workoutsService
+      {} as never, // nutritionService
+      {} as never, // habitsService
+      {} as never, // recipesService
+      {} as never, // todayService
+      {} as never, // progressService
+      {} as never, // wellbeingCheckInsService
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adapt_workout_plan_from_progress",
+      targetDomain: "workout",
+      proposedChanges: {
+        plan: {
+          ...workoutPayload,
+          estimatedSessionCalorieBurn: 310,
+          calorieEstimateProvenance: "workout_llm",
+        },
+        sourceTrendObservationIds: [],
+      },
+    });
+
+    expect(reference).toBe("workout_revision:rev-progress-calorie");
+    // The calorie fields must survive from the nested .plan into the applied revision.
+    const persistedPayload = capturedPayload as Record<string, unknown>;
+    expect(persistedPayload["estimatedSessionCalorieBurn"]).toBe(310);
+    expect(persistedPayload["calorieEstimateProvenance"]).toBe("workout_llm");
+  });
+
   it("routes accepted nutrition proposals through the nutrition service", async () => {
     let nutritionCalled = false;
 

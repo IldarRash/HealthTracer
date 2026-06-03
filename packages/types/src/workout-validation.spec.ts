@@ -18,6 +18,7 @@ import {
   workoutPlanExerciseSchema,
   workoutPlanPayloadSchema,
   workoutPlanProposalChangesSchema,
+  workoutSessionExerciseExecutionSchema,
 } from "./workouts.js";
 
 const catalogExercise = workoutPlanExerciseSchema.parse({
@@ -459,5 +460,277 @@ describe("exercise catalog metadata helpers", () => {
       modalities: ["yoga", "mobility"],
       instructions: ["Hold steady gaze over front hand."],
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6: calorie-on-workout fields
+// ---------------------------------------------------------------------------
+
+describe("workoutPlanExerciseSchema — estimatedCalorieBurn", () => {
+  it("accepts an exercise with a valid calorie estimate", () => {
+    const exercise = workoutPlanExerciseSchema.parse({
+      snapshot: { name: "Goblet Squat" },
+      sets: 3,
+      reps: "10",
+      estimatedCalorieBurn: 120,
+    });
+    expect(exercise.estimatedCalorieBurn).toBe(120);
+  });
+
+  it("accepts zero as a valid calorie estimate (nonneg)", () => {
+    const exercise = workoutPlanExerciseSchema.parse({
+      snapshot: { name: "Stretch" },
+      durationSeconds: 60,
+      estimatedCalorieBurn: 0,
+    });
+    expect(exercise.estimatedCalorieBurn).toBe(0);
+  });
+
+  it("rejects a negative calorie estimate", () => {
+    expect(() =>
+      workoutPlanExerciseSchema.parse({
+        snapshot: { name: "Squat" },
+        sets: 3,
+        reps: "8",
+        estimatedCalorieBurn: -1,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an exercise calorie estimate exceeding 5 000 kcal", () => {
+    expect(() =>
+      workoutPlanExerciseSchema.parse({
+        snapshot: { name: "Ultra Marathon Sprint" },
+        durationSeconds: 3600,
+        estimatedCalorieBurn: 5001,
+      }),
+    ).toThrow();
+  });
+
+  it("accepts the maximum boundary value of 5 000 kcal", () => {
+    const exercise = workoutPlanExerciseSchema.parse({
+      snapshot: { name: "Extreme Effort" },
+      durationSeconds: 3600,
+      estimatedCalorieBurn: 5000,
+    });
+    expect(exercise.estimatedCalorieBurn).toBe(5000);
+  });
+});
+
+describe("workoutPlanPayloadSchema — estimatedSessionCalorieBurn + calorieEstimateProvenance", () => {
+  it("accepts a payload without calorie fields", () => {
+    const payload = workoutPlanPayloadSchema.parse({
+      title: "Base plan",
+      summary: "No calorie fields.",
+      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+      notes: [],
+    });
+    expect(payload.estimatedSessionCalorieBurn).toBeUndefined();
+    expect(payload.calorieEstimateProvenance).toBeUndefined();
+  });
+
+  it("accepts a payload with both session calorie fields set", () => {
+    const payload = workoutPlanPayloadSchema.parse({
+      title: "Base plan",
+      summary: "With calorie estimate.",
+      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+      notes: [],
+      estimatedSessionCalorieBurn: 350,
+      calorieEstimateProvenance: "workout_llm",
+    });
+    expect(payload.estimatedSessionCalorieBurn).toBe(350);
+    expect(payload.calorieEstimateProvenance).toBe("workout_llm");
+  });
+
+  it("accepts user_manual provenance", () => {
+    const payload = workoutPlanPayloadSchema.parse({
+      title: "User plan",
+      summary: "User entered calories.",
+      days: [{ weekday: "tuesday", focus: "Cardio", exercises: ["Run"] }],
+      notes: [],
+      estimatedSessionCalorieBurn: 500,
+      calorieEstimateProvenance: "user_manual",
+    });
+    expect(payload.calorieEstimateProvenance).toBe("user_manual");
+  });
+
+  it("rejects a session calorie estimate exceeding 20 000 kcal", () => {
+    expect(() =>
+      workoutPlanPayloadSchema.parse({
+        title: "Extreme",
+        summary: "Way too many calories.",
+        days: [{ weekday: "monday", focus: "Ultra", exercises: ["Run"] }],
+        notes: [],
+        estimatedSessionCalorieBurn: 20001,
+        calorieEstimateProvenance: "workout_llm",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a negative session calorie estimate", () => {
+    expect(() =>
+      workoutPlanPayloadSchema.parse({
+        title: "Negative",
+        summary: "Negative is invalid.",
+        days: [{ weekday: "monday", focus: "Rest", exercises: ["Stretch"] }],
+        notes: [],
+        estimatedSessionCalorieBurn: -10,
+        calorieEstimateProvenance: "workout_llm",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an unknown provenance value", () => {
+    expect(() =>
+      workoutPlanPayloadSchema.parse({
+        title: "Unknown",
+        summary: "Bad provenance.",
+        days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+        notes: [],
+        estimatedSessionCalorieBurn: 300,
+        calorieEstimateProvenance: "some_llm",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("getWorkoutProposalDomainErrors — calorie field validation", () => {
+  const baseChanges = workoutPlanProposalChangesSchema.parse({
+    title: "Three day plan",
+    summary: "Weekly training.",
+    days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+    notes: [],
+  });
+
+  it("accepts a valid workout_llm provenance with session calorie estimate", () => {
+    const errors = getWorkoutProposalDomainErrors({
+      ...baseChanges,
+      estimatedSessionCalorieBurn: 280,
+      calorieEstimateProvenance: "workout_llm",
+    });
+    expect(errors).toEqual([]);
+  });
+
+  it("requires calorieEstimateProvenance when estimatedSessionCalorieBurn is set", () => {
+    // Build the object manually — schema-level validation does not enforce co-presence.
+    const changes = {
+      ...baseChanges,
+      estimatedSessionCalorieBurn: 280,
+      calorieEstimateProvenance: undefined,
+    };
+    const errors = getWorkoutProposalDomainErrors(changes as typeof baseChanges);
+    expect(
+      errors.some((e) => e.includes("calorieEstimateProvenance")),
+    ).toBe(true);
+  });
+
+  it("requires estimatedSessionCalorieBurn when calorieEstimateProvenance is set", () => {
+    const changes = {
+      ...baseChanges,
+      estimatedSessionCalorieBurn: undefined,
+      calorieEstimateProvenance: "workout_llm" as const,
+    };
+    const errors = getWorkoutProposalDomainErrors(changes as typeof baseChanges);
+    expect(
+      errors.some((e) => e.includes("calorieEstimateProvenance")),
+    ).toBe(true);
+  });
+
+  it("bounds the session calorie estimate in domain errors", () => {
+    // Must pass schema parse (max is 20 000 in schema), but our domain checker
+    // repeats the upper bound to give a domain-level error message.
+    const changes = workoutPlanProposalChangesSchema.parse({
+      ...baseChanges,
+      estimatedSessionCalorieBurn: 20000,
+      calorieEstimateProvenance: "workout_llm",
+    });
+    const errors = getWorkoutProposalDomainErrors(changes);
+    // 20 000 is the schema max; no domain error expected at this boundary.
+    expect(errors.some((e) => e.includes("estimatedSessionCalorieBurn"))).toBe(false);
+  });
+
+  it("accepts an exercise with a valid per-exercise calorie estimate in proposals", () => {
+    const changes = workoutPlanProposalChangesSchema.parse({
+      title: "Three day plan",
+      summary: "Weekly training.",
+      days: [
+        {
+          weekday: "monday",
+          focus: "Strength",
+          exercises: [
+            {
+              exerciseId: "b1000001-0000-4000-8000-000000000016",
+              snapshot: { name: "Goblet Squat", primaryMuscles: ["quads"], equipment: ["dumbbell"] },
+              sets: 3,
+              reps: "10",
+              estimatedCalorieBurn: 95,
+            },
+          ],
+        },
+      ],
+      notes: [],
+    });
+    const errors = getWorkoutProposalDomainErrors(changes, { requireStructuredPlan: true });
+    expect(errors).toEqual([]);
+  });
+});
+
+describe("workoutSessionExerciseExecutionSchema — userCompletionTimeMinutes (user-set only)", () => {
+  it("accepts a valid completion time", () => {
+    const execution = workoutSessionExerciseExecutionSchema.parse({
+      status: "completed",
+      userCompletionTimeMinutes: 45,
+    });
+    expect(execution.userCompletionTimeMinutes).toBe(45);
+  });
+
+  it("accepts null as an explicit reset", () => {
+    const execution = workoutSessionExerciseExecutionSchema.parse({
+      status: "completed",
+      userCompletionTimeMinutes: null,
+    });
+    expect(execution.userCompletionTimeMinutes).toBeNull();
+  });
+
+  it("rejects zero (must be positive)", () => {
+    expect(() =>
+      workoutSessionExerciseExecutionSchema.parse({
+        status: "planned",
+        userCompletionTimeMinutes: 0,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a completion time exceeding 600 minutes", () => {
+    expect(() =>
+      workoutSessionExerciseExecutionSchema.parse({
+        status: "planned",
+        userCompletionTimeMinutes: 601,
+      }),
+    ).toThrow();
+  });
+
+  it("accepts the maximum boundary of 600 minutes", () => {
+    const execution = workoutSessionExerciseExecutionSchema.parse({
+      status: "completed",
+      userCompletionTimeMinutes: 600,
+    });
+    expect(execution.userCompletionTimeMinutes).toBe(600);
+  });
+
+  it("does not appear in workoutPlanPayloadSchema (LLM cannot set it)", () => {
+    // workoutPlanPayloadSchema must not know about userCompletionTimeMinutes.
+    // Parse a payload that includes it — Zod strips unknown keys by default
+    // (no .strict()), so it simply won't appear in the parsed output.
+    const rawInput: Record<string, unknown> = {
+      title: "Plan",
+      summary: "Summary.",
+      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+      notes: [],
+      userCompletionTimeMinutes: 45,
+    };
+    const payload = workoutPlanPayloadSchema.parse(rawInput);
+    expect((payload as Record<string, unknown>)["userCompletionTimeMinutes"]).toBeUndefined();
   });
 });

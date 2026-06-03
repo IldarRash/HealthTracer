@@ -1,8 +1,9 @@
-import type { AiStructuredOutput, AgentTurnMetadata } from "@health/types";
+import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
   AgentOrchestratorService,
+  type AttachmentTurnContext,
   type ProposalRevisionContext,
 } from "./agent-orchestrator.service.js";
 
@@ -17,6 +18,8 @@ export interface GenerateCoachResponseInput {
     content: string;
   }>;
   proposalRevision?: ProposalRevisionContext;
+  proposalExplainer?: ProposalExplainerTurnContext;
+  attachmentTurn?: AttachmentTurnContext;
 }
 
 export interface GeneratedCoachResponse {
@@ -24,6 +27,13 @@ export interface GeneratedCoachResponse {
   parseErrors: string[];
   replySafetyErrors: string[];
   agentMetadata: AgentTurnMetadata;
+  /**
+   * Whether the AI pipeline resolved a consent-gated outcome (e.g. a medical
+   * document save proposal). When true, ChatService surfaces a distinct consent
+   * prompt flag in the turn response. Nothing is auto-persisted.
+   * Only set on fan-out turns; undefined otherwise.
+   */
+  consentRequired?: boolean;
 }
 
 @Injectable()
@@ -40,6 +50,9 @@ export class AiService {
       parseErrors: orchestrated.parseErrors,
       replySafetyErrors: orchestrated.replySafetyErrors,
       agentMetadata: orchestrated.agentMetadata,
+      ...(orchestrated.consentRequired !== undefined
+        ? { consentRequired: orchestrated.consentRequired }
+        : {}),
     };
   }
 

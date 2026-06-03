@@ -3,6 +3,7 @@ import type {
   ChatThread,
   WellbeingCrisisSupportCopy,
 } from "@health/types";
+import type { ChatMessageAttachmentPreview } from "./chat-message-attachments.js";
 import {
   WELLBEING_CRISIS_SUPPORT_COPY,
   wellbeingCrisisEvaluationSchema,
@@ -60,23 +61,20 @@ export const SUGGESTED_CHAT_PROMPTS: readonly SuggestedChatPrompt[] = [
 export function createOptimisticUserMessage(
   threadId: string,
   content: string,
-  attachmentSummary = "",
+  attachmentPreviews: readonly ChatMessageAttachmentPreview[] = [],
 ): OptimisticChatMessage {
   const trimmed = content.trim();
-  const displayContent =
-    trimmed.length > 0
-      ? attachmentSummary
-        ? `${trimmed}\n\n${attachmentSummary}`
-        : trimmed
-      : attachmentSummary;
 
   return {
     id: `optimistic-${Date.now()}`,
     threadId,
     role: "user",
-    content: displayContent,
+    content: trimmed,
     createdAt: new Date().toISOString(),
-    metadata: attachmentSummary ? { attachmentSummary } : {},
+    metadata:
+      attachmentPreviews.length > 0
+        ? { optimisticAttachmentDisplays: attachmentPreviews }
+        : {},
     optimistic: true,
   };
 }

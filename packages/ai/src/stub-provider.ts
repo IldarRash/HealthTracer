@@ -1,11 +1,18 @@
 import type {
+  AgentLoopOutputInput,
+  AgentToolCallResult,
   AiStructuredOutputInput,
-  LlmIntentRouterOutputInput,
+  DomainLlmStepOutputInput,
+  DomainLlmStepRequest,
+  FinalDecisionOutputInput,
+  FinalDecisionRequest,
+  IntentCatalogEntry,
+  RouterDecisionOutputInput,
+  RouterDecisionRequest,
 } from "@health/types";
 import {
-  buildContextSliceRequestForIntent,
+  createFallbackFinalDecision,
   isWeeklyReviewChatMessage,
-  normalizeContextSlicePlan,
 } from "@health/types";
 import {
   hasActiveHabitPlanInContext,
@@ -32,18 +39,6 @@ import {
   stubSwapExerciseWorkoutPlan,
 } from "./stub-workout-plan.js";
 
-export interface IntentRouterRequest {
-  readonly userMessage: string;
-  readonly recentMessages: ReadonlyArray<{
-    readonly role: "user" | "assistant" | "system";
-    readonly content: string;
-  }>;
-  readonly ruleRouteHint?: {
-    readonly intent: string;
-    readonly safetyFlags: readonly string[];
-  };
-}
-
 export interface CoachAiRequest {
   readonly userMessage: string;
   readonly recentMessages: ReadonlyArray<{
@@ -54,18 +49,40 @@ export interface CoachAiRequest {
   readonly agentMetadata?: {
     readonly purpose: string;
     readonly intent: string;
+    readonly catalogIntentId?: string;
     readonly depth: string;
     readonly timeRange: string;
     readonly safetyConstraints: readonly string[];
     readonly expectedResponseMode?: string;
     readonly safetyFlags?: readonly string[];
     readonly missingContextNotes?: readonly string[];
+    readonly intentDefinition?: IntentCatalogEntry;
+    readonly allowedTools?: readonly string[];
+    readonly allowedProposalIntents?: readonly string[];
+    readonly messageUnderstandingSummary?: Record<string, unknown>;
+    readonly responseModeExecutor?: {
+      readonly mode: string;
+      readonly handlerPath: string;
+      readonly maxLoopIterations: number;
+      readonly allowToolLoop: boolean;
+      readonly useContextExpansionMetadata: boolean;
+    };
   };
 }
 
+export interface CoachAiLoopRequest extends CoachAiRequest {
+  readonly iteration: number;
+  readonly maxIterations: number;
+  readonly priorToolResults: ReadonlyArray<AgentToolCallResult>;
+}
+
 export interface CoachAiProvider {
-  generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput>;
+  generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput>;
   generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput>;
+  // Phase 2 — parallel-domain pipeline methods (dark; not called by orchestrator yet)
+  generateRouterDecision(request: RouterDecisionRequest): Promise<RouterDecisionOutputInput>;
+  generateDomainStep(request: DomainLlmStepRequest): Promise<DomainLlmStepOutputInput>;
+  generateFinalDecision(request: FinalDecisionRequest): Promise<FinalDecisionOutputInput>;
 }
 
 const SAFE_DEFAULT_REPLY =
@@ -79,52 +96,30 @@ function stubCoachOutput(value: unknown): AiStructuredOutputInput {
 }
 
 export class StubCoachAiProvider implements CoachAiProvider {
-  async generateIntentRoute(request: IntentRouterRequest): Promise<LlmIntentRouterOutputInput> {
-    const normalized = request.userMessage.toLowerCase();
+  async generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput> {
+    const catalogIntentId = request.agentMetadata?.catalogIntentId ?? request.agentMetadata?.intent;
 
     if (
-      normalized.includes("not losing weight") ||
-      normalized.includes("not seeing results") ||
-      (normalized.includes("hungry") && normalized.includes("tired"))
+      catalogIntentId === "review_progress" &&
+      request.iteration < request.maxIterations &&
+      !request.priorToolResults.some(
+        (result) => result.tool === "getWeeklyProgressContext" && result.ok,
+      )
     ) {
       return {
-        intent: "adjust_nutrition",
-        confidence: 0.84,
-        routingMethod: "llm_router",
-        requiredContextSlices: normalizeContextSlicePlan([
-          buildContextSliceRequestForIntent("adjust_nutrition"),
-          { type: "weekly_review", depth: "medium", timeRange: "7d" },
-        ]),
-        safetyFlags: ["hunger", "fatigue"],
-        expectedResponseMode: "recommendation_with_optional_proposal",
+        kind: "tool_request",
+        tool: "getWeeklyProgressContext",
+        input: {},
+        rationale: "Weekly progress context is needed before summarizing the user's week.",
       };
     }
 
-    if (
-      normalized.includes("feel off") ||
-      normalized.includes("completely off") ||
-      normalized.includes("routine is not")
-    ) {
-      return {
-        intent: "adjust_workout",
-        confidence: 0.82,
-        routingMethod: "llm_router",
-        requiredContextSlices: normalizeContextSlicePlan([
-          buildContextSliceRequestForIntent("adjust_workout"),
-          { type: "daily_checkin", depth: "small", timeRange: "7d" },
-        ]),
-        safetyFlags: ["fatigue", "stress"],
-        expectedResponseMode: "recommendation_with_optional_proposal",
-      };
-    }
+    const coachOutput = await this.generateCoachResponse(request);
 
     return {
-      intent: "general",
-      confidence: 0.78,
-      routingMethod: "llm_router",
-      requiredContextSlices: [buildContextSliceRequestForIntent("general")],
-      safetyFlags: [],
-      expectedResponseMode: "advice_only",
+      kind: "final_answer",
+      reply: coachOutput.reply,
+      proposals: coachOutput.proposals ?? [],
     };
   }
 
@@ -387,5 +382,291 @@ export class StubCoachAiProvider implements CoachAiProvider {
       reply: SAFE_DEFAULT_REPLY,
       proposals: [],
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 2 — parallel-domain pipeline stubs
+  // These are deterministic stubs used in tests. Not called by the orchestrator yet.
+  // ---------------------------------------------------------------------------
+
+  async generateRouterDecision(request: RouterDecisionRequest): Promise<RouterDecisionOutputInput> {
+    const normalized = request.normalizedText.toLowerCase();
+    const selectedDomains: RouterDecisionOutputInput["selectedDomains"] = [];
+
+    // Reuse keyword-routing signals from existing preprocessor
+    if (
+      request.preprocessor.simpleSignals.workout ||
+      normalized.includes("workout") ||
+      normalized.includes("training") ||
+      normalized.includes("exercise")
+    ) {
+      selectedDomains.push({
+        domain: "workout",
+        confidence: 0.8,
+        intentHints: ["adjust_workout", "create_workout_plan"],
+        toolHints: [],
+        signalHints: ["request_change"],
+      });
+    }
+
+    if (
+      request.preprocessor.simpleSignals.nutrition ||
+      normalized.includes("nutrition") ||
+      normalized.includes("meal") ||
+      normalized.includes("food") ||
+      normalized.includes("recipe")
+    ) {
+      selectedDomains.push({
+        domain: "nutrition",
+        confidence: 0.75,
+        intentHints: ["create_nutrition_plan", "recommend_recipes"],
+        toolHints: [],
+        signalHints: ["request_change"],
+      });
+    }
+
+    // Attachment hints may route to health domain (consent-gated, context-only)
+    const hasMedicalAttachment = request.attachmentHints.some(
+      (h) => h.category === "medical_document",
+    );
+
+    if (
+      hasMedicalAttachment ||
+      request.preprocessor.simpleSignals.pain ||
+      request.preprocessor.simpleSignals.fatigue ||
+      request.preprocessor.simpleSignals.sleep
+    ) {
+      selectedDomains.push({
+        domain: "health",
+        confidence: 0.65,
+        intentHints: [],
+        toolHints: [],
+        signalHints: ["wellness_check_in"],
+      });
+    }
+
+    // Fallback: if nothing matched, route to workout as a conservative default
+    if (selectedDomains.length === 0) {
+      selectedDomains.push({
+        domain: "workout",
+        confidence: 0.45,
+        intentHints: ["general"],
+        toolHints: [],
+        signalHints: [],
+      });
+    }
+
+    const safetyFlags: RouterDecisionOutputInput["safetyFlags"] = [];
+
+    if (request.preprocessor.simpleSignals.fatigue) {
+      safetyFlags.push("fatigue");
+    }
+
+    if (request.preprocessor.simpleSignals.pain) {
+      safetyFlags.push("pain");
+    }
+
+    if (request.preprocessor.simpleSignals.sleep) {
+      safetyFlags.push("sleep_issue");
+    }
+
+    return {
+      selectedDomains: selectedDomains.slice(0, 3),
+      contextNeeds: [],
+      safetyFlags,
+      confidence: selectedDomains[0]?.confidence ?? 0.45,
+    };
+  }
+
+  async generateDomainStep(request: DomainLlmStepRequest): Promise<DomainLlmStepOutputInput> {
+    const normalized = request.userMessage.toLowerCase();
+
+    if (request.domain === "workout") {
+      // Build a stub workout candidate proposal matching the keyword routing in generateCoachResponse
+      const candidateProposals: Record<string, unknown>[] = [];
+
+      if (normalized.includes("reduce") || normalized.includes("easier") || normalized.includes("lighter")) {
+        candidateProposals.push({
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Reduce load for this week",
+          reason: "This lowers recommended load while keeping your weekly structure intact.",
+          proposedChanges: stubReducedLoadWorkoutPlan,
+        });
+      } else if (normalized.includes("swap") || normalized.includes("replace")) {
+        candidateProposals.push({
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Swap a pulling exercise",
+          reason: "This keeps pulling work available with minimal equipment.",
+          proposedChanges: stubSwapExerciseWorkoutPlan,
+        });
+      } else if (normalized.includes("remove")) {
+        candidateProposals.push({
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Remove a conditioning exercise",
+          reason: "This keeps the weekly structure while simplifying Wednesday work.",
+          proposedChanges: stubRemoveExerciseWorkoutPlan,
+        });
+      } else {
+        candidateProposals.push({
+          intent: "create_workout_plan",
+          targetDomain: "workout",
+          title: "Start a three day strength plan",
+          reason: "This gives you a repeatable weekly structure to build consistency.",
+          proposedChanges: stubStructuredWorkoutPlan,
+        });
+      }
+
+      return {
+        kind: "domain_answer",
+        domain: "workout",
+        summary:
+          "Reviewed your workout context and drafted a candidate plan adjustment for your consideration.",
+        candidateProposals,
+        domainSignals: ["workout_plan_present"],
+        workoutCalorieEstimate: 280,
+      };
+    }
+
+    if (request.domain === "nutrition") {
+      // Step 7b: when a food_photo attachment is present in the bounded attachment
+      // context, the nutrition domain LLM analyzes it directly and returns a nutrition
+      // incident proposal with approximate calories/macros. This REPLACES the old
+      // FoodPhotoAnalysisService path.
+      const foodPhotoItem = request.attachmentContext?.items.find(
+        (item) => item.category === "food_photo",
+      );
+
+      if (foodPhotoItem) {
+        return {
+          kind: "domain_answer",
+          domain: "nutrition",
+          summary:
+            "Analyzed the food photo and prepared a nutrition incident log with approximate estimates. Review and adjust before saving.",
+          candidateProposals: [
+            {
+              intent: "log_nutrition_incident",
+              targetDomain: "nutrition",
+              title: "Log meal from photo",
+              reason: "Approximate calorie and macro estimates from the food photo you shared.",
+              proposedChanges: {
+                incidentDateTime: new Date().toISOString(),
+                items: [
+                  {
+                    name: "Meal from photo",
+                    quantity: "1 serving",
+                    calories: 520,
+                  },
+                ],
+                estimatedCalories: 520,
+                estimatedMacros: {
+                  proteinGrams: 32,
+                  carbsGrams: 55,
+                  fatGrams: 18,
+                },
+                confidence: "medium",
+                provenance: {
+                  source: "vision_llm_estimate",
+                  providerId: "nutrition_domain_llm",
+                },
+                imageRefs: [{ id: foodPhotoItem.attachmentRefId }],
+              },
+            },
+          ],
+          domainSignals: ["food_photo_present"],
+        };
+      }
+
+      const candidateProposals: Record<string, unknown>[] = [];
+
+      if (normalized.includes("recipe")) {
+        candidateProposals.push({
+          intent: "recommend_recipes",
+          targetDomain: "recipe",
+          title: "Breakfast recipe ideas for your plan",
+          reason: "These options align with your current estimated nutrition targets.",
+          proposedChanges: {
+            recommendations: [
+              {
+                recipeId: STUB_RECIPE_ID,
+                reason: "High-protein breakfast with estimated macro fit.",
+                fitSummary: "Estimated macros align with your active plan.",
+              },
+            ],
+          },
+        });
+      } else {
+        candidateProposals.push({
+          intent: "create_nutrition_plan",
+          targetDomain: "nutrition",
+          title: "Balanced daily nutrition base",
+          reason: "This provides a simple macro and hydration starting point.",
+          proposedChanges: {
+            title: "Balanced daily nutrition base",
+            summary: "A moderate starting point focused on consistency.",
+            caloriesPerDay: 2200,
+            proteinGrams: 140,
+            carbsGrams: 220,
+            fatGrams: 70,
+            hydrationLiters: 2.5,
+            mealStructure: [{ label: "Breakfast", timingHint: null }],
+            notes: ["Prioritize whole foods and regular meal timing."],
+          },
+        });
+      }
+
+      return {
+        kind: "domain_answer",
+        domain: "nutrition",
+        summary: "Reviewed your nutrition context and prepared candidate suggestions.",
+        candidateProposals,
+        domainSignals: ["nutrition_plan_present"],
+      };
+    }
+
+    // health domain — context-only, no proposals, consent-gated
+    return {
+      kind: "domain_answer",
+      domain: "health",
+      summary:
+        "Health context noted. No structured changes are proposed without explicit consent.",
+      candidateProposals: [],
+      domainSignals: [],
+    };
+  }
+
+  async generateFinalDecision(request: FinalDecisionRequest): Promise<FinalDecisionOutputInput> {
+    // Collect all candidate proposals from domain outputs
+    const allProposals = request.domainOutputs.flatMap((d) => d.candidateProposals);
+
+    // Build a reply from domain summaries
+    const summaries = request.domainOutputs
+      .filter((d) => d.summary.trim().length > 0)
+      .map((d) => d.summary);
+
+    if (summaries.length === 0) {
+      const fallback = createFallbackFinalDecision();
+
+      return {
+        reply: fallback.reply,
+        selectedAction: null,
+        proposals: allProposals,
+        consentRequired: false,
+      };
+    }
+
+    const reply =
+      summaries.length === 1
+        ? (summaries[0] ?? SAFE_DEFAULT_REPLY)
+        : `Here is what I found across your wellness domains: ${summaries.join(" ")}`;
+
+    return {
+      reply,
+      selectedAction: null,
+      proposals: allProposals.slice(0, 5),
+      consentRequired: request.domainOutputs.some((d) => d.domain === "health"),
+    };
   }
 }

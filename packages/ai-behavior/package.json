@@ -1,0 +1,21 @@
+{
+  "name": "@health/ai-behavior",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./config/ai-behavior.json": "./config/ai-behavior.json",
+    "./config/attachments.json": "./config/attachments.json"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@health/types": "workspace:*",
+    "yaml": "^2.9.0"
+  }
+}

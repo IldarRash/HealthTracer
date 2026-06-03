@@ -1,7 +1,5 @@
 import type {
   ActiveNutritionPlanResponse,
-  FoodPhotoAnalysisRequest,
-  FoodPhotoAnalysisResult,
   LogNutritionIncidentProposalPayload,
   NutritionAdherenceResponse,
   NutritionPlanPayload,
@@ -26,14 +24,12 @@ import {
   toNutritionPlanRevision,
 } from "./nutrition.mapper.js";
 import { NutritionRepository } from "./nutrition.repository.js";
-import { FoodPhotoAnalysisService } from "./food-photo-analysis.service.js";
 
 @Injectable()
 export class NutritionService {
   constructor(
     private readonly nutritionRepository: NutritionRepository,
     private readonly usersService: UsersService,
-    private readonly foodPhotoAnalysisService: FoodPhotoAnalysisService,
   ) {}
 
   async getCurrentActivePlan(
@@ -230,14 +226,6 @@ export class NutritionService {
     return row.id;
   }
 
-  async analyzeFoodPhoto(
-    auth: ClerkAuthContext,
-    request: FoodPhotoAnalysisRequest,
-  ): Promise<FoodPhotoAnalysisResult> {
-    const user = await this.usersService.resolveFromAuth(auth);
-
-    return this.foodPhotoAnalysisService.analyzeOwnedPhoto(user.id, request);
-  }
 }
 
 function parseAdherenceDate(date: string): string {
