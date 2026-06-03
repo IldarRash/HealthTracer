@@ -25,6 +25,8 @@ The Feature Planner's goal is to deliver the user's requested feature to a fully
 
 Hard rule: the Feature Planner never writes implementation code for feature work. The planner may inspect code, refine plans and docs, synthesize subagent results, and assign follow-up tasks, but all source changes, tests, migrations, UI, styling, design polish, and runtime fixes must be done by the appropriate subagent. If the planner discovers a needed code change, it must create the smallest corrective task for the right subagent instead of editing directly.
 
+Subagent scope rule: before launching a subagent, estimate whether the task is likely to consume more than 30% of that subagent's context window. If so, split the work into smaller role-specific tasks and launch additional subagents instead of assigning one oversized task. Prefer several narrow subagents with clear handoff outputs over one broad subagent that risks losing context.
+
 1. The user describes the feature they want to build.
 2. Feature Planner launches Product Analyst as a subagent to clarify the problem, scope, acceptance criteria, risks, and an initial implementation plan.
 3. Product Analyst writes the analyzed feature brief to `docs/product/features/<feature-slug>.md`.
@@ -43,19 +45,17 @@ Hard rule: the Feature Planner never writes implementation code for feature work
 9. After a feature is implemented and verified, Feature Planner updates the project knowledge base before final reporting. Use `agents-memory-updater` for durable agent knowledge and update relevant docs/rules when implementation changes product or architecture guidance.
 10. Feature Planner integrates subagent outputs, keeps the main dialog coherent, and reports the final result only after App Runner reports `working` for the relevant flow, or after a specific blocker prevents runtime verification.
 
-Role templates live in `.cursor/agents`.
+Role templates live in `.claude/agents`.
 
 ## Model Policy
 
-- Feature Planner must use GPT-5.5 for planning and task decomposition.
-- Backend Implementer and Frontend Implementer subagents must use the latest Composer model available in Cursor.
-- UI Polish Implementer subagents must use the latest Composer model available in Cursor.
-- If model slugs are required by tooling, use `gpt-5.5-medium` for GPT-5.5 and `composer-2.5-fast` for the latest Composer currently available.
+- This repo runs under the Claude Code operating layer in `.claude/` (subagents, skills, rules); there is no Cursor model policy.
+- Do not hardcode external model slugs in agent guidance. Defer model choice to the harness or the user's configuration.
 
 ## Development Workflow
 
 1. Inspect relevant architecture and product docs before changing code.
-2. Use `.cursor/references/best-practices.md` for external reference inspiration.
+2. Use `.cursor/references/best-practices.md` for external reference inspiration (reference material still lives under `.cursor/references`).
 3. Make the smallest vertical change that satisfies the task.
 4. Keep business logic out of UI components and controllers.
 5. Add or update focused tests for domain logic, schemas, UI states, and AI output handling.
@@ -72,22 +72,57 @@ Role templates live in `.cursor/agents`.
 - Do not bypass Drizzle migrations for schema changes.
 - For unfamiliar framework APIs, consult Context7 or current docs first.
 
-## Cursor Operating Layer
+## Claude Operating Layer
 
-- Project rules live in `.cursor/rules`.
-- Consolidated skills live in `.cursor/skills`.
-- Agent role templates live in `.cursor/agents`.
-- Reference inspiration lives in `.cursor/references`.
+- Specialized subagents live in `.claude/agents`.
+- Invocable skills live in `.claude/skills`.
+- Project rules live in `.claude/rules`.
+- Reference inspiration lives in `.cursor/references` (mirrored from the original `.cursor` setup).
 - Architecture and feature roadmap live in `docs`.
+
+## Runtime LLM Pipeline
+
+The unified chat/AI pipeline is a **multi-domain fan-out + synthesis** design. It runs:
+`ChatService.sendMessage` → attachment turn stages (context-only plumbing) →
+code-owned pre-AI gates (crisis, proposal explainer, direct chat paths) →
+`AgentOrchestratorService` → `MessagePreprocessorService` (message normalization) →
+`RouterLlmService` (first LLM: selects ≤3 relevant domains, read-only/clamped) →
+`SystemPlannerService` (deterministic fan-out plan: budget, executor modes, allowlists)
+→ `CoachingContextService` (one bounded `AgentContextPacket` per selected domain) →
+**parallel domain LLMs** via `DomainLlmExecutorService` (only-selected: workout /
+nutrition / health) → `DecisionMakerExecutorService` (final synthesis LLM) →
+`ActionResolverService` (typed proposal/action, allowlist-filtered) → proposal
+validation and persistence. LLM budget per turn: 1 router + N≤3 parallel domain LLMs +
+1 decision-maker. `docs/architecture/llm-pipeline.md` is the canonical, file-by-file map
+and must be read before changing the AI/chat subsystem.
 
 ## Useful Docs
 
-- `docs/product/mvp-scope.md`
-- `docs/product/mvp-slices.md`
+- `docs/architecture/llm-pipeline.md`
 - `docs/architecture/overview.md`
+- `docs/architecture/product-surface-architecture.md`
 - `docs/architecture/domain-model.md`
 - `docs/architecture/ai-update-flow.md`
+- `docs/architecture/ai-behavior-config.md`
 - `docs/architecture/database.md`
 - `docs/architecture/auth.md`
 - `docs/architecture/foundation-slice.md`
 - `docs/architecture/mcp.md`
+- `docs/product/feature-roadmap.md`
+
+## Learned Workspace Facts
+
+- AI/chat behavior is files-first and repo-backed via `packages/ai-behavior/config/ai-behavior.json`, `packages/ai-behavior/config/attachments.json`, `packages/ai-behavior/config/domains/*.yml`, and the `@health/ai-behavior` loaders; there is no DB overlay.
+- `ai-behavior.json` owns chat/LLM behavior; `attachments.json` owns attachment consent, categories, retention, and plumbing stage order (no classification/recognition); per-domain `domains/*.yml` own each domain's `intents[]/tools[]/signals[]/prompts[]`.
+- Domain YAML can only **narrow** the capability-catalog allowlists, never widen them; the loader is fail-closed per file and drops anything outside the catalog.
+- Attachments are context-only plumbing stages (validate→link→apply disposition); there is no recognition/classification machinery — the multimodal router and domain LLMs read attachment content directly.
+- RouterLlm runs for eligible turns (revision/explainer excluded) before SystemPlanner and returns strictly typed, read-only domain selections (≤3 domains); it never emits replies or proposals.
+- SystemPlanner consumes RouterLlm output when confident into a deterministic `DomainFanoutPlan`, otherwise rule-routes from repo config; it caps selected domains at 3 and never widens catalog allowlists.
+- Domain LLMs run only-selected and in parallel; each enforces its own read-only tool allowlist and reply safety, and a failed/timed-out domain degrades to a safe empty output. The decision-maker LLM synthesizes their outputs and emits typed proposals only.
+- Future AI/chat and domain behavior changes should prefer repo config plus focused tests over service hardcoding; safety floors stay in code.
+- Direct chat paths are deterministic and explicit only: today summary read and marking today's workout done; they resolve only when there is no attachment, and plan changes remain proposal-only.
+- Proposal explainer is read-only, rule-routed, excluded from router domain selection, and must not create proposals or mutations.
+- Context budgets deny documents and sensitive health context by default, re-applied to every per-domain packet; config cannot enable those contexts because code-level safety floors remain authoritative.
+- Preserve chat safety invariants in code when changing orchestration: schemas, fail-closed config loading, safety floors, proposal validation, permissions, consent, no raw documents, no direct LLM mutation, executor guards, crisis boundaries, and provider isolation.
+- Runtime verification for the unified AI pipeline: AppModule/API startup OK, config sources are `file`, health/ready pass, and authenticated chat E2E requires a Clerk bearer token.
+- Medical attachments are consent-gated at upload by the user-declared category/document-type + MIME (no classifier); content is context-only and a save is a consent-gated proposal — never an auto-persisted `health_document`. Legacy `saved_health_document` JSON still parses via `parseStoredChatAttachmentRecognition` and is sanitized before API responses.

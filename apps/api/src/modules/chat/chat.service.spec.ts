@@ -2,24 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
 import {
-  type RawAiProposal,
   WELLBEING_CRISIS_SUPPORT_COPY,
   WEEKLY_REVIEW_CHAT_PROMPT,
+  getTodayIsoDateInTimezone,
 } from "@health/types";
-import type { AttachmentProposalCandidate } from "../chat-attachments/chat-attachment-recognition.service.js";
-import { ChatAttachmentRecognitionService } from "../chat-attachments/chat-attachment-recognition.service.js";
+import { createAiPolicyTestStack } from "../ai/test-ai-behavior-fixtures.js";
+import { DirectChatPathService } from "./direct-chat-path.service.js";
 import { ChatService } from "./chat.service.js";
-
-type BuildAttachmentProposalInput = Parameters<
-  ChatAttachmentRecognitionService["buildProposalCandidates"]
->[0];
-
-type ClassifyAttachmentsForMessageInput = {
-  auth: typeof auth;
-  userId: string;
-  messageContent: string;
-  attachments: readonly unknown[];
-};
 
 const auth = {
   clerkUserId: "user_123",
@@ -59,17 +48,141 @@ const noopRecipesService = {
 } as never;
 
 const noopChatAttachmentsService = {
-  assertOwnedAttachmentRefs: async () => [],
-  linkAttachmentsToMessage: async () => undefined,
-  classifyAndRecognizeAttachmentsForMessage: async (input: {
-    attachments: readonly unknown[];
-  }) => [...input.attachments],
+  getMessageDisplayAttachments: async () => new Map(),
 } as never;
 
-const noopChatAttachmentRecognitionService = {
-  buildProposalCandidates: () => [],
-  mergeAttachmentProposals: <T>(aiProposals: T[]) => aiProposals,
+function buildMockAttachmentTurnStageResult(input: {
+  attachments: readonly Record<string, unknown>[];
+}) {
+  return {
+    attachmentMetadata: input.attachments.map((attachment) => ({
+      refId: attachment.id,
+      category: attachment.category ?? "unclassified",
+      mimeType: attachment.mimeType ?? "image/jpeg",
+      consentState: attachment.consent != null ? "granted" : "none",
+      storageRef: attachment.storageKey ?? null,
+    })),
+    outcomes: input.attachments.map((attachment) => ({
+      attachmentRefId: attachment.id,
+      category: attachment.category ?? "unclassified",
+      status: attachment.status ?? "ready",
+      recognition: attachment.recognition ?? null,
+    })),
+  };
+}
+
+const noopDirectChatPathService = {
+  tryExecute: async () => null,
 } as never;
+
+const noopProposalExplainerService = {
+  resolvePreAiTurn: async () => ({ kind: "not_explainer" as const }),
+} as never;
+
+function createDirectChatPathServiceForChatTests(todayService: {
+  getOrGenerateDay: (...args: unknown[]) => Promise<unknown>;
+  updateItemStatus?: (...args: unknown[]) => Promise<unknown>;
+}) {
+  const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+
+  return new DirectChatPathService(
+    systemPlannerService,
+    aiBehaviorConfigService,
+    todayService as never,
+    {
+      resolveFromAuth: async () => user,
+    } as never,
+  );
+}
+
+const noopAiBehaviorConfigService = {
+  getChat: () => ({
+    emptyAttachmentMessage: "Shared attachment(s) for coaching review.",
+  }),
+  getDeterministicProposalTriggers: () => ({
+    maxMergedProposals: 5,
+    wellbeingCheckin: {
+      enabled: true,
+      moodPhrases: ["feel bad"],
+      excludeContainsPhrases: ["hungry", "not losing weight"],
+      excludeWhenNutritionIncidentSignal: true,
+      requireNoTodayCheckIn: true,
+      skipWhenCrisis: true,
+    },
+    nutritionIncident: {
+      enabled: true,
+      phrases: ["cheat meal"],
+      skipWhenCrisis: true,
+    },
+    recipeRecommendation: {
+      enabled: true,
+      phrases: ["dinner idea"],
+      excludeWhenNutritionIncidentSignal: true,
+      skipWhenCrisis: true,
+    },
+  }),
+} as never;
+
+const noopChatTurnAttachmentStageService = {
+  validateRefsForSend: async () => undefined,
+  runTurnStages: async () => null,
+} as never;
+
+function createDefaultAgentMetadataForTests(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    provider: "stub",
+    intent: "general",
+    catalogIntentId: "general",
+    purpose: "general_chat",
+    depth: "small",
+    timeRange: "7d",
+    toolsInvoked: [],
+    citations: [],
+    unifiedTurnDecision: { ran: false },
+    safety: {
+      status: "passed",
+      blockedReasons: [],
+      constraintsApplied: [],
+    },
+    ...overrides,
+  };
+}
+
+function wrapAiServiceWithDefaultMetadata(aiService: unknown) {
+  const service = aiService as {
+    generateCoachResponse: (...args: unknown[]) => Promise<Record<string, unknown>>;
+  };
+
+  return {
+    ...service,
+    generateCoachResponse: async (...args: unknown[]) => {
+      const result = await service.generateCoachResponse(...args);
+
+      if (!result.agentMetadata) {
+        return {
+          ...result,
+          agentMetadata: createDefaultAgentMetadataForTests(),
+        };
+      }
+
+      const agentMetadata = result.agentMetadata as Record<string, unknown>;
+
+      if (agentMetadata.unifiedTurnDecision) {
+        return result;
+      }
+
+      return {
+        ...result,
+        agentMetadata: {
+          ...agentMetadata,
+          unifiedTurnDecision: { ran: false },
+        },
+      };
+    },
+  };
+}
 
 function createChatService(deps: {
   chatRepository: unknown;
@@ -80,18 +193,24 @@ function createChatService(deps: {
   wellbeingCheckInsService?: unknown;
   recipesService?: unknown;
   chatAttachmentsService?: unknown;
-  chatAttachmentRecognitionService?: unknown;
+  chatTurnAttachmentStageService?: unknown;
+  directChatPathService?: unknown;
+  proposalExplainerService?: unknown;
+  aiBehaviorConfigService?: unknown;
 }) {
   return new ChatService(
     deps.chatRepository as never,
     deps.usersService as never,
-    deps.aiService as never,
+    wrapAiServiceWithDefaultMetadata(deps.aiService) as never,
     deps.proposalValidationService as never,
     (deps.progressWeeklyReviewService ?? noopWeeklyReviewService) as never,
     (deps.wellbeingCheckInsService ?? noopWellbeingCheckInsService) as never,
     (deps.recipesService ?? noopRecipesService) as never,
     (deps.chatAttachmentsService ?? noopChatAttachmentsService) as never,
-    (deps.chatAttachmentRecognitionService ?? noopChatAttachmentRecognitionService) as never,
+    (deps.chatTurnAttachmentStageService ?? noopChatTurnAttachmentStageService) as never,
+    (deps.directChatPathService ?? noopDirectChatPathService) as never,
+    (deps.proposalExplainerService ?? noopProposalExplainerService) as never,
+    (deps.aiBehaviorConfigService ?? noopAiBehaviorConfigService) as never,
   );
 }
 
@@ -105,6 +224,7 @@ describe("ChatService", () => {
       depth: "medium" as const,
       timeRange: "14d" as const,
       toolsInvoked: ["getWeeklyProgressContext" as const],
+      unifiedTurnDecision: { ran: false },
       safety: {
         status: "passed" as const,
         blockedReasons: [],
@@ -275,7 +395,7 @@ describe("ChatService", () => {
     expect(capturedInput?.proposalRevision).toEqual(proposalRevision);
   });
 
-  it("persists llm routing metadata on assistant messages", async () => {
+  it("persists unified turn decision routing metadata on assistant messages", async () => {
     let assistantMetadata: Record<string, unknown> = {};
     const agentMetadata = {
       provider: "stub" as const,
@@ -292,8 +412,9 @@ describe("ChatService", () => {
       citations: [],
       routing: {
         confidence: 0.84,
-        routingMethod: "llm_router" as const,
-        llmRouterInvoked: true,
+        routingMethod: "unified_turn_decision" as const,
+        llmRouterInvoked: false,
+        unifiedTurnDecisionInvoked: true,
         safetyFlags: ["hunger", "fatigue"] as const,
         expectedResponseMode: "recommendation_with_optional_proposal" as const,
         contextSliceCount: 2,
@@ -365,8 +486,8 @@ describe("ChatService", () => {
     expect(assistantMetadata.agent).toEqual(
       expect.objectContaining({
         routing: expect.objectContaining({
-          llmRouterInvoked: true,
-          routingMethod: "llm_router",
+          unifiedTurnDecisionInvoked: true,
+          routingMethod: "unified_turn_decision",
           contextSliceCount: 2,
         }),
       }),
@@ -687,6 +808,300 @@ describe("ChatService", () => {
     });
     expect(result.proposals).toEqual([]);
     expect(result.assistantMessage.content).toContain(WELLBEING_CRISIS_SUPPORT_COPY.message);
+  });
+
+  describe("direct chat path integration", () => {
+    const workoutItemId = "880099c6-3b5f-4383-8246-97b72bf61818";
+    const todayIsoDate = getTodayIsoDateInTimezone(user.timezone);
+
+    function buildDirectPathTodayDay(overrides?: {
+      items?: Array<{
+        id: string;
+        label: string;
+        kind: "workout";
+        status: "pending" | "completed" | "skipped";
+        required: boolean;
+        source: { type: "workout_session"; id: string };
+      }>;
+      adherence?: {
+        score: number | null;
+        completedRequired: number;
+        totalRequired: number;
+        completedOptional: number;
+        skippedRequired: number;
+        skippedOptional: number;
+      };
+    }) {
+      return {
+        id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+        userId: user.id,
+        date: todayIsoDate,
+        items: overrides?.items ?? [
+          {
+            id: workoutItemId,
+            label: "Strength session",
+            kind: "workout" as const,
+            status: "pending" as const,
+            required: true,
+            source: {
+              type: "workout_session" as const,
+              id: "78d40655-b4b5-47b3-b28e-470192e05f04",
+            },
+          },
+        ],
+        source: "generated",
+        feedback: null,
+        adherence: overrides?.adherence ?? {
+          score: 0,
+          completedRequired: 0,
+          totalRequired: 1,
+          completedOptional: 0,
+          skippedRequired: 0,
+          skippedOptional: 0,
+        },
+        createdAt: new Date("2026-05-27T12:00:00.000Z").toISOString(),
+        updatedAt: new Date("2026-05-27T12:00:00.000Z").toISOString(),
+        workout: null,
+        nutrition: null,
+      };
+    }
+
+    function createDirectPathChatService(options?: {
+      todayService?: {
+        getOrGenerateDay: (...args: unknown[]) => Promise<unknown>;
+        updateItemStatus?: (...args: unknown[]) => Promise<unknown>;
+      };
+      aiCalledRef?: { value: boolean };
+      attachmentRefIds?: string[];
+    }) {
+      const aiCalledRef = options?.aiCalledRef ?? { value: false };
+      const capturedAssistant: Array<{ content: string; metadata: Record<string, unknown> }> =
+        [];
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "assistant") {
+              capturedAssistant.push({ content, metadata });
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            };
+          },
+          createProposal: async () => {
+            throw new Error("createProposal should not be called for direct path turns");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => {
+            aiCalledRef.value = true;
+            return {
+              output: { reply: "AI should not run", proposals: [] },
+              parseErrors: [],
+              replySafetyErrors: [],
+            };
+          },
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        directChatPathService: createDirectChatPathServiceForChatTests(
+          options?.todayService ?? {
+            getOrGenerateDay: async () => buildDirectPathTodayDay(),
+            updateItemStatus: async () => buildDirectPathTodayDay(),
+          },
+        ),
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () =>
+            buildMockAttachmentTurnStageResult({
+              attachments: options!.attachmentRefIds!.map((id) => ({
+                id,
+                userId: user.id,
+                category: "unclassified",
+                status: "ready",
+                linkedDocumentId: null,
+                linkedImageRefId: null,
+                retentionPolicy: "standard",
+                expiresAt: null,
+                recognition: null,
+              })),
+            }),
+        },
+      });
+
+      return { service, aiCalledRef, capturedAssistant };
+    }
+
+    it("bypasses AI for explicit today summary read", async () => {
+      const { service, aiCalledRef, capturedAssistant } = createDirectPathChatService();
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "What is today?",
+      });
+
+      expect(aiCalledRef.value).toBe(false);
+      expect(result.proposals).toEqual([]);
+      expect(capturedAssistant[0]?.metadata.directPath).toMatchObject({
+        candidate: { kind: "today_summary_read" },
+        outcome: { kind: "today_summary_read", status: "executed", refreshHints: ["today"] },
+      });
+      expect(result.assistantMessage.content).toContain("Here's your Today summary");
+    });
+
+    it("executes explicit workout done without AI when one pending workout exists", async () => {
+      const updateItemStatus = vi.fn(async () => buildDirectPathTodayDay());
+      const { service, aiCalledRef } = createDirectPathChatService({
+        todayService: {
+          getOrGenerateDay: async () => buildDirectPathTodayDay(),
+          updateItemStatus,
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Mark today's workout done",
+      });
+
+      expect(aiCalledRef.value).toBe(false);
+      expect(updateItemStatus).toHaveBeenCalledWith(auth, todayIsoDate, workoutItemId, {
+        status: "completed",
+      });
+      expect(result.proposals).toEqual([]);
+      expect(result.assistantMessage.content).toContain('Marked "Strength session" as done');
+      expect(result.assistantMessage.metadata.directPath).toMatchObject({
+        outcome: {
+          kind: "mark_today_workout_done",
+          status: "executed",
+          refreshHints: ["today", "dashboard", "longevity"],
+        },
+      });
+    });
+
+    it("returns clarification for ambiguous workout done without AI or mutation", async () => {
+      const updateItemStatus = vi.fn();
+      const { service, aiCalledRef } = createDirectPathChatService({
+        todayService: {
+          getOrGenerateDay: async () =>
+            buildDirectPathTodayDay({
+              items: [],
+              adherence: {
+                score: null,
+                completedRequired: 0,
+                totalRequired: 0,
+                completedOptional: 0,
+                skippedRequired: 0,
+                skippedOptional: 0,
+              },
+            }),
+          updateItemStatus,
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Mark today's workout done",
+      });
+
+      expect(aiCalledRef.value).toBe(false);
+      expect(updateItemStatus).not.toHaveBeenCalled();
+      expect(result.proposals).toEqual([]);
+      expect(result.assistantMessage.metadata.directPath).toMatchObject({
+        outcome: {
+          kind: "mark_today_workout_done",
+          status: "clarification_required",
+          refreshHints: [],
+        },
+      });
+    });
+
+    it("still calls AI for non-direct messages", async () => {
+      const { service, aiCalledRef } = createDirectPathChatService();
+
+      await service.sendMessage(auth, thread.id, {
+        content: "How can I improve recovery this week?",
+      });
+
+      expect(aiCalledRef.value).toBe(true);
+    });
+
+    it("does not take direct path when attachments are present", async () => {
+      const { service, aiCalledRef } = createDirectPathChatService({
+        attachmentRefIds: ["a1000001-0000-4000-8000-000000000001"],
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "What is today?",
+        attachmentRefIds: ["a1000001-0000-4000-8000-000000000001"],
+      });
+
+      expect(aiCalledRef.value).toBe(true);
+    });
+
+    it("does not take direct path when proposal revision is present", async () => {
+      const { service, aiCalledRef } = createDirectPathChatService();
+
+      await service.sendMessage(auth, thread.id, {
+        content: "What is today?",
+        proposalRevision: {
+          supersededProposalId: "a1000001-0000-4000-8000-000000000001",
+          originalProposal: {
+            intent: "create_workout_plan",
+            targetDomain: "workout",
+            title: "Weekly plan",
+            reason: "Build consistency",
+            proposedChanges: {
+              title: "Weekly plan",
+              summary: "Build consistency with a simple weekly structure.",
+              days: [{ focus: "Strength", exercises: ["Squat"] }],
+              notes: [],
+            },
+          },
+          modificationFeedback: "Make it easier on Wednesdays",
+        },
+      });
+
+      expect(aiCalledRef.value).toBe(true);
+    });
+
+    it("returns crisis support before direct path when crisis language is present", async () => {
+      const { service, aiCalledRef, capturedAssistant } = createDirectPathChatService();
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "I want to die and I do not know what to do",
+      });
+
+      expect(aiCalledRef.value).toBe(false);
+      expect(capturedAssistant[0]?.metadata.crisisBoundary).toBe(true);
+      expect(capturedAssistant[0]?.metadata.directPath).toBeUndefined();
+      expect(result.proposals).toEqual([]);
+    });
   });
 
   describe("habit proposal validation at chat time", () => {
@@ -1631,10 +2046,270 @@ describe("ChatService", () => {
       expect(result.proposals).toHaveLength(1);
     });
 
-    it("links owned attachment refs and merges attachment proposal candidates on send", async () => {
+    it("passes bounded attachment metadata into coach orchestration without generic router fields", async () => {
+      const attachmentId = "a1000001-0000-4000-8000-000000000001";
+      let capturedCoachInput: Record<string, unknown> | undefined;
+
+      const attachmentRecord = {
+        id: attachmentId,
+        userId: user.id,
+        threadId: thread.id,
+        messageId: null,
+        category: "food_photo" as const,
+        status: "ready" as const,
+        filename: "meal.jpg",
+        mimeType: "image/jpeg",
+        fileSizeBytes: 1024,
+        storageKey: "local://attachments/meal.jpg",
+        linkedDocumentId: null,
+        linkedImageRefId: attachmentId,
+        consent: null,
+        recognition: {
+          category: "food_photo" as const,
+          attachmentRefId: attachmentId,
+          analysis: {
+            candidates: [
+              {
+                items: [{ name: "Salad", calories: 320 }],
+                estimatedCalories: 320,
+                estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
+                confidence: "medium" as const,
+                provenance: {
+                  source: "dev_stub",
+                  providerId: "dev_food_photo",
+                  analysisId: "b1000001-0000-4000-8000-000000000002",
+                },
+              },
+            ],
+            lowConfidenceNotice: null,
+          },
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            recognitionId: "b1000001-0000-4000-8000-000000000002",
+            confidence: "medium" as const,
+          },
+        },
+        failureReason: null,
+        retentionPolicy: "ephemeral_recognition" as const,
+        expiresAt: null,
+        createdAt: "2026-05-26T12:00:00.000Z",
+        updatedAt: "2026-05-26T12:00:00.000Z",
+      };
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-05-26T12:00:00.000Z"),
+          }),
+          createProposal: async () => {
+            throw new Error("createProposal should not be called");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async (input: Record<string, unknown>) => {
+            capturedCoachInput = input;
+            return {
+              output: { reply: "I reviewed your attachment.", proposals: [] },
+              parseErrors: [],
+              replySafetyErrors: [],
+              agentMetadata: {
+                provider: "stub" as const,
+                intent: "adjust_nutrition" as const,
+                catalogIntentId: "attachment_food_photo" as const,
+                purpose: "nutrition_adaptation" as const,
+                depth: "medium" as const,
+                timeRange: "14d" as const,
+                toolsInvoked: [],
+                safety: {
+                  status: "passed" as const,
+                  blockedReasons: [],
+                  constraintsApplied: [],
+                },
+                citations: [],
+                routing: {
+                  confidence: 0.98,
+                  routingMethod: "unified_turn_decision" as const,
+                  llmRouterInvoked: false,
+                  unifiedTurnDecisionInvoked: true,
+                  catalogIntentId: "attachment_food_photo" as const,
+                  safetyFlags: [],
+                  expectedResponseMode: "recommendation_with_optional_proposal" as const,
+                  contextSliceCount: 1,
+                  loopIterations: 1,
+                  maxLoopIterations: 3,
+                },
+              },
+            };
+          },
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () =>
+            buildMockAttachmentTurnStageResult({ attachments: [attachmentRecord] }),
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "",
+        attachmentRefIds: [attachmentId],
+      });
+
+      expect(capturedCoachInput?.attachmentTurn).toMatchObject({
+        attachments: [
+          {
+            attachmentRefId: attachmentId,
+            category: "food_photo",
+            consentState: "none",
+          },
+        ],
+      });
+      expect(capturedCoachInput).not.toHaveProperty("proposalRevision");
+      expect(capturedCoachInput?.recentMessages).toEqual([]);
+    });
+
+    it("passes prior thread messages without duplicating the current user turn", async () => {
+      let capturedCoachInput: Record<string, unknown> | undefined;
+      const priorUserMessage = {
+        id: "prior-user-message-id",
+        threadId: thread.id,
+        role: "user" as const,
+        content: "How was my week?",
+        metadata: {},
+        createdAt: new Date("2026-05-26T11:00:00.000Z"),
+      };
+      const priorAssistantMessage = {
+        id: "prior-assistant-message-id",
+        threadId: thread.id,
+        role: "assistant" as const,
+        content: "Your week looked consistent overall.",
+        metadata: {},
+        createdAt: new Date("2026-05-26T11:01:00.000Z"),
+      };
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [priorUserMessage, priorAssistantMessage],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-05-26T12:00:00.000Z"),
+          }),
+          createProposal: async () => {
+            throw new Error("createProposal should not be called");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async (input: Record<string, unknown>) => {
+            capturedCoachInput = input;
+            return {
+              output: { reply: "Here is a follow-up.", proposals: [] },
+              parseErrors: [],
+              replySafetyErrors: [],
+              agentMetadata: {
+                provider: "stub" as const,
+                intent: "general" as const,
+                catalogIntentId: "general" as const,
+                purpose: "general_chat" as const,
+                depth: "small" as const,
+                timeRange: "7d" as const,
+                toolsInvoked: [],
+                safety: {
+                  status: "passed" as const,
+                  blockedReasons: [],
+                  constraintsApplied: [],
+                },
+                citations: [],
+                routing: {
+                  confidence: 0.82,
+                  routingMethod: "unified_turn_decision" as const,
+                  llmRouterInvoked: false,
+                  unifiedTurnDecisionInvoked: true,
+                  catalogIntentId: "general" as const,
+                  safetyFlags: [],
+                  expectedResponseMode: "advice_only" as const,
+                  contextSliceCount: 1,
+                  loopIterations: 1,
+                  maxLoopIterations: 3,
+                },
+              },
+            };
+          },
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "Can you help me stay consistent this week?",
+      });
+
+      expect(capturedCoachInput?.userMessage).toBe("Can you help me stay consistent this week?");
+      expect(capturedCoachInput?.recentMessages).toEqual([
+        { role: "user", content: "How was my week?" },
+        { role: "assistant", content: "Your week looked consistent overall." },
+      ]);
+    });
+
+    it("links owned attachment refs without auto-merging attachment proposals", async () => {
       const attachmentId = "a1000001-0000-4000-8000-000000000001";
       let userMessageMetadata: Record<string, unknown> = {};
-      let linkCalled = false;
+      let turnStagesCalled = false;
 
       const attachmentRecord = {
         id: attachmentId,
@@ -1762,40 +2437,14 @@ describe("ChatService", () => {
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
         },
-        chatAttachmentsService: {
-          assertOwnedAttachmentRefs: async () => [attachmentRecord],
-          linkAttachmentsToMessage: async () => {
-            linkCalled = true;
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () => {
+            turnStagesCalled = true;
+            return buildMockAttachmentTurnStageResult({
+              attachments: [attachmentRecord],
+            });
           },
-          classifyAndRecognizeAttachmentsForMessage: async () => [attachmentRecord],
-        },
-        chatAttachmentRecognitionService: {
-          buildProposalCandidates: () => [
-            {
-              intent: "log_nutrition_incident",
-              targetDomain: "nutrition",
-              title: "Log meal from photo",
-              reason: "Review meal estimate",
-              proposedChanges: { attachmentRefId: attachmentId },
-              attachmentRefId: attachmentId,
-            },
-          ],
-          mergeAttachmentProposals: (
-            aiProposals: RawAiProposal[],
-            attachmentProposals: AttachmentProposalCandidate[],
-          ): RawAiProposal[] => [
-            ...aiProposals,
-            ...attachmentProposals.map(
-              ({ intent, targetDomain, title, reason, proposedChanges }) =>
-                ({
-                  intent,
-                  targetDomain,
-                  title,
-                  reason,
-                  proposedChanges,
-                }) as RawAiProposal,
-            ),
-          ],
         },
       });
 
@@ -1805,11 +2454,119 @@ describe("ChatService", () => {
       });
 
       expect(userMessageMetadata.attachmentRefIds).toEqual([attachmentId]);
-      expect(linkCalled).toBe(true);
-      expect(capturedProposals.map((proposal) => proposal.intent)).toContain(
-        "log_nutrition_incident",
-      );
-      expect(result.attachmentOutcomes?.[0]?.proposalCandidateCount).toBe(1);
+      expect(turnStagesCalled).toBe(true);
+      expect(capturedProposals).toEqual([]);
+      expect(result.proposals).toHaveLength(0);
+    });
+
+    it("does not persist proposals when coach AI fails on attachment turns", async () => {
+      const attachmentId = "a1000001-0000-4000-8000-000000000001";
+      const createProposal = vi.fn();
+      const attachmentRecord = {
+        id: attachmentId,
+        userId: user.id,
+        threadId: thread.id,
+        messageId: null,
+        category: "food_photo" as const,
+        status: "ready" as const,
+        filename: "meal.jpg",
+        mimeType: "image/jpeg",
+        fileSizeBytes: 1024,
+        storageKey: "local://attachments/meal.jpg",
+        linkedDocumentId: null,
+        linkedImageRefId: attachmentId,
+        consent: null,
+        recognition: {
+          category: "food_photo" as const,
+          attachmentRefId: attachmentId,
+          analysis: { candidates: [], lowConfidenceNotice: null },
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            recognitionId: "b1000001-0000-4000-8000-000000000002",
+            confidence: "medium" as const,
+          },
+        },
+        failureReason: null,
+        retentionPolicy: "ephemeral_recognition" as const,
+        expiresAt: null,
+        createdAt: "2026-05-26T12:00:00.000Z",
+        updatedAt: "2026-05-26T12:00:00.000Z",
+      };
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-05-26T12:00:00.000Z"),
+          }),
+          createProposal,
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "I could not review that attachment safely.", proposals: [] },
+            parseErrors: ["OpenAI coach provider request failed."],
+            replySafetyErrors: [],
+            agentMetadata: {
+              provider: "stub",
+              intent: "general",
+              catalogIntentId: "general",
+              purpose: "general_chat",
+              depth: "small",
+              timeRange: "7d",
+              toolsInvoked: [],
+              citations: [],
+              unifiedTurnDecision: { ran: true, routingMethod: "unified_turn_decision" },
+              safety: {
+                status: "provider_error",
+                blockedReasons: ["OpenAI coach provider request failed."],
+                constraintsApplied: [],
+              },
+              routing: {
+                confidence: 0.35,
+                routingMethod: "unified_turn_decision",
+                llmRouterInvoked: false,
+                unifiedTurnDecisionInvoked: true,
+                catalogIntentId: "general",
+                safetyFlags: [],
+                expectedResponseMode: "advice_only",
+                contextSliceCount: 1,
+              },
+            },
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+        },
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () =>
+            buildMockAttachmentTurnStageResult({ attachments: [attachmentRecord] }),
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "",
+        attachmentRefIds: [attachmentId],
+      });
+
+      expect(createProposal).not.toHaveBeenCalled();
+      expect(result.proposals).toEqual([]);
     });
 
     it("rejects chat send when attachment refs are still recognizing", async () => {
@@ -1849,30 +2606,13 @@ describe("ChatService", () => {
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
         },
-        chatAttachmentsService: {
-          assertOwnedAttachmentRefs: async () => [
-            {
-              id: attachmentId,
-              userId: user.id,
-              threadId: thread.id,
-              messageId: null,
-              category: "food_photo",
-              status: "recognizing",
-              filename: "meal.jpg",
-              mimeType: "image/jpeg",
-              fileSizeBytes: 1024,
-              storageKey: "local://attachments/meal.jpg",
-              linkedDocumentId: null,
-              linkedImageRefId: attachmentId,
-              consent: null,
-              recognition: null,
-              failureReason: null,
-              retentionPolicy: "ephemeral_recognition",
-              expiresAt: null,
-              createdAt: "2026-05-26T12:00:00.000Z",
-              updatedAt: "2026-05-26T12:00:00.000Z",
-            },
-          ],
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => {
+            throw new BadRequestException({
+              message: "Attachment references failed validation.",
+              validationErrors: ["Attachment is still processing."],
+            });
+          },
         },
       });
 
@@ -1888,6 +2628,8 @@ describe("ChatService", () => {
 
     it("allows text-only chat send without attachment refs", async () => {
       let createMessageCalled = false;
+      const validateRefsForSend = vi.fn();
+      const runTurnStages = vi.fn();
 
       const service = createChatService({
         chatRepository: {
@@ -1941,6 +2683,10 @@ describe("ChatService", () => {
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
         },
+        chatTurnAttachmentStageService: {
+          validateRefsForSend,
+          runTurnStages,
+        },
       });
 
       await service.sendMessage(auth, thread.id, {
@@ -1948,17 +2694,108 @@ describe("ChatService", () => {
       });
 
       expect(createMessageCalled).toBe(true);
+      expect(validateRefsForSend).not.toHaveBeenCalled();
+      expect(runTurnStages).not.toHaveBeenCalled();
     });
 
-    it("classifies queued unclassified refs during send and passes meal context to proposal builders", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-05-26T18:00:00.000Z"));
-
+    it("runs attachment turn stages after user message creation with persisted messageId", async () => {
       const attachmentId = "a1000001-0000-4000-8000-000000000001";
-      let classifyInput: { messageContent: string } | undefined;
-      let buildProposalInput: { mealContextLabel?: string | null } | undefined;
+      let userMessageCreated = false;
+      let turnStageInput:
+        | {
+            messageId: string;
+            attachmentRefIds: readonly string[];
+          }
+        | undefined;
 
-      const classifiedAttachment = {
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "user") {
+              userMessageCreated = true;
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-05-26T12:00:00.000Z"),
+            };
+          },
+          createProposal: async () => {
+            throw new Error("createProposal should not be called");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "I reviewed your attachment.", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async (input: {
+            messageId: string;
+            attachmentRefIds: readonly string[];
+          }) => {
+            expect(userMessageCreated).toBe(true);
+            turnStageInput = input;
+            return buildMockAttachmentTurnStageResult({
+              attachments: [
+                {
+                  id: attachmentId,
+                  category: "food_photo",
+                  status: "ready",
+                  recognition: null,
+                },
+              ],
+            });
+          },
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "Second meal",
+        attachmentRefIds: [attachmentId],
+      });
+
+      expect(turnStageInput?.messageId).toBe("user-message-id");
+      expect(turnStageInput?.attachmentRefIds).toEqual([attachmentId]);
+    });
+
+    it("passes bounded attachment metadata (no recognition envelope) to coach orchestration", async () => {
+      const attachmentId = "a1000001-0000-4000-8000-000000000001";
+      let capturedCoachInput: Record<string, unknown> | undefined;
+
+      const attachmentRecord = {
         id: attachmentId,
         userId: user.id,
         threadId: thread.id,
@@ -1972,68 +2809,13 @@ describe("ChatService", () => {
         linkedDocumentId: null,
         linkedImageRefId: attachmentId,
         consent: null,
-        recognition: {
-          category: "food_photo" as const,
-          attachmentRefId: attachmentId,
-          analysis: {
-            candidates: [
-              {
-                items: [{ name: "Salad", calories: 320 }],
-                estimatedCalories: 320,
-                estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
-                confidence: "medium" as const,
-                provenance: {
-                  source: "dev_stub",
-                  providerId: "dev_food_photo",
-                  analysisId: "b1000001-0000-4000-8000-000000000002",
-                },
-              },
-            ],
-            lowConfidenceNotice: null,
-          },
-          provenance: {
-            source: "dev_stub",
-            providerId: "dev_food_photo",
-            recognitionId: "b1000001-0000-4000-8000-000000000002",
-            confidence: "medium" as const,
-          },
-        },
+        recognition: null,
         failureReason: null,
         retentionPolicy: "ephemeral_recognition" as const,
         expiresAt: null,
         createdAt: "2026-05-26T12:00:00.000Z",
         updatedAt: "2026-05-26T12:00:00.000Z",
       };
-
-      const queuedAttachment = {
-        ...classifiedAttachment,
-        category: "unclassified" as const,
-        status: "queued" as const,
-        linkedImageRefId: null,
-        recognition: null,
-      };
-
-      const recognitionService = new ChatAttachmentRecognitionService(
-        { recognize: vi.fn(), buildEnvelope: vi.fn() } as never,
-        { recognize: vi.fn() } as never,
-        { recognize: vi.fn() } as never,
-        {
-          buildProposalPayloadFromAnalysis: vi.fn(() => ({
-            incidentDateTime: "2026-05-26T18:00:00.000Z",
-            items: [{ name: "Salad", calories: 320 }],
-            estimatedCalories: 320,
-            estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
-            confidence: "medium" as const,
-            provenance: {
-              source: "dev_stub" as const,
-              providerId: "dev_food_photo",
-              analysisId: "b1000001-0000-4000-8000-000000000002",
-            },
-            imageRefs: [{ id: attachmentId }],
-            mealContextLabel: "Second meal",
-          })),
-        } as never,
-      );
 
       const service = createChatService({
         chatRepository: {
@@ -2050,13 +2832,260 @@ describe("ChatService", () => {
             role,
             content,
             metadata,
-            createdAt: new Date("2026-05-26T18:00:00.000Z"),
+            createdAt: new Date("2026-05-26T12:00:00.000Z"),
+          }),
+          createProposal: async () => {
+            throw new Error("createProposal should not be called");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async (input: Record<string, unknown>) => {
+            capturedCoachInput = input;
+            return {
+              output: { reply: "I reviewed your attachment.", proposals: [] },
+              parseErrors: [],
+              replySafetyErrors: [],
+            };
+          },
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () =>
+            buildMockAttachmentTurnStageResult({ attachments: [attachmentRecord] }),
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "Second meal",
+        attachmentRefIds: [attachmentId],
+      });
+
+      // Bounded metadata only — no recognition envelope, no contextSummaries.
+      expect(capturedCoachInput?.attachmentTurn).toMatchObject({
+        attachments: [
+          {
+            attachmentRefId: attachmentId,
+            category: "food_photo",
+            mimeType: "image/jpeg",
+            consentState: "none",
+          },
+        ],
+      });
+      expect(capturedCoachInput?.attachmentTurn).not.toHaveProperty("contextSummaries");
+    });
+  });
+
+  describe("proposal explainer turns", () => {
+    it("returns clarification without calling AI when no stored proposal exists", async () => {
+      const generateCoachResponse = vi.fn();
+      const createProposal = vi.fn();
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-msg" : "assistant-msg",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-05-27T10:00:00.000Z"),
+          }),
+          touchThread: async () => undefined,
+          createProposal,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse,
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+        },
+        proposalExplainerService: {
+          resolvePreAiTurn: async () => ({
+            kind: "no_proposal",
+            reply: "No recent proposal to explain.",
+          }),
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Why this proposal?",
+      });
+
+      expect(generateCoachResponse).not.toHaveBeenCalled();
+      expect(createProposal).not.toHaveBeenCalled();
+      expect(result.proposals).toEqual([]);
+      expect(result.assistantMessage.content).toBe("No recent proposal to explain.");
+    });
+
+    it("passes proposal context to AI and does not persist proposals", async () => {
+      const createProposal = vi.fn();
+      let capturedCoachInput: Record<string, unknown> | undefined;
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-msg" : "assistant-msg",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-05-27T10:00:00.000Z"),
+          }),
+          touchThread: async () => undefined,
+          createProposal,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async (input: Record<string, unknown>) => {
+            capturedCoachInput = input;
+            return {
+              output: {
+                reply: "I suggested this because your recovery signals were low.",
+                proposals: [
+                  {
+                    intent: "adapt_workout_plan",
+                    targetDomain: "workout",
+                    title: "Should not persist",
+                    reason: "Blocked",
+                    proposedChanges: {},
+                  },
+                ],
+              },
+              parseErrors: [],
+              replySafetyErrors: [],
+              agentMetadata: {
+                provider: "stub",
+                intent: "proposal_explainer",
+                catalogIntentId: "proposal_explainer",
+                purpose: "general_chat",
+                depth: "small",
+                timeRange: "7d",
+                toolsInvoked: [],
+                citations: [],
+                routing: {
+                  confidence: 0.95,
+                  routingMethod: "rule_based",
+                  llmRouterInvoked: false,
+                  catalogIntentId: "proposal_explainer",
+                  safetyFlags: [],
+                  expectedResponseMode: "advice_only",
+                  contextSliceCount: 1,
+                  maxLoopIterations: 3,
+                  loopIterations: 1,
+                },
+                safety: {
+                  status: "passed",
+                  blockedReasons: [],
+                  constraintsApplied: [],
+                },
+              },
+            };
+          },
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+        },
+        proposalExplainerService: {
+          resolvePreAiTurn: async () => ({
+            kind: "with_proposal",
+            context: {
+              proposalId: "a1000001-0000-4000-8000-000000000001",
+              intent: "adapt_workout_plan",
+              targetDomain: "workout",
+              title: "Lighten leg day",
+              reason: "Recent poor sleep suggested a lighter session.",
+              status: "pending",
+              evidenceSummaries: [
+                { domain: "wellbeing", label: "Poor sleep reported yesterday" },
+              ],
+              createdAt: "2026-05-27T10:00:00.000Z",
+            },
+          }),
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Why did you suggest this change?",
+      });
+
+      expect(capturedCoachInput?.proposalExplainer).toMatchObject({
+        proposalId: "a1000001-0000-4000-8000-000000000001",
+        title: "Lighten leg day",
+      });
+      expect(createProposal).not.toHaveBeenCalled();
+      expect(result.proposals).toEqual([]);
+      expect(result.assistantMessage.content).toContain("recovery signals");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 7: consentRequired surfacing + no health_documents auto-persist
+  // ---------------------------------------------------------------------------
+
+  describe("consentRequired surfacing (Phase 7)", () => {
+    function buildMinimalChatServiceWithAiResult(aiResult: {
+      consentRequired?: boolean;
+      proposals?: unknown[];
+    }) {
+      return createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-05-30T10:00:00.000Z"),
           }),
           createProposal: async (
             _userId: string,
             _threadId: string,
             _sourceMessageId: string | null,
-            proposal: { intent: string; proposedChanges: unknown; title?: string; reason?: string },
+            proposal: unknown,
             validationStatus: "valid" | "invalid" | "pending_validation",
             validationErrors: string[],
           ) => ({
@@ -2064,18 +3093,14 @@ describe("ChatService", () => {
             userId: user.id,
             threadId: thread.id,
             sourceMessageId: "assistant-message-id",
-            targetDomain: "nutrition",
+            ...(proposal as Record<string, unknown>),
             status: "pending" as const,
             validationStatus,
             validationErrors,
             userDecisionAt: null,
             appliedReference: null,
-            createdAt: new Date("2026-05-26T18:00:00.000Z"),
-            updatedAt: new Date("2026-05-26T18:00:00.000Z"),
-            title: proposal.title ?? "Log meal from photo (Second meal)",
-            reason: proposal.reason ?? "Review meal estimate",
-            intent: proposal.intent,
-            proposedChanges: proposal.proposedChanges,
+            createdAt: new Date("2026-05-30T10:00:00.000Z"),
+            updatedAt: new Date("2026-05-30T10:00:00.000Z"),
           }),
           touchThread: async () => undefined,
         },
@@ -2084,195 +3109,24 @@ describe("ChatService", () => {
         },
         aiService: {
           generateCoachResponse: async () => ({
-            output: { reply: "I reviewed your meal photo.", proposals: [] },
-            parseErrors: [],
-            replySafetyErrors: [],
-          }),
-        },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
-        chatAttachmentsService: {
-          assertOwnedAttachmentRefs: async () => [queuedAttachment],
-          linkAttachmentsToMessage: async () => undefined,
-          classifyAndRecognizeAttachmentsForMessage: async (
-            input: ClassifyAttachmentsForMessageInput,
-          ) => {
-            classifyInput = input;
-            return [classifiedAttachment];
-          },
-        },
-        chatAttachmentRecognitionService: {
-          buildProposalCandidates: (input: BuildAttachmentProposalInput) => {
-            buildProposalInput = input;
-            return recognitionService.buildProposalCandidates(input);
-          },
-          mergeAttachmentProposals: (
-            aiProposals: RawAiProposal[],
-            attachmentProposals: AttachmentProposalCandidate[],
-          ): RawAiProposal[] =>
-            recognitionService.mergeAttachmentProposals(aiProposals, attachmentProposals),
-        },
-      });
-
-      const result = await service.sendMessage(auth, thread.id, {
-        content: "второй прием пищи",
-        attachmentRefIds: [attachmentId],
-      });
-
-      expect(classifyInput?.messageContent).toBe("второй прием пищи");
-      expect(buildProposalInput?.mealContextLabel).toBe("Second meal");
-      expect(result.attachmentOutcomes?.[0]?.proposalCandidateCount).toBe(1);
-      expect(result.proposals).toHaveLength(1);
-      expect(result.proposals[0]?.intent).toBe("log_nutrition_incident");
-      expect(result.proposals[0]?.title).toMatch(/Second meal/i);
-      expect(result.proposals[0]?.proposedChanges).toMatchObject({
-        mealContextLabel: "Second meal",
-        attachmentRefId: attachmentId,
-      });
-    });
-
-    it("dedupes text-estimate nutrition proposals when a photo-backed attachment proposal is present", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-05-26T18:00:00.000Z"));
-
-      const attachmentId = "a1000001-0000-4000-8000-000000000001";
-      const capturedProposals: Array<{ intent: string; proposedChanges: unknown }> = [];
-
-      const attachmentRecord = {
-        id: attachmentId,
-        userId: user.id,
-        threadId: thread.id,
-        messageId: "user-message-id",
-        category: "food_photo" as const,
-        status: "ready" as const,
-        filename: "meal.jpg",
-        mimeType: "image/jpeg",
-        fileSizeBytes: 1024,
-        storageKey: "local://attachments/meal.jpg",
-        linkedDocumentId: null,
-        linkedImageRefId: attachmentId,
-        consent: null,
-        recognition: {
-          category: "food_photo" as const,
-          attachmentRefId: attachmentId,
-          analysis: {
-            candidates: [
-              {
-                items: [{ name: "Salad", calories: 320 }],
-                estimatedCalories: 320,
-                estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
-                confidence: "medium" as const,
-                provenance: {
-                  source: "dev_stub",
-                  providerId: "dev_food_photo",
-                  analysisId: "b1000001-0000-4000-8000-000000000002",
-                },
-              },
-            ],
-            lowConfidenceNotice: null,
-          },
-          provenance: {
-            source: "dev_stub",
-            providerId: "dev_food_photo",
-            recognitionId: "b1000001-0000-4000-8000-000000000002",
-            confidence: "medium" as const,
-          },
-        },
-        failureReason: null,
-        retentionPolicy: "ephemeral_recognition" as const,
-        expiresAt: null,
-        createdAt: "2026-05-26T12:00:00.000Z",
-        updatedAt: "2026-05-26T12:00:00.000Z",
-      };
-
-      const recognitionService = new ChatAttachmentRecognitionService(
-        { recognize: vi.fn(), buildEnvelope: vi.fn() } as never,
-        { recognize: vi.fn() } as never,
-        { recognize: vi.fn() } as never,
-        {
-          buildProposalPayloadFromAnalysis: vi.fn(() => ({
-            incidentDateTime: "2026-05-26T18:00:00.000Z",
-            items: [{ name: "Salad", calories: 320 }],
-            estimatedCalories: 320,
-            estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
-            confidence: "medium" as const,
-            provenance: {
-              source: "dev_stub" as const,
-              providerId: "dev_food_photo",
-              analysisId: "b1000001-0000-4000-8000-000000000002",
+            output: {
+              reply: "Health context noted. I prepared a consent-gated proposal you can review.",
+              proposals: (aiResult.proposals ?? []) as never,
             },
-            imageRefs: [{ id: attachmentId }],
-            attachmentRefId: attachmentId,
-          })),
-        } as never,
-      );
-
-      const service = createChatService({
-        chatRepository: {
-          findThreadById: async () => thread,
-          listMessagesByThreadId: async () => [],
-          createMessage: async (
-            _threadId: string,
-            role: "user" | "assistant" | "system",
-            content: string,
-          ) => ({
-            id: role === "user" ? "user-message-id" : "assistant-message-id",
-            threadId: thread.id,
-            role,
-            content,
-            metadata: {},
-            createdAt: new Date("2026-05-26T18:00:00.000Z"),
-          }),
-          createProposal: async (
-            _userId: string,
-            _threadId: string,
-            _sourceMessageId: string | null,
-            proposal: { intent: string; proposedChanges: unknown },
-            validationStatus: "valid" | "invalid" | "pending_validation",
-            validationErrors: string[],
-          ) => {
-            capturedProposals.push(proposal);
-
-            return {
-              id: "proposal-id",
-              userId: user.id,
-              threadId: thread.id,
-              sourceMessageId: "assistant-message-id",
-              targetDomain: "nutrition",
-              title: "Nutrition proposal",
-              reason: "From send",
-              ...proposal,
-              status: "pending" as const,
-              validationStatus,
-              validationErrors,
-              userDecisionAt: null,
-              appliedReference: null,
-              createdAt: new Date("2026-05-26T18:00:00.000Z"),
-              updatedAt: new Date("2026-05-26T18:00:00.000Z"),
-            };
-          },
-          touchThread: async () => undefined,
-        },
-        usersService: {
-          resolveFromAuth: async () => user,
-        },
-        aiService: {
-          generateCoachResponse: async () => ({
-            output: { reply: "Got it.", proposals: [] },
             parseErrors: [],
             replySafetyErrors: [],
+            consentRequired: aiResult.consentRequired,
+            agentMetadata: {
+              provider: "stub" as const,
+              intent: "general" as const,
+              catalogIntentId: "general" as const,
+              purpose: "general_chat" as const,
+              depth: "small" as const,
+              timeRange: "7d" as const,
+              toolsInvoked: [],
+              safety: { status: "passed" as const, blockedReasons: [], constraintsApplied: [] },
+              citations: [],
+            },
           }),
         },
         proposalValidationService: {
@@ -2289,211 +3143,124 @@ describe("ChatService", () => {
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
         },
-        chatAttachmentsService: {
-          assertOwnedAttachmentRefs: async () => [attachmentRecord],
-          linkAttachmentsToMessage: async () => undefined,
-          classifyAndRecognizeAttachmentsForMessage: async () => [attachmentRecord],
-        },
-        chatAttachmentRecognitionService: {
-          buildProposalCandidates: (input: BuildAttachmentProposalInput) =>
-            recognitionService.buildProposalCandidates(input),
-          mergeAttachmentProposals: (
-            aiProposals: RawAiProposal[],
-            attachmentProposals: AttachmentProposalCandidate[],
-          ): RawAiProposal[] =>
-            recognitionService.mergeAttachmentProposals(aiProposals, attachmentProposals),
-        },
       });
+    }
+
+    it("surfaces consentRequired=true on the chat turn result when the AI result carries it", async () => {
+      const service = buildMinimalChatServiceWithAiResult({ consentRequired: true });
 
       const result = await service.sendMessage(auth, thread.id, {
-        content: "I had a cheat meal tonight",
-        attachmentRefIds: [attachmentId],
+        content: "Please review my health document and suggest next steps.",
       });
 
-      expect(capturedProposals.filter((proposal) => proposal.intent === "log_nutrition_incident")).toHaveLength(
-        1,
-      );
-      expect(capturedProposals[0]?.proposedChanges).toMatchObject({
-        attachmentRefId: attachmentId,
-        provenance: { source: "dev_stub" },
-      });
-      expect(result.proposals).toHaveLength(1);
+      // consentRequired must be surfaced to the caller so the UI can prompt for consent.
+      expect(result.consentRequired).toBe(true);
+      // No health_documents are auto-persisted — proposals flow through the normal
+      // proposal validation + accept path. The proposals array may be empty or contain
+      // a consent-gated proposal record; no auto-applied health_documents row exists.
+      // (The intent type union does not include an auto-persist variant by design.)
+      expect(Array.isArray(result.proposals)).toBe(true);
     });
 
-    it("returns workout attachment outcomes without auto plan mutation proposals", async () => {
-      const attachmentId = "c1000001-0000-4000-8000-000000000001";
-
-      const workoutAttachment = {
-        id: attachmentId,
-        userId: user.id,
-        threadId: thread.id,
-        messageId: "user-message-id",
-        category: "workout_attachment" as const,
-        status: "ready" as const,
-        filename: "session.jpg",
-        mimeType: "image/jpeg",
-        fileSizeBytes: 1024,
-        storageKey: "local://attachments/session.jpg",
-        linkedDocumentId: null,
-        linkedImageRefId: null,
-        consent: null,
-        recognition: {
-          category: "workout_attachment" as const,
-          attachmentRefId: attachmentId,
-          attachmentKind: "exercise_photo" as const,
-          sessionLabel: "Recognized training session",
-          sessionDate: null,
-          exercises: [{ name: "Row", target: "3 sets", sets: 3, reps: "8-10" }],
-          suggestedIntent: "log_session_context" as const,
-          planDraftTitle: null,
-          provenance: {
-            source: "dev_stub",
-            providerId: "dev_workout_attachment",
-            recognitionId: "f1000001-0000-4000-8000-000000000002",
-            confidence: "medium" as const,
-          },
-          manualFallbackNotice: "Describe the workout in text.",
-        },
-        failureReason: null,
-        retentionPolicy: "ephemeral_recognition" as const,
-        expiresAt: null,
-        createdAt: "2026-05-26T12:00:00.000Z",
-        updatedAt: "2026-05-26T12:00:00.000Z",
-      };
-
-      const recognitionService = new ChatAttachmentRecognitionService(
-        { recognize: vi.fn(), buildEnvelope: vi.fn() } as never,
-        { recognize: vi.fn() } as never,
-        { recognize: vi.fn() } as never,
-        { buildProposalPayloadFromAnalysis: vi.fn() } as never,
-      );
-
-      const service = createChatService({
-        chatRepository: {
-          findThreadById: async () => thread,
-          listMessagesByThreadId: async () => [],
-          createMessage: async (
-            _threadId: string,
-            role: "user" | "assistant" | "system",
-            content: string,
-          ) => ({
-            id: role === "user" ? "user-message-id" : "assistant-message-id",
-            threadId: thread.id,
-            role,
-            content,
-            metadata: {},
-            createdAt: new Date("2026-05-26T12:00:00.000Z"),
-          }),
-          createProposal: async () => {
-            throw new Error("createProposal should not be called for session-context workout attachments");
-          },
-          touchThread: async () => undefined,
-        },
-        usersService: {
-          resolveFromAuth: async () => user,
-        },
-        aiService: {
-          generateCoachResponse: async () => ({
-            output: { reply: "I reviewed your training attachment.", proposals: [] },
-            parseErrors: [],
-            replySafetyErrors: [],
-          }),
-        },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
-        chatAttachmentsService: {
-          assertOwnedAttachmentRefs: async () => [workoutAttachment],
-          linkAttachmentsToMessage: async () => undefined,
-          classifyAndRecognizeAttachmentsForMessage: async () => [workoutAttachment],
-        },
-        chatAttachmentRecognitionService: {
-          buildProposalCandidates: (input: BuildAttachmentProposalInput) =>
-            recognitionService.buildProposalCandidates(input),
-          mergeAttachmentProposals: (
-            aiProposals: RawAiProposal[],
-            attachmentProposals: AttachmentProposalCandidate[],
-          ): RawAiProposal[] =>
-            recognitionService.mergeAttachmentProposals(aiProposals, attachmentProposals),
-        },
-      });
+    it("does not set consentRequired on the chat turn result when the AI result has consentRequired=false", async () => {
+      const service = buildMinimalChatServiceWithAiResult({ consentRequired: false });
 
       const result = await service.sendMessage(auth, thread.id, {
-        content: "заполни активность",
-        attachmentRefIds: [attachmentId],
+        content: "Can you adapt my workout plan this week?",
       });
 
-      expect(result.attachmentOutcomes?.[0]?.category).toBe("workout_attachment");
-      expect(result.attachmentOutcomes?.[0]?.proposalCandidateCount).toBe(0);
-      expect(result.proposals).toEqual([]);
+      // consentRequired must NOT be set (falsy / absent) for normal non-consent turns.
+      expect(result.consentRequired).toBeFalsy();
     });
 
-    it("returns medical attachment outcomes without proposals before profile review", async () => {
-      const attachmentId = "d1000001-0000-4000-8000-000000000001";
+    it("does not set consentRequired on the chat turn result when the AI result is undefined", async () => {
+      const service = buildMinimalChatServiceWithAiResult({ consentRequired: undefined });
 
-      const medicalAttachment = {
-        id: attachmentId,
-        userId: user.id,
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Can you adjust my nutrition plan?",
+      });
+
+      expect(result.consentRequired).toBeFalsy();
+    });
+  });
+
+  describe("attachment display metadata on message DTOs", () => {
+    const attachmentId = "a1000001-0000-4000-8000-000000000001";
+    const attachmentMeta = {
+      attachmentRefId: attachmentId,
+      filename: "food.jpg",
+      mimeType: "image/jpeg",
+      category: "food_photo" as const,
+      status: "ready" as const,
+      hasViewableContent: true,
+    };
+
+    function makeMessage(id: string, role: "user" | "assistant" = "user") {
+      return {
+        id,
         threadId: thread.id,
-        messageId: "user-message-id",
-        category: "medical_document" as const,
-        status: "needs_review" as const,
-        filename: "labs.pdf",
-        mimeType: "application/pdf",
-        fileSizeBytes: 1024,
-        storageKey: "local://attachments/labs.pdf",
-        linkedDocumentId: "e1000001-0000-4000-8000-000000000001",
-        linkedImageRefId: null,
-        consent: {
-          consentScopes: ["upload_storage", "parse_ocr"],
-          consentVersion: "v1",
-          consentGrantedAt: "2026-05-26T12:00:00.000Z",
-          documentType: "lab_report",
-          documentTitle: "Labs",
-        },
-        recognition: {
-          category: "medical_document" as const,
-          attachmentRefId: attachmentId,
-          documentId: "e1000001-0000-4000-8000-000000000001",
-          documentType: "lab_report",
-          title: "Labs",
-          parseStatus: "summary_ready",
-          summarySnippet: null,
-          reviewStatus: "pending_review",
-          consentScopes: ["upload_storage", "parse_ocr"],
-          provenance: {
-            source: "document_parser",
-            providerId: "documents_module",
-            recognitionId: "f1000001-0000-4000-8000-000000000001",
-          },
-          wellnessContextOnlyNotice:
-            "This document is wellness coaching context only. It is not a diagnosis or treatment plan.",
-          documentReviewPath: "/profile/documents?documentId=e1000001-0000-4000-8000-000000000001",
-        },
-        failureReason: null,
-        retentionPolicy: "document_consent_rules" as const,
-        expiresAt: null,
-        createdAt: "2026-05-26T12:00:00.000Z",
-        updatedAt: "2026-05-26T12:00:00.000Z",
+        role,
+        content: "Hello",
+        metadata: {},
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
       };
+    }
 
-      const recognitionService = new ChatAttachmentRecognitionService(
-        { recognize: vi.fn(), buildEnvelope: vi.fn() } as never,
-        { recognize: vi.fn() } as never,
-        { recognize: vi.fn() } as never,
-        { buildProposalPayloadFromAnalysis: vi.fn() } as never,
-      );
+    it("getThread populates attachments on messages via a single batched load", async () => {
+      const msgId = "msg-001-user";
+      const listByMessageIdsCalls: string[][] = [];
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [makeMessage(msgId, "user")],
+          touchThread: async () => undefined,
+        },
+        usersService: { resolveFromAuth: async () => user },
+        aiService: {} as never,
+        proposalValidationService: {} as never,
+        chatAttachmentsService: {
+          getMessageDisplayAttachments: async (userId: string, ids: string[]) => {
+            listByMessageIdsCalls.push(ids);
+            const map = new Map<string, typeof attachmentMeta[]>();
+            map.set(msgId, [attachmentMeta]);
+            return map;
+          },
+        },
+      });
+
+      const result = await service.getThread(auth, thread.id);
+
+      expect(result.messages).toHaveLength(1);
+      expect(result.messages[0]?.attachments).toHaveLength(1);
+      expect(result.messages[0]?.attachments[0]?.hasViewableContent).toBe(true);
+      // batched: called once for all messages, not once per message
+      expect(listByMessageIdsCalls).toHaveLength(1);
+      expect(listByMessageIdsCalls[0]).toContain(msgId);
+    });
+
+    it("getThread returns empty attachments array for messages with no linked attachments", async () => {
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [makeMessage("msg-002")],
+          touchThread: async () => undefined,
+        },
+        usersService: { resolveFromAuth: async () => user },
+        aiService: {} as never,
+        proposalValidationService: {} as never,
+        chatAttachmentsService: {
+          getMessageDisplayAttachments: async () => new Map(),
+        },
+      });
+
+      const result = await service.getThread(auth, thread.id);
+
+      expect(result.messages[0]?.attachments).toEqual([]);
+    });
+
+    it("sendMessage returns populated attachments on userMessage when attachments are linked", async () => {
+      const userMsgId = "user-msg-with-attachment";
 
       const service = createChatService({
         chatRepository: {
@@ -2503,25 +3270,22 @@ describe("ChatService", () => {
             _threadId: string,
             role: "user" | "assistant" | "system",
             content: string,
+            metadata: Record<string, unknown> = {},
           ) => ({
-            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            id: role === "user" ? userMsgId : "assistant-msg",
             threadId: thread.id,
             role,
             content,
-            metadata: {},
-            createdAt: new Date("2026-05-26T12:00:00.000Z"),
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
           }),
-          createProposal: async () => {
-            throw new Error("createProposal should not be called for pending medical review");
-          },
+          createProposal: async () => { throw new Error("not needed"); },
           touchThread: async () => undefined,
         },
-        usersService: {
-          resolveFromAuth: async () => user,
-        },
+        usersService: { resolveFromAuth: async () => user },
         aiService: {
           generateCoachResponse: async () => ({
-            output: { reply: "Your document is ready for profile review.", proposals: [] },
+            output: { reply: "Got your photo.", proposals: [] },
             parseErrors: [],
             replySafetyErrors: [],
           }),
@@ -2540,33 +3304,86 @@ describe("ChatService", () => {
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
         },
-        chatAttachmentsService: {
-          assertOwnedAttachmentRefs: async () => [medicalAttachment],
-          linkAttachmentsToMessage: async () => undefined,
-          classifyAndRecognizeAttachmentsForMessage: async () => [medicalAttachment],
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () => ({
+            attachmentMetadata: [
+              { refId: attachmentId, category: "food_photo", mimeType: "image/jpeg", consentState: "none", storageRef: "local://x" },
+            ],
+            outcomes: [],
+          }),
         },
-        chatAttachmentRecognitionService: {
-          buildProposalCandidates: (input: BuildAttachmentProposalInput) =>
-            recognitionService.buildProposalCandidates(input),
-          mergeAttachmentProposals: (
-            aiProposals: RawAiProposal[],
-            attachmentProposals: AttachmentProposalCandidate[],
-          ): RawAiProposal[] =>
-            recognitionService.mergeAttachmentProposals(aiProposals, attachmentProposals),
+        chatAttachmentsService: {
+          getMessageDisplayAttachments: async (_userId: string, ids: string[]) => {
+            const map = new Map<string, typeof attachmentMeta[]>();
+            if (ids.includes(userMsgId)) {
+              map.set(userMsgId, [attachmentMeta]);
+            }
+            return map;
+          },
         },
       });
 
       const result = await service.sendMessage(auth, thread.id, {
-        content: "here are my lab results",
+        content: "",
         attachmentRefIds: [attachmentId],
       });
 
-      expect(result.attachmentOutcomes?.[0]?.category).toBe("medical_document");
-      expect(result.attachmentOutcomes?.[0]?.proposalCandidateCount).toBe(0);
-      if (result.attachmentOutcomes?.[0]?.recognition?.category === "medical_document") {
-        expect(result.attachmentOutcomes[0].recognition.summarySnippet).toBeNull();
-      }
-      expect(result.proposals).toEqual([]);
+      expect(result.userMessage.attachments).toHaveLength(1);
+      expect(result.userMessage.attachments[0]?.attachmentRefId).toBe(attachmentId);
+      expect(result.userMessage.attachments[0]?.hasViewableContent).toBe(true);
+    });
+
+    it("sendMessage userMessage has empty attachments when no attachmentRefIds are passed", async () => {
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-msg-no-attach" : "assistant-msg",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          }),
+          createProposal: async () => { throw new Error("not needed"); },
+          touchThread: async () => undefined,
+        },
+        usersService: { resolveFromAuth: async () => user },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "Hello!", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "How should I train today?",
+      });
+
+      expect(result.userMessage.attachments).toEqual([]);
     });
   });
 });

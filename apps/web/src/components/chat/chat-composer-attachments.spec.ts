@@ -3,10 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  AMBIGUOUS_IMAGE_ATTACHMENT_COPY,
-  CHAT_ATTACHMENT_PRIVACY_NOTICE,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
-  MESSAGE_FIRST_ATTACHMENT_COPY,
 } from "../../lib/chat-attachment-ui-state.js";
 
 const chatDir = dirname(fileURLToPath(import.meta.url));
@@ -14,6 +11,10 @@ const chatDir = dirname(fileURLToPath(import.meta.url));
 const chatWorkspaceSource = readFileSync(join(chatDir, "chat-workspace.tsx"), "utf8");
 const composerAttachmentsSource = readFileSync(
   join(chatDir, "chat-composer-attachments.tsx"),
+  "utf8",
+);
+const composerAttachmentInputSource = readFileSync(
+  join(chatDir, "chat-composer-attachment-input.tsx"),
   "utf8",
 );
 const outcomePanelSource = readFileSync(
@@ -25,9 +26,7 @@ const ATTACHMENT_USER_VISIBLE_SOURCES = [
   chatWorkspaceSource,
   composerAttachmentsSource,
   outcomePanelSource,
-  CHAT_ATTACHMENT_PRIVACY_NOTICE,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
-  MESSAGE_FIRST_ATTACHMENT_COPY,
 ];
 
 const FORBIDDEN_ATTACHMENT_TERMS = [
@@ -40,35 +39,63 @@ const FORBIDDEN_ATTACHMENT_TERMS = [
 ];
 
 describe("chat composer attachments wiring", () => {
-  it("wires upload, consent, optional recognize, and send with attachment refs", () => {
+  it("wires upload and send with attachment refs (recognize endpoint removed, no consent gate on upload)", () => {
     expect(chatWorkspaceSource).toContain("uploadChatAttachment");
-    expect(chatWorkspaceSource).toContain("recognizeChatAttachment");
-    expect(chatWorkspaceSource).toContain("grantChatAttachmentConsent");
+    expect(chatWorkspaceSource).not.toContain("recognizeChatAttachment");
     expect(chatWorkspaceSource).toContain("attachmentRefIds");
     expect(chatWorkspaceSource).toContain("ChatComposerAttachments");
+    expect(chatWorkspaceSource).toContain("ChatComposerAttachmentInput");
+    expect(chatWorkspaceSource).toContain("ChatMessageAttachmentPreviews");
+    expect(chatWorkspaceSource).toContain("chat-composer-controls");
+    expect(chatWorkspaceSource).toContain("buildOptimisticAttachmentDisplays");
     expect(chatWorkspaceSource).toContain("ChatAttachmentOutcomePanel");
     expect(chatWorkspaceSource).toContain("canSendChatComposer");
     expect(chatWorkspaceSource).toContain('phase: "uploaded"');
-    expect(chatWorkspaceSource).toContain("enrichAttachmentOutcomesWithProposalContext");
+    expect(chatWorkspaceSource).not.toContain("enrichAttachmentOutcomesWithProposalContext");
   });
 
-  it("uses shared file input and consent primitives", () => {
-    expect(composerAttachmentsSource).toContain("FileInputTrigger");
-    expect(composerAttachmentsSource).toContain("ConsentScopeChecklist");
+  it("places the attach control in the composer input row", () => {
+    expect(composerAttachmentInputSource).toContain("FileInputTrigger");
+    expect(composerAttachmentInputSource).toContain('inputId="chat-attachment-input"');
+    expect(composerAttachmentsSource).not.toContain("FileInputTrigger");
+    expect(composerAttachmentsSource).not.toContain("Attachment privacy");
+    expect(composerAttachmentsSource).not.toContain("CHAT_ATTACHMENT_PRIVACY_NOTICE");
+  });
+
+  it("uses shared file input primitives and attachment preview thumb", () => {
+    expect(composerAttachmentInputSource).toContain("FileInputTrigger");
+    expect(composerAttachmentInputSource).toContain('inputId="chat-attachment-input"');
+    expect(composerAttachmentInputSource).toContain("labelText=");
     expect(composerAttachmentsSource).toContain("AttachmentPreviewThumb");
-    expect(composerAttachmentsSource).toContain("AttachmentStatusBadge");
-    expect(composerAttachmentsSource).toContain('inputId="chat-attachment-input"');
-    expect(composerAttachmentsSource).toContain("labelText=");
+    expect(composerAttachmentsSource).not.toContain("PrivacyBoundaryNote");
   });
 
-  it("does not require category select on the message-first happy path", () => {
-    expect(composerAttachmentsSource).toContain("MESSAGE_FIRST_ATTACHMENT_COPY");
-    expect(composerAttachmentsSource).toContain("Recognized after send");
-    expect(composerAttachmentsSource).toContain('option value="">Auto-detect on send</option>');
-    expect(composerAttachmentsSource).toContain("OPTIONAL_CATEGORY_CORRECTION_COPY");
-    expect(composerAttachmentsSource).not.toMatch(
-      /<label[^>]+>[\s\S]*Category[\s\S]*<\/label>[\s\S]*<select[^>]+required/s,
-    );
+  it("renders compact attachment chips without privacy panels or category pickers", () => {
+    expect(composerAttachmentsSource).toContain("chat-composer-attachments__chips");
+    expect(composerAttachmentsSource).toContain("chat-composer-attachments__chip");
+    expect(composerAttachmentsSource).not.toContain("PrivacyBoundaryNote");
+    expect(composerAttachmentsSource).not.toContain("Recognized after send");
+    expect(composerAttachmentsSource).not.toContain("CHAT_ATTACHMENT_PRIVACY_NOTICE");
+    expect(composerAttachmentsSource).not.toContain("formatChatAttachmentFileSize");
+    expect(composerAttachmentsSource).not.toContain("AttachmentStatusBadge");
+  });
+
+  it("has no category correction picker or optional category correction copy", () => {
+    expect(composerAttachmentsSource).not.toContain("OPTIONAL_CATEGORY_CORRECTION_COPY");
+    expect(composerAttachmentsSource).not.toContain("isAmbiguousFoodOrWorkoutImage");
+    expect(composerAttachmentsSource).not.toContain("isUnclassifiedLikelyMedicalDocumentDraft");
+    expect(composerAttachmentsSource).not.toContain('option value="">Auto-detect on send</option>');
+    expect(composerAttachmentsSource).not.toContain("chat-composer-attachments__category-correction");
+  });
+
+  it("has no pre-upload medical consent form in the composer", () => {
+    expect(composerAttachmentsSource).not.toContain("Consent scopes");
+    expect(composerAttachmentsSource).not.toContain("Upload document");
+    expect(composerAttachmentsSource).not.toContain("Grant consent and retry upload");
+    expect(composerAttachmentsSource).not.toContain("MEDICAL_ATTACHMENT_WELLNESS_NOTICE");
+    expect(composerAttachmentsSource).not.toContain("document-title-");
+    expect(composerAttachmentsSource).not.toContain("document-type-");
+    expect(composerAttachmentsSource).not.toContain("ConsentScopeChecklist");
   });
 
   it("exposes accessible attachment groups, remove labels, and live region updates", () => {
@@ -78,25 +105,21 @@ describe("chat composer attachments wiring", () => {
     expect(composerAttachmentsSource).toContain('aria-live="polite"');
   });
 
-  it("gates medical uploads behind consent scopes and wellness copy", () => {
-    expect(composerAttachmentsSource).toContain("Consent scopes");
-    expect(composerAttachmentsSource).toContain("Upload document");
-    expect(composerAttachmentsSource).toContain("Grant consent and retry upload");
-    expect(composerAttachmentsSource).toContain("MEDICAL_ATTACHMENT_WELLNESS_NOTICE");
-    expect(composerAttachmentsSource).toContain("document-title-");
-    expect(composerAttachmentsSource).toContain("document-type-");
-  });
-
-  it("renders attachment outcomes with inferred category, meal context, and profile review links", () => {
+  it("renders attachment outcomes with inferred category and fallback copy", () => {
     expect(outcomePanelSource).toContain("ChatMetadataPanel");
     expect(outcomePanelSource).toContain("Attachment results");
-    expect(outcomePanelSource).toContain("resolveMedicalDocumentProfileHref");
     expect(outcomePanelSource).toContain("resolveAttachmentOutcomeFallbackCopy");
-    expect(outcomePanelSource).toContain("resolveAttachmentOutcomeConfidenceLabel");
-    expect(outcomePanelSource).toContain("Meal context:");
-    expect(outcomePanelSource).toContain("Classification confidence:");
-    expect(outcomePanelSource).toContain("Nothing changes until you apply");
-    expect(outcomePanelSource).toContain('aria-label="Attachment recognition results"');
+    expect(outcomePanelSource).not.toContain("resolveAttachmentOutcomeConfidenceLabel");
+    expect(outcomePanelSource).not.toContain("Meal context:");
+    expect(outcomePanelSource).not.toContain("Classification confidence:");
+    expect(outcomePanelSource).not.toContain("Nothing changes until you apply");
+    expect(outcomePanelSource).not.toContain('aria-label="Attachment recognition results"');
+    expect(outcomePanelSource).toContain('aria-label="Attachment results"');
+    // Post-send consent path removed — never reached since backend always returns unclassified
+    expect(outcomePanelSource).not.toContain("Grant consent and process");
+    expect(outcomePanelSource).not.toContain("ConsentScopeChecklist");
+    expect(chatWorkspaceSource).not.toContain("pendingMedicalConsentByAttachmentId");
+    expect(chatWorkspaceSource).not.toContain("buildGrantMedicalAttachmentConsentInput");
   });
 
   it("avoids forbidden clinical terms in attachment user-visible copy", () => {
@@ -107,31 +130,33 @@ describe("chat composer attachments wiring", () => {
     }
   });
 
-  it("auto-uploads non-medical attachments on select without pre-send recognize", () => {
-    expect(composerAttachmentsSource).toContain("shouldAutoProcessChatAttachmentOnSelect");
-    expect(composerAttachmentsSource).toMatch(
-      /shouldAutoProcessChatAttachmentOnSelect\(draft\)[\s\S]*onProcessDraft\(draft\)/,
-    );
+  it("auto-uploads all valid attachments on select without pre-send gate", () => {
+    // Input auto-uploads: calls onProcessDraft for every draft without a validation error.
+    expect(composerAttachmentInputSource).not.toContain("shouldAutoProcessChatAttachmentOnSelect");
+    expect(composerAttachmentInputSource).toContain("localValidationError");
+    expect(composerAttachmentInputSource).toContain("onProcessDraft(draft)");
     expect(composerAttachmentsSource).not.toContain(">Recognize<");
-    expect(composerAttachmentsSource).toContain("Preview recognition (optional)");
-    expect(AMBIGUOUS_IMAGE_ATTACHMENT_COPY).toMatch(/Send it with your message/i);
-  });
-
-  it("resets validation when category is corrected before upload", () => {
-    expect(composerAttachmentsSource).toContain("applyChatAttachmentCategoryChange");
-    expect(composerAttachmentsSource).toContain("handleCategoryChange");
+    expect(composerAttachmentsSource).not.toContain("canPreviewRecognizeChatAttachmentDraft");
+    expect(composerAttachmentsSource).not.toContain("Preview recognition (optional)");
+    expect(composerAttachmentsSource).not.toContain("onRecognizeDraft");
     expect(composerAttachmentsSource).not.toContain("categoryOverride");
   });
 
-  it("does not render medical summary snippets before profile review", () => {
+  it("does not render medical summary snippets, profile review links, or consent forms", () => {
+    // Medical summary snippets and profile review links were in the removed consent path.
     expect(outcomePanelSource).not.toContain("summarySnippet");
-    expect(outcomePanelSource).toContain("Review document in Profile");
-    expect(outcomePanelSource).toContain("available in Profile after review");
+    expect(outcomePanelSource).not.toContain("Review document in Profile");
+    expect(outcomePanelSource).not.toContain("available in Profile after review");
+    // Consent form elements removed (backend never produces needs_consent outcomes).
+    expect(outcomePanelSource).not.toContain("Grant consent and process");
+    expect(outcomePanelSource).not.toContain("ConsentScopeChecklist");
   });
 
-  it("keeps medical consent scopes unchecked until the user opts in", () => {
-    expect(composerAttachmentsSource).toContain("ConsentScopeChecklist");
-    expect(composerAttachmentsSource).toContain("Upload storage is required");
-    expect(composerAttachmentsSource).toContain("Upload document");
+  it("has no consent form in either the outcome panel or the composer (post-send consent path removed)", () => {
+    // Post-send consent path removed: backend never produces needs_consent outcomes (always unclassified).
+    expect(outcomePanelSource).not.toContain("ConsentScopeChecklist");
+    expect(composerAttachmentsSource).not.toContain("ConsentScopeChecklist");
+    expect(composerAttachmentsSource).not.toContain("onGrantConsentAndRecognize");
+    expect(chatWorkspaceSource).not.toContain("grantChatAttachmentConsent");
   });
 });

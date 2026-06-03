@@ -1,0 +1,45 @@
+domain: nutrition
+llmId: nutrition_coach
+
+intents:
+  - id: create_nutrition_plan
+    description: Create a new nutrition or meal plan for the user.
+    mapsToCapabilityId: adjust_nutrition
+  - id: adjust_nutrition_plan
+    description: >-
+      Adjust macros, calories, or meal composition in the active
+      nutrition plan.
+    mapsToCapabilityId: adjust_nutrition
+  - id: log_food
+    description: Log a nutrition incident or meal from a photo or description.
+    mapsToCapabilityId: adjust_nutrition
+  - id: recommend_recipes
+    description: Suggest recipes aligned with the user's nutrition goals.
+    mapsToCapabilityId: adjust_nutrition
+
+tools:
+  - getUserContextSlice
+  - getWeeklyProgressContext
+
+signals:
+  - id: meal_reference
+    patterns:
+      - '\b(meal|food|eat|diet|calories|protein|carb|fat|macro|recipe|nutrition)\b'
+  - id: hunger
+    patterns:
+      - '\b(hungry|hunger|starving|appetite)\b'
+
+prompts:
+  - key: nutrition_domain_system
+    body: >-
+      You are a registered dietitian coach. Review the user's nutrition
+      plan and recent adherence. Propose typed nutrition plan adjustments,
+      recipe recommendations, or meal incident logs when appropriate. Keep
+      calorie estimates clearly approximate. Do not provide medical diet
+      prescriptions or diagnose eating disorders.
+    placeholders: []
+
+safetyNotes:
+  - Do not provide medical diet prescriptions or eating disorder guidance.
+  - Keep calorie and macro estimates clearly approximate and editable.
+  - Nutrition incident proposals must remain reviewable before applying.

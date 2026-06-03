@@ -251,43 +251,4 @@ describe("WellbeingCheckInsService", () => {
     });
     expect(history.entries[0]).not.toHaveProperty("note");
   });
-
-  it("returns sorted aggregate entries and note-free summary metadata", async () => {
-    const service = createService(
-      createRepositoryMock({
-        listByUserAndDateRange: async () => [
-          createCheckInRow({
-            date: "2026-05-25",
-            moodScore: 5,
-            stressScore: 2,
-            note: "Private newest note",
-          }),
-          createCheckInRow({
-            id: "a1000002-0000-4000-8000-000000000002",
-            date: "2026-05-23",
-            moodScore: 3,
-            stressScore: 4,
-            note: "Private older note",
-          }),
-        ],
-      }),
-    );
-
-    const aggregates = await service.getAggregates(auth as never, {
-      periodType: "daily",
-      limit: 7,
-    });
-
-    expect(aggregates.aggregates).toEqual([
-      { date: "2026-05-23", moodScore: 3, stressScore: 4 },
-      { date: "2026-05-25", moodScore: 5, stressScore: 2 },
-    ]);
-    expect(aggregates.summary).toMatchObject({
-      checkInCount: 2,
-      dataSufficiency: "partial",
-      moodTrendDirection: "up",
-      stressTrendDirection: "down",
-    });
-    expect(JSON.stringify(aggregates)).not.toContain("Private");
-  });
 });

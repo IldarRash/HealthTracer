@@ -1,10 +1,8 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
 import type { AiProposal, NutritionIncidentItem, ProposalModifyResponse } from "@health/types";
-import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
-import { useId, useMemo, useState, type ChangeEvent } from "react";
+import { useId, useMemo, useState } from "react";
 import {
   buildNutritionIncidentAcceptPayload,
   createNutritionIncidentFormState,
@@ -17,7 +15,6 @@ import {
   sumNutritionItemCalories,
   sumNutritionItemMacros,
 } from "../../lib/action-proposal-ui-state";
-import { analyzeFoodPhoto } from "../../lib/api";
 import {
   canDecideProposal,
   getProposalDomainLabel,
@@ -48,7 +45,6 @@ export function NutritionIncidentProposalCard({
   onDecision,
   onModifyRequest,
 }: NutritionIncidentProposalCardProps) {
-  const { getToken } = useAuth();
   const parsedPayload = useMemo(
     () => parseNutritionIncidentProposalPayload(proposal.proposedChanges),
     [proposal.proposedChanges],
@@ -56,10 +52,7 @@ export function NutritionIncidentProposalCard({
   const [form, setForm] = useState(() =>
     parsedPayload ? createNutritionIncidentFormState(parsedPayload) : null,
   );
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const modifyFeedbackId = useId();
-  const photoInputId = useId();
 
   const {
     decisionMutation,
@@ -75,62 +68,6 @@ export function NutritionIncidentProposalCard({
     onDecision,
     onModifyRequest,
     getAcceptPayload: () => (form ? buildNutritionIncidentAcceptPayload(form) : null),
-  });
-
-  const analyzeMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const token = await getToken();
-      if (!token) {
-        throw new Error("Clerk session token is unavailable.");
-      }
-
-      const imageRef = {
-        id: crypto.randomUUID(),
-        mimeType: file.type || "image/jpeg",
-      };
-
-      const result = await analyzeFoodPhoto(token, {
-        imageRef,
-        instruction: "Estimate meal items and macros from this food photo.",
-      });
-
-      if (result.error || !result.data) {
-        throw new Error(result.error ?? "Food photo analysis failed.");
-      }
-
-      return { imageRef, analysis: result.data };
-    },
-    onSuccess: ({ imageRef, analysis }) => {
-      const candidate = analysis.candidates[0];
-      if (!candidate) {
-        setAnalysisError("No food estimate was returned. Edit items manually or try another photo.");
-        return;
-      }
-
-      setAnalysisError(null);
-      setForm((current) => {
-        if (!current) {
-          return current;
-        }
-
-        return {
-          ...current,
-          items: candidate.items.map((item) => ({ ...item })),
-          confidence: candidate.confidence,
-          provenance: candidate.provenance,
-          imageRefs: [...current.imageRefs, imageRef].slice(-5),
-          lowConfidenceNotice: analysis.lowConfidenceNotice,
-          hasUserEdited: candidate.confidence !== "low",
-        };
-      });
-    },
-    onError: (error) => {
-      setAnalysisError(
-        error instanceof Error
-          ? error.message
-          : "Food photo analysis failed. You can still edit the estimate manually.",
-      );
-    },
   });
 
   const isPending = proposal.status === "pending";
@@ -169,25 +106,6 @@ export function NutritionIncidentProposalCard({
     });
   };
 
-  const handlePhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    setAnalysisError(null);
-
-    if (!file) {
-      setSelectedFileName(null);
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      setAnalysisError("Choose an image file for meal photo analysis.");
-      setSelectedFileName(null);
-      return;
-    }
-
-    setSelectedFileName(file.name);
-    analyzeMutation.mutate(file);
-  };
-
   if (!parsedPayload || !form) {
     return (
       <ProposalConfirmation status={proposal.status} title={proposal.title} inline>
@@ -203,7 +121,7 @@ export function NutritionIncidentProposalCard({
       status={proposal.status}
       title={proposal.title}
       inline
-      aria-busy={isActionPending || analyzeMutation.isPending || undefined}
+      aria-busy={isActionPending || undefined}
       aria-live="polite"
       meta={
         <>
@@ -228,7 +146,7 @@ export function NutritionIncidentProposalCard({
             <Button
               type="button"
               className="button-coach"
-              disabled={!canAccept || isActionPending || isModifyMode || analyzeMutation.isPending}
+              disabled={!canAccept || isActionPending || isModifyMode}
               title={!canAccept ? (acceptBlockReason ?? undefined) : undefined}
               onClick={() => decisionMutation.mutate("accept")}
             >
@@ -237,7 +155,7 @@ export function NutritionIncidentProposalCard({
             <Button
               type="button"
               variant="secondary"
-              disabled={isActionPending || analyzeMutation.isPending}
+              disabled={isActionPending}
               aria-expanded={isModifyMode}
               onClick={() => {
                 setIsModifyMode((current) => !current);
@@ -249,7 +167,7 @@ export function NutritionIncidentProposalCard({
             <Button
               type="button"
               variant="secondary"
-              disabled={isActionPending || isModifyMode || analyzeMutation.isPending}
+              disabled={isActionPending || isModifyMode}
               onClick={() => decisionMutation.mutate("reject")}
             >
               Reject
@@ -273,35 +191,10 @@ export function NutritionIncidentProposalCard({
 
       {isPending ? (
         <div className="action-proposal-form nutrition-incident-proposal-form">
-          <div className="nutrition-incident-photo-row">
-            <label className="proposal-meta" htmlFor={photoInputId}>
-              Food photo (optional)
-            </label>
-            <input
-              id={photoInputId}
-              type="file"
-              accept="image/*"
-              disabled={isActionPending || analyzeMutation.isPending}
-              onChange={handlePhotoChange}
-            />
-            {selectedFileName ? (
-              <p className="proposal-meta">Selected: {selectedFileName}</p>
-            ) : (
-              <p className="proposal-meta">
-                Add a meal photo for an estimate, or edit the items below manually.
-              </p>
-            )}
-            {analyzeMutation.isPending ? (
-              <p className="proposal-meta" role="status">
-                Analyzing photo…
-              </p>
-            ) : null}
-            {analysisError ? (
-              <p className="form-error" role="alert">
-                {analysisError}
-              </p>
-            ) : null}
-          </div>
+          {/* Food photo capture via chat: send a photo in the chat thread to get an
+              AI-generated nutrition proposal. Direct photo analysis from this card was
+              removed in Phase 8 (POST /nutrition/food-photo/analyze was deleted from the
+              backend). Follow-up: re-add food photo capture in the chat message composer. */}
 
           <div className="nutrition-incident-estimate-meta">
             <p className="proposal-meta">
@@ -331,7 +224,7 @@ export function NutritionIncidentProposalCard({
                     id={`item-name-${proposal.id}-${index}`}
                     className="form-input"
                     value={item.name}
-                    disabled={isActionPending || analyzeMutation.isPending}
+                    disabled={isActionPending}
                     onChange={(event) => updateItem(index, { name: event.target.value })}
                   />
                 </div>
@@ -343,7 +236,7 @@ export function NutritionIncidentProposalCard({
                     id={`item-qty-${proposal.id}-${index}`}
                     className="form-input"
                     value={item.quantity ?? ""}
-                    disabled={isActionPending || analyzeMutation.isPending}
+                    disabled={isActionPending}
                     onChange={(event) => updateItem(index, { quantity: event.target.value })}
                   />
                 </div>
@@ -356,7 +249,7 @@ export function NutritionIncidentProposalCard({
                     className="form-input"
                     inputMode="numeric"
                     value={item.calories ?? ""}
-                    disabled={isActionPending || analyzeMutation.isPending}
+                    disabled={isActionPending}
                     onChange={(event) => {
                       const value = event.target.value.trim();
                       updateItem(index, {
@@ -373,7 +266,7 @@ export function NutritionIncidentProposalCard({
             <Button
               type="button"
               variant="secondary"
-              disabled={isActionPending || analyzeMutation.isPending}
+              disabled={isActionPending}
               onClick={() =>
                 setForm((current) =>
                   current

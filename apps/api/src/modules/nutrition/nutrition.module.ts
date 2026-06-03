@@ -2,10 +2,6 @@ import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
 import { UsersModule } from "../users/users.module.js";
 import { NutritionController } from "./nutrition.controller.js";
-import {
-  DevFoodPhotoAnalysisProvider,
-  FoodPhotoAnalysisService,
-} from "./food-photo-analysis.service.js";
 import { NutritionRepository } from "./nutrition.repository.js";
 import { NutritionService } from "./nutrition.service.js";
 
@@ -14,10 +10,8 @@ import { NutritionService } from "./nutrition.service.js";
   controllers: [NutritionController],
   providers: [
     NutritionRepository,
-    DevFoodPhotoAnalysisProvider,
-    FoodPhotoAnalysisService,
     NutritionService,
   ],
-  exports: [NutritionService, NutritionRepository, FoodPhotoAnalysisService],
+  exports: [NutritionService, NutritionRepository],
 })
 export class NutritionModule {}

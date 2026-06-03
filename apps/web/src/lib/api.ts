@@ -5,13 +5,10 @@ import {
   aiMetricsContextSummarySchema,
   aiProposalSchema,
   chatAttachmentRecordSchema,
-  chatAttachmentRecognitionResponseSchema,
   chatMessageSchema,
   chatThreadSchema,
   chatTurnResponseSchema,
   createChatAttachmentSchema,
-  grantChatAttachmentConsentSchema,
-  recognizeChatAttachmentSchema,
   sendChatMessageSchema,
   completeWorkoutSessionSchema,
   connectDeviceSchema,
@@ -29,8 +26,6 @@ import {
   habitPlanRevisionsResponseSchema,
   nutritionAdherenceResponseSchema,
   nutritionPlanRevisionSchema,
-  foodPhotoAnalysisRequestSchema,
-  foodPhotoAnalysisResultSchema,
   proposalDecisionSchema,
   proposalModifyResponseSchema,
   upsertNutritionAdherenceSchema,
@@ -53,13 +48,11 @@ import {
   type AiMetricsContextSummary,
   type AiProposal,
   type ChatAttachmentRecord,
-  type ChatAttachmentRecognitionResponse,
   type ChatMessage,
   type ChatThread,
   type ChatTurnResponse,
+  type DirectChatPathRefreshHint,
   type CreateChatAttachmentInput,
-  type GrantChatAttachmentConsentInput,
-  type RecognizeChatAttachmentInput,
   type SendChatMessageInput,
   type ConnectDeviceInput,
   type DeviceConnection,
@@ -75,8 +68,6 @@ import {
   type HealthMetricSnapshot,
   type ListHealthMetricAggregatesQuery,
   type ListHealthMetricSnapshotsQuery,
-  type FoodPhotoAnalysisRequest,
-  type FoodPhotoAnalysisResult,
   type NutritionAdherenceResponse,
   type NutritionPlanRevision,
   type UpsertNutritionAdherenceInput,
@@ -361,45 +352,6 @@ export async function uploadChatAttachment(
   });
 }
 
-export async function getChatAttachment(
-  token: string,
-  attachmentId: string,
-): Promise<ApiResult<ChatAttachmentRecord>> {
-  return apiFetch(
-    `/chat/attachments/${encodeURIComponent(attachmentId)}`,
-    token,
-    chatAttachmentRecordSchema,
-  );
-}
-
-export async function grantChatAttachmentConsent(
-  token: string,
-  attachmentId: string,
-  input: GrantChatAttachmentConsentInput,
-): Promise<ApiResult<ChatAttachmentRecord>> {
-  const body = grantChatAttachmentConsentSchema.parse(input);
-  return apiFetch(
-    `/chat/attachments/${encodeURIComponent(attachmentId)}/consent`,
-    token,
-    chatAttachmentRecordSchema,
-    { method: "POST", body },
-  );
-}
-
-export async function recognizeChatAttachment(
-  token: string,
-  attachmentId: string,
-  input: RecognizeChatAttachmentInput = {},
-): Promise<ApiResult<ChatAttachmentRecognitionResponse>> {
-  const body = recognizeChatAttachmentSchema.parse(input);
-  return apiFetch(
-    `/chat/attachments/${encodeURIComponent(attachmentId)}/recognize`,
-    token,
-    chatAttachmentRecognitionResponseSchema,
-    { method: "POST", body },
-  );
-}
-
 export async function listProposals(
   token: string,
   threadId?: string,
@@ -428,17 +380,6 @@ export async function decideProposal(
       : {}),
   });
   return apiFetch(`/proposals/${proposalId}/decision`, token, aiProposalSchema, {
-    method: "POST",
-    body,
-  });
-}
-
-export async function analyzeFoodPhoto(
-  token: string,
-  input: FoodPhotoAnalysisRequest,
-): Promise<ApiResult<FoodPhotoAnalysisResult>> {
-  const body = foodPhotoAnalysisRequestSchema.parse(input);
-  return apiFetch("/nutrition/food-photo/analyze", token, foodPhotoAnalysisResultSchema, {
     method: "POST",
     body,
   });
@@ -709,6 +650,32 @@ export function getWorkoutExecutionRefreshQueryKeys(): ReadonlyArray<readonly un
 
 export function getTodayItemStatusRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
   return getWorkoutExecutionRefreshQueryKeys();
+}
+
+export function getDirectChatPathRefreshQueryKeys(
+  refreshHints: readonly DirectChatPathRefreshHint[],
+): ReadonlyArray<readonly unknown[]> {
+  const keys: Array<readonly unknown[]> = [];
+
+  for (const hint of refreshHints) {
+    switch (hint) {
+      case "today":
+        keys.push(apiQueryKeys.todayDayPrefix, apiQueryKeys.todayHistoryPrefix);
+        break;
+      case "dashboard":
+        keys.push(apiQueryKeys.dashboardState);
+        break;
+      case "longevity":
+        keys.push(apiQueryKeys.longevityState);
+        break;
+      default: {
+        const _exhaustive: never = hint;
+        return _exhaustive;
+      }
+    }
+  }
+
+  return keys;
 }
 
 export function getWellbeingRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {

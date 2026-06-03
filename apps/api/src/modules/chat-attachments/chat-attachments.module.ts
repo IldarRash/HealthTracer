@@ -1,35 +1,26 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
+import { AiBehaviorModule } from "../ai/ai-behavior.module.js";
 import { ChatRepository } from "../chat/chat.repository.js";
-import { DocumentsModule } from "../documents/documents.module.js";
-import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { UsersModule } from "../users/users.module.js";
-import { ChatAttachmentClassifierService } from "./chat-attachment-classifier.service.js";
-import { ChatAttachmentRecognitionService } from "./chat-attachment-recognition.service.js";
 import { ChatAttachmentsController } from "./chat-attachments.controller.js";
 import { ChatAttachmentsRepository } from "./chat-attachments.repository.js";
 import { ChatAttachmentsService } from "./chat-attachments.service.js";
-import { FoodPhotoAttachmentRecognizer } from "./food-photo-attachment-recognizer.js";
-import { MedicalDocumentAttachmentRecognizer } from "./medical-document-attachment-recognizer.js";
-import {
-  DevWorkoutAttachmentRecognitionProvider,
-  WorkoutAttachmentRecognizer,
-} from "./workout-attachment-recognizer.js";
+import { ChatTurnAttachmentStageService } from "./chat-turn-attachment-stage.service.js";
 
 @Module({
-  imports: [DatabaseModule, UsersModule, NutritionModule, DocumentsModule],
+  imports: [DatabaseModule, UsersModule, AiBehaviorModule],
   controllers: [ChatAttachmentsController],
   providers: [
     ChatRepository,
     ChatAttachmentsRepository,
     ChatAttachmentsService,
-    ChatAttachmentClassifierService,
-    ChatAttachmentRecognitionService,
-    FoodPhotoAttachmentRecognizer,
-    MedicalDocumentAttachmentRecognizer,
-    DevWorkoutAttachmentRecognitionProvider,
-    WorkoutAttachmentRecognizer,
+    ChatTurnAttachmentStageService,
   ],
-  exports: [ChatAttachmentsService, ChatAttachmentsRepository, ChatAttachmentRecognitionService],
+  exports: [
+    ChatAttachmentsService,
+    ChatAttachmentsRepository,
+    ChatTurnAttachmentStageService,
+  ],
 })
 export class ChatAttachmentsModule {}

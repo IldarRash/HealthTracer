@@ -1,24 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
-  assertRecognitionProviderIsolation,
-  buildMedicalDocumentReviewPath,
   chatAttachmentRecognitionEnvelopeSchema,
-  containsUnsafeRecognitionSummaryLanguage,
+  chatAttachmentRecordSchema,
+  chatMessageAttachmentMetaSchema,
+  chatMessageSchema,
   getChatAttachmentMimeTypeError,
   getChatAttachmentOwnershipErrors,
   getChatAttachmentProposalRefErrors,
-  getChatAttachmentRecognitionEligibilityErrors,
   getChatAttachmentRetentionPolicy,
   getChatAttachmentSendEligibilityErrors,
   getChatAttachmentSizeError,
   getMedicalAttachmentConsentErrors,
-  grantChatAttachmentConsentSchema,
   createChatAttachmentSchema,
   isChatAttachmentExpired,
+  isChatAttachmentImageMimeType,
   isChatAttachmentSendEligibleStatus,
-  recognizeChatAttachmentSchema,
+  parseChatMessageAttachmentRefIds,
+  parseStoredChatAttachmentRecognition,
   sanitizeMedicalRecognitionForClient,
   sendChatMessageSchema,
+  CHAT_PROVISIONAL_UPLOAD_MIME_TYPES,
+  getProvisionalAttachmentMimeTypeError,
 } from "./index.js";
 
 const ownedAttachmentDefaults = {
@@ -27,47 +29,99 @@ const ownedAttachmentDefaults = {
 };
 
 describe("chat attachment contracts", () => {
-  it("accepts supported MIME types per category", () => {
-    expect(getChatAttachmentMimeTypeError("food_photo", "image/jpeg")).toBeNull();
-    expect(getChatAttachmentMimeTypeError("food_photo", "application/pdf")).toMatch(
-      /Unsupported MIME type/,
-    );
-    expect(getChatAttachmentMimeTypeError("medical_document", "application/pdf")).toBeNull();
-    expect(getChatAttachmentMimeTypeError("medical_document", "image/jpeg")).toBeNull();
-    expect(getChatAttachmentMimeTypeError("workout_attachment", "text/plain")).toBeNull();
+  describe("image-only MIME (plan item 5)", () => {
+    it("accepts image MIME types for all categories", () => {
+      expect(getChatAttachmentMimeTypeError("food_photo", "image/jpeg")).toBeNull();
+      expect(getChatAttachmentMimeTypeError("food_photo", "image/png")).toBeNull();
+      expect(getChatAttachmentMimeTypeError("food_photo", "image/webp")).toBeNull();
+      expect(getChatAttachmentMimeTypeError("medical_document", "image/jpeg")).toBeNull();
+      expect(getChatAttachmentMimeTypeError("medical_document", "image/png")).toBeNull();
+      expect(getChatAttachmentMimeTypeError("workout_attachment", "image/jpeg")).toBeNull();
+      expect(getChatAttachmentMimeTypeError("unclassified", "image/jpeg")).toBeNull();
+    });
+
+    it("rejects PDF for all categories — images only", () => {
+      expect(getChatAttachmentMimeTypeError("food_photo", "application/pdf")).toMatch(
+        /Unsupported MIME type/,
+      );
+      expect(getChatAttachmentMimeTypeError("medical_document", "application/pdf")).toMatch(
+        /Unsupported MIME type/,
+      );
+      expect(getChatAttachmentMimeTypeError("workout_attachment", "application/pdf")).toMatch(
+        /Unsupported MIME type/,
+      );
+      expect(getChatAttachmentMimeTypeError("unclassified", "application/pdf")).toMatch(
+        /Unsupported MIME type/,
+      );
+    });
+
+    it("rejects text/plain for all categories — images only", () => {
+      expect(getChatAttachmentMimeTypeError("workout_attachment", "text/plain")).toMatch(
+        /Unsupported MIME type/,
+      );
+      expect(getChatAttachmentMimeTypeError("unclassified", "text/plain")).toMatch(
+        /Unsupported MIME type/,
+      );
+    });
+
+    it("CHAT_PROVISIONAL_UPLOAD_MIME_TYPES contains only the three image types", () => {
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toEqual(["image/jpeg", "image/png", "image/webp"]);
+    });
+
+    it("getProvisionalAttachmentMimeTypeError accepts images and rejects non-images", () => {
+      expect(getProvisionalAttachmentMimeTypeError("image/jpeg")).toBeNull();
+      expect(getProvisionalAttachmentMimeTypeError("image/png")).toBeNull();
+      expect(getProvisionalAttachmentMimeTypeError("image/webp")).toBeNull();
+      expect(getProvisionalAttachmentMimeTypeError("application/pdf")).toMatch(/Unsupported/);
+      expect(getProvisionalAttachmentMimeTypeError("text/plain")).toMatch(/Unsupported/);
+      expect(getProvisionalAttachmentMimeTypeError("application/octet-stream")).toMatch(/Unsupported/);
+    });
+  });
+
+  describe("createChatAttachmentSchema — no upfront consent gate (plan item 6)", () => {
+    it("accepts a plain image upload without category or consent", () => {
+      const parsed = createChatAttachmentSchema.safeParse({
+        filename: "meal.jpg",
+        mimeType: "image/jpeg",
+        fileContentBase64: "dGVzdA==",
+      });
+
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(parsed.data.filename).toBe("meal.jpg");
+      }
+    });
+
+    it("rejects non-image uploads at the provisional gate", () => {
+      const parsed = createChatAttachmentSchema.safeParse({
+        filename: "labs.pdf",
+        mimeType: "application/pdf",
+        fileContentBase64: "dGVzdA==",
+      });
+
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.issues[0]?.message).toMatch(/Unsupported MIME type/);
+      }
+    });
+
+    it("does not require consent scopes on upload — consent gate removed", () => {
+      // Previously medical_document category required upload_storage consent on create.
+      // Now uploads are category-agnostic at upload time and no upfront consent gate applies.
+      const parsed = createChatAttachmentSchema.safeParse({
+        filename: "labs.jpg",
+        mimeType: "image/jpeg",
+        fileContentBase64: "dGVzdA==",
+      });
+
+      expect(parsed.success).toBe(true);
+    });
   });
 
   it("enforces size limits per category", () => {
     expect(getChatAttachmentSizeError("food_photo", 0)).toMatch(/empty/);
     expect(getChatAttachmentSizeError("food_photo", 10_000_001)).toMatch(/exceeds/);
     expect(getChatAttachmentSizeError("medical_document", 5_000_001)).toMatch(/exceeds/);
-  });
-
-  it("requires medical document consent on create", () => {
-    const parsed = createChatAttachmentSchema.safeParse({
-      category: "medical_document",
-      filename: "labs.pdf",
-      mimeType: "application/pdf",
-      fileContentBase64: "dGVzdA==",
-      documentType: "lab_report",
-      documentTitle: "Labs",
-    });
-
-    expect(parsed.success).toBe(false);
-  });
-
-  it("accepts medical document create input with upload consent", () => {
-    const parsed = createChatAttachmentSchema.safeParse({
-      category: "medical_document",
-      filename: "labs.pdf",
-      mimeType: "application/pdf",
-      fileContentBase64: "dGVzdA==",
-      documentType: "lab_report",
-      documentTitle: "Labs",
-      consentScopes: ["upload_storage", "parse_ocr", "ai_summarization"],
-    });
-
-    expect(parsed.success).toBe(true);
   });
 
   it("rejects cross-user attachment references", () => {
@@ -100,43 +154,13 @@ describe("chat attachment contracts", () => {
     expect(errors[0]).toMatch(/not proposal-ready/);
   });
 
-  it("requires explicit medical consent scopes", () => {
+  it("requires explicit medical consent scopes (post-send consent grant)", () => {
     expect(getMedicalAttachmentConsentErrors("medical_document", undefined)).toHaveLength(1);
     expect(getMedicalAttachmentConsentErrors("medical_document", ["parse_ocr"])).toHaveLength(1);
     expect(
       getMedicalAttachmentConsentErrors("medical_document", ["upload_storage", "parse_ocr"]),
     ).toHaveLength(0);
     expect(getMedicalAttachmentConsentErrors("food_photo", undefined)).toHaveLength(0);
-  });
-
-  it("blocks unsafe recognition summary language", () => {
-    expect(containsUnsafeRecognitionSummaryLanguage("Vitamin D is slightly low.")).toBe(false);
-    expect(containsUnsafeRecognitionSummaryLanguage("This confirms a diagnosis of anemia.")).toBe(
-      true,
-    );
-  });
-
-  it("enforces provider isolation boundaries", () => {
-    expect(() =>
-      assertRecognitionProviderIsolation({
-        category: "food_photo",
-        payload: { imageRef: { id: "x" }, profile: { age: 30 } },
-      }),
-    ).toThrow(/must not include cross-category context key "profile"/);
-
-    expect(() =>
-      assertRecognitionProviderIsolation({
-        category: "medical_document",
-        payload: { documentText: "sample" },
-      }),
-    ).not.toThrow();
-
-    expect(() =>
-      assertRecognitionProviderIsolation({
-        category: "workout_attachment",
-        payload: { documentText: "sample" },
-      }),
-    ).toThrow(/documentText/);
   });
 
   it("allows chat messages with attachment refs and empty content", () => {
@@ -152,6 +176,20 @@ describe("chat attachment contracts", () => {
     const parsed = sendChatMessageSchema.safeParse({ content: "" });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it("parses attachment ref ids from chat message metadata", () => {
+    expect(
+      parseChatMessageAttachmentRefIds({
+        attachmentRefIds: ["a1000001-0000-4000-8000-000000000001"],
+      }),
+    ).toEqual(["a1000001-0000-4000-8000-000000000001"]);
+    expect(parseChatMessageAttachmentRefIds({})).toEqual([]);
+  });
+
+  it("detects image mime types for transcript previews", () => {
+    expect(isChatAttachmentImageMimeType("image/jpeg")).toBe(true);
+    expect(isChatAttachmentImageMimeType("application/pdf")).toBe(false);
   });
 
   it("maps retention policies per attachment category", () => {
@@ -281,89 +319,6 @@ describe("chat attachment contracts", () => {
     }
   });
 
-  it("parses recognition envelope variants", () => {
-    const foodEnvelope = chatAttachmentRecognitionEnvelopeSchema.parse({
-      category: "food_photo",
-      attachmentRefId: "a1000001-0000-4000-8000-000000000001",
-      analysis: {
-        candidates: [
-          {
-            items: [{ name: "Salad", calories: 320 }],
-            estimatedCalories: 320,
-            estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
-            confidence: "medium",
-            provenance: {
-              source: "dev_stub",
-              providerId: "dev_food_photo",
-              analysisId: "b1000001-0000-4000-8000-000000000002",
-            },
-          },
-        ],
-        lowConfidenceNotice: null,
-      },
-      provenance: {
-        source: "dev_stub",
-        providerId: "dev_food_photo",
-        recognitionId: "b1000001-0000-4000-8000-000000000002",
-        confidence: "medium",
-      },
-    });
-
-    expect(foodEnvelope.category).toBe("food_photo");
-
-    const medicalEnvelope = chatAttachmentRecognitionEnvelopeSchema.parse({
-      category: "medical_document",
-      attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-      documentId: "e1000001-0000-4000-8000-000000000001",
-      documentType: "lab_report",
-      title: "Labs",
-      parseStatus: "summary_ready",
-      summarySnippet: "Vitamin D is slightly below the reference range.",
-      reviewStatus: "pending_review",
-      consentScopes: ["upload_storage", "parse_ocr"],
-      provenance: {
-        source: "document_parser",
-        providerId: "documents_module",
-        recognitionId: "f1000001-0000-4000-8000-000000000001",
-      },
-      wellnessContextOnlyNotice:
-        "This document is wellness coaching context only. It is not a diagnosis or treatment plan.",
-      documentReviewPath: null,
-    });
-
-    expect(medicalEnvelope.category).toBe("medical_document");
-    if (medicalEnvelope.category === "medical_document") {
-      expect(medicalEnvelope.reviewStatus).toBe("pending_review");
-    }
-  });
-
-  it("validates recognize and consent request schemas", () => {
-    expect(
-      recognizeChatAttachmentSchema.safeParse({
-        consentScopes: ["upload_storage"],
-      }).success,
-    ).toBe(true);
-
-    expect(
-      recognizeChatAttachmentSchema.safeParse({
-        categoryOverride: "workout_attachment",
-        consentScopes: ["upload_storage"],
-      }).success,
-    ).toBe(false);
-
-    expect(
-      grantChatAttachmentConsentSchema.safeParse({
-        consentScopes: ["upload_storage"],
-      }).success,
-    ).toBe(true);
-
-    expect(
-      grantChatAttachmentConsentSchema.safeParse({
-        consentScopes: [],
-      }).success,
-    ).toBe(false);
-  });
-
   it("rejects expired ephemeral attachment refs for chat and proposals", () => {
     const expiredAttachment = {
       id: "a1000001-0000-4000-8000-000000000001",
@@ -397,45 +352,6 @@ describe("chat attachment contracts", () => {
     expect(proposalErrors[0]).toMatch(/expired/);
   });
 
-  it("blocks recognition when stored MIME does not match category", () => {
-    const errors = getChatAttachmentRecognitionEligibilityErrors({
-      category: "food_photo",
-      mimeType: "application/pdf",
-      consent: null,
-      retentionPolicy: "ephemeral_recognition",
-      expiresAt: null,
-    });
-
-    expect(errors[0]).toMatch(/Unsupported MIME type/);
-  });
-
-  it("strips medical summary text until review approval", () => {
-    const sanitized = sanitizeMedicalRecognitionForClient({
-      category: "medical_document",
-      attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-      documentId: "e1000001-0000-4000-8000-000000000001",
-      documentType: "lab_report",
-      title: "Labs",
-      parseStatus: "summary_ready",
-      summarySnippet: "Vitamin D is slightly below the reference range.",
-      reviewStatus: "pending_review",
-      documentReviewPath: null,
-      consentScopes: ["upload_storage", "parse_ocr"],
-      provenance: {
-        source: "document_parser",
-        providerId: "documents_module",
-        recognitionId: "f1000001-0000-4000-8000-000000000001",
-      },
-      wellnessContextOnlyNotice:
-        "This document is wellness coaching context only. It is not a diagnosis or treatment plan.",
-    });
-
-    expect(sanitized.summarySnippet).toBeNull();
-    expect(sanitized.documentReviewPath).toBe(
-      buildMedicalDocumentReviewPath("e1000001-0000-4000-8000-000000000001"),
-    );
-  });
-
   it("caps attachment ref count on chat messages", () => {
     const attachmentRefIds = [
       "a1000001-0000-4000-8000-000000000001",
@@ -452,5 +368,328 @@ describe("chat attachment contracts", () => {
     });
 
     expect(tooMany.success).toBe(false);
+  });
+
+  describe("DB-compat: historical recognition envelope parsing (plan item 7)", () => {
+    it("parses legacy food_photo recognition envelopes from DB rows", () => {
+      const foodEnvelope = chatAttachmentRecognitionEnvelopeSchema.parse({
+        category: "food_photo",
+        attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+        analysis: {
+          candidates: [
+            {
+              items: [{ name: "Salad", calories: 320 }],
+              estimatedCalories: 320,
+              estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
+              confidence: "medium",
+              provenance: {
+                source: "dev_stub",
+                providerId: "dev_food_photo",
+                analysisId: "b1000001-0000-4000-8000-000000000002",
+              },
+            },
+          ],
+          lowConfidenceNotice: null,
+        },
+        provenance: {
+          source: "dev_stub",
+          providerId: "dev_food_photo",
+          recognitionId: "b1000001-0000-4000-8000-000000000002",
+          confidence: "medium",
+        },
+      });
+
+      expect(foodEnvelope.category).toBe("food_photo");
+    });
+
+    it("parses legacy medical_document recognition envelopes from DB rows", () => {
+      const medicalEnvelope = chatAttachmentRecognitionEnvelopeSchema.parse({
+        category: "medical_document",
+        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
+        documentId: "00000000-0000-4000-8000-000000000000",
+        documentType: "lab_report",
+        title: "Labs",
+        parseStatus: "uploaded",
+        summarySnippet: null,
+        reviewStatus: null,
+        consentScopes: ["upload_storage", "parse_ocr"],
+        provenance: {
+          source: "attachment_context_only",
+          providerId: "chat_attachment",
+          recognitionId: "f1000001-0000-4000-8000-000000000001",
+        },
+        wellnessContextOnlyNotice:
+          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
+        documentReviewPath: null,
+        documentPersistenceStatus: "attachment_context_only",
+      });
+
+      expect(medicalEnvelope.category).toBe("medical_document");
+      if (medicalEnvelope.category === "medical_document") {
+        expect(medicalEnvelope.documentPersistenceStatus).toBe("attachment_context_only");
+      }
+    });
+
+    it("parses legacy saved_health_document recognition rows as context-only", () => {
+      const parsed = parseStoredChatAttachmentRecognition({
+        category: "medical_document",
+        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
+        documentId: "e1000001-0000-4000-8000-000000000001",
+        documentType: "lab_report",
+        title: "Labs",
+        parseStatus: "summary_ready",
+        summarySnippet: "Vitamin D is slightly below the reference range.",
+        reviewStatus: "pending_review",
+        documentReviewPath: "/profile#documents?documentId=e1000001-0000-4000-8000-000000000001",
+        consentScopes: ["upload_storage", "parse_ocr"],
+        provenance: {
+          source: "chat_attachment",
+          providerId: "chat_attachment",
+          recognitionId: "f1000001-0000-4000-8000-000000000001",
+        },
+        wellnessContextOnlyNotice:
+          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
+        documentPersistenceStatus: "saved_health_document",
+      });
+
+      expect(parsed?.category).toBe("medical_document");
+      if (parsed?.category === "medical_document") {
+        expect(parsed.documentPersistenceStatus).toBe("attachment_context_only");
+        expect(parsed.summarySnippet).toBeNull();
+        expect(parsed.documentId).toBe("00000000-0000-4000-8000-000000000000");
+      }
+    });
+
+    it("sanitizes medical recognition to context-only client shape", () => {
+      const sanitized = sanitizeMedicalRecognitionForClient({
+        category: "medical_document",
+        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
+        documentId: "e1000001-0000-4000-8000-000000000001",
+        documentType: "lab_report",
+        title: "Labs",
+        parseStatus: "summary_ready",
+        summarySnippet: "Vitamin D is slightly below the reference range.",
+        reviewStatus: "pending_review",
+        documentReviewPath: "/profile#documents?documentId=e1000001-0000-4000-8000-000000000001",
+        consentScopes: ["upload_storage", "parse_ocr"],
+        provenance: {
+          source: "attachment_context_only",
+          providerId: "chat_attachment",
+          recognitionId: "f1000001-0000-4000-8000-000000000001",
+        },
+        wellnessContextOnlyNotice:
+          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
+      });
+
+      expect(sanitized.documentPersistenceStatus).toBe("attachment_context_only");
+      expect(sanitized.summarySnippet).toBeNull();
+      expect(sanitized.reviewStatus).toBeNull();
+      expect(sanitized.documentReviewPath).toBeNull();
+      expect(sanitized.parseStatus).toBe("uploaded");
+      expect(sanitized.documentId).toBe("00000000-0000-4000-8000-000000000000");
+    });
+
+    it("does not expose saved-document semantics for context-only medical recognition", () => {
+      const sanitized = sanitizeMedicalRecognitionForClient({
+        category: "medical_document",
+        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
+        documentId: "d1000001-0000-4000-8000-000000000001",
+        documentType: "lab_report",
+        title: "Labs",
+        parseStatus: "uploaded",
+        summarySnippet: null,
+        reviewStatus: "pending_review",
+        documentReviewPath: null,
+        consentScopes: ["upload_storage", "parse_ocr"],
+        provenance: {
+          source: "attachment_context_only",
+          providerId: "chat_attachment",
+          recognitionId: "f1000001-0000-4000-8000-000000000001",
+        },
+        wellnessContextOnlyNotice:
+          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
+        documentPersistenceStatus: "attachment_context_only",
+      });
+
+      expect(sanitized.documentPersistenceStatus).toBe("attachment_context_only");
+      expect(sanitized.summarySnippet).toBeNull();
+      expect(sanitized.reviewStatus).toBeNull();
+      expect(sanitized.documentReviewPath).toBeNull();
+      expect(sanitized.parseStatus).toBe("uploaded");
+    });
+
+    it("chatAttachmentRecordSchema parses a row carrying legacy category, status, and recognition — DB backwards compat", () => {
+      // DB columns for category, status, and recognition remain readable on historically
+      // persisted rows. New rows use category=unclassified, status=queued, recognition=null,
+      // but the schema must still parse old rows without dropping data.
+      const legacyRow = chatAttachmentRecordSchema.parse({
+        id: "b1000001-0000-4000-8000-000000000001",
+        userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+        threadId: null,
+        messageId: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+        category: "food_photo",         // legacy category value — still readable
+        categorySource: "ai_classified", // legacy categorySource — still readable
+        status: "ready",                 // legacy status — still readable
+        filename: "meal.jpg",
+        mimeType: "image/jpeg",
+        fileSizeBytes: 5000,
+        storageKey: "local://attachments/meal.jpg",
+        linkedDocumentId: null,
+        linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
+        consent: null,
+        recognition: {
+          category: "food_photo",
+          attachmentRefId: "b1000001-0000-4000-8000-000000000001",
+          analysis: {
+            candidates: [
+              {
+                items: [{ name: "Pasta", calories: 450 }],
+                estimatedCalories: 450,
+                estimatedMacros: { proteinGrams: 15, carbsGrams: 65, fatGrams: 10 },
+                confidence: "high",
+                provenance: {
+                  source: "dev_stub",
+                  providerId: "dev_food_photo",
+                  analysisId: "c1000001-0000-4000-8000-000000000001",
+                },
+              },
+            ],
+            lowConfidenceNotice: null,
+          },
+          provenance: {
+            source: "dev_stub",
+            providerId: "dev_food_photo",
+            recognitionId: "c1000001-0000-4000-8000-000000000001",
+            confidence: "high",
+          },
+        },
+        failureReason: null,
+        retentionPolicy: "ephemeral_recognition",
+        expiresAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Legacy category / status / recognition all parse correctly.
+      expect(legacyRow.category).toBe("food_photo");
+      expect(legacyRow.categorySource).toBe("ai_classified");
+      expect(legacyRow.status).toBe("ready");
+      expect(legacyRow.recognition?.category).toBe("food_photo");
+    });
+  });
+});
+
+describe("chatMessageAttachmentMetaSchema — display-only contract", () => {
+  const validMeta = {
+    attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+    filename: "food.jpg",
+    mimeType: "image/jpeg",
+    category: "food_photo",
+    status: "ready",
+    hasViewableContent: true,
+  };
+
+  it("accepts a valid display-only attachment metadata object", () => {
+    expect(chatMessageAttachmentMetaSchema.safeParse(validMeta).success).toBe(true);
+  });
+
+  it("rejects objects with storageKey (raw content field not allowed on display schema)", () => {
+    expect(
+      chatMessageAttachmentMetaSchema.safeParse({ ...validMeta, storageKey: "some/key" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects objects with consent (consent object not allowed on display schema)", () => {
+    expect(
+      chatMessageAttachmentMetaSchema.safeParse({
+        ...validMeta,
+        consent: { consentScopes: ["upload_storage"], consentVersion: "v1", consentGrantedAt: new Date().toISOString() },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects objects with recognition payloads (recognition not allowed on display schema)", () => {
+    expect(
+      chatMessageAttachmentMetaSchema.safeParse({
+        ...validMeta,
+        recognition: { category: "food_photo", analysis: {} },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects objects with fileContentBase64 (bytes not allowed on display schema)", () => {
+    expect(
+      chatMessageAttachmentMetaSchema.safeParse({ ...validMeta, fileContentBase64: "dGVzdA==" })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("chatMessageSchema — attachments field", () => {
+  const baseMessage = {
+    id: "a1000001-0000-4000-8000-000000000001",
+    threadId: "b2000002-0000-4000-8000-000000000002",
+    role: "user",
+    content: "Hi coach",
+    metadata: {},
+    createdAt: new Date().toISOString(),
+  };
+
+  it("defaults attachments to empty array when field is absent", () => {
+    const parsed = chatMessageSchema.safeParse(baseMessage);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.attachments).toEqual([]);
+    }
+  });
+
+  it("accepts a message with a populated attachments array", () => {
+    const parsed = chatMessageSchema.safeParse({
+      ...baseMessage,
+      attachments: [
+        {
+          attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+          filename: "photo.jpg",
+          mimeType: "image/jpeg",
+          category: "food_photo",
+          status: "ready",
+          hasViewableContent: true,
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.attachments).toHaveLength(1);
+      expect(parsed.data.attachments[0]?.hasViewableContent).toBe(true);
+    }
+  });
+
+  it("rejects a message where attachments contain storageKey (no raw content in contract)", () => {
+    const parsed = chatMessageSchema.safeParse({
+      ...baseMessage,
+      attachments: [
+        {
+          attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+          filename: "photo.jpg",
+          mimeType: "image/jpeg",
+          category: "food_photo",
+          status: "ready",
+          hasViewableContent: true,
+          storageKey: "some/storage/path",
+        },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("accepts assistant messages with empty attachments (backward compatible)", () => {
+    const parsed = chatMessageSchema.safeParse({
+      ...baseMessage,
+      role: "assistant",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.attachments).toEqual([]);
+    }
   });
 });

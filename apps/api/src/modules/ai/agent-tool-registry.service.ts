@@ -1,4 +1,9 @@
-import type { AgentToolCallRequest, AgentToolCallResult, AgentToolName } from "@health/types";
+import type {
+  AgentToolCallRequest,
+  AgentToolCallResult,
+  AgentToolName,
+  ContextBudgetPolicy,
+} from "@health/types";
 import {
   agentGetDocumentContextToolResultSchema,
   agentGetUserContextSliceToolResultSchema,
@@ -6,23 +11,37 @@ import {
   agentToolCallRequestSchema,
   agentToolCallResultSchema,
   getUserContextSliceInputSchema,
+  DEFAULT_CONTEXT_BUDGET_POLICY,
 } from "@health/types";
 import type { ZodError } from "zod";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { CoachingContextService } from "../coaching-context/coaching-context.service.js";
+import { ContextBudgetPolicyService } from "../coaching-context/context-budget-policy.service.js";
 
 @Injectable()
 export class AgentToolRegistryService {
-  constructor(private readonly coachingContextService: CoachingContextService) {}
+  constructor(
+    private readonly coachingContextService: CoachingContextService,
+    private readonly contextBudgetPolicyService: ContextBudgetPolicyService,
+  ) {}
 
   listAvailableTools(): AgentToolName[] {
     return ["getUserContextSlice", "getDocumentContext", "getWeeklyProgressContext"];
   }
 
+  /**
+   * Execute a tool request from a domain loop after executor allowlist checks.
+   *
+   * @param contextBudget - The active per-domain context budget. Required for
+   *   `getDocumentContext` to re-apply the deny-by-default document floor.
+   *   When omitted, `DEFAULT_CONTEXT_BUDGET_POLICY` is used as the conservative
+   *   fallback (allowDocuments=false, allowSensitiveHealthContext=false).
+   */
   async executeTool(
     auth: ClerkAuthContext,
     request: AgentToolCallRequest,
+    contextBudget?: ContextBudgetPolicy,
   ): Promise<AgentToolCallResult> {
     const parsedRequest = agentToolCallRequestSchema.safeParse(request);
 
@@ -30,18 +49,19 @@ export class AgentToolRegistryService {
       return this.invalidToolCallResult(parsedRequest.error);
     }
 
-    return this.executeValidatedTool(auth, parsedRequest.data);
+    return this.executeValidatedTool(auth, parsedRequest.data, contextBudget);
   }
 
   private async executeValidatedTool(
     auth: ClerkAuthContext,
     request: AgentToolCallRequest,
+    contextBudget?: ContextBudgetPolicy,
   ): Promise<AgentToolCallResult> {
     switch (request.tool) {
       case "getUserContextSlice":
         return this.executeGetUserContextSlice(auth, request.input);
       case "getDocumentContext":
-        return this.executeGetDocumentContext(auth);
+        return this.executeGetDocumentContext(auth, contextBudget);
       case "getWeeklyProgressContext":
         return this.executeGetWeeklyProgressContext(auth);
       default: {
@@ -105,12 +125,39 @@ export class AgentToolRegistryService {
     });
   }
 
-  private async executeGetDocumentContext(auth: ClerkAuthContext): Promise<AgentToolCallResult> {
-    const slice = await this.coachingContextService.getUserContextSlice(auth, {
+  /**
+   * Execute the `getDocumentContext` tool.
+   *
+   * Safety floor (MUST NOT be weakened):
+   *  - The slice is always routed through `applyBudgetToBuiltSlice` using the
+   *    active per-domain context budget. The budget's `allowDocuments` and
+   *    `allowSensitiveHealthContext` flags are the code-level deny-by-default
+   *    floors — config cannot relax them.
+   *  - When `contextBudget` is not supplied (legacy or test callers), we fall
+   *    back to `DEFAULT_CONTEXT_BUDGET_POLICY` which denies documents and
+   *    sensitive health context. This means the tool produces an empty document
+   *    result when no explicit budget is passed, which is the safe default.
+   *  - Document content returned is consent-approved, summarized references only
+   *    (no raw document contents) — enforced by `getUserContextSlice` + budget.
+   */
+  private async executeGetDocumentContext(
+    auth: ClerkAuthContext,
+    contextBudget?: ContextBudgetPolicy,
+  ): Promise<AgentToolCallResult> {
+    const activeBudget = contextBudget ?? DEFAULT_CONTEXT_BUDGET_POLICY;
+
+    const rawSlice = await this.coachingContextService.getUserContextSlice(auth, {
       purpose: "health_context",
       includeDocuments: true,
       includeRawData: false,
     });
+
+    // Re-apply the active per-domain context budget floor AFTER building the slice.
+    // This is the deny-by-default enforcement: if the budget denies documents or
+    // sensitive health context, those fields are stripped here even though
+    // getUserContextSlice was called with includeDocuments:true.
+    // The budget floor is a code-level invariant — it is not relaxable by config.
+    const slice = this.contextBudgetPolicyService.applyBudgetToBuiltSlice(rawSlice, activeBudget);
 
     const result = {
       documentContext: slice.documentContext ?? {

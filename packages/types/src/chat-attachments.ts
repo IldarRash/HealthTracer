@@ -3,13 +3,11 @@ import { isoDateTimeSchema } from "./dates.js";
 import {
   documentConsentScopeSchema,
   documentTypeSchema,
-  SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
   type DocumentConsentScope,
 } from "./documents.js";
 import {
   foodPhotoAnalysisResultSchema,
   nutritionConfidenceBandSchema,
-  type LogNutritionIncidentProposalPayload,
 } from "./nutrition-incidents.js";
 import { workoutExerciseSchema } from "./workouts.js";
 
@@ -56,18 +54,20 @@ export const CHAT_FOOD_PHOTO_MIME_TYPES = [
   "image/webp",
 ] as const;
 
-/** Medical chat attachments include PDF/text plus screenshot uploads pending manual review. */
+/**
+ * Chat attachment image MIME types accepted for medical context.
+ * Images only for now — PDF/text document flow is deferred.
+ */
 export const CHAT_MEDICAL_DOCUMENT_MIME_TYPES = [
-  ...SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
-  ...CHAT_FOOD_PHOTO_MIME_TYPES,
+  "image/jpeg",
+  "image/png",
+  "image/webp",
 ] as const;
 
 export const CHAT_WORKOUT_ATTACHMENT_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
-  "application/pdf",
-  "text/plain",
 ] as const;
 
 export type ChatFoodPhotoMimeType = (typeof CHAT_FOOD_PHOTO_MIME_TYPES)[number];
@@ -130,6 +130,18 @@ export const foodPhotoRecognitionEnvelopeSchema = z
 
 export type FoodPhotoRecognitionEnvelope = z.infer<typeof foodPhotoRecognitionEnvelopeSchema>;
 
+export const ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID =
+  "00000000-0000-4000-8000-000000000000";
+
+export const medicalDocumentPersistenceStatusSchema = z.literal("attachment_context_only");
+
+export type MedicalDocumentPersistenceStatus = z.infer<
+  typeof medicalDocumentPersistenceStatusSchema
+>;
+
+/** Legacy persisted rows only; new writes use attachment_context_only. */
+export const legacyMedicalDocumentPersistenceStatusSchema = z.literal("saved_health_document");
+
 export const medicalDocumentRecognitionEnvelopeSchema = z
   .object({
     category: z.literal("medical_document"),
@@ -144,6 +156,7 @@ export const medicalDocumentRecognitionEnvelopeSchema = z
     consentScopes: z.array(documentConsentScopeSchema).min(1),
     provenance: recognitionProvenanceSchema,
     wellnessContextOnlyNotice: z.string().min(1).max(240),
+    documentPersistenceStatus: medicalDocumentPersistenceStatusSchema.optional(),
   })
   .strict();
 
@@ -181,6 +194,19 @@ export type WorkoutAttachmentRecognitionEnvelope = z.infer<
   typeof workoutAttachmentRecognitionEnvelopeSchema
 >;
 
+export const storedMedicalDocumentRecognitionEnvelopeSchema =
+  medicalDocumentRecognitionEnvelopeSchema.extend({
+    documentPersistenceStatus: z
+      .union([medicalDocumentPersistenceStatusSchema, legacyMedicalDocumentPersistenceStatusSchema])
+      .optional(),
+  });
+
+export const storedChatAttachmentRecognitionEnvelopeSchema = z.discriminatedUnion("category", [
+  foodPhotoRecognitionEnvelopeSchema,
+  storedMedicalDocumentRecognitionEnvelopeSchema,
+  workoutAttachmentRecognitionEnvelopeSchema,
+]);
+
 export const chatAttachmentRecognitionEnvelopeSchema = z.discriminatedUnion("category", [
   foodPhotoRecognitionEnvelopeSchema,
   medicalDocumentRecognitionEnvelopeSchema,
@@ -191,12 +217,22 @@ export type ChatAttachmentRecognitionEnvelope = z.infer<
   typeof chatAttachmentRecognitionEnvelopeSchema
 >;
 
+export const chatAttachmentCategorySourceSchema = z.enum([
+  "default_unclassified",
+  "mime_inferred",
+  "user_selected",
+  "ai_classified",
+]);
+
+export type ChatAttachmentCategorySource = z.infer<typeof chatAttachmentCategorySourceSchema>;
+
 export const chatAttachmentRecordSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
   threadId: z.string().uuid().nullable(),
   messageId: z.string().uuid().nullable(),
   category: chatAttachmentCategorySchema,
+  categorySource: chatAttachmentCategorySourceSchema.default("default_unclassified"),
   status: chatAttachmentStatusSchema,
   filename: z.string().min(1).max(200),
   mimeType: z.string().min(1).max(120),
@@ -218,17 +254,12 @@ export type ChatAttachmentRecord = z.infer<typeof chatAttachmentRecordSchema>;
 export const createChatAttachmentSchema = z
   .object({
     threadId: z.string().uuid().optional(),
-    category: chatAttachmentCategorySchema.default("unclassified"),
     filename: z.string().min(1).max(200),
     mimeType: z.string().min(1).max(120),
     fileContentBase64: z.string().min(1),
-    consentScopes: z.array(documentConsentScopeSchema).min(1).max(5).optional(),
-    consentVersion: z.string().min(1).max(40).default("v1"),
-    documentType: documentTypeSchema.optional(),
-    documentTitle: z.string().min(1).max(160).optional(),
   })
   .superRefine((input, ctx) => {
-    const mimeError = getChatAttachmentMimeTypeError(input.category, input.mimeType);
+    const mimeError = getChatAttachmentMimeTypeError("unclassified", input.mimeType);
 
     if (mimeError) {
       ctx.addIssue({
@@ -237,104 +268,65 @@ export const createChatAttachmentSchema = z
         path: ["mimeType"],
       });
     }
-
-    if (input.category === "unclassified" && input.consentScopes?.length) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Consent scopes apply only after a medical document category is assigned.",
-        path: ["consentScopes"],
-      });
-    }
-
-    if (input.category === "medical_document") {
-      if (!input.consentScopes?.includes("upload_storage")) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Medical document attachments require upload_storage consent.",
-          path: ["consentScopes"],
-        });
-      }
-
-      if (!input.documentType) {
-        ctx.addIssue({
-          code: "custom",
-          message: "documentType is required for medical document attachments.",
-          path: ["documentType"],
-        });
-      }
-
-      if (!input.documentTitle) {
-        ctx.addIssue({
-          code: "custom",
-          message: "documentTitle is required for medical document attachments.",
-          path: ["documentTitle"],
-        });
-      }
-    }
   });
 
 export type CreateChatAttachmentInput = z.input<typeof createChatAttachmentSchema>;
-
-export const recognizeChatAttachmentSchema = z
-  .object({
-    consentScopes: z.array(documentConsentScopeSchema).min(1).max(5).optional(),
-    consentVersion: z.string().min(1).max(40).optional(),
-  })
-  .strict();
-
-export type RecognizeChatAttachmentInput = z.infer<typeof recognizeChatAttachmentSchema>;
-
-export const grantChatAttachmentConsentSchema = z
-  .object({
-    consentScopes: z.array(documentConsentScopeSchema).min(1).max(5),
-    consentVersion: z.string().min(1).max(40).default("v1"),
-  })
-  .strict();
-
-export type GrantChatAttachmentConsentInput = z.infer<typeof grantChatAttachmentConsentSchema>;
-
-export const chatAttachmentRecognitionResponseSchema = z.object({
-  attachment: chatAttachmentRecordSchema,
-  proposalCandidates: z.array(
-    z.object({
-      intent: z.string().min(1).max(80),
-      targetDomain: z.string().min(1).max(40),
-      title: z.string().min(1).max(160),
-      reason: z.string().min(1).max(1000),
-      proposedChanges: z.unknown(),
-      attachmentRefId: z.string().uuid(),
-    }),
-  ),
-});
-
-export type ChatAttachmentRecognitionResponse = z.infer<
-  typeof chatAttachmentRecognitionResponseSchema
->;
 
 export const chatAttachmentOutcomeSchema = z.object({
   attachmentRefId: z.string().uuid(),
   category: chatAttachmentCategorySchema,
   status: chatAttachmentStatusSchema,
   recognition: chatAttachmentRecognitionEnvelopeSchema.nullable(),
-  proposalCandidateCount: z.number().int().nonnegative().max(5),
 });
 
 export type ChatAttachmentOutcome = z.infer<typeof chatAttachmentOutcomeSchema>;
 
-const UNSAFE_RECOGNITION_SUMMARY_PATTERNS = [
-  /\bdiagnos(e|is|ed|ing)\b/i,
-  /\bprescri(be|ption|bed|bing)\b/i,
-  /\btreat(ment|ing|ed)\b/i,
-  /\bmedication\b/i,
-  /\bcure\b/i,
-  /\bclinical(?:ly)?\b/i,
-  /\bpatholog(y|ical)\b/i,
-  /\bdisorder\b/i,
-  /\bmedical advice\b/i,
-  /\byou have\b/i,
-  /\bdefinitely\b/i,
-  /\bconfirmed\b/i,
-];
+/** Image MIME types eligible for inline chat transcript previews. */
+export const CHAT_ATTACHMENT_IMAGE_MIME_TYPES = CHAT_FOOD_PHOTO_MIME_TYPES;
+
+export function isChatAttachmentImageMimeType(mimeType: string): boolean {
+  return (CHAT_ATTACHMENT_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType);
+}
+
+export const chatMessageAttachmentDisplaySchema = z
+  .object({
+    attachmentRefId: z.string().uuid(),
+    filename: z.string().min(1).max(200),
+    mimeType: z.string().min(1).max(120),
+  })
+  .strict();
+
+export type ChatMessageAttachmentDisplay = z.infer<typeof chatMessageAttachmentDisplaySchema>;
+
+/**
+ * Display-only projection of a linked chat attachment on a persisted message.
+ * MUST NOT contain bytes, storageKey, consent, document text, or recognition payloads.
+ * hasViewableContent is the server-computed flag for whether the /content endpoint can serve this attachment.
+ */
+export const chatMessageAttachmentMetaSchema = z
+  .object({
+    attachmentRefId: z.string().uuid(),
+    filename: z.string().min(1).max(200),
+    mimeType: z.string().min(1).max(120),
+    category: chatAttachmentCategorySchema,
+    status: chatAttachmentStatusSchema,
+    hasViewableContent: z.boolean(),
+  })
+  .strict();
+
+export type ChatMessageAttachmentMeta = z.infer<typeof chatMessageAttachmentMetaSchema>;
+
+export function parseChatMessageAttachmentRefIds(
+  metadata: Record<string, unknown>,
+): string[] {
+  const raw = metadata.attachmentRefIds;
+
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.filter((value): value is string => typeof value === "string");
+}
 
 const CATEGORY_MIME_ALLOWLIST: Record<
   Exclude<ChatAttachmentCategory, "unclassified">,
@@ -363,13 +355,15 @@ const CATEGORY_RETENTION: Record<
   workout_attachment: "ephemeral_recognition",
 };
 
+/**
+ * Image MIME types accepted for all provisional chat attachment uploads.
+ * Images only for now — PDF/text document flow is deferred.
+ */
 export const CHAT_PROVISIONAL_UPLOAD_MIME_TYPES = [
-  ...new Set([
-    ...CHAT_FOOD_PHOTO_MIME_TYPES,
-    ...SUPPORTED_HEALTH_DOCUMENT_MIME_TYPES,
-    ...CHAT_WORKOUT_ATTACHMENT_MIME_TYPES,
-  ]),
-] as const;
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const satisfies readonly string[];
 
 export const MAX_CHAT_PROVISIONAL_ATTACHMENT_BYTES = 10_000_000;
 
@@ -484,43 +478,6 @@ export function getMedicalAttachmentConsentErrors(
   return [];
 }
 
-export function containsUnsafeRecognitionSummaryLanguage(text: string): boolean {
-  return UNSAFE_RECOGNITION_SUMMARY_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-export function assertRecognitionProviderIsolation(input: {
-  category: ChatAttachmentCategory;
-  payload: Record<string, unknown>;
-}): void {
-  const forbiddenKeysByCategory: Record<
-    Exclude<ChatAttachmentCategory, "unclassified">,
-    readonly string[]
-  > = {
-    food_photo: [
-      "documentId",
-      "documentText",
-      "profile",
-      "wellbeingNotes",
-      "medicalContext",
-      "workoutContext",
-    ],
-    medical_document: ["imageRef", "mealContext", "workoutContext", "profile"],
-    workout_attachment: ["documentId", "documentText", "profile", "mealContext", "medicalContext"],
-  };
-
-  if (input.category === "unclassified") {
-    return;
-  }
-
-  for (const key of forbiddenKeysByCategory[input.category]) {
-    if (key in input.payload) {
-      throw new Error(
-        `${input.category} recognition must not include cross-category context key "${key}".`,
-      );
-    }
-  }
-}
-
 export type OwnedChatAttachmentRef = {
   id: string;
   userId: string;
@@ -544,8 +501,17 @@ export function isChatAttachmentSendEligibleStatus(status: ChatAttachmentStatus)
   );
 }
 
-export function buildMedicalDocumentReviewPath(documentId: string): string {
-  return `/profile#documents?documentId=${documentId}`;
+export function isAttachmentContextOnlyMedicalRecognition(
+  recognition: Pick<
+    MedicalDocumentRecognitionEnvelope,
+    "provenance" | "documentPersistenceStatus" | "documentId"
+  >,
+): boolean {
+  return (
+    recognition.documentPersistenceStatus === "attachment_context_only" ||
+    recognition.provenance.source === "attachment_context_only" ||
+    recognition.documentId === ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID
+  );
 }
 
 export function isChatAttachmentExpired(
@@ -559,51 +525,33 @@ export function isChatAttachmentExpired(
   return new Date(attachment.expiresAt).getTime() <= now.getTime();
 }
 
-export function getChatAttachmentRecognitionEligibilityErrors(
-  attachment: Pick<
-    ChatAttachmentRecord,
-    "category" | "mimeType" | "consent" | "retentionPolicy" | "expiresAt"
-  >,
-): string[] {
-  const errors: string[] = [];
+export function parseStoredChatAttachmentRecognition(
+  raw: unknown,
+): ChatAttachmentRecognitionEnvelope | null {
+  const parsed = storedChatAttachmentRecognitionEnvelopeSchema.safeParse(raw);
 
-  if (attachment.category === "unclassified") {
-    errors.push("Classify the attachment during chat send before running standalone recognition.");
-    return errors;
+  if (!parsed.success) {
+    return null;
   }
 
-  if (isChatAttachmentExpired(attachment)) {
-    errors.push("Attachment recognition reference has expired.");
+  if (parsed.data.category === "medical_document") {
+    return sanitizeMedicalRecognitionForClient(parsed.data);
   }
 
-  const mimeError = getChatAttachmentMimeTypeError(attachment.category, attachment.mimeType);
-
-  if (mimeError) {
-    errors.push(mimeError);
-  }
-
-  errors.push(
-    ...getMedicalAttachmentConsentErrors(attachment.category, attachment.consent?.consentScopes),
-  );
-
-  return errors;
+  return parsed.data;
 }
 
 export function sanitizeMedicalRecognitionForClient(
-  recognition: MedicalDocumentRecognitionEnvelope,
+  recognition: z.infer<typeof storedMedicalDocumentRecognitionEnvelopeSchema>,
 ): MedicalDocumentRecognitionEnvelope {
-  if (recognition.reviewStatus === "approved") {
-    return {
-      ...recognition,
-      documentReviewPath:
-        recognition.documentReviewPath ?? buildMedicalDocumentReviewPath(recognition.documentId),
-    };
-  }
-
   return {
     ...recognition,
+    documentId: ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID,
+    parseStatus: "uploaded",
     summarySnippet: null,
-    documentReviewPath: buildMedicalDocumentReviewPath(recognition.documentId),
+    reviewStatus: null,
+    documentReviewPath: null,
+    documentPersistenceStatus: "attachment_context_only",
   };
 }
 
@@ -708,9 +656,3 @@ export function getChatAttachmentProposalRefErrors(input: {
   return [];
 }
 
-export function buildNutritionIncidentProposalFromFoodPhotoRecognition(input: {
-  recognition: FoodPhotoRecognitionEnvelope;
-  incidentDateTime: string;
-}): LogNutritionIncidentProposalPayload["imageRefs"] {
-  return [{ id: input.recognition.attachmentRefId }];
-}

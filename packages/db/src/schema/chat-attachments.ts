@@ -37,6 +37,13 @@ export const chatAttachmentRetentionPolicyEnum = pgEnum("chat_attachment_retenti
   "session_linked",
 ]);
 
+export const chatAttachmentCategorySourceEnum = pgEnum("chat_attachment_category_source", [
+  "default_unclassified",
+  "mime_inferred",
+  "user_selected",
+  "ai_classified",
+]);
+
 export const chatAttachments = pgTable(
   "chat_attachments",
   {
@@ -47,6 +54,9 @@ export const chatAttachments = pgTable(
     threadId: uuid("thread_id").references(() => chatThreads.id, { onDelete: "set null" }),
     messageId: uuid("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
     category: chatAttachmentCategoryEnum("category").notNull(),
+    categorySource: chatAttachmentCategorySourceEnum("category_source")
+      .notNull()
+      .default("default_unclassified"),
     status: chatAttachmentStatusEnum("status").notNull().default("queued"),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_CONTEXT_BUDGET_POLICY, DEEP_REVIEW_CONTEXT_BUDGET_POLICY } from "@health/types";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
 
 const auth = {
@@ -7,9 +8,25 @@ const auth = {
   displayName: "Test User",
 };
 
+/**
+ * A minimal stub ContextBudgetPolicyService that delegates applyBudgetToBuiltSlice
+ * to the real logic (pass-through to the actual function from the service module).
+ * For most tests we just use a pass-through; specific tests supply a tracking mock.
+ */
+function createStubContextBudgetPolicyService(
+  applyBudgetOverride?: ReturnType<typeof vi.fn>,
+) {
+  return {
+    applyBudgetToBuiltSlice: applyBudgetOverride ?? vi.fn((slice: unknown) => slice),
+  } as never;
+}
+
 describe("AgentToolRegistryService", () => {
   it("lists the read-only agent tools", () => {
-    const service = new AgentToolRegistryService({} as never);
+    const service = new AgentToolRegistryService(
+      {} as never,
+      createStubContextBudgetPolicyService(),
+    );
 
     expect(service.listAvailableTools()).toEqual([
       "getUserContextSlice",
@@ -19,7 +36,10 @@ describe("AgentToolRegistryService", () => {
   });
 
   it("returns typed validation errors for unknown tool requests", async () => {
-    const service = new AgentToolRegistryService({} as never);
+    const service = new AgentToolRegistryService(
+      {} as never,
+      createStubContextBudgetPolicyService(),
+    );
 
     const result = await service.executeTool(auth, {
       tool: "deleteUserData",
@@ -33,9 +53,10 @@ describe("AgentToolRegistryService", () => {
 
   it("returns typed validation errors for invalid getUserContextSlice input", async () => {
     const getUserContextSlice = vi.fn();
-    const service = new AgentToolRegistryService({
-      getUserContextSlice,
-    } as never);
+    const service = new AgentToolRegistryService(
+      { getUserContextSlice } as never,
+      createStubContextBudgetPolicyService(),
+    );
 
     const result = await service.executeTool(auth, {
       tool: "getUserContextSlice",
@@ -49,7 +70,7 @@ describe("AgentToolRegistryService", () => {
   });
 
   it("loads document context through the consent-gated health slice", async () => {
-    const getUserContextSlice = vi.fn(async () => ({
+    const rawSlice = {
       purpose: "health_context",
       documentContext: {
         items: [
@@ -74,22 +95,35 @@ describe("AgentToolRegistryService", () => {
           consentScope: "semantic_indexing",
         },
       ],
-    }));
+    };
 
-    const service = new AgentToolRegistryService({
-      getUserContextSlice,
-    } as never);
+    const getUserContextSlice = vi.fn(async () => rawSlice);
+    // Budget that allows documents (simulates health domain with allowDocuments=true)
+    const budgetWithDocuments = {
+      ...DEFAULT_CONTEXT_BUDGET_POLICY,
+      allowDocuments: true,
+      allowSensitiveHealthContext: true,
+    };
+    const applyBudgetToBuiltSlice = vi.fn((slice: unknown) => slice);
 
-    const result = await service.executeTool(auth, {
-      tool: "getDocumentContext",
-      input: {},
-    });
+    const service = new AgentToolRegistryService(
+      { getUserContextSlice } as never,
+      { applyBudgetToBuiltSlice } as never,
+    );
+
+    const result = await service.executeTool(
+      auth,
+      { tool: "getDocumentContext", input: {} },
+      budgetWithDocuments,
+    );
 
     expect(getUserContextSlice).toHaveBeenCalledWith(auth, {
       purpose: "health_context",
       includeDocuments: true,
       includeRawData: false,
     });
+    // Budget floor must be applied after the slice is built.
+    expect(applyBudgetToBuiltSlice).toHaveBeenCalledWith(rawSlice, budgetWithDocuments);
     expect(result.ok).toBe(true);
     expect(result.result).toMatchObject({
       documentContext: {
@@ -99,6 +133,79 @@ describe("AgentToolRegistryService", () => {
     });
   });
 
+  it("strips document context when budget denies documents (deny-by-default floor)", async () => {
+    const rawSlice = {
+      purpose: "health_context",
+      documentContext: {
+        items: [
+          {
+            documentId: "d2000001-0000-4000-8000-000000000001",
+            summaryId: "a2000001-0000-4000-8000-000000000001",
+            documentType: "lab_report",
+            title: "Should be stripped",
+            summarySnippet: "Sensitive content.",
+            extractedConstraints: [],
+          },
+        ],
+        generatedAt: new Date().toISOString(),
+      },
+      ragResults: [],
+    };
+    // Budget that denies documents (the deny-by-default floor)
+    const denyBudget = { ...DEFAULT_CONTEXT_BUDGET_POLICY, allowDocuments: false };
+
+    const getUserContextSlice = vi.fn(async () => rawSlice);
+    // The real applyBudgetToBuiltSlice strips documentContext when allowDocuments=false.
+    const applyBudgetToBuiltSlice = vi.fn((slice: Record<string, unknown>) => ({
+      ...slice,
+      documentContext: undefined,
+      ragResults: undefined,
+    }));
+
+    const service = new AgentToolRegistryService(
+      { getUserContextSlice } as never,
+      { applyBudgetToBuiltSlice } as never,
+    );
+
+    const result = await service.executeTool(
+      auth,
+      { tool: "getDocumentContext", input: {} },
+      denyBudget,
+    );
+
+    expect(applyBudgetToBuiltSlice).toHaveBeenCalledWith(rawSlice, denyBudget);
+    // After budget strips documents, result falls back to empty documentContext.
+    expect(result.ok).toBe(true);
+    expect(result.result).toMatchObject({
+      documentContext: { items: [] },
+      ragResults: [],
+    });
+  });
+
+  it("falls back to DEFAULT_CONTEXT_BUDGET_POLICY when no budget is passed to executeTool", async () => {
+    const rawSlice = {
+      purpose: "health_context",
+      documentContext: {
+        items: [],
+        generatedAt: new Date().toISOString(),
+      },
+      ragResults: [],
+    };
+
+    const getUserContextSlice = vi.fn(async () => rawSlice);
+    const applyBudgetToBuiltSlice = vi.fn((slice: unknown) => slice);
+
+    const service = new AgentToolRegistryService(
+      { getUserContextSlice } as never,
+      { applyBudgetToBuiltSlice } as never,
+    );
+
+    // Call without contextBudget — should use DEFAULT_CONTEXT_BUDGET_POLICY.
+    await service.executeTool(auth, { tool: "getDocumentContext", input: {} });
+
+    expect(applyBudgetToBuiltSlice).toHaveBeenCalledWith(rawSlice, DEFAULT_CONTEXT_BUDGET_POLICY);
+  });
+
   it("returns validation errors when getDocumentContext result shape is invalid", async () => {
     const getUserContextSlice = vi.fn(async () => ({
       purpose: "health_context",
@@ -106,9 +213,10 @@ describe("AgentToolRegistryService", () => {
       ragResults: [],
     }));
 
-    const service = new AgentToolRegistryService({
-      getUserContextSlice,
-    } as never);
+    const service = new AgentToolRegistryService(
+      { getUserContextSlice } as never,
+      createStubContextBudgetPolicyService(),
+    );
 
     const result = await service.executeTool(auth, {
       tool: "getDocumentContext",
@@ -126,9 +234,10 @@ describe("AgentToolRegistryService", () => {
       weeklyProgress: { weekStart: "not-a-date" },
     }));
 
-    const service = new AgentToolRegistryService({
-      getUserContextSlice,
-    } as never);
+    const service = new AgentToolRegistryService(
+      { getUserContextSlice } as never,
+      createStubContextBudgetPolicyService(),
+    );
 
     const result = await service.executeTool(auth, {
       tool: "getWeeklyProgressContext",
@@ -152,9 +261,10 @@ describe("AgentToolRegistryService", () => {
       },
     }));
 
-    const service = new AgentToolRegistryService({
-      getUserContextSlice,
-    } as never);
+    const service = new AgentToolRegistryService(
+      { getUserContextSlice } as never,
+      createStubContextBudgetPolicyService(),
+    );
 
     const result = await service.executeTool(auth, {
       tool: "getWeeklyProgressContext",
@@ -170,5 +280,41 @@ describe("AgentToolRegistryService", () => {
     expect(result.result).toMatchObject({
       userMessage: "You completed 2 of 3 planned workouts this week.",
     });
+  });
+
+  it("passes the per-domain context budget to getDocumentContext (DEEP_REVIEW budget allows documents)", async () => {
+    const rawSlice = {
+      purpose: "health_context",
+      documentContext: {
+        items: [
+          {
+            documentId: "d3000001-0000-4000-8000-000000000001",
+            summaryId: "a3000001-0000-4000-8000-000000000001",
+            documentType: "lab_report",
+            title: "Deep review document",
+            summarySnippet: "Approved for deep review.",
+            extractedConstraints: [],
+          },
+        ],
+        generatedAt: new Date().toISOString(),
+      },
+      ragResults: [],
+    };
+    const getUserContextSlice = vi.fn(async () => rawSlice);
+    const applyBudgetToBuiltSlice = vi.fn((slice: unknown) => slice);
+
+    const service = new AgentToolRegistryService(
+      { getUserContextSlice } as never,
+      { applyBudgetToBuiltSlice } as never,
+    );
+
+    await service.executeTool(
+      auth,
+      { tool: "getDocumentContext", input: {} },
+      DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
+    );
+
+    // The DEEP_REVIEW budget (not the default) must be passed to applyBudgetToBuiltSlice.
+    expect(applyBudgetToBuiltSlice).toHaveBeenCalledWith(rawSlice, DEEP_REVIEW_CONTEXT_BUDGET_POLICY);
   });
 });

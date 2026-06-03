@@ -1,9 +1,12 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module.js";
 import { env } from "./env.js";
 import { REQUEST_ID_HEADER } from "./observability/request-id.js";
 import { logListening, logStartupDiagnostics } from "./observability/startup-diagnostics.js";
+
+const JSON_BODY_LIMIT = "15mb";
 
 function resolveCorsOrigin():
   | boolean
@@ -25,9 +28,11 @@ function resolveCorsOrigin():
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: false,
   });
+  app.useBodyParser("json", { limit: JSON_BODY_LIMIT });
+  app.useBodyParser("urlencoded", { limit: JSON_BODY_LIMIT, extended: true });
   app.enableCors({
     origin: resolveCorsOrigin(),
     credentials: true,

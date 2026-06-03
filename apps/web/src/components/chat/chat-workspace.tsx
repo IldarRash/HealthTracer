@@ -8,27 +8,25 @@ import {
   apiQueryKeys,
   createChatThread,
   getChatThread,
-  grantChatAttachmentConsent,
+  getDirectChatPathRefreshQueryKeys,
   listChatThreads,
   listProposals,
-  recognizeChatAttachment,
   sendChatMessage,
   uploadChatAttachment,
 } from "../../lib/api";
 import {
-  buildOptimisticAttachmentSummary,
+  buildOptimisticAttachmentDisplays,
   canSendChatComposer,
-  enrichAttachmentOutcomesWithProposalContext,
   isChatAttachmentSendEligible,
   revokeChatAttachmentPreviewUrl,
   type ChatAttachmentOutcomeDisplay,
   type ChatComposerAttachmentDraft,
 } from "../../lib/chat-attachment-ui-state";
+import { buildChatAttachmentUploadPayload } from "../../lib/chat-attachment-upload";
 import {
-  buildChatAttachmentUploadPayload,
-  resolveRecognizeConsentScopes,
-} from "../../lib/chat-attachment-upload";
-import { DOCUMENT_CONSENT_VERSION } from "../../lib/documents-ui-state";
+  getDirectChatPathRefreshHints,
+  resolveChatMessageDirectPathFeedback,
+} from "../../lib/chat-direct-path-ui-state";
 import {
   createOptimisticUserMessage,
   formatChatTimestamp,
@@ -41,9 +39,15 @@ import {
   SUGGESTED_CHAT_PROMPTS,
   type OptimisticChatMessage,
 } from "../../lib/chat-ui-state";
+import {
+  resolveChatMessageAttachmentPreviews,
+  resolveChatMessageTextContent,
+} from "../../lib/chat-message-attachments";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
 import { ChatAttachmentOutcomePanel } from "./chat-attachment-outcome-panel";
+import { ChatComposerAttachmentInput } from "./chat-composer-attachment-input";
 import { ChatComposerAttachments } from "./chat-composer-attachments";
+import { ChatMessageAttachmentPreviews } from "./chat-message-attachment-previews";
 import { WeeklyReviewChatSummary } from "./weekly-review-chat-summary";
 import { mergeProposalsById } from "../../lib/proposal-ui-state";
 import {
@@ -189,6 +193,7 @@ export function ChatWorkspace() {
     setLocalProposals([]);
     setOptimisticMessage(null);
     setPendingRevisionSend(null);
+    setAttachmentOutcomesByMessageId({});
     setComposerAttachments((current) => {
       for (const attachment of current) {
         revokeChatAttachmentPreviewUrl(attachment);
@@ -250,16 +255,6 @@ export function ChatWorkspace() {
           return;
         }
 
-        if (uploadResult.data.status === "needs_consent") {
-          updateComposerAttachment(draftInput.localId, (current) => ({
-            ...current,
-            attachmentId: uploadResult.data!.id,
-            record: uploadResult.data!,
-            phase: "needs_consent",
-          }));
-          return;
-        }
-
         updateComposerAttachment(draftInput.localId, (current) => ({
           ...current,
           attachmentId: uploadResult.data!.id,
@@ -276,113 +271,6 @@ export function ChatWorkspace() {
       }
     },
     [getToken, primaryThreadId, updateComposerAttachment],
-  );
-
-  const grantConsentAndRetry = useCallback(
-    async (localId: string) => {
-      const draft = composerAttachments.find((attachment) => attachment.localId === localId);
-      if (!draft) {
-        return;
-      }
-
-      if (!draft.attachmentId) {
-        await processAttachmentDraft(draft);
-        return;
-      }
-
-      updateComposerAttachment(localId, (current) => ({
-        ...current,
-        phase: "uploading",
-        error: null,
-      }));
-
-      try {
-        const token = await getToken();
-        if (!token) {
-          throw new Error("Clerk session token is unavailable.");
-        }
-
-        const consentResult = await grantChatAttachmentConsent(token, draft.attachmentId, {
-          consentScopes: [...draft.consentScopes],
-          consentVersion: DOCUMENT_CONSENT_VERSION,
-        });
-
-        if (consentResult.error || !consentResult.data) {
-          updateComposerAttachment(localId, (current) => ({
-            ...current,
-            phase: "needs_consent",
-            error: consentResult.error ?? "Consent could not be recorded.",
-          }));
-          return;
-        }
-
-        updateComposerAttachment(localId, (current) => ({
-          ...current,
-          record: consentResult.data!,
-          phase: "uploaded",
-          error: null,
-        }));
-      } catch (error) {
-        updateComposerAttachment(localId, (current) => ({
-          ...current,
-          phase: "needs_consent",
-          error: error instanceof Error ? error.message : "Consent could not be recorded.",
-        }));
-      }
-    },
-    [composerAttachments, getToken, processAttachmentDraft, updateComposerAttachment],
-  );
-
-  const recognizeAttachmentDraft = useCallback(
-    async (draftInput: ChatComposerAttachmentDraft) => {
-      if (!draftInput.attachmentId) {
-        return;
-      }
-
-      updateComposerAttachment(draftInput.localId, (current) => ({
-        ...current,
-        phase: "recognizing",
-        error: null,
-      }));
-
-      try {
-        const token = await getToken();
-        if (!token) {
-          throw new Error("Clerk session token is unavailable.");
-        }
-
-        const recognizeResult = await recognizeChatAttachment(token, draftInput.attachmentId, {
-          consentScopes: resolveRecognizeConsentScopes(
-            draftInput.category,
-            draftInput.consentScopes,
-          ),
-          consentVersion: DOCUMENT_CONSENT_VERSION,
-        });
-
-        if (recognizeResult.error || !recognizeResult.data) {
-          updateComposerAttachment(draftInput.localId, (current) => ({
-            ...current,
-            phase: "uploaded",
-            error: recognizeResult.error ?? "Attachment could not be recognized.",
-          }));
-          return;
-        }
-
-        updateComposerAttachment(draftInput.localId, (current) => ({
-          ...current,
-          record: recognizeResult.data!.attachment,
-          phase: "ready",
-          proposalCandidateCount: recognizeResult.data!.proposalCandidates.length,
-        }));
-      } catch (error) {
-        updateComposerAttachment(draftInput.localId, (current) => ({
-          ...current,
-          phase: "uploaded",
-          error: error instanceof Error ? error.message : "Attachment recognition failed.",
-        }));
-      }
-    },
-    [getToken, updateComposerAttachment],
   );
 
   const sendMessageMutation = useMutation({
@@ -423,10 +311,14 @@ export function ChatWorkspace() {
       }
 
       if (typeof input === "object" && "attachmentRefIds" in input) {
-        const attachmentSummary = buildOptimisticAttachmentSummary(composerAttachments);
         setOptimisticMessage(
-          createOptimisticUserMessage(primaryThreadId, input.content, attachmentSummary),
+          createOptimisticUserMessage(
+            primaryThreadId,
+            input.content,
+            buildOptimisticAttachmentDisplays(composerAttachments),
+          ),
         );
+
         return;
       }
 
@@ -437,26 +329,32 @@ export function ChatWorkspace() {
       setDraft("");
       setOptimisticMessage(null);
       setPendingRevisionSend(null);
+
       setComposerAttachments((current) => {
         for (const attachment of current) {
           revokeChatAttachmentPreviewUrl(attachment);
         }
         return [];
       });
+
       setLocalProposals(turn.proposals);
       if (turn.attachmentOutcomes?.length) {
         setAttachmentOutcomesByMessageId((current) => ({
           ...current,
-          [turn.assistantMessage.id]: enrichAttachmentOutcomesWithProposalContext(
-            turn.attachmentOutcomes ?? [],
-            turn.proposals,
-          ),
+          [turn.assistantMessage.id]: turn.attachmentOutcomes ?? [],
         }));
       }
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
       void queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
       void queryClient.invalidateQueries({ queryKey: ["proposals", turn.thread.id] });
       void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
+
+      const directPathRefreshHints = getDirectChatPathRefreshHints(turn.assistantMessage.metadata);
+      if (directPathRefreshHints.length > 0) {
+        for (const queryKey of getDirectChatPathRefreshQueryKeys(directPathRefreshHints)) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
+      }
     },
     onError: () => {
       setOptimisticMessage(null);
@@ -618,12 +516,21 @@ export function ChatWorkspace() {
             {messages.map((message) => {
               const linkedProposals = proposalsByMessageId.get(message.id) ?? [];
               const isUser = message.role === "user";
+              const attachmentPreviews = isUser
+                ? resolveChatMessageAttachmentPreviews(message)
+                : [];
+              const messageText = isUser
+                ? resolveChatMessageTextContent(message.content, attachmentPreviews)
+                : message.content;
               const crisisSupportCopy = isUser
                 ? null
                 : resolveChatMessageCrisisSupport(message);
               const weeklyReviewPack = isUser
                 ? null
                 : resolveChatMessageWeeklyReview(message);
+              const directPathFeedback = isUser
+                ? null
+                : resolveChatMessageDirectPathFeedback(message);
 
               return (
                 <li key={message.id}>
@@ -644,7 +551,29 @@ export function ChatWorkspace() {
                         titleId={`chat-crisis-${message.id}`}
                       />
                     ) : (
-                      message.content
+                      <>
+                        {attachmentPreviews.length > 0 ? (
+                          <ChatMessageAttachmentPreviews previews={attachmentPreviews} />
+                        ) : null}
+                        {messageText ? <p className="chat-bubble__text">{messageText}</p> : null}
+                        {directPathFeedback ? (
+                          <p className="notice notice-inline" role="status">
+                            {directPathFeedback.message}
+                          </p>
+                        ) : null}
+                        {linkedProposals.length > 0 ? (
+                          <div className="message-proposals">
+                            {linkedProposals.map((proposal) => (
+                              <InlineProposalCard
+                                key={proposal.id}
+                                proposal={proposal}
+                                onDecision={handleProposalDecision}
+                                onModifyRequest={handleProposalModifyRequest}
+                              />
+                            ))}
+                          </div>
+                        ) : null}
+                      </>
                     )}
                   </ChatBubble>
 
@@ -660,19 +589,6 @@ export function ChatWorkspace() {
                       outcomes={attachmentOutcomesByMessageId[message.id] ?? []}
                       titleId={`chat-attachment-outcomes-${message.id}`}
                     />
-                  ) : null}
-
-                  {linkedProposals.length > 0 ? (
-                    <div className="message-proposals">
-                      {linkedProposals.map((proposal) => (
-                        <InlineProposalCard
-                          key={proposal.id}
-                          proposal={proposal}
-                          onDecision={handleProposalDecision}
-                          onModifyRequest={handleProposalModifyRequest}
-                        />
-                      ))}
-                    </div>
                   ) : null}
                 </li>
               );
@@ -714,32 +630,31 @@ export function ChatWorkspace() {
                 attachments={composerAttachments}
                 disabled={sendMessageMutation.isPending}
                 onAttachmentsChange={setComposerAttachments}
-                onProcessDraft={(draft) => {
-                  void processAttachmentDraft(draft);
-                }}
-                onGrantConsentAndRecognize={(localId) => {
-                  void grantConsentAndRetry(localId);
-                }}
-                onRecognizeDraft={(draft) => {
-                  void recognizeAttachmentDraft(draft);
-                }}
               />
-              <label className="sr-only" htmlFor="chat-message">
-                Message your coach
-              </label>
-              <textarea
-                id="chat-message"
-                className="form-textarea"
-                rows={2}
-                value={draft}
-                placeholder="Message your coach…"
-                disabled={sendMessageMutation.isPending}
-                onChange={(event) => setDraft(event.target.value)}
-              />
-              <div className="action-row composer-actions">
+              <div className="chat-composer-controls">
+                <ChatComposerAttachmentInput
+                  attachments={composerAttachments}
+                  disabled={sendMessageMutation.isPending}
+                  onAttachmentsChange={setComposerAttachments}
+                  onProcessDraft={(draft) => {
+                    void processAttachmentDraft(draft);
+                  }}
+                />
+                <label className="sr-only" htmlFor="chat-message">
+                  Message your coach
+                </label>
+                <textarea
+                  id="chat-message"
+                  className="form-textarea chat-composer-controls__input"
+                  rows={2}
+                  value={draft}
+                  placeholder="Message your coach…"
+                  disabled={sendMessageMutation.isPending}
+                  onChange={(event) => setDraft(event.target.value)}
+                />
                 <Button
                   type="submit"
-                  className="button-coach"
+                  className="button-coach chat-composer-controls__send"
                   disabled={sendDisabled || !primaryThreadId}
                 >
                   {sendMessageMutation.isPending ? "Sending…" : "Send"}

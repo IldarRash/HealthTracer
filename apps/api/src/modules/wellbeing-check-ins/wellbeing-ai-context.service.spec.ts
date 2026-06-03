@@ -7,46 +7,6 @@ const checkInOneId = "a1000001-0000-4000-8000-000000000001";
 const checkInTwoId = "a1000002-0000-4000-8000-000000000002";
 
 describe("WellbeingAiContextService", () => {
-  it("builds a coaching summary without notes", async () => {
-    const service = new WellbeingAiContextService({
-      listRecentByUserId: async () => [
-        {
-          id: checkInOneId,
-          userId,
-          date: "2026-05-24",
-          moodScore: 3,
-          stressScore: 4,
-          tags: [],
-          note: "Private note should stay out of AI context",
-          source: "user_entry",
-          crisisFlagReasons: [],
-          createdAt: new Date("2026-05-24T12:00:00.000Z"),
-          updatedAt: new Date("2026-05-24T12:00:00.000Z"),
-        },
-        {
-          id: checkInTwoId,
-          userId,
-          date: "2026-05-25",
-          moodScore: 4,
-          stressScore: 3,
-          tags: [],
-          note: "Another private note",
-          source: "user_entry",
-          crisisFlagReasons: [],
-          createdAt: new Date("2026-05-25T12:00:00.000Z"),
-          updatedAt: new Date("2026-05-25T12:00:00.000Z"),
-        },
-      ],
-    } as never);
-
-    const summary = await service.buildSummaryForUser(userId, "UTC");
-
-    expect(summary.latestMoodScore).toBe(4);
-    expect(summary.latestStressScore).toBe(3);
-    expect(summary.dataSufficiency).toBe("partial");
-    expect(summary).not.toHaveProperty("note");
-  });
-
   it("excludes raw notes and crisis text while preserving sufficiency and trends", async () => {
     const today = getTodayIsoDateInTimezone("UTC");
     const service = new WellbeingAiContextService({

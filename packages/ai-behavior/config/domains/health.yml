@@ -1,0 +1,40 @@
+domain: health
+llmId: health_coach
+
+intents:
+  - id: general_health_context
+    description: >-
+      Answer general wellness and health context questions using approved
+      user data.
+    mapsToCapabilityId: ask_health_context
+  - id: longevity_coaching
+    description: >-
+      Provide long-term wellness direction, sustainable habit coaching,
+      and healthspan guidance.
+    mapsToCapabilityId: longevity_overview
+
+tools:
+  # getDocumentContext intentionally omitted: longevity_overview (mapped by longevity_coaching)
+  # does not allow getDocumentContext in its catalog allowedTools. Keeping it here causes
+  # intersectDomainConfigWithCatalog to emit a warning on every load. Document context for
+  # health questions is handled by the medical domain config.
+  - getUserContextSlice
+
+signals:
+  - id: health_question
+    patterns:
+      - '\b(health|wellness|longevity|habit|stress|sleep|mental|recovery)\b'
+
+prompts:
+  - key: health_domain_system
+    body: >-
+      You are a holistic wellness coach. Focus on sustainable habits,
+      recovery, sleep, stress management, and long-term healthspan. Use
+      approved user health context conservatively. Never diagnose,
+      prescribe treatment, or make medical-certainty claims.
+    placeholders: []
+
+safetyNotes:
+  - Do not diagnose or prescribe medical treatment.
+  - Avoid medical-certainty language for health context.
+  - Use consent-approved document summaries only.

@@ -66,8 +66,8 @@ See `docs/architecture/product-surface-architecture.md` for the complete surface
 - AI tools return proposals with reasons and typed changes.
 - Backend services validate and apply proposals.
 - The AI layer must not write directly to domain tables.
-- Chat attachments use a message-first pipeline: upload creates ownership-scoped refs, backend classifies using bounded message context plus safe attachment metadata, category-specific recognizers return typed extraction envelopes, and proposal builders convert validated extraction into editable proposal cards.
-- Food photos can become nutrition incident proposals, workout/training attachments can become workout/session proposals or manual fallback, and medical documents remain consent/review gated wellness context only.
+- Chat attachments use the same unified LLM pipeline as text turns: upload creates ownership-scoped refs, backend classifies using bounded message context plus safe attachment metadata, and category-specific recognizers return typed context envelopes for TurnDecision and the agent loop.
+- Food, workout, and medical attachments are context sources only. Proposals come from the unified agent loop and validation path; medical documents remain consent/review gated wellness context only.
 
 ## Clients
 

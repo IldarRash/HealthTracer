@@ -9,8 +9,13 @@ export {
   validateReplySafety,
 } from "./safety.js";
 export {
+  coerceAgentLoopFinalAnswer,
+  parseAgentLoopOutput,
+  type ParsedAgentLoopOutput,
+} from "./agent-loop-output.js";
+export {
   StubCoachAiProvider,
   type CoachAiProvider,
+  type CoachAiLoopRequest,
   type CoachAiRequest,
-  type IntentRouterRequest,
 } from "./stub-provider.js";

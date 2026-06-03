@@ -211,6 +211,13 @@
       "when": 1779696000000,
       "tag": "0029_chat_attachment_unclassified",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1779697000000,
+      "tag": "0030_chat_attachment_category_source",
+      "breakpoints": true
     }
   ]
 }

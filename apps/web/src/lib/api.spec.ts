@@ -6,9 +6,6 @@ import {
   decideProposal,
   sendChatMessage,
   uploadChatAttachment,
-  getChatAttachment,
-  grantChatAttachmentConsent,
-  recognizeChatAttachment,
   apiQueryKeys,
   getAcceptedProposalRefreshQueryKeys,
   getProposalDecisionRefreshQueryKeys,
@@ -395,7 +392,6 @@ describe("web api helpers", () => {
                   category: "food_photo",
                   status: "ready",
                   recognition: null,
-                  proposalCandidateCount: 1,
                 },
               ],
             }),
@@ -419,17 +415,14 @@ describe("web api helpers", () => {
     expect(result.data?.attachmentOutcomes?.[0]?.category).toBe("food_photo");
   });
 
-  it("uploads, fetches, grants consent, and recognizes chat attachments", async () => {
+  it("uploads chat attachments and returns the attachment record", async () => {
     const attachmentId = "a1000001-0000-4000-8000-000000000001";
-    const requestLog: Array<{ method: string; path: string; body?: unknown }> = [];
 
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
         const method = init?.method ?? "GET";
-        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-        requestLog.push({ method, path, body });
 
         if (method === "POST" && path.endsWith("/chat/attachments")) {
           return new Response(
@@ -438,7 +431,8 @@ describe("web api helpers", () => {
               userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
               threadId: "24b19287-75b8-4a3e-9c10-691908479405",
               messageId: null,
-              category: "food_photo",
+              category: "unclassified",
+              categorySource: "default_unclassified",
               status: "queued",
               filename: "meal.jpg",
               mimeType: "image/jpeg",
@@ -458,122 +452,18 @@ describe("web api helpers", () => {
           );
         }
 
-        if (method === "GET" && path.endsWith(`/chat/attachments/${attachmentId}`)) {
-          return new Response(
-            JSON.stringify({
-              id: attachmentId,
-              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
-              threadId: "24b19287-75b8-4a3e-9c10-691908479405",
-              messageId: null,
-              category: "food_photo",
-              status: "ready",
-              filename: "meal.jpg",
-              mimeType: "image/jpeg",
-              fileSizeBytes: 4,
-              storageKey: "local://attachments/meal.jpg",
-              linkedDocumentId: null,
-              linkedImageRefId: attachmentId,
-              consent: null,
-              recognition: null,
-              failureReason: null,
-              retentionPolicy: "ephemeral_recognition",
-              expiresAt: null,
-              createdAt: "2026-05-22T12:00:00.000Z",
-              updatedAt: "2026-05-22T12:00:01.000Z",
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-
-        if (method === "POST" && path.endsWith(`/chat/attachments/${attachmentId}/consent`)) {
-          return new Response(
-            JSON.stringify({
-              id: attachmentId,
-              userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
-              threadId: "24b19287-75b8-4a3e-9c10-691908479405",
-              messageId: null,
-              category: "medical_document",
-              status: "queued",
-              filename: "lab.pdf",
-              mimeType: "application/pdf",
-              fileSizeBytes: 4,
-              storageKey: "local://attachments/lab.pdf",
-              linkedDocumentId: null,
-              linkedImageRefId: null,
-              consent: {
-                consentScopes: ["upload_storage"],
-                consentVersion: "v1",
-                consentGrantedAt: "2026-05-22T12:00:00.000Z",
-                documentType: "lab_report",
-                documentTitle: "Lab report",
-              },
-              recognition: null,
-              failureReason: null,
-              retentionPolicy: "document_consent_rules",
-              expiresAt: null,
-              createdAt: "2026-05-22T12:00:00.000Z",
-              updatedAt: "2026-05-22T12:00:01.000Z",
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-
-        if (method === "POST" && path.endsWith(`/chat/attachments/${attachmentId}/recognize`)) {
-          return new Response(
-            JSON.stringify({
-              attachment: {
-                id: attachmentId,
-                userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
-                threadId: "24b19287-75b8-4a3e-9c10-691908479405",
-                messageId: null,
-                category: "food_photo",
-                status: "ready",
-                filename: "meal.jpg",
-                mimeType: "image/jpeg",
-                fileSizeBytes: 4,
-                storageKey: "local://attachments/meal.jpg",
-                linkedDocumentId: null,
-                linkedImageRefId: attachmentId,
-                consent: null,
-                recognition: null,
-                failureReason: null,
-                retentionPolicy: "ephemeral_recognition",
-                expiresAt: null,
-                createdAt: "2026-05-22T12:00:00.000Z",
-                updatedAt: "2026-05-22T12:00:02.000Z",
-              },
-              proposalCandidates: [],
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-
         return new Response("not found", { status: 404 });
       }),
     );
 
     const uploadResult = await uploadChatAttachment(token, {
-      category: "food_photo",
       filename: "meal.jpg",
       mimeType: "image/jpeg",
       fileContentBase64: "aGVsbG8=",
-      consentVersion: "v1",
     });
     expect(uploadResult.data?.id).toBe(attachmentId);
-
-    const getResult = await getChatAttachment(token, attachmentId);
-    expect(getResult.data?.status).toBe("ready");
-
-    const consentResult = await grantChatAttachmentConsent(token, attachmentId, {
-      consentScopes: ["upload_storage"],
-      consentVersion: "v1",
-    });
-    expect(consentResult.data?.consent?.consentScopes).toContain("upload_storage");
-
-    const recognizeResult = await recognizeChatAttachment(token, attachmentId, {});
-    expect(recognizeResult.data?.attachment.status).toBe("ready");
-
-    expect(requestLog.map((entry) => entry.method)).toEqual(["POST", "GET", "POST", "POST"]);
+    expect(uploadResult.data?.category).toBe("unclassified");
+    expect(uploadResult.data?.status).toBe("queued");
   });
 
   it("returns API errors for non-OK proposal decisions", async () => {

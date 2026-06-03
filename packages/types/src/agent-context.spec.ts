@@ -1,24 +1,22 @@
 import { describe, expect, it } from "vitest";
-import type { AgentSafetyFlag } from "./agent-context.js";
 import {
   agentContextPacketSchema,
   agentToolCallRequestSchema,
   agentToolCallResultSchema,
+  agentTurnCapabilityPresentationSchema,
   agentTurnMetadataSchema,
   buildAgentContextRequestSchema,
   buildContextSliceRequestForIntent,
+  buildRouteFromCatalogIntent,
   DEFAULT_AGENT_SAFETY_CONSTRAINTS,
   getUserContextSliceInputSchema,
   INTENT_TO_SLICE_PURPOSE,
-  llmIntentRouterOutputSchema,
   MAX_CONTEXT_SLICES,
-  mergeLlmRouterOutputIntoRoute,
   normalizeContextSlicePlan,
   resolveDefaultDepthForPurpose,
   resolveDefaultTimeRangeForPurpose,
   shouldIncludeDocumentsForPurpose,
   userContextSliceSchema,
-  validateLlmRouterOutputShape,
 } from "./agent-context.js";
 
 describe("agent context contracts", () => {
@@ -77,27 +75,55 @@ describe("agent context contracts", () => {
     expect(packet.intent).toBe("ask_about_today");
   });
 
-  it("accepts agent turn metadata for chat persistence", () => {
-    const metadata = agentTurnMetadataSchema.parse({
-      provider: "stub",
-      intent: "general",
-      purpose: "general_chat",
-      depth: "small",
-      timeRange: "7d",
-      safety: {
-        status: "passed",
-      },
-      routing: {
-        confidence: 0.42,
-        routingMethod: "llm_router",
-        llmRouterInvoked: true,
-        safetyFlags: ["fatigue"],
-        expectedResponseMode: "advice_only",
-        contextSliceCount: 1,
-      },
+  describe("historical persisted metadata compatibility", () => {
+    it("accepts deprecated llm_router routing metadata on stored agent turns", () => {
+      const metadata = agentTurnMetadataSchema.parse({
+        provider: "stub",
+        intent: "general",
+        purpose: "general_chat",
+        depth: "small",
+        timeRange: "7d",
+        safety: {
+          status: "passed",
+        },
+        routing: {
+          confidence: 0.42,
+          routingMethod: "llm_router",
+          llmRouterInvoked: true,
+          safetyFlags: ["fatigue"],
+          expectedResponseMode: "advice_only",
+          contextSliceCount: 1,
+        },
+      });
+
+      expect(metadata.toolsInvoked).toEqual([]);
+    });
+  });
+
+  it("accepts optional capability composition metadata on agent turns", () => {
+    const presentation = agentTurnCapabilityPresentationSchema.parse({
+      primaryCapabilityId: "adjust_workout",
+      selectedCapabilityIds: ["adjust_workout", "ask_about_today"],
+      compositionStrategy: "primary_only",
+      widgetDescriptors: [{ id: "adapt_workout_plan_card", type: "proposal_card" }],
+      actionDescriptors: [{ id: "adapt_workout_plan", type: "create_proposal" }],
     });
 
-    expect(metadata.toolsInvoked).toEqual([]);
+    const metadata = agentTurnMetadataSchema.parse({
+      provider: "stub",
+      intent: "adjust_workout",
+      catalogIntentId: "adjust_workout",
+      primaryCapabilityId: "adjust_workout",
+      selectedCapabilityIds: ["adjust_workout", "ask_about_today"],
+      capabilityPresentation: presentation,
+      purpose: "workout_adaptation",
+      depth: "medium",
+      timeRange: "14d",
+      safety: { status: "passed" },
+    });
+
+    expect(metadata.capabilityPresentation?.widgetDescriptors).toHaveLength(1);
+    expect(metadata.selectedCapabilityIds).toEqual(["adjust_workout", "ask_about_today"]);
   });
 
   it("normalizes router context slice plans to bounded defaults", () => {
@@ -114,68 +140,12 @@ describe("agent context contracts", () => {
     expect(plan[0]?.depth).toBe("medium");
   });
 
-  it("validates llm router output and rejects user-facing advice fields", () => {
-    const valid = llmIntentRouterOutputSchema.parse({
-      intent: "adjust_workout",
-      confidence: 0.86,
-      routingMethod: "llm_router",
-      requiredContextSlices: [buildContextSliceRequestForIntent("adjust_workout")],
-      safetyFlags: ["fatigue"],
-      expectedResponseMode: "recommendation_with_optional_proposal",
-    });
-
-    expect(valid.routingMethod).toBe("llm_router");
-    expect(
-      validateLlmRouterOutputShape({
-        ...valid,
-        reply: "You should skip training today.",
-      }),
-    ).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/must not include user-facing field "reply"/),
-      ]),
-    );
-    expect(
-      validateLlmRouterOutputShape({
-        ...valid,
-        proposals: [{ intent: "adapt_workout_plan" }],
-      }),
-    ).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/must not include user-facing field "proposals"/),
-      ]),
-    );
-    expect(
-      validateLlmRouterOutputShape({
-        ...valid,
-        advice: "Eat more protein tonight.",
-      }),
-    ).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/must not include user-facing field "advice"/),
-      ]),
-    );
-  });
-
-  it("merges llm router output into an uncertain rule route", () => {
-    const uncertainRoute = {
-      intent: "general" as const,
-      confidence: 0.4,
-      isConfident: false,
-      purpose: "general_chat" as const,
-      depth: "small" as const,
-      timeRange: "7d" as const,
-      includeDocuments: false,
-      routingMethod: "rule_based" as const,
-      requiredContextSlices: [buildContextSliceRequestForIntent("general")],
-      safetyFlags: [] as AgentSafetyFlag[],
-      expectedResponseMode: "advice_only" as const,
-    };
-
-    const merged = mergeLlmRouterOutputIntoRoute(uncertainRoute, {
-      intent: "adjust_nutrition",
+  it("builds catalog routes with unified_turn_decision routing metadata", () => {
+    const merged = buildRouteFromCatalogIntent({
+      catalogIntentId: "adjust_nutrition",
+      mappedAgentIntent: "adjust_nutrition",
       confidence: 0.84,
-      routingMethod: "llm_router",
+      routingMethod: "unified_turn_decision",
       requiredContextSlices: [
         buildContextSliceRequestForIntent("adjust_nutrition"),
         { type: "weekly_review", depth: "medium", timeRange: "7d" },
@@ -184,7 +154,7 @@ describe("agent context contracts", () => {
       expectedResponseMode: "recommendation_with_optional_proposal",
     });
 
-    expect(merged.routingMethod).toBe("llm_router");
+    expect(merged.routingMethod).toBe("unified_turn_decision");
     expect(merged.intent).toBe("adjust_nutrition");
     expect(merged.requiredContextSlices).toHaveLength(2);
   });

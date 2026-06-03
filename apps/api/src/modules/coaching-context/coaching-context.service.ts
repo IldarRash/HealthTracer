@@ -7,6 +7,7 @@ import type {
   AiWellbeingContextSummary,
   BuildAgentContextRequest,
   CoachingHierarchySummary,
+  ContextBudgetPolicy,
   CorrelationInsightPreviewResponse,
   GetUserContextSliceInput,
   Goal,
@@ -24,7 +25,9 @@ import type {
 import {
   agentContextPacketSchema,
   buildCoachingHierarchySummary,
+  clampContextDepth,
   DEFAULT_AGENT_SAFETY_CONSTRAINTS,
+  DEFAULT_CONTEXT_BUDGET_POLICY,
   getTodayIsoDateInTimezone,
   getUserContextSliceInputSchema,
   getWeekStartIsoDate,
@@ -39,6 +42,7 @@ import {
   workoutPlanPayloadSchema,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
+import { ContextBudgetPolicyService } from "./context-budget-policy.service.js";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { buildAgentPromptContextFromPacket } from "./agent-prompt-context.js";
 import { buildUserContextSliceFromSnapshot, resolveSliceOptions } from "./user-context-slice.builder.js";
@@ -79,9 +83,14 @@ export interface CoachingContextSnapshot {
   recoveryContext: AiRecoveryContextSummary;
 }
 
+export interface BuildAgentContextOptions {
+  contextBudget?: ContextBudgetPolicy;
+}
+
 @Injectable()
 export class CoachingContextService {
   constructor(
+    private readonly contextBudgetPolicyService: ContextBudgetPolicyService,
     private readonly usersService: UsersService,
     private readonly profilesService: ProfilesService,
     private readonly goalsService: GoalsService,
@@ -303,9 +312,11 @@ export class CoachingContextService {
     auth: ClerkAuthContext,
     request: BuildAgentContextRequest,
     route?: IntentRouteResult,
+    options?: BuildAgentContextOptions,
   ): Promise<AgentContextPacket> {
     const intent = route?.intent ?? request.intent ?? "general";
-    const slicePlan = normalizeContextSlicePlan(
+    const budget = options?.contextBudget ?? DEFAULT_CONTEXT_BUDGET_POLICY;
+    const normalizedSlicePlan = normalizeContextSlicePlan(
       route?.requiredContextSlices ?? [
         {
           type: request.purpose ?? INTENT_TO_SLICE_PURPOSE[intent],
@@ -314,6 +325,10 @@ export class CoachingContextService {
           includeDocuments: request.includeDocuments,
         },
       ],
+    );
+    const { slicePlan, notes: budgetNotes } = this.contextBudgetPolicyService.applyBudgetToSlicePlan(
+      normalizedSlicePlan,
+      budget,
     );
     const [primaryRequest, ...supplementaryRequests] = slicePlan;
 
@@ -327,20 +342,30 @@ export class CoachingContextService {
         ? await this.getActiveNutritionPlanPayload(auth)
         : null;
 
-    const primarySlice = await this.buildSliceFromRequest(
-      snapshot,
-      primaryRequest,
-      activeNutritionPlan,
+    const primarySlice = this.contextBudgetPolicyService.applyBudgetToBuiltSlice(
+      await this.buildSliceFromRequest(snapshot, primaryRequest, activeNutritionPlan, budget),
+      budget,
     );
     const supplementarySlices = await Promise.all(
-      supplementaryRequests.map((sliceRequest) =>
-        this.buildSliceFromRequest(snapshot, sliceRequest, activeNutritionPlan),
+      supplementaryRequests.map(async (sliceRequest) =>
+        this.contextBudgetPolicyService.applyBudgetToBuiltSlice(
+          await this.buildSliceFromRequest(snapshot, sliceRequest, activeNutritionPlan, budget),
+          budget,
+        ),
       ),
     );
-    const missingContextNotes = collectMissingContextNotes(
-      [primarySlice, ...supplementarySlices],
-      slicePlan,
-    );
+    const missingContextNotes = [
+      ...collectMissingContextNotes([primarySlice, ...supplementarySlices], slicePlan),
+      ...budgetNotes,
+    ];
+
+    if (budget.requiresCompression) {
+      missingContextNotes.push(
+        "Large review context requires compression before full historical detail is available.",
+      );
+    }
+
+    const uniqueMissingContextNotes = [...new Set(missingContextNotes)].slice(0, 5);
     const sourceRefs = mergeSourceRefs(primarySlice, supplementarySlices);
 
     return agentContextPacketSchema.parse({
@@ -351,14 +376,15 @@ export class CoachingContextService {
       generatedAt: new Date().toISOString(),
       slice: primarySlice,
       supplementarySlices,
-      missingContextNotes,
+      missingContextNotes: uniqueMissingContextNotes,
       safetyConstraints: [...DEFAULT_AGENT_SAFETY_CONSTRAINTS],
       sourceRefs,
       routing: route
         ? {
             confidence: route.confidence,
             routingMethod: route.routingMethod,
-            llmRouterInvoked: route.routingMethod === "llm_router",
+            llmRouterInvoked: false,
+            catalogIntentId: route.catalogIntentId,
             safetyFlags: route.safetyFlags,
             expectedResponseMode: route.expectedResponseMode,
             contextSliceCount: slicePlan.length,
@@ -371,6 +397,7 @@ export class CoachingContextService {
     snapshot: CoachingContextSnapshot,
     sliceRequest: ReturnType<typeof normalizeContextSlicePlan>[number],
     activeNutritionPlan: NutritionPlanPayload | null,
+    budget: ContextBudgetPolicy,
   ): Promise<UserContextSlice> {
     const resolved = resolveSliceOptions(
       getUserContextSliceInputSchema.parse({
@@ -380,14 +407,16 @@ export class CoachingContextService {
         includeDocuments: sliceRequest.includeDocuments,
       }),
     );
+    const depth = clampContextDepth(resolved.depth, budget.maxDepth);
+    const includeDocuments = budget.allowDocuments && resolved.includeDocuments;
 
     return buildUserContextSliceFromSnapshot(
       snapshot,
       {
         purpose: sliceRequest.type,
-        depth: resolved.depth,
+        depth,
         timeRange: resolved.timeRange,
-        includeDocuments: resolved.includeDocuments,
+        includeDocuments,
         includeRawData: false,
       },
       {
