@@ -14,7 +14,7 @@ import {
 
 type WorkoutSessionSummary = Pick<
   WorkoutSession,
-  "id" | "title" | "status" | "workoutPlanId" | "workoutPlanRevisionId"
+  "id" | "title" | "status" | "workoutPlanId" | "workoutPlanRevisionId" | "source"
 >;
 
 export interface ActiveWorkoutPlanChecklistContext {
@@ -71,12 +71,16 @@ export function createHabitChecklistItem(habit: HabitDefinition): TodayChecklist
 }
 
 export function createWorkoutChecklistItem(session: WorkoutSessionSummary): TodayChecklistItem {
+  // Ad-hoc sessions are already completed activities; they are not required items
+  // (don't penalize adherence) but still appear on the checklist.
+  const isAdHoc = session.source === "ad_hoc";
+
   return {
     id: crypto.randomUUID(),
     label: session.title,
     kind: "workout",
     status: mapWorkoutStatusToItemStatus(session.status),
-    required: true,
+    required: !isAdHoc,
     source: {
       type: "workout_session",
       id: session.id,
@@ -107,8 +111,10 @@ export function filterWorkoutSessionsForChecklist(
 
   return sessions.filter(
     (session) =>
-      session.workoutPlanId === activePlan.planId &&
-      session.workoutPlanRevisionId === activePlan.activeRevisionId,
+      // Always include ad-hoc completed sessions — they don't belong to a plan.
+      session.source === "ad_hoc" ||
+      (session.workoutPlanId === activePlan.planId &&
+        session.workoutPlanRevisionId === activePlan.activeRevisionId),
   );
 }
 

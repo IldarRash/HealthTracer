@@ -14,6 +14,12 @@ export class UsersService {
     return toUser(user);
   }
 
+  async getUserById(userId: string): Promise<User | null> {
+    const row = await this.usersRepository.findByUserId(userId);
+
+    return row ? toUser(row) : null;
+  }
+
   async updateCurrentUser(
     auth: ClerkAuthContext,
     input: UpdateCurrentUserInput,

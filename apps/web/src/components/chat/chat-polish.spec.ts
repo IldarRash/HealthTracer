@@ -36,6 +36,10 @@ const nutritionProposalSource = readFileSync(
   join(webSrcDir, "components/proposals/nutrition-incident-proposal-card.tsx"),
   "utf8",
 );
+const proposalCardShellSource = readFileSync(
+  join(webSrcDir, "components/proposals/proposal-card-shell.tsx"),
+  "utf8",
+);
 const weeklyReviewSummarySource = readFileSync(
   join(chatDir, "weekly-review-chat-summary.tsx"),
   "utf8",
@@ -184,19 +188,28 @@ describe("Chat polish copy and labels", () => {
   });
 
   it("exposes Apply, Modify, and Reject affordances with decision accessibility", () => {
-    for (const source of [
-      genericInlineProposalSource,
-      wellbeingProposalSource,
-      nutritionProposalSource,
-    ]) {
-      expect(source).toContain('"Apply"');
-      expect(source).toContain("\n              Modify\n");
-      expect(source).toContain("\n              Reject\n");
-      expect(source).toContain('decisionMutation.mutate("accept")');
-      expect(source).toContain('decisionMutation.mutate("reject")');
-      expect(source).toContain("aria-busy={isActionPending");
-      expect(source).toContain('aria-live="polite"');
-    }
+    // The generic card still owns its own affordances directly.
+    expect(genericInlineProposalSource).toContain('"Apply"');
+    expect(genericInlineProposalSource).toContain("\n              Modify\n");
+    expect(genericInlineProposalSource).toContain("\n              Reject\n");
+    expect(genericInlineProposalSource).toContain('decisionMutation.mutate("accept")');
+    expect(genericInlineProposalSource).toContain('decisionMutation.mutate("reject")');
+    expect(genericInlineProposalSource).toContain("aria-busy={isActionPending");
+    expect(genericInlineProposalSource).toContain('aria-live="polite"');
+
+    // Wellbeing and nutrition cards use ProposalCardShell, which owns these affordances.
+    expect(wellbeingProposalSource).toContain("ProposalCardShell");
+    expect(nutritionProposalSource).toContain("ProposalCardShell");
+    // "Apply" appears as the acceptLabel prop value in each card file.
+    expect(wellbeingProposalSource).toContain('"Apply"');
+    expect(nutritionProposalSource).toContain('"Apply"');
+    // The shell carries the shared affordances.
+    expect(proposalCardShellSource).toContain("\n              Modify\n");
+    expect(proposalCardShellSource).toContain("\n              Reject\n");
+    expect(proposalCardShellSource).toContain('decisionMutation.mutate("accept")');
+    expect(proposalCardShellSource).toContain('decisionMutation.mutate("reject")');
+    expect(proposalCardShellSource).toContain("aria-busy={isActionPending");
+    expect(proposalCardShellSource).toContain('aria-live="polite"');
 
     expect(genericInlineProposalSource).toContain("modifyProposal");
     expect(genericInlineProposalSource).toContain("proposal-accept-hint-");

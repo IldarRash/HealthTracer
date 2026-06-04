@@ -37,6 +37,14 @@ export function toTodayWorkoutDetail(
   weekday: TodayWorkoutDetail["weekday"],
   focus: string,
 ): TodayWorkoutDetail {
+  // Planned sessions (source = 'planned') always have workoutPlanId and
+  // workoutPlanRevisionId. Ad-hoc sessions are not surfaced through TodayWorkoutDetail.
+  if (!session.workoutPlanId || !session.workoutPlanRevisionId) {
+    throw new Error(
+      `toTodayWorkoutDetail: session ${session.id} is missing workoutPlanId or workoutPlanRevisionId (source=${session.source}).`,
+    );
+  }
+
   return {
     sessionId: session.id,
     workoutPlanId: session.workoutPlanId,

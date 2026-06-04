@@ -692,3 +692,357 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
     expect(changes["calorieEstimateProvenance"]).toBe("workout_llm");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 6c — workout caloriePerHourRate stamping (trusted source exclusivity)
+// ---------------------------------------------------------------------------
+
+describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRate stamping (Phase 6c)", () => {
+  const service = new ActionResolverService();
+
+  function makeDomainEntry(
+    domain: DomainFanoutEntry["domain"],
+    allowedProposalIntents: string[],
+  ): DomainFanoutEntry {
+    return {
+      domain,
+      capabilityId: domain === "workout" ? "adjust_workout" : "adjust_nutrition",
+      allowedTools: [],
+      allowedProposalIntents,
+      contextBudget: DEFAULT_CONTEXT_BUDGET_POLICY,
+      executorMode: "single_llm",
+    };
+  }
+
+  const FLAT_WORKOUT_PROPOSAL = {
+    intent: "adapt_workout_plan" as const,
+    targetDomain: "workout" as const,
+    title: "Adapted plan",
+    reason: "Load reduced.",
+    proposedChanges: {
+      title: "Strength base",
+      summary: "Lighter session.",
+      days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+      notes: [],
+    },
+  };
+
+  it("stamps caloriePerHourRate from workoutCaloriePerHourRate onto flat workout proposals", () => {
+    const result = service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Here is your adjusted plan.",
+        selectedAction: "adapt_workout_plan",
+        proposals: [FLAT_WORKOUT_PROPOSAL],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      workoutCalorieEstimate: 300,
+      workoutCaloriePerHourRate: 280,
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    const changes = result.proposals[0]?.proposedChanges as Record<string, unknown>;
+    expect(changes["caloriePerHourRate"]).toBe(280);
+    expect(changes["estimatedSessionCalorieBurn"]).toBe(300);
+    expect(changes["calorieEstimateProvenance"]).toBe("workout_llm");
+  });
+
+  it("scrubs a fabricated caloriePerHourRate when no trusted rate is provided", () => {
+    // The decision-maker LLM must never set caloriePerHourRate — it must be scrubbed.
+    // Use a value within the schema-valid range (1–5000) so that safeParse succeeds
+    // and the scrub logic is actually tested (not masked by a parse failure).
+    const fabricatedProposal = {
+      intent: "adapt_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "Plan with fabricated rate",
+      reason: "Test.",
+      proposedChanges: {
+        title: "Strength base",
+        summary: "Session.",
+        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        notes: [],
+        caloriePerHourRate: 450, // Valid-range fabricated value — must be scrubbed when no trusted rate
+      } as Record<string, unknown>,
+    };
+
+    const result = service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Plan.",
+        selectedAction: "adapt_workout_plan",
+        proposals: [fabricatedProposal],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      // No workoutCaloriePerHourRate — fabricated value must be removed
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    const changes = result.proposals[0]?.proposedChanges as Record<string, unknown>;
+    expect(changes["caloriePerHourRate"]).toBeUndefined();
+  });
+
+  it("stamps caloriePerHourRate onto adapt_workout_plan_from_progress nested .plan", () => {
+    const fromProgressProposal = {
+      intent: "adapt_workout_plan_from_progress" as const,
+      targetDomain: "workout" as const,
+      title: "Progress-based adaptation",
+      reason: "Weekly progress.",
+      proposedChanges: {
+        plan: {
+          title: "Adapted plan",
+          summary: "Reduced load.",
+          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          notes: [],
+        },
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+      },
+    };
+
+    const result = service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Adapted.",
+        selectedAction: "adapt_workout_plan_from_progress",
+        proposals: [fromProgressProposal],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan_from_progress"])],
+      workoutCalorieEstimate: 310,
+      workoutCaloriePerHourRate: 280,
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    const changes = result.proposals[0]?.proposedChanges as Record<string, unknown>;
+    const nestedPlan = changes["plan"] as Record<string, unknown>;
+
+    // caloriePerHourRate must be on nested .plan
+    expect(nestedPlan["caloriePerHourRate"]).toBe(280);
+    expect(nestedPlan["estimatedSessionCalorieBurn"]).toBe(310);
+    expect(nestedPlan["calorieEstimateProvenance"]).toBe("workout_llm");
+
+    // Wrapper must not carry calorie fields
+    expect(changes["caloriePerHourRate"]).toBeUndefined();
+  });
+
+  it("scrubs a fabricated caloriePerHourRate from nested .plan when no trusted rate is provided", () => {
+    const fabricatedFromProgress = {
+      intent: "adapt_workout_plan_from_progress" as const,
+      targetDomain: "workout" as const,
+      title: "Fabricated from-progress",
+      reason: "Test.",
+      proposedChanges: {
+        plan: {
+          title: "Adapted plan",
+          summary: "Lighter.",
+          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          notes: [],
+          caloriePerHourRate: 350, // Valid-range fabricated value — must be scrubbed when no trusted rate
+        },
+        sourceTrendObservationIds: [],
+      } as Record<string, unknown>,
+    };
+
+    const result = service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Adapted.",
+        selectedAction: "adapt_workout_plan_from_progress",
+        proposals: [fabricatedFromProgress],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan_from_progress"])],
+      // No workoutCaloriePerHourRate — fabricated value must be removed
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    const nestedPlan = (result.proposals[0]?.proposedChanges as Record<string, unknown>)[
+      "plan"
+    ] as Record<string, unknown>;
+    expect(nestedPlan["caloriePerHourRate"]).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BLOCKER 2 — log_workout_activity ratePerHour / estimatedCalories scrub+stamp
+// ---------------------------------------------------------------------------
+
+describe("ActionResolverService.resolveFinalDecisionOutput — log_workout_activity calorie scrub+stamp", () => {
+  const service = new ActionResolverService();
+
+  function makeDomainEntry(
+    domain: DomainFanoutEntry["domain"],
+    allowedProposalIntents: string[],
+  ): DomainFanoutEntry {
+    return {
+      domain,
+      capabilityId: domain === "workout" ? "adjust_workout" : "adjust_nutrition",
+      allowedTools: [],
+      allowedProposalIntents,
+      contextBudget: DEFAULT_CONTEXT_BUDGET_POLICY,
+      executorMode: "single_llm",
+    };
+  }
+
+  const VALID_LOG_WORKOUT_BASE = {
+    activityType: "volleyball",
+    title: "Volleyball session",
+    durationMinutes: 90,
+    performedAt: "2026-06-04T16:00:00.000Z",
+  };
+
+  it("stamps ratePerHour and estimatedCalories from trusted workout domain LLM values", () => {
+    const proposal = {
+      intent: "log_workout_activity" as const,
+      targetDomain: "workout" as const,
+      title: "Volleyball 90 min",
+      reason: "User reported activity.",
+      proposedChanges: {
+        ...VALID_LOG_WORKOUT_BASE,
+        estimatedCalories: 300,   // will be replaced by trusted estimate
+        ratePerHour: 200,         // will be replaced by trusted rate
+      },
+    };
+
+    const result = service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Logged!",
+        selectedAction: "log_workout_activity",
+        proposals: [proposal],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      workoutCalorieEstimate: 450,
+      workoutCaloriePerHourRate: 300,
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    const changes = result.proposals[0]?.proposedChanges as Record<string, unknown>;
+    expect(changes["ratePerHour"]).toBe(300);
+    expect(changes["estimatedCalories"]).toBe(450);
+  });
+
+  it("scrubs fabricated ratePerHour from decision-maker when no trusted rate is available", () => {
+    // Use a schema-valid ratePerHour value (≤3000) so safeParse succeeds and the
+    // scrub logic is actually exercised (not masked by a parse failure).
+    const proposal = {
+      intent: "log_workout_activity" as const,
+      targetDomain: "workout" as const,
+      title: "Volleyball 90 min",
+      reason: "User reported activity.",
+      proposedChanges: {
+        ...VALID_LOG_WORKOUT_BASE,
+        estimatedCalories: 300,
+        ratePerHour: 450, // Valid-range fabricated rate — must be scrubbed when no trusted rate
+      },
+    };
+
+    const result = service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Logged!",
+        selectedAction: "log_workout_activity",
+        proposals: [proposal],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      // No trusted rate or estimate — fabricated ratePerHour must be stripped;
+      // the payload .refine() will reject the proposal downstream (fail-closed).
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    const changes = result.proposals[0]?.proposedChanges as Record<string, unknown>;
+    expect(changes["ratePerHour"]).toBeUndefined();
+    // estimatedCalories also scrubbed since no trusted estimate was provided
+    expect(changes["estimatedCalories"]).toBeUndefined();
+  });
+
+  it("scrubs fabricated ratePerHour but re-stamps trusted estimatedCalories when only estimate is provided", () => {
+    const proposal = {
+      intent: "log_workout_activity" as const,
+      targetDomain: "workout" as const,
+      title: "Volleyball 90 min",
+      reason: "User reported activity.",
+      proposedChanges: {
+        ...VALID_LOG_WORKOUT_BASE,
+        estimatedCalories: 100,
+        ratePerHour: 450, // Valid-range fabricated rate — must be scrubbed
+      },
+    };
+
+    const result = service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Logged!",
+        selectedAction: "log_workout_activity",
+        proposals: [proposal],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      workoutCalorieEstimate: 405, // Only trusted estimate, no rate
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    const changes = result.proposals[0]?.proposedChanges as Record<string, unknown>;
+    // Fabricated ratePerHour scrubbed; trusted estimate stamped
+    expect(changes["ratePerHour"]).toBeUndefined();
+    expect(changes["estimatedCalories"]).toBe(405);
+  });
+
+  it("stamps only ratePerHour when only the trusted rate is provided (no estimate)", () => {
+    const proposal = {
+      intent: "log_workout_activity" as const,
+      targetDomain: "workout" as const,
+      title: "Volleyball 90 min",
+      reason: "User reported activity.",
+      proposedChanges: {
+        ...VALID_LOG_WORKOUT_BASE,
+        estimatedCalories: 100, // will be scrubbed; no trusted estimate to re-stamp
+        ratePerHour: 450,       // will be scrubbed; trusted rate re-stamped
+      },
+    };
+
+    const result = service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Logged!",
+        selectedAction: "log_workout_activity",
+        proposals: [proposal],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      workoutCaloriePerHourRate: 280, // Only trusted rate, no estimate
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    const changes = result.proposals[0]?.proposedChanges as Record<string, unknown>;
+    expect(changes["ratePerHour"]).toBe(280);
+    expect(changes["estimatedCalories"]).toBeUndefined();
+  });
+
+  it("does not mutate the original proposedChanges object for log_workout_activity", () => {
+    const originalChanges = {
+      ...VALID_LOG_WORKOUT_BASE,
+      estimatedCalories: 200,
+      ratePerHour: 150,
+    };
+    const proposal = {
+      intent: "log_workout_activity" as const,
+      targetDomain: "workout" as const,
+      title: "Volleyball 90 min",
+      reason: "User reported activity.",
+      proposedChanges: originalChanges,
+    };
+
+    service.resolveFinalDecisionOutput({
+      finalDecision: {
+        reply: "Logged!",
+        selectedAction: "log_workout_activity",
+        proposals: [proposal],
+        consentRequired: false,
+      },
+      selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      workoutCalorieEstimate: 500,
+      workoutCaloriePerHourRate: 333,
+    });
+
+    // Original object must be untouched
+    expect((originalChanges as Record<string, unknown>)["ratePerHour"]).toBe(150);
+    expect((originalChanges as Record<string, unknown>)["estimatedCalories"]).toBe(200);
+  });
+});

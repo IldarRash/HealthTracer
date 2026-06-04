@@ -166,6 +166,27 @@ export function TodayNutritionCard({
         </div>
       }
     >
+      {/* Eaten-today summary — aggregated from logged nutrition incidents */}
+      {nutrition.eaten != null ? (
+        <div className="today-nutrition-eaten nested-card" role="status">
+          <p className="section-label">Eaten today</p>
+          <p className="muted-text">
+            {nutrition.eaten.calories} kcal
+            {" · "}
+            {nutrition.eaten.proteinGrams}g protein
+            {" · "}
+            {nutrition.eaten.carbsGrams}g carbs
+            {" · "}
+            {nutrition.eaten.fatGrams}g fat
+          </p>
+          <p className="muted-text">
+            {nutrition.eaten.incidentCount === 1
+              ? "From 1 logged meal"
+              : `From ${nutrition.eaten.incidentCount} logged meals`}
+          </p>
+        </div>
+      ) : null}
+
       {phase === "partial" ? (
         <p className="muted-text">
           Your plan is active, but meals, hydration, and targets are not configured yet. Ask the

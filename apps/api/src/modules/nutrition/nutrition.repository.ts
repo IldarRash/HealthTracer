@@ -219,6 +219,33 @@ export class NutritionRepository {
     });
   }
 
+  async listIncidentsByUserAndDate(userId: string, date: string) {
+    return this.db
+      .select()
+      .from(nutritionIncidents)
+      .where(
+        and(
+          eq(nutritionIncidents.userId, userId),
+          eq(nutritionIncidents.date, date),
+        ),
+      )
+      .orderBy(nutritionIncidents.incidentDateTime);
+  }
+
+  async listIncidentsByUserAndDateRange(userId: string, startDate: string, endDate: string) {
+    return this.db
+      .select()
+      .from(nutritionIncidents)
+      .where(
+        and(
+          eq(nutritionIncidents.userId, userId),
+          gte(nutritionIncidents.date, startDate),
+          lte(nutritionIncidents.date, endDate),
+        ),
+      )
+      .orderBy(nutritionIncidents.date, nutritionIncidents.incidentDateTime);
+  }
+
   async findIncidentBySourceProposalId(
     userId: string,
     sourceProposalId: string,
@@ -244,6 +271,11 @@ export class NutritionRepository {
     payload: LogNutritionIncidentProposalPayload,
     db: Pick<HealthDatabase, "insert"> = this.db,
   ) {
+    // TODO(C2): incidentDate is derived as a UTC prefix here. Ideally it should be
+    // derived in the user's timezone (as workouts.service.ts now does for plannedDate).
+    // The user timezone is not readily available at the repository layer; the fix
+    // belongs in a service-layer caller once the createIncident signature carries
+    // the timezone or a pre-computed date.
     const incidentDate = payload.incidentDateTime.slice(0, 10);
     const [row] = await db
       .insert(nutritionIncidents)

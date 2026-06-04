@@ -70,6 +70,7 @@ describe("workout session materializer", () => {
           plannedDate: "2026-05-18",
           title: "Strength base — Lower body",
           status: "planned",
+          source: "planned" as const,
           exercises: [],
           feedback: {},
           completedAt: null,
@@ -254,6 +255,7 @@ describe("workout session materializer", () => {
         plannedDate: "2026-05-18",
         title: "Strength base — Lower body",
         status: "planned",
+        source: "planned",
         exercises: [
           "Goblet squat",
           { name: "Romanian deadlift", sets: 3, reps: "8", target: "Moderate load" },

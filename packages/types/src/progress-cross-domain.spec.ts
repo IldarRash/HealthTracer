@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateHabitsProgressWeek,
   aggregateNutritionAdherenceWeek,
+  aggregateNutritionIncidentsWeek,
   aggregateRecipesActivityWeek,
   aggregateTodayChecklists,
   countSufficientDomains,
@@ -9,6 +10,7 @@ import {
   evaluateWeeklyReviewLaneEligibility,
   isWeeklyReviewChatMessage,
   markExplanationOnlyLanes,
+  nutritionPerformedAggregateSchema,
   packWeeklyReviewProposals,
   WEEKLY_REVIEW_CHAT_PROMPT,
   WEEKLY_REVIEW_MAX_PROPOSALS,
@@ -403,5 +405,28 @@ describe("progress cross-domain helpers", () => {
   it("detects the canonical weekly review chat prompt", () => {
     expect(isWeeklyReviewChatMessage(WEEKLY_REVIEW_CHAT_PROMPT)).toBe(true);
     expect(isWeeklyReviewChatMessage("Suggest a workout plan")).toBe(false);
+  });
+
+  // C5: >7 distinct dates must be clamped to 7 so the result stays within
+  // nutritionPerformedAggregateSchema .max(7) and the schema parse succeeds.
+  it("clamps daysWithIncidentsLogged to 7 when incidents span more than 7 distinct days", () => {
+    // Build 8 distinct days with one incident each (100 kcal, 10g protein, 10g carbs, 5g fat).
+    const incidents = Array.from({ length: 8 }, (_, i) => ({
+      date: `2026-05-${String(i + 1).padStart(2, "0")}`,
+      estimatedCalories: 100,
+      proteinGrams: 10,
+      carbsGrams: 10,
+      fatGrams: 5,
+    }));
+
+    const result = aggregateNutritionIncidentsWeek(incidents);
+
+    // The schema allows max(7) for daysWithIncidentsLogged — must not be 8.
+    expect(result.daysWithIncidentsLogged).toBe(7);
+    expect(result.incidentCount).toBe(8);
+
+    // The aggregate must still satisfy the schema (no validation errors).
+    const parsed = nutritionPerformedAggregateSchema.safeParse(result);
+    expect(parsed.success).toBe(true);
   });
 });

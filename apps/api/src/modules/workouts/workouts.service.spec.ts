@@ -40,6 +40,14 @@ const usersService = {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }),
+  getUserById: async () => ({
+    id: userId,
+    email: auth.email,
+    displayName: auth.displayName,
+    timezone: "UTC",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }),
 };
 
 const exercisesService = {
@@ -198,7 +206,6 @@ describe("WorkoutsService", () => {
       userId,
       payload,
       "Starting a new plan.",
-      "create_workout_plan",
     );
 
     expect(reference).toBe("workout_revision:rev-append-race");
@@ -224,7 +231,6 @@ describe("WorkoutsService", () => {
           notes: [],
         },
         "Starting a new plan.",
-        "create_workout_plan",
       ),
     ).rejects.toMatchObject({
       response: {
@@ -257,7 +263,6 @@ describe("WorkoutsService", () => {
       userId,
       payload,
       "Starting a new plan.",
-      "create_workout_plan",
     );
 
     expect(reference).toBe("workout_revision:rev-create-1");
@@ -296,7 +301,6 @@ describe("WorkoutsService", () => {
       userId,
       payload,
       "Adjusting the current plan.",
-      "adapt_workout_plan",
     );
 
     expect(reference).toBe("workout_revision:rev-append-2");
@@ -330,7 +334,6 @@ describe("WorkoutsService", () => {
       userId,
       payload,
       "Replacing the current plan.",
-      "create_workout_plan",
     );
 
     expect(reference).toBe("workout_revision:rev-append-3");
@@ -743,7 +746,6 @@ describe("WorkoutsService", () => {
         },
       },
       "Swapping to a band-friendly pull.",
-      "adapt_workout_plan",
     );
 
     expect(reference).toBe("workout_revision:rev-pending-1");
@@ -802,7 +804,6 @@ describe("WorkoutsService", () => {
           notes: [],
         },
         "Invalid exercise reference.",
-        "adapt_workout_plan",
       ),
     ).rejects.toMatchObject({
       response: {
@@ -832,7 +833,6 @@ describe("WorkoutsService", () => {
           notes: [],
         },
         "Attempted free-form apply.",
-        "adapt_workout_plan",
       ),
     ).rejects.toMatchObject({
       response: {
@@ -1444,7 +1444,6 @@ describe("WorkoutsService — calorie revision preservation (Phase 6)", () => {
       userId,
       payloadWithCalorie,
       "Adapting plan with calorie estimate from workout LLM.",
-      "adapt_workout_plan",
     );
 
     expect(reference).toBe("workout_revision:rev-calorie-1");
@@ -1474,7 +1473,6 @@ describe("WorkoutsService — calorie revision preservation (Phase 6)", () => {
       userId,
       payloadWithCalorie,
       "Creating plan with calorie estimate.",
-      "create_workout_plan",
     );
 
     expect(reference).toBe("workout_revision:rev-calorie-2");
@@ -1510,7 +1508,6 @@ describe("WorkoutsService — calorie revision preservation (Phase 6)", () => {
       userId,
       payloadNoCalorie,
       "Adaptation without calorie estimate.",
-      "adapt_workout_plan",
     );
 
     expect(persistedPayload?.estimatedSessionCalorieBurn).toBeUndefined();
@@ -1545,7 +1542,6 @@ describe("WorkoutsService — calorie revision preservation (Phase 6)", () => {
       userId,
       payloadUserManual,
       "User manually set calorie estimate.",
-      "adapt_workout_plan",
     );
 
     expect(persistedPayload?.estimatedSessionCalorieBurn).toBe(450);
@@ -1580,11 +1576,394 @@ describe("WorkoutsService — calorie revision preservation (Phase 6)", () => {
       userId,
       payloadWithCalorie,
       "Apply already-validated calorie proposal.",
-      "adapt_workout_plan",
     );
 
     // Both fields must survive the apply path unchanged.
     expect(persistedPayload?.estimatedSessionCalorieBurn).toBe(280);
     expect(persistedPayload?.calorieEstimateProvenance).toBe("workout_llm");
+  });
+
+  // ---------------------------------------------------------------------------
+  // applyLogWorkoutActivityProposal — trusted ratePerHour governs persisted calories.
+  // Verifies that:
+  //   1. estimatedCalories is always re-derived from ratePerHour × durationMinutes / 60
+  //      (not taken from the advisory estimatedCalories on the payload).
+  //   2. A tampered client ratePerHour that survived schema parsing would be re-derived —
+  //      but the pinning in proposals.service ensures the rate is already the trusted
+  //      stored value before applyLogWorkoutActivityProposal runs.
+  //   3. NO revision is created (insertAdHocSession is called; appendRevision is NOT).
+  // ---------------------------------------------------------------------------
+
+  it("applyLogWorkoutActivityProposal: estimatedCalories is recomputed from ratePerHour * durationMinutes / 60", async () => {
+    // The advisory estimatedCalories may differ from the re-derived value by up to 2000 kcal
+    // (domain validation tolerance). This test uses an advisory value that differs from the
+    // stored value to confirm the re-derivation.
+    // Stored: rate=300, duration=90 → expected persisted = round(300 * 90 / 60) = 450.
+    // Advisory estimatedCalories=480 is close enough to pass domain validation (|480-450|=30 ≤ 2000)
+    // but differs from the re-derived value, proving the apply path re-derives.
+    let insertedCalories: number | undefined;
+    let appendRevisionCalled = false;
+
+    const service = new WorkoutsService(
+      {
+        insertAdHocSession: async (
+          _userId: string,
+          payload: {
+            title: string;
+            activityType: string;
+            performedAt: Date;
+            plannedDate: string;
+            estimatedCalories: number;
+          },
+        ) => {
+          insertedCalories = payload.estimatedCalories;
+          return {
+            id: "session-adhoc-1",
+            userId,
+            workoutPlanId: null,
+            workoutPlanRevisionId: null,
+            plannedDate: payload.plannedDate,
+            title: payload.title,
+            status: "completed",
+            exercises: [],
+            feedback: {},
+            completedAt: payload.performedAt,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        },
+        appendRevision: async () => {
+          appendRevisionCalled = true;
+          return { id: "should-never-be-called" };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    // ratePerHour=300, durationMinutes=90 → recomputed = round(300 * 90 / 60) = 450.
+    // Advisory estimatedCalories=480 (within domain validation tolerance) must be replaced.
+    const reference = await service.applyLogWorkoutActivityProposal(
+      userId,
+      {
+        activityType: "volleyball",
+        title: "Volleyball session",
+        durationMinutes: 90,
+        performedAt: "2026-06-04T16:00:00.000Z",
+        ratePerHour: 300,
+        estimatedCalories: 480, // advisory differs from computed 450 — must be overwritten
+      },
+      "Logged from message",
+    );
+
+    expect(reference).toMatch(/^workout_session:/);
+    expect(insertedCalories).toBe(450);          // round(300 * 90 / 60) — NOT 480
+    expect(appendRevisionCalled).toBe(false);    // NO revision created
+  });
+
+  it("applyLogWorkoutActivityProposal: advisory estimatedCalories is ignored when ratePerHour is present", async () => {
+    // applyLogWorkoutActivityProposal always uses ratePerHour to re-derive calories.
+    // The advisory estimatedCalories field is never trusted directly.
+    // In production, proposals.service pins ratePerHour to the stored trusted value before
+    // calling applyLogWorkoutActivityProposal, so there is no client inflation path.
+    // This test uses a payload where estimatedCalories differs from the ratePerHour recompute
+    // (within domain tolerance) to verify re-derivation is used.
+    let insertedCalories: number | undefined;
+
+    const service = new WorkoutsService(
+      {
+        insertAdHocSession: async (
+          _userId: string,
+          payload: { estimatedCalories: number; title: string; activityType: string; performedAt: Date; plannedDate: string },
+        ) => {
+          insertedCalories = payload.estimatedCalories;
+          return {
+            id: "session-adhoc-tamper",
+            userId,
+            workoutPlanId: null,
+            workoutPlanRevisionId: null,
+            plannedDate: payload.plannedDate,
+            title: payload.title,
+            status: "completed",
+            exercises: [],
+            feedback: {},
+            completedAt: payload.performedAt,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    // ratePerHour=300, durationMinutes=60 → recomputed = round(300 * 60 / 60) = 300.
+    // Advisory estimatedCalories=450 is within domain tolerance (|450-300|=150 ≤ 2000)
+    // but differs from the re-derived value, confirming re-derivation wins.
+    await service.applyLogWorkoutActivityProposal(
+      userId,
+      {
+        activityType: "running",
+        title: "Running session",
+        durationMinutes: 60,
+        performedAt: "2026-06-04T08:00:00.000Z",
+        ratePerHour: 300,
+        estimatedCalories: 450, // advisory — closer than 2000 to 300 (domain valid)
+      },
+      "Logged from message",
+    );
+
+    // round(300 * 60 / 60) = 300 — NOT the advisory 450
+    expect(insertedCalories).toBe(300);
+  });
+
+  it("applyLogWorkoutActivityProposal: creates NO workout plan revision", async () => {
+    let appendRevisionCalled = false;
+    let createPlanCalled = false;
+
+    const service = new WorkoutsService(
+      {
+        insertAdHocSession: async (
+          _userId: string,
+          payload: { estimatedCalories: number; title: string; activityType: string; performedAt: Date; plannedDate: string },
+        ) => ({
+          id: "session-no-revision",
+          userId,
+          workoutPlanId: null,
+          workoutPlanRevisionId: null,
+          plannedDate: payload.plannedDate,
+          title: payload.title,
+          status: "completed",
+          exercises: [],
+          feedback: {},
+          completedAt: payload.performedAt,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        appendRevision: async () => {
+          appendRevisionCalled = true;
+          return { id: "rev-should-not-exist" };
+        },
+        createPlanWithRevision: async () => {
+          createPlanCalled = true;
+          return { revision: { id: "plan-should-not-exist" } };
+        },
+      } as never,
+      usersService as never,
+      exercisesService as never,
+    );
+
+    const reference = await service.applyLogWorkoutActivityProposal(
+      userId,
+      {
+        activityType: "yoga",
+        title: "Yoga session",
+        durationMinutes: 45,
+        performedAt: "2026-06-04T07:00:00.000Z",
+        ratePerHour: 200,
+        estimatedCalories: 150,
+      },
+      "Logged yoga session",
+    );
+
+    expect(reference).toMatch(/^workout_session:/);
+    expect(appendRevisionCalled).toBe(false);
+    expect(createPlanCalled).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C2: applyLogWorkoutActivityProposal — plannedDate uses user's LOCAL timezone
+// ---------------------------------------------------------------------------
+
+describe("WorkoutsService — applyLogWorkoutActivityProposal plannedDate timezone (C2)", () => {
+  /**
+   * A performedAt of 2026-06-04T23:30:00-07:00 (America/Los_Angeles) is
+   * 2026-06-05T06:30:00Z in UTC.  The UTC .slice(0,10) would yield "2026-06-05"
+   * (next day), but the user's local date is still "2026-06-04".
+   * The service must derive the LOCAL calendar date via formatIsoDateInTimezone.
+   */
+
+  function makeAdHocInsertSpy(capturedPayload: { plannedDate?: string }) {
+    return async (
+      _uid: string,
+      payload: {
+        title: string;
+        activityType: string;
+        performedAt: Date;
+        plannedDate: string;
+        estimatedCalories: number;
+      },
+    ) => {
+      capturedPayload.plannedDate = payload.plannedDate;
+      return {
+        id: "session-tz-1",
+        userId,
+        workoutPlanId: null,
+        workoutPlanRevisionId: null,
+        plannedDate: payload.plannedDate,
+        title: payload.title,
+        status: "completed",
+        exercises: [],
+        feedback: {},
+        completedAt: payload.performedAt,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    };
+  }
+
+  it("derives plannedDate in a negative-UTC-offset timezone (America/Los_Angeles 23:30 local = next UTC day)", async () => {
+    const captured: { plannedDate?: string } = {};
+
+    // America/Los_Angeles is UTC-7 in summer (PDT).
+    // 2026-06-04T23:30:00 PDT = 2026-06-05T06:30:00 UTC.
+    // UTC .slice(0,10) = "2026-06-05" (wrong), local date = "2026-06-04" (correct).
+    const performedAtUtc = "2026-06-05T06:30:00.000Z";
+
+    const laUsersService = {
+      resolveFromAuth: async () => ({
+        id: userId,
+        email: auth.email,
+        displayName: auth.displayName,
+        timezone: "America/Los_Angeles",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      getUserById: async () => ({
+        id: userId,
+        email: auth.email,
+        displayName: auth.displayName,
+        timezone: "America/Los_Angeles",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    };
+
+    const service = new WorkoutsService(
+      {
+        insertAdHocSession: makeAdHocInsertSpy(captured),
+      } as never,
+      laUsersService as never,
+      exercisesService as never,
+    );
+
+    const reference = await service.applyLogWorkoutActivityProposal(
+      userId,
+      {
+        activityType: "volleyball",
+        title: "Late evening volleyball",
+        durationMinutes: 60,
+        performedAt: performedAtUtc,
+        ratePerHour: 300,
+        estimatedCalories: 300,
+      },
+      "Logged from chat",
+    );
+
+    expect(reference).toMatch(/^workout_session:/);
+    // Must be the LOCAL date in LA, NOT the UTC next-day date.
+    expect(captured.plannedDate).toBe("2026-06-04");
+    expect(captured.plannedDate).not.toBe("2026-06-05");
+  });
+
+  it("the local-date plannedDate matches Today for that date in America/Los_Angeles", async () => {
+    // This verifies the Today surface can match the session by plannedDate.
+    // The session's plannedDate must equal formatIsoDateInTimezone("America/Los_Angeles", performedAt).
+    // We test this by asserting the stored plannedDate ("2026-06-04") equals what
+    // the Today service would use as "today" for a user in LA at that same moment.
+    const captured: { plannedDate?: string } = {};
+    const performedAtUtc = "2026-06-05T06:30:00.000Z"; // 23:30 PDT on June 4th
+
+    const laUsersService = {
+      resolveFromAuth: async () => ({
+        id: userId,
+        email: auth.email,
+        displayName: null,
+        timezone: "America/Los_Angeles",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      getUserById: async () => ({
+        id: userId,
+        email: auth.email,
+        displayName: null,
+        timezone: "America/Los_Angeles",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    };
+
+    const service = new WorkoutsService(
+      { insertAdHocSession: makeAdHocInsertSpy(captured) } as never,
+      laUsersService as never,
+      exercisesService as never,
+    );
+
+    await service.applyLogWorkoutActivityProposal(
+      userId,
+      {
+        activityType: "running",
+        title: "Evening run",
+        durationMinutes: 45,
+        performedAt: performedAtUtc,
+        ratePerHour: 360,
+        estimatedCalories: 270,
+      },
+      "Logged from chat",
+    );
+
+    // The Today service queries sessions by plannedDate == user's today in their timezone.
+    // For a user in LA at 23:30 PDT on June 4th, their "today" is "2026-06-04".
+    // The stored plannedDate must match so the session appears in Today.
+    const { formatIsoDateInTimezone } = await import("@health/types");
+    const expectedTodayDateForLa = formatIsoDateInTimezone(
+      "America/Los_Angeles",
+      new Date(performedAtUtc),
+    );
+
+    expect(captured.plannedDate).toBe(expectedTodayDateForLa);
+    expect(captured.plannedDate).toBe("2026-06-04");
+  });
+
+  it("falls back to UTC when getUserById returns null", async () => {
+    const captured: { plannedDate?: string } = {};
+
+    // 2026-06-05T00:30:00Z → UTC date is "2026-06-05" (same as UTC fallback).
+    const performedAtUtc = "2026-06-05T00:30:00.000Z";
+
+    const nullUsersService = {
+      resolveFromAuth: async () => ({
+        id: userId,
+        email: auth.email,
+        displayName: null,
+        timezone: "UTC",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      getUserById: async () => null,
+    };
+
+    const service = new WorkoutsService(
+      { insertAdHocSession: makeAdHocInsertSpy(captured) } as never,
+      nullUsersService as never,
+      exercisesService as never,
+    );
+
+    await service.applyLogWorkoutActivityProposal(
+      userId,
+      {
+        activityType: "yoga",
+        title: "Morning yoga",
+        durationMinutes: 30,
+        performedAt: performedAtUtc,
+        ratePerHour: 200,
+        estimatedCalories: 100,
+      },
+      "Logged from chat",
+    );
+
+    // UTC fallback: 2026-06-05T00:30Z → UTC date = "2026-06-05"
+    expect(captured.plannedDate).toBe("2026-06-05");
   });
 });

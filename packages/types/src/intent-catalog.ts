@@ -27,14 +27,12 @@ const PROPOSAL_INTENT_VALUES = [
   "adapt_habit_plan",
   "capture_wellbeing_checkin",
   "log_nutrition_incident",
+  "log_workout_activity",
 ] as const;
 
 export type CatalogProposalIntent = (typeof PROPOSAL_INTENT_VALUES)[number];
 
 const catalogProposalIntentSchema = z.enum(PROPOSAL_INTENT_VALUES);
-
-export type { AttachmentCatalogIntentId, CatalogIntentId } from "./agent-context.js";
-export { catalogIntentIdSchema } from "./agent-context.js";
 
 export const intentCatalogKindSchema = z.enum(["normal", "attachment_family"]);
 
@@ -65,6 +63,7 @@ const WORKOUT_PROPOSAL_INTENTS = [
   "create_workout_plan",
   "adapt_workout_plan",
   "adapt_workout_plan_from_progress",
+  "log_workout_activity",
 ] as const satisfies readonly CatalogProposalIntent[];
 
 const NUTRITION_PROPOSAL_INTENTS = [
@@ -139,13 +138,14 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
   {
     id: "adjust_workout",
     kind: "normal",
-    description: "Workout plan creation, adaptation, fatigue-aware training changes.",
+    description: "Workout plan creation, adaptation, fatigue-aware training changes, and one-off activity logging.",
     routerGuidance:
-      "Use for training, gym, exercise, session planning, load changes, soreness, or skipping workouts.",
+      "Use for training, gym, exercise, session planning, load changes, soreness, skipping workouts, or logging a one-off activity the user just performed.",
     examples: [
       "Can you adapt my workout plan?",
       "Should I train today if I feel sore?",
       "Make my program lighter this week.",
+      "I just played volleyball for 90 minutes, log it.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("adjust_workout"),
     allowedTools: ["getUserContextSlice", "getWeeklyProgressContext"],
@@ -153,9 +153,11 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
     safetyGuidance: [
       "Respect fatigue, pain, and recovery signals.",
       "Prefer lighter adaptations before major plan rewrites.",
+      "log_workout_activity proposals NEVER create a workout plan revision — they log a one-off ad-hoc session only.",
+      "Do not use log_workout_activity when the user wants to change their recurring plan.",
     ],
     promptInstructions:
-      "Review active workout context and recent execution. Propose typed workout plan changes only when a structured revision is warranted.",
+      "Review active workout context and recent execution. Propose typed workout plan changes only when a structured revision is warranted. For one-off activities the user reports performing (e.g. 'I played volleyball 90 min'), use log_workout_activity — this logs an ad-hoc session and NEVER modifies the active plan.",
     mappedAgentIntent: "adjust_workout",
   },
   {
@@ -307,9 +309,10 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Do not apply extracted workout data directly to active plans.",
       "Prefer reviewable workout proposals or manual fallback guidance.",
       "Do not suggest a full workout plan for a one-off session logged for today.",
+      "log_workout_activity proposals NEVER create a workout plan revision — they log a one-off ad-hoc session only.",
     ],
     promptInstructions:
-      "Use attachment recognition context to explain extracted workout details. For plan documents, propose structured plan updates. For one-off sessions the user asked to log for today, reference the prepared Today checklist proposal briefly and avoid unrelated full-plan suggestions.",
+      "Use attachment recognition context to explain extracted workout details. For plan documents, propose structured plan updates. For one-off sessions the user asked to log for today, reference the prepared Today checklist proposal briefly and avoid unrelated full-plan suggestions. If the attachment describes a single performed activity (not a recurring plan), prefer log_workout_activity over a full plan proposal.",
     mappedAgentIntent: "adjust_workout",
   },
   {

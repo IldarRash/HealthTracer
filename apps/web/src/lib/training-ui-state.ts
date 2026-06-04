@@ -134,6 +134,9 @@ export function getSessionRevisionNote(input: {
   activeRevisionId: string;
   revisions: ReadonlyArray<{ id: string; revisionNumber: number }>;
 }): string | null {
+  if (input.session.workoutPlanRevisionId == null) {
+    return null;
+  }
   const revisionLabel = getRevisionNumberLabel(
     input.session.workoutPlanRevisionId,
     input.revisions,

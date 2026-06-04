@@ -30,6 +30,8 @@ function sampleSummary(): WeeklyProgressSummaryResponse {
           exerciseAdjustedCount: 0,
           exerciseCompletionPercent: null,
           partialSessionCount: 0,
+          adHocCompletedCount: 0,
+          plannedCompletedCount: 0,
         },
         nutrition: {
           hasActivePlan: true,

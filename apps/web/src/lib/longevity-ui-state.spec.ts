@@ -339,6 +339,7 @@ describe("longevity UI state", () => {
           workoutPlanId: "88888888-8888-4888-8888-888888888888",
           workoutPlanRevisionId: "99999999-9999-4999-8999-999999999999",
           title: "Strength day",
+          source: "planned",
           exercises: [],
           feedback: {},
           plannedDate: "2026-05-20",
@@ -593,6 +594,7 @@ describe("longevity UI state", () => {
             workoutPlanId: "88888888-8888-4888-8888-888888888888",
             workoutPlanRevisionId: "99999999-9999-4999-8999-999999999999",
             title: "Strength day",
+            source: "planned",
             exercises: [],
             feedback: {},
             plannedDate: "2026-05-20",
@@ -883,6 +885,8 @@ describe("longevity UI state", () => {
               exerciseAdjustedCount: 0,
               exerciseCompletionPercent: null,
               partialSessionCount: 0,
+              adHocCompletedCount: 0,
+              plannedCompletedCount: 0,
             },
             today: {
               daysWithChecklist: 3,
@@ -960,6 +964,8 @@ describe("longevity UI state", () => {
               exerciseAdjustedCount: 0,
               exerciseCompletionPercent: null,
               partialSessionCount: 0,
+              adHocCompletedCount: 0,
+              plannedCompletedCount: 0,
             },
           },
           deferredDomains: [

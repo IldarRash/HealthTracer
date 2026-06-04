@@ -75,7 +75,6 @@ const habitPayload = {
 describe("ProposalApplyService", () => {
   it("routes accepted adapt_workout_plan proposals through the workouts service", async () => {
     let workoutsCalled = false;
-    let capturedIntent: string | undefined;
 
     const service = new ProposalApplyService(
       {} as never,
@@ -85,10 +84,8 @@ describe("ProposalApplyService", () => {
           _userId: string,
           _payload: unknown,
           _reason: string,
-          intent: string,
         ) => {
           workoutsCalled = true;
-          capturedIntent = intent;
           return "workout_revision:rev-adapt-1";
         },
       } as never,
@@ -109,7 +106,6 @@ describe("ProposalApplyService", () => {
 
     expect(reference).toBe("workout_revision:rev-adapt-1");
     expect(workoutsCalled).toBe(true);
-    expect(capturedIntent).toBe("adapt_workout_plan");
   });
 
   it("routes accepted workout proposals through the workouts service", async () => {
@@ -146,7 +142,6 @@ describe("ProposalApplyService", () => {
   it("routes accepted progress-derived workout proposals through the workouts service with recovery metadata preserved", async () => {
     let workoutsCalled = false;
     let capturedPayload: unknown;
-    let capturedIntent: string | undefined;
 
     const service = new ProposalApplyService(
       {} as never,
@@ -156,11 +151,9 @@ describe("ProposalApplyService", () => {
           _userId: string,
           payload: unknown,
           _reason: string,
-          intent: string,
         ) => {
           workoutsCalled = true;
           capturedPayload = payload;
-          capturedIntent = intent;
           return "workout_revision:rev-progress";
         },
       } as never,
@@ -201,7 +194,6 @@ describe("ProposalApplyService", () => {
 
     expect(reference).toBe("workout_revision:rev-progress");
     expect(workoutsCalled).toBe(true);
-    expect(capturedIntent).toBe("adapt_workout_plan");
     expect(capturedPayload).toMatchObject({
       adaptationMetadata: {
         operations: [
@@ -876,5 +868,143 @@ describe("ProposalApplyService", () => {
     expect(incidentCalled).toBe(true);
     expect(workoutPlanCalled).toBe(false);
     expect(nutritionPlanCalled).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part B — applyLogWorkoutActivityProposal (log_workout_activity)
+// ---------------------------------------------------------------------------
+
+describe("ProposalApplyService — log_workout_activity (Part B)", () => {
+  const logWorkoutPayload = {
+    activityType: "volleyball",
+    title: "Volleyball session",
+    durationMinutes: 90,
+    performedAt: "2026-06-04T16:00:00.000Z",
+    ratePerHour: 300,
+    // estimatedCalories intentionally omitted — ratePerHour governs
+  };
+
+  it("routes log_workout_activity through workoutsService.applyLogWorkoutActivityProposal", async () => {
+    let logWorkoutCalled = false;
+    let capturedPayload: unknown;
+
+    const service = new ProposalApplyService(
+      {} as never, // profilesService
+      {} as never, // goalsService
+      {
+        applyLogWorkoutActivityProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+        ) => {
+          logWorkoutCalled = true;
+          capturedPayload = payload;
+          return "workout_session:session-adhoc-1";
+        },
+      } as never, // workoutsService
+      {} as never, // nutritionService
+      {} as never, // habitsService
+      {} as never, // recipesService
+      {} as never, // todayService
+      {} as never, // progressService
+      {} as never, // wellbeingCheckInsService
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "log_workout_activity",
+      targetDomain: "workout",
+      proposedChanges: logWorkoutPayload,
+    });
+
+    expect(reference).toBe("workout_session:session-adhoc-1");
+    expect(logWorkoutCalled).toBe(true);
+    // The payload was forwarded (ratePerHour from original payload)
+    expect((capturedPayload as Record<string, unknown>)["ratePerHour"]).toBe(300);
+  });
+
+  it("does NOT call applyWorkoutPlanProposal for log_workout_activity (no plan revision created)", async () => {
+    let planRevisionCalled = false;
+    let logWorkoutCalled = false;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {
+        applyWorkoutPlanProposal: async () => {
+          planRevisionCalled = true;
+          return "workout_revision:rev-MUST_NOT_REACH";
+        },
+        applyLogWorkoutActivityProposal: async () => {
+          logWorkoutCalled = true;
+          return "workout_session:session-adhoc-2";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "log_workout_activity",
+      targetDomain: "workout",
+      proposedChanges: logWorkoutPayload,
+    });
+
+    // Plan revision service must NOT be called — no revision is created for ad_hoc logs
+    expect(planRevisionCalled).toBe(false);
+    expect(logWorkoutCalled).toBe(true);
+  });
+
+  it("passes the acceptance transaction (tx) into the workouts service", async () => {
+    let capturedTx: unknown;
+    const fakeTx = Symbol("tx") as unknown;
+
+    // Simulate the scenario where the caller passes a tx by calling the apply service
+    // with a tx and asserting it was threaded through.
+    // ProposalApplyService.applyAcceptedProposal receives an optional tx param and passes it
+    // through to the underlying service call.
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {
+        applyLogWorkoutActivityProposal: async (
+          _userId: string,
+          _payload: unknown,
+          _reason: string,
+          tx?: unknown,
+        ) => {
+          capturedTx = tx;
+          return "workout_session:session-adhoc-3";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await (service as {
+      applyAcceptedProposal: (
+        auth: { clerkUserId: string; displayName: string; email: string },
+        userId: string,
+        proposal: unknown,
+        tx?: unknown,
+      ) => Promise<string>;
+    }).applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "log_workout_activity",
+      targetDomain: "workout",
+      proposedChanges: logWorkoutPayload,
+    }, fakeTx);
+
+    expect(capturedTx).toBe(fakeTx);
   });
 });

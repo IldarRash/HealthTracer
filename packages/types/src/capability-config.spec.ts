@@ -74,6 +74,7 @@ describe("capability config", () => {
       "create_workout_plan",
       "adapt_workout_plan",
       "adapt_workout_plan_from_progress",
+      "log_workout_activity",
     ]);
 
     expect(getAllowedToolsForCapability("attachment_medical_document")).toEqual([
@@ -161,6 +162,11 @@ describe("capability config", () => {
         type: "proposal_card",
         proposalIntent: "adapt_workout_plan_from_progress",
       },
+      {
+        id: "log_workout_activity_card",
+        type: "proposal_card",
+        proposalIntent: "log_workout_activity",
+      },
     ]);
     expect(workout.actionDescriptors).toEqual([
       { id: "create_workout_plan", type: "create_proposal", proposalIntent: "create_workout_plan" },
@@ -169,6 +175,11 @@ describe("capability config", () => {
         id: "adapt_workout_plan_from_progress",
         type: "create_proposal",
         proposalIntent: "adapt_workout_plan_from_progress",
+      },
+      {
+        id: "log_workout_activity",
+        type: "create_proposal",
+        proposalIntent: "log_workout_activity",
       },
     ]);
 

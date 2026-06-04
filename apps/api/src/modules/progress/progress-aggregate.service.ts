@@ -103,11 +103,19 @@ export function aggregateWorkoutSessions(
     isDateWithinRange(session.plannedDate, weekStart, weekEnd),
   );
 
-  const plannedCount = weekSessions.length;
+  // Ad-hoc sessions are already-completed activities; they count toward
+  // completedCount and activeDays but must NOT inflate plannedCount or the
+  // adherence denominator (adherence = "of planned sessions").
+  const adHocSessions = weekSessions.filter((session) => session.source === "ad_hoc");
+  const plannedSessions = weekSessions.filter((session) => session.source !== "ad_hoc");
+
+  const plannedCount = plannedSessions.length;
   const completedCount = weekSessions.filter((session) => session.status === "completed").length;
-  const skippedCount = weekSessions.filter((session) => session.status === "skipped").length;
+  const skippedCount = plannedSessions.filter((session) => session.status === "skipped").length;
+  // Adherence is measured against planned sessions only.
+  const plannedCompletedCount = plannedSessions.filter((session) => session.status === "completed").length;
   const adherencePercent =
-    plannedCount > 0 ? Math.round((completedCount / plannedCount) * 100) : null;
+    plannedCount > 0 ? Math.round((plannedCompletedCount / plannedCount) * 100) : null;
 
   const activeDays = new Set(
     weekSessions
@@ -133,7 +141,8 @@ export function aggregateWorkoutSessions(
   let exerciseAdjustedCount = 0;
   let partialSessionCount = 0;
 
-  for (const session of weekSessions) {
+  // Exercise progress only from planned sessions (ad-hoc sessions have no structured exercises).
+  for (const session of plannedSessions) {
     const progress = countStructuredWorkoutSessionExerciseProgress(session.exercises);
 
     exercisePlannedCount += progress.planned;
@@ -165,6 +174,10 @@ export function aggregateWorkoutSessions(
         )
       : null;
 
+  const adHocCompletedCount = adHocSessions.filter(
+    (session) => session.status === "completed",
+  ).length;
+
   return {
     plannedCount,
     completedCount,
@@ -179,6 +192,8 @@ export function aggregateWorkoutSessions(
     exerciseAdjustedCount,
     exerciseCompletionPercent,
     partialSessionCount,
+    adHocCompletedCount,
+    plannedCompletedCount,
   };
 }
 
@@ -288,15 +303,21 @@ export function buildSummaryUserMessage(
   }
 
   if (workout && workout.plannedCount > 0) {
-    if (workout.completedCount === 0) {
+    if (workout.plannedCompletedCount === 0) {
       segments.push(
         `You had ${workout.plannedCount} planned workout session${workout.plannedCount === 1 ? "" : "s"} this week, but none were marked completed yet.`,
       );
     } else {
       segments.push(
-        `Workouts: you completed ${workout.completedCount} of ${workout.plannedCount} planned sessions (${workout.adherencePercent ?? 0}% completion) based on the entries available.`,
+        `Workouts: you completed ${workout.plannedCompletedCount} of ${workout.plannedCount} planned sessions (${workout.adherencePercent ?? 0}% completion) based on the entries available.`,
       );
     }
+  }
+  if (workout && workout.adHocCompletedCount > 0) {
+    const n = workout.adHocCompletedCount;
+    segments.push(
+      `Plus ${n} logged ad-hoc ${n === 1 ? "activity" : "activities"} this week.`,
+    );
   }
 
   if (today && today.dataSufficiency !== "deferred") {
@@ -590,7 +611,8 @@ function buildConsistencyTrend(
       weekEnd,
       activeDays: aggregate.activeDays,
       plannedCount: aggregate.plannedCount,
-      completedCount: aggregate.completedCount,
+      plannedCompletedCount: aggregate.plannedCompletedCount,
+      adHocCompletedCount: aggregate.adHocCompletedCount,
     },
     message,
   };
@@ -657,7 +679,7 @@ function buildSkipRateTrend(
     direction = "down";
     message =
       "A few planned workouts were marked skipped this week, which could suggest room to simplify scheduling or recovery balance.";
-  } else if (skipRate === 0 && aggregate.completedCount > 0) {
+  } else if (skipRate === 0 && aggregate.plannedCount > 0 && aggregate.plannedCompletedCount > 0) {
     direction = "up";
     message =
       "No planned workouts were marked skipped this week based on the entries available.";

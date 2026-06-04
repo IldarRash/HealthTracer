@@ -297,20 +297,22 @@ type WorkoutSessionRow = {
   id: string;
   title: string;
   status: string;
-  workoutPlanId: string;
-  workoutPlanRevisionId: string;
+  workoutPlanId: string | null;
+  workoutPlanRevisionId: string | null;
+  source?: string | null;
 };
 
 function toWorkoutSessionChecklistSummary(session: WorkoutSessionRow): Pick<
   WorkoutSession,
-  "id" | "title" | "status" | "workoutPlanId" | "workoutPlanRevisionId"
+  "id" | "title" | "status" | "workoutPlanId" | "workoutPlanRevisionId" | "source"
 > {
   return {
     id: session.id,
     title: session.title,
     status: session.status as WorkoutSession["status"],
-    workoutPlanId: session.workoutPlanId,
-    workoutPlanRevisionId: session.workoutPlanRevisionId,
+    workoutPlanId: session.workoutPlanId ?? null,
+    workoutPlanRevisionId: session.workoutPlanRevisionId ?? null,
+    source: (session.source === "ad_hoc" ? "ad_hoc" : "planned") as WorkoutSession["source"],
   };
 }
 

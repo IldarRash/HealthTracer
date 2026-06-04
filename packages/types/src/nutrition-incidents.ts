@@ -245,6 +245,62 @@ export function getNutritionIncidentImageRefOwnershipErrors(
   return errors;
 }
 
+/**
+ * Map a DB row (or any object with estimatedCalories + estimatedMacros Record) to a
+ * typed NutritionIncidentSnapshot for weekly aggregation.
+ * Keeps the `date` field as-is; macro keys that are absent default to 0.
+ */
+export function toNutritionIncidentSnapshot(row: {
+  date: string;
+  estimatedCalories: number;
+  estimatedMacros: Record<string, number>;
+}): { date: string; estimatedCalories: number; proteinGrams: number; carbsGrams: number; fatGrams: number } {
+  return {
+    date: row.date,
+    estimatedCalories: row.estimatedCalories,
+    proteinGrams: row.estimatedMacros["proteinGrams"] ?? 0,
+    carbsGrams: row.estimatedMacros["carbsGrams"] ?? 0,
+    fatGrams: row.estimatedMacros["fatGrams"] ?? 0,
+  };
+}
+
+/**
+ * Sum calories and macros across a list of incident rows or snapshots.
+ * Returns null when `rows` is empty (null = no incidents, not zero-calories),
+ * matching the `buildEatenBlock` / daily-detail contract.
+ * Returns rounded integers so callers never need to round themselves.
+ */
+export function sumNutritionIncidentMacros(
+  rows: ReadonlyArray<{
+    estimatedCalories: number;
+    estimatedMacros: Record<string, number>;
+  }>,
+): { calories: number; proteinGrams: number; carbsGrams: number; fatGrams: number; incidentCount: number } | null {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  let calories = 0;
+  let proteinGrams = 0;
+  let carbsGrams = 0;
+  let fatGrams = 0;
+
+  for (const row of rows) {
+    calories += row.estimatedCalories;
+    proteinGrams += row.estimatedMacros["proteinGrams"] ?? 0;
+    carbsGrams += row.estimatedMacros["carbsGrams"] ?? 0;
+    fatGrams += row.estimatedMacros["fatGrams"] ?? 0;
+  }
+
+  return {
+    calories: Math.round(calories),
+    proteinGrams: Math.round(proteinGrams),
+    carbsGrams: Math.round(carbsGrams),
+    fatGrams: Math.round(fatGrams),
+    incidentCount: rows.length,
+  };
+}
+
 export function getNutritionIncidentDomainErrors(
   payload: LogNutritionIncidentProposalPayload,
 ): string[] {

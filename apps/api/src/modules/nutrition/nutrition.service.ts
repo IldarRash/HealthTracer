@@ -10,9 +10,11 @@ import type {
 import {
   getNutritionIncidentDomainErrors,
   getNutritionPlanDomainErrors,
+  getTodayIsoDateInTimezone,
   isoDateSchema,
   logNutritionIncidentProposalPayloadSchema,
   nutritionPlanPayloadSchema,
+  sumNutritionIncidentMacros,
 } from "@health/types";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { HealthDatabaseTransaction } from "../../database/database.types.js";
@@ -66,7 +68,7 @@ export class NutritionService {
 
   async getAdherenceForToday(auth: ClerkAuthContext): Promise<NutritionAdherenceResponse> {
     const user = await this.usersService.resolveFromAuth(auth);
-    const date = getDateInTimezone(user.timezone);
+    const date = getTodayIsoDateInTimezone(user.timezone);
 
     return this.getAdherenceForDate(auth, date);
   }
@@ -76,7 +78,7 @@ export class NutritionService {
     input: UpsertNutritionAdherenceInput,
   ): Promise<NutritionAdherenceResponse> {
     const user = await this.usersService.resolveFromAuth(auth);
-    const date = getDateInTimezone(user.timezone);
+    const date = getTodayIsoDateInTimezone(user.timezone);
     const row = await this.nutritionRepository.upsertAdherenceByUserIdAndDate(
       user.id,
       date,
@@ -112,24 +114,29 @@ export class NutritionService {
     const user = await this.usersService.resolveFromAuth(auth);
     const plan = await this.nutritionRepository.findActivePlanByUserId(user.id);
 
-    if (!plan?.activeRevisionId) {
+    // Fetch incidents regardless of plan — logged incidents are a standalone signal.
+    const [activeRevision, adherenceRow, incidentRows] = plan?.activeRevisionId
+      ? await Promise.all([
+          this.nutritionRepository.findActiveRevisionByPlanId(plan.id, plan.activeRevisionId),
+          this.nutritionRepository.findAdherenceByUserIdAndDate(user.id, parsedDate),
+          this.nutritionRepository.listIncidentsByUserAndDate(user.id, parsedDate),
+        ])
+      : [null, null, await this.nutritionRepository.listIncidentsByUserAndDate(user.id, parsedDate)];
+
+    // Require an active plan + revision for plan-level detail.
+    if (!plan?.activeRevisionId || !activeRevision) {
       return null;
     }
 
-    const [activeRevision, adherenceRow] = await Promise.all([
-      this.nutritionRepository.findActiveRevisionByPlanId(plan.id, plan.activeRevisionId),
-      this.nutritionRepository.findAdherenceByUserIdAndDate(user.id, parsedDate),
-    ]);
-
-    if (!activeRevision) {
-      return null;
-    }
+    // Aggregate confirmed incidents into the eaten block.
+    const eaten = buildEatenBlock(incidentRows);
 
     return {
       date: parsedDate,
       plan: toNutritionPlan(plan),
       activeRevision: toNutritionPlanRevision(activeRevision),
       adherence: adherenceRow ? toNutritionAdherenceRecord(adherenceRow) : null,
+      eaten,
     };
   }
 
@@ -238,20 +245,13 @@ function parseAdherenceDate(date: string): string {
   return parsed.data;
 }
 
-function getDateInTimezone(timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-  } catch {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "UTC",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-  }
+/**
+ * Aggregate confirmed nutrition incidents into the `eaten` block for TodayNutritionDetail.
+ * Returns null when no incidents are present (null = no incidents, not zero-calories).
+ * Delegates macro extraction to `sumNutritionIncidentMacros` (packages/types).
+ */
+function buildEatenBlock(
+  rows: ReadonlyArray<{ estimatedCalories: number; estimatedMacros: Record<string, number> }>,
+): { calories: number; proteinGrams: number; carbsGrams: number; fatGrams: number; incidentCount: number } | null {
+  return sumNutritionIncidentMacros(rows);
 }

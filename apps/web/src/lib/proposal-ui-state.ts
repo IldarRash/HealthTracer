@@ -31,6 +31,8 @@ export function getProposalIntentLabel(
       return "Wellbeing check-in";
     case "log_nutrition_incident":
       return "Nutrition incident log";
+    case "log_workout_activity":
+      return "Log activity";
     case "recommend_recipes":
       return "Recipe recommendations";
     default:

@@ -70,15 +70,33 @@ export const workoutSessions = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    // Nullable for ad-hoc sessions that are not tied to a workout plan.
     workoutPlanId: uuid("workout_plan_id")
-      .notNull()
       .references(() => workoutPlans.id, { onDelete: "cascade" }),
+    // Nullable for ad-hoc sessions that are not tied to a workout plan revision.
     workoutPlanRevisionId: uuid("workout_plan_revision_id")
-      .notNull()
       .references(() => workoutPlanRevisions.id, { onDelete: "cascade" }),
     plannedDate: date("planned_date").notNull(),
     title: text("title").notNull(),
     status: text("status").notNull().default("planned"),
+    /**
+     * 'planned'  — materialized from an active plan revision (default).
+     * 'ad_hoc'   — logged one-off activity not tied to any plan
+     *              (e.g. "played volleyball 90 min").
+     */
+    source: text("source").notNull().default("planned"),
+    /**
+     * Free-text activity type for ad-hoc sessions (e.g. "volleyball", "cycling").
+     * NULL for planned sessions.
+     */
+    activityType: text("activity_type"),
+    /**
+     * Calorie burn estimate for the session (kcal).
+     * For ad-hoc sessions this is sourced from the log_workout_activity proposal.
+     * For planned sessions this is populated from the plan revision payload.
+     * NULL when not estimated.
+     */
+    estimatedCalories: integer("estimated_calories"),
     exercises: jsonb("exercises").$type<unknown[]>().default([]).notNull(),
     feedback: jsonb("feedback").$type<Record<string, unknown>>().default({}).notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -93,6 +111,9 @@ export const workoutSessions = pgTable(
     planRevisionIdx: index("workout_sessions_plan_revision_idx").on(
       table.workoutPlanRevisionId,
     ),
+    // NOTE: NULLs are distinct in Postgres unique indexes, so multiple ad_hoc
+    // rows on the same day insert cleanly even though workoutPlanId and
+    // workoutPlanRevisionId are NULL for all of them.
     userPlanRevisionDateUnique: uniqueIndex(
       "workout_sessions_user_plan_revision_date_unique",
     ).on(

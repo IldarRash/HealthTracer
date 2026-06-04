@@ -12,6 +12,7 @@ import type {
 } from "@health/types";
 import {
   createFallbackFinalDecision,
+  deriveActivityCalories,
   isWeeklyReviewChatMessage,
 } from "@health/types";
 import {
@@ -91,6 +92,96 @@ const SAFE_DEFAULT_REPLY =
 /** Seed fixture recipe id from packages/db/drizzle/seeds/recipes.sql */
 const STUB_RECIPE_ID = "a1000001-0000-4000-8000-000000000001";
 
+/**
+ * Detect past-tense activity logging messages in the stub.
+ *
+ * Trigger pattern: a past-tense physical activity verb combined with a duration
+ * ("90 minutes", "for 1 hour", "1h30", etc.) or a standalone past-tense activity
+ * report without a future/plan framing.
+ *
+ * Matches:  "I played volleyball for 90 minutes"
+ *           "ran 5k for 1 hour"
+ *           "just finished a swim, 45 minutes"
+ *           "I went for a 30 min jog"
+ *           "cycled for 1.5 hours"
+ *
+ * Does NOT match plan requests ("make me a plan", "create a workout", "design …").
+ * Kept deterministic — no external calls.
+ */
+function isPastActivityLoggingMessage(normalized: string): boolean {
+  // Past-tense / completed-activity verbs
+  const activityVerbPattern =
+    /\b(played|ran|did|went for|finished|completed|jogged|swam|cycled|walked|hiked|climbed|rowed|trained|worked out|exercised|lifted|danced|skated|skied|surfed|paddled|jumped|sprinted|stretched)\b/i;
+
+  // Duration indicators
+  const durationPattern =
+    /\b(\d+(\.\d+)?\s*(minutes?|mins?|hours?|hrs?|h)\b|\d+h\d*m?\b|for \d)/i;
+
+  // Explicit "just did" / "just finished" / "already did" short forms
+  const shortFormPattern = /\b(just (did|finished|completed|went|ran|played)|already (did|finished|completed))\b/i;
+
+  // Exclude plan/design/create requests — these should go to create_workout_plan
+  const planRequestPattern = /\b(make|create|design|build|suggest|give me|start|plan|set up)\b.*\b(plan|workout|program|routine|schedule|training)\b/i;
+
+  if (planRequestPattern.test(normalized)) {
+    return false;
+  }
+
+  return (
+    shortFormPattern.test(normalized) ||
+    (activityVerbPattern.test(normalized) && durationPattern.test(normalized))
+  );
+}
+
+/**
+ * Parse a simple duration in minutes from a past-activity message.
+ * Returns a default of 60 when no duration can be parsed.
+ */
+function parseDurationMinutesFromMessage(normalized: string): number {
+  // "90 minutes" / "90 min" / "90 mins"
+  const minuteMatch = /(\d+)\s*(?:minutes?|mins?)/i.exec(normalized);
+  if (minuteMatch) {
+    const val = parseInt(minuteMatch[1]!, 10);
+    if (val > 0 && val <= 600) return val;
+  }
+
+  // "1.5 hours" / "2 hours" / "1 hr"
+  const hourMatch = /(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i.exec(normalized);
+  if (hourMatch) {
+    const val = parseFloat(hourMatch[1]!);
+    const mins = Math.round(val * 60);
+    if (mins > 0 && mins <= 600) return mins;
+  }
+
+  // "1h30" / "1h30m"
+  const hhmMatch = /(\d+)h(\d+)m?/i.exec(normalized);
+  if (hhmMatch) {
+    const h = parseInt(hhmMatch[1]!, 10);
+    const m = parseInt(hhmMatch[2]!, 10);
+    const mins = h * 60 + m;
+    if (mins > 0 && mins <= 600) return mins;
+  }
+
+  return 60;
+}
+
+/**
+ * Derive a simple activity type label from the message for the stub.
+ */
+function parseActivityTypeFromMessage(normalized: string): string {
+  if (/\bvolleyball\b/i.test(normalized)) return "volleyball";
+  if (/\bbasketball\b/i.test(normalized)) return "basketball";
+  if (/\bfootball\b|soccer/i.test(normalized)) return "football";
+  if (/\btennis\b/i.test(normalized)) return "tennis";
+  if (/\bswim|swimming|swam\b/i.test(normalized)) return "swimming";
+  if (/\bcycl|biking|bike\b/i.test(normalized)) return "cycling";
+  if (/\bran|running|jog\b/i.test(normalized)) return "running";
+  if (/\bwalk|hiking|hike\b/i.test(normalized)) return "walking";
+  if (/\byoga\b/i.test(normalized)) return "yoga";
+  if (/\bdanc\b/i.test(normalized)) return "dancing";
+  return "general activity";
+}
+
 function stubCoachOutput(value: unknown): AiStructuredOutputInput {
   return value as AiStructuredOutputInput;
 }
@@ -135,6 +226,72 @@ export class StubCoachAiProvider implements CoachAiProvider {
 
     if (isWeeklyReviewChatMessage(request.userMessage)) {
       return stubCoachOutput(buildStubWeeklyReviewCoachOutput(request.coachingContext));
+    }
+
+    // Past-activity logging: checked BEFORE the generic workout/training branch so that
+    // "I played volleyball for 90 minutes" goes to log_workout_activity, not create_workout_plan.
+    if (isPastActivityLoggingMessage(normalized)) {
+      const STUB_LOG_RATE = 300;
+      const durationMinutes = parseDurationMinutesFromMessage(normalized);
+      const activityType = parseActivityTypeFromMessage(normalized);
+      const estimatedCalories = deriveActivityCalories(STUB_LOG_RATE, durationMinutes);
+      const performedAt = new Date().toISOString();
+
+      return stubCoachOutput({
+        reply:
+          "Got it — I logged that activity for you to review. Adjust the duration or confirm to save it.",
+        proposals: [
+          {
+            intent: "log_workout_activity",
+            targetDomain: "workout",
+            title: `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`,
+            reason: `Logged from your message as an ad-hoc activity (${durationMinutes} min).`,
+            proposedChanges: {
+              activityType,
+              title: `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`,
+              durationMinutes,
+              performedAt,
+              ratePerHour: STUB_LOG_RATE,
+              estimatedCalories,
+              displayContract: {
+                version: 1,
+                title: "Activity log",
+                fields: [
+                  {
+                    key: "ratePerHour",
+                    label: "Burn rate",
+                    kind: "readonly",
+                    unit: "kcal/hour",
+                    value: STUB_LOG_RATE,
+                    editable: false,
+                  },
+                  {
+                    key: "durationMinutes",
+                    label: "Duration",
+                    kind: "slider",
+                    unit: "min",
+                    value: durationMinutes,
+                    min: 1,
+                    max: 600,
+                    step: 5,
+                    editable: true,
+                  },
+                ],
+                derived: [
+                  {
+                    target: "totalCalories",
+                    label: "Estimated calories",
+                    unit: "kcal",
+                    op: "rate_per_hour",
+                    inputs: ["ratePerHour", "durationMinutes"],
+                    isPrimaryTotal: true,
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      });
     }
 
     if (normalized.includes("workout") || normalized.includes("training")) {
@@ -482,6 +639,76 @@ export class StubCoachAiProvider implements CoachAiProvider {
     const normalized = request.userMessage.toLowerCase();
 
     if (request.domain === "workout") {
+      // Past-activity logging: emit log_workout_activity for "what I did" turns.
+      // Checked before plan branches so activity reports don't become plan proposals.
+      if (isPastActivityLoggingMessage(normalized)) {
+        const STUB_LOG_RATE = 300;
+        const durationMinutes = parseDurationMinutesFromMessage(normalized);
+        const activityType = parseActivityTypeFromMessage(normalized);
+        const estimatedCalories = deriveActivityCalories(STUB_LOG_RATE, durationMinutes);
+        const performedAt = new Date().toISOString();
+
+        return {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: `Logged ${activityType} (${durationMinutes} min) as an ad-hoc session — review before saving.`,
+          candidateProposals: [
+            {
+              intent: "log_workout_activity",
+              targetDomain: "workout",
+              title: `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`,
+              reason: `Logged from your message as an ad-hoc activity (${durationMinutes} min).`,
+              proposedChanges: {
+                activityType,
+                title: `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`,
+                durationMinutes,
+                performedAt,
+                ratePerHour: STUB_LOG_RATE,
+                estimatedCalories,
+                displayContract: {
+                  version: 1,
+                  title: "Activity log",
+                  fields: [
+                    {
+                      key: "ratePerHour",
+                      label: "Burn rate",
+                      kind: "readonly",
+                      unit: "kcal/hour",
+                      value: STUB_LOG_RATE,
+                      editable: false,
+                    },
+                    {
+                      key: "durationMinutes",
+                      label: "Duration",
+                      kind: "slider",
+                      unit: "min",
+                      value: durationMinutes,
+                      min: 1,
+                      max: 600,
+                      step: 5,
+                      editable: true,
+                    },
+                  ],
+                  derived: [
+                    {
+                      target: "totalCalories",
+                      label: "Estimated calories",
+                      unit: "kcal",
+                      op: "rate_per_hour",
+                      inputs: ["ratePerHour", "durationMinutes"],
+                      isPrimaryTotal: true,
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+          domainSignals: ["activity_logged"],
+          workoutCalorieEstimate: estimatedCalories,
+          workoutCaloriePerHourRate: STUB_LOG_RATE,
+        };
+      }
+
       // Build a stub workout candidate proposal matching the keyword routing in generateCoachResponse
       const candidateProposals: Record<string, unknown>[] = [];
 
@@ -519,6 +746,56 @@ export class StubCoachAiProvider implements CoachAiProvider {
         });
       }
 
+      // Attach a displayContract to the first candidate proposal so the local/test path
+      // renders the duration slider deterministically.
+      // caloriePerHourRate=280 matches workoutCaloriePerHourRate below.
+      const STUB_RATE = 280;
+      const STUB_DURATION_MINUTES = 60;
+      const stubDisplayContract = {
+        version: 1 as const,
+        title: "Workout session",
+        fields: [
+          {
+            key: "caloriePerHourRate",
+            label: "Burn rate",
+            kind: "readonly" as const,
+            unit: "kcal/hour",
+            value: STUB_RATE,
+            editable: false,
+          },
+          {
+            key: "durationMinutes",
+            label: "Duration",
+            kind: "slider" as const,
+            unit: "min",
+            value: STUB_DURATION_MINUTES,
+            min: 1,
+            max: 600,
+            step: 5,
+            editable: true,
+          },
+        ],
+        derived: [
+          {
+            target: "totalCalories",
+            label: "Estimated calories",
+            unit: "kcal",
+            op: "rate_per_hour" as const,
+            inputs: ["caloriePerHourRate", "durationMinutes"],
+            isPrimaryTotal: true,
+          },
+        ],
+      };
+
+      if (candidateProposals.length > 0 && candidateProposals[0]) {
+        const first = candidateProposals[0];
+        const existingChanges = first.proposedChanges as Record<string, unknown>;
+        (first as Record<string, unknown>).proposedChanges = {
+          ...existingChanges,
+          displayContract: stubDisplayContract,
+        };
+      }
+
       return {
         kind: "domain_answer",
         domain: "workout",
@@ -526,7 +803,8 @@ export class StubCoachAiProvider implements CoachAiProvider {
           "Reviewed your workout context and drafted a candidate plan adjustment for your consideration.",
         candidateProposals,
         domainSignals: ["workout_plan_present"],
-        workoutCalorieEstimate: 280,
+        workoutCalorieEstimate: Math.round(STUB_RATE * (STUB_DURATION_MINUTES / 60)),
+        workoutCaloriePerHourRate: STUB_RATE,
       };
     }
 

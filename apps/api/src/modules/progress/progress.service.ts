@@ -153,7 +153,9 @@ export class ProgressService {
       workout: currentWorkoutAggregate.plannedCount > 0 ? currentWorkoutAggregate : null,
       today: todayAggregate.daysWithChecklist > 0 ? todayAggregate : null,
       nutrition:
-        nutritionAggregate.hasActivePlan || nutritionAggregate.daysWithAdherenceLogged > 0
+        nutritionAggregate.hasActivePlan ||
+        nutritionAggregate.daysWithAdherenceLogged > 0 ||
+        (nutritionAggregate.performed != null && nutritionAggregate.performed.incidentCount > 0)
           ? nutritionAggregate
           : null,
       habits:

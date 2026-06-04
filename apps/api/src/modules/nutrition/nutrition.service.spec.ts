@@ -42,6 +42,8 @@ function createRepositoryMock(overrides: Record<string, unknown> = {}) {
     findActiveRevisionByPlanId: async () => null,
     listRevisionsByUserId: async () => [],
     findAdherenceByUserIdAndDate: async () => null,
+    listIncidentsByUserAndDate: async () => [],
+    listIncidentsByUserAndDateRange: async () => [],
     upsertAdherenceByUserIdAndDate: async () => ({
       id: "adherence-1",
       userId,

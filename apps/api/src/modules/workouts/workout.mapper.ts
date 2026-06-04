@@ -60,11 +60,14 @@ export function toWorkoutSession(row: WorkoutSessionRow): WorkoutSession {
   return {
     id: row.id,
     userId: row.userId,
-    workoutPlanId: row.workoutPlanId,
-    workoutPlanRevisionId: row.workoutPlanRevisionId,
+    workoutPlanId: row.workoutPlanId ?? null,
+    workoutPlanRevisionId: row.workoutPlanRevisionId ?? null,
     plannedDate: row.plannedDate,
     title: row.title,
     status: row.status as WorkoutSession["status"],
+    source: (row.source ?? "planned") as WorkoutSession["source"],
+    activityType: row.activityType ?? null,
+    estimatedCalories: row.estimatedCalories ?? null,
     exercises: parseStoredValue(
       workoutSessionExerciseEntrySchema.array(),
       row.exercises,

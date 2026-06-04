@@ -7,7 +7,7 @@ import type {
 import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
-import type { HealthDatabase } from "../../database/database.types.js";
+import type { HealthDatabase, HealthDatabaseTransaction } from "../../database/database.types.js";
 
 export function isPostgresUniqueViolation(error: unknown): boolean {
   if (typeof error !== "object" || error === null) {
@@ -357,6 +357,51 @@ export class WorkoutsRepository {
 
       return { plan: updatedPlan, revision };
     });
+  }
+
+  /**
+   * Insert a fully-completed ad-hoc workout session.
+   * workoutPlanId and workoutPlanRevisionId are intentionally null — this is not
+   * backed by a plan revision. source='ad_hoc', status='completed'.
+   *
+   * When tx is provided the insert runs inside that transaction so the domain
+   * write is atomic with the proposal status flip in the caller (mirrors the
+   * nutrition-incident pattern: NutritionRepository.createIncident).
+   */
+  async insertAdHocSession(
+    userId: string,
+    payload: {
+      title: string;
+      activityType: string;
+      performedAt: Date;
+      plannedDate: string;
+      estimatedCalories: number;
+    },
+    tx?: HealthDatabaseTransaction,
+  ) {
+    const db = tx ?? this.db;
+    const [session] = await db
+      .insert(workoutSessions)
+      .values({
+        userId,
+        workoutPlanId: null,
+        workoutPlanRevisionId: null,
+        source: "ad_hoc",
+        status: "completed",
+        title: payload.title,
+        activityType: payload.activityType,
+        estimatedCalories: payload.estimatedCalories,
+        plannedDate: payload.plannedDate,
+        completedAt: payload.performedAt,
+        exercises: [],
+      })
+      .returning();
+
+    if (!session) {
+      throw new Error("Failed to insert ad-hoc workout session.");
+    }
+
+    return session;
   }
 
   async appendRevision(
