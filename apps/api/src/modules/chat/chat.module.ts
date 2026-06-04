@@ -1,6 +1,7 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
 import { AiModule } from "../ai/ai.module.js";
+import { BillingModule } from "../billing/billing.module.js";
 import { ChatAttachmentsModule } from "../chat-attachments/chat-attachments.module.js";
 import { ProgressModule } from "../progress/progress.module.js";
 import { ProposalsModule } from "../proposals/proposals.module.js";
@@ -19,6 +20,7 @@ import { ProposalExplainerService } from "./proposal-explainer.service.js";
     DatabaseModule,
     UsersModule,
     AiModule,
+    BillingModule,
     ProposalsModule,
     ProgressModule,
     WellbeingCheckInsModule,

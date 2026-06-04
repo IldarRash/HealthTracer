@@ -51,6 +51,18 @@ const noopChatAttachmentsService = {
   getMessageDisplayAttachments: async () => new Map(),
 } as never;
 
+/** Entitlements stub: always allows AI messages (no quota enforcement in existing tests). */
+const noopEntitlementsService = {
+  assertAiMessageAllowed: async () => undefined,
+  recordAiMessageUsage: async () => undefined,
+  getEntitlement: async () => ({
+    tier: "free" as const,
+    aiMessagesPerDay: 10,
+    aiMessagesUsedToday: 0,
+    aiMessagesRemaining: 10,
+  }),
+} as never;
+
 function buildMockAttachmentTurnStageResult(input: {
   attachments: readonly Record<string, unknown>[];
 }) {
@@ -197,6 +209,7 @@ function createChatService(deps: {
   directChatPathService?: unknown;
   proposalExplainerService?: unknown;
   aiBehaviorConfigService?: unknown;
+  entitlementsService?: unknown;
 }) {
   return new ChatService(
     deps.chatRepository as never,
@@ -211,6 +224,7 @@ function createChatService(deps: {
     (deps.directChatPathService ?? noopDirectChatPathService) as never,
     (deps.proposalExplainerService ?? noopProposalExplainerService) as never,
     (deps.aiBehaviorConfigService ?? noopAiBehaviorConfigService) as never,
+    (deps.entitlementsService ?? noopEntitlementsService) as never,
   );
 }
 
@@ -3384,6 +3398,230 @@ describe("ChatService", () => {
       });
 
       expect(result.userMessage.attachments).toEqual([]);
+    });
+  });
+
+  describe("AI message quota enforcement", () => {
+    const minimalProposalValidationService = {
+      validateRawProposal: () => ({ valid: true, errors: [] }),
+      validateCorrelationEvidenceOwnership: async () => [],
+      validateProvenanceOwnership: async () => [],
+      validateProgressLinkedProvenanceRequired: () => [],
+      validateGoalProposalHierarchy: async () => [],
+      validateTodayChecklistGoalSourceRefs: async () => [],
+      validateRecoveryAwareWorkoutAdaptation: async () => [],
+      validateHabitProposalContext: async () => [],
+      validateWellbeingCheckinProposalContext: async () => [],
+      validateNutritionIncidentImageRefOwnership: async () => [],
+      validateChatAttachmentProposalRefs: async () => [],
+      validateRecipeRecommendationProposalContext: async () => [],
+    };
+
+    function createQuotaChatService(deps: {
+      assertAiMessageAllowed?: () => Promise<void>;
+      recordAiMessageUsage?: () => Promise<void>;
+      generateCoachResponse?: (...args: unknown[]) => Promise<unknown>;
+    } = {}) {
+      const generateCoachResponse = deps.generateCoachResponse ?? vi.fn(async () => ({
+        output: { reply: "Here is a coaching reply.", proposals: [] },
+        parseErrors: [],
+        replySafetyErrors: [],
+      }));
+
+      const assertAiMessageAllowed = deps.assertAiMessageAllowed ?? vi.fn(async () => undefined);
+      const recordAiMessageUsage = deps.recordAiMessageUsage ?? vi.fn(async () => undefined);
+
+      const entitlementsService = {
+        assertAiMessageAllowed,
+        recordAiMessageUsage,
+        getEntitlement: async () => ({
+          tier: "free" as const,
+          aiMessagesPerDay: 10,
+          aiMessagesUsedToday: 0,
+          aiMessagesRemaining: 10,
+        }),
+      };
+
+      const capturedAssistant: Array<{ content: string; metadata: Record<string, unknown> }> = [];
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "assistant") {
+              capturedAssistant.push({ content, metadata });
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            };
+          },
+          createProposal: async () => {
+            throw new Error("createProposal should not be called in quota tests");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: { generateCoachResponse },
+        proposalValidationService: minimalProposalValidationService,
+        entitlementsService: entitlementsService as never,
+      });
+
+      return { service, capturedAssistant, generateCoachResponse, assertAiMessageAllowed, recordAiMessageUsage };
+    }
+
+    it("free user at the limit gets a boundary reply and generateCoachResponse is NOT called", async () => {
+      const { AiMessageQuotaExceededError } = await import("../billing/entitlements.service.js");
+
+      const { service, capturedAssistant, generateCoachResponse } = createQuotaChatService({
+        assertAiMessageAllowed: vi.fn(async () => {
+          throw new AiMessageQuotaExceededError();
+        }),
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "How can I improve my workout?",
+      });
+
+      expect(generateCoachResponse).not.toHaveBeenCalled();
+      expect(result.proposals).toEqual([]);
+      expect(capturedAssistant).toHaveLength(1);
+      expect(capturedAssistant[0]?.content).toContain("upgrade to Pro");
+      expect(capturedAssistant[0]?.metadata).toMatchObject({
+        quota: { limitReached: true, tier: "free" },
+      });
+    });
+
+    it("allowed turn calls generateCoachResponse and then recordAiMessageUsage", async () => {
+      const recordAiMessageUsage = vi.fn(async () => undefined);
+
+      const { service, generateCoachResponse } = createQuotaChatService({
+        assertAiMessageAllowed: vi.fn(async () => undefined),
+        recordAiMessageUsage,
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "How should I structure my week?",
+      });
+
+      expect(generateCoachResponse).toHaveBeenCalledOnce();
+      // recordAiMessageUsage is fire-and-forget — give it a tick to resolve
+      await new Promise((r) => setTimeout(r, 0));
+      expect(recordAiMessageUsage).toHaveBeenCalledOnce();
+    });
+
+    it("crisis-support turn does not call assertAiMessageAllowed or recordAiMessageUsage", async () => {
+      const assertAiMessageAllowed = vi.fn(async () => undefined);
+      const recordAiMessageUsage = vi.fn(async () => undefined);
+
+      const { service } = createQuotaChatService({
+        assertAiMessageAllowed,
+        recordAiMessageUsage,
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "I want to die and I do not know what to do",
+      });
+
+      expect(assertAiMessageAllowed).not.toHaveBeenCalled();
+      expect(recordAiMessageUsage).not.toHaveBeenCalled();
+      expect(result.assistantMessage.metadata.crisisBoundary).toBe(true);
+    });
+
+    it("direct-path turn does not call assertAiMessageAllowed or recordAiMessageUsage", async () => {
+      const assertAiMessageAllowed = vi.fn(async () => undefined);
+      const recordAiMessageUsage = vi.fn(async () => undefined);
+
+      const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
+
+      const directChatPathService = new DirectChatPathService(
+        systemPlannerService,
+        aiBehaviorConfigService,
+        {
+          getOrGenerateDay: async () => ({
+            id: "day-id",
+            userId: user.id,
+            date: "2026-01-01",
+            items: [],
+            source: "generated",
+            feedback: null,
+            adherence: { score: null, completedRequired: 0, totalRequired: 0, completedOptional: 0, skippedRequired: 0, skippedOptional: 0 },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            workout: null,
+            nutrition: null,
+          }),
+        } as never,
+        { resolveFromAuth: async () => user } as never,
+      );
+
+      const entitlementsService = {
+        assertAiMessageAllowed,
+        recordAiMessageUsage,
+        getEntitlement: async () => ({
+          tier: "free" as const,
+          aiMessagesPerDay: 10,
+          aiMessagesUsedToday: 0,
+          aiMessagesRemaining: 10,
+        }),
+      };
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          }),
+          createProposal: async () => {
+            throw new Error("proposals should not be created for direct path");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: { resolveFromAuth: async () => user },
+        aiService: {
+          generateCoachResponse: vi.fn(async () => ({
+            output: { reply: "AI should not run", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+          })),
+        },
+        proposalValidationService: minimalProposalValidationService,
+        directChatPathService,
+        entitlementsService: entitlementsService as never,
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "What is today?",
+      });
+
+      // Direct-path executes (no AI)
+      expect(result.assistantMessage.metadata.directPath).toBeDefined();
+      expect(assertAiMessageAllowed).not.toHaveBeenCalled();
+      expect(recordAiMessageUsage).not.toHaveBeenCalled();
     });
   });
 });

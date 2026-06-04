@@ -30,6 +30,7 @@ function resolveCorsOrigin():
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: false,
+    rawBody: true,
   });
   app.useBodyParser("json", { limit: JSON_BODY_LIMIT });
   app.useBodyParser("urlencoded", { limit: JSON_BODY_LIMIT, extended: true });

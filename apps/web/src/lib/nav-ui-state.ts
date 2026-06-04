@@ -11,7 +11,7 @@ export const PRIMARY_NAV_LINKS: readonly NavLink[] = [
   { href: "/chat", label: "Chat", featured: true },
   { href: "/today", label: "Today" },
   { href: "/longevity", label: "Longevity" },
-  { href: "/profile", label: "Profile", aliases: ["/goals", "/documents", "/metrics"] },
+  { href: "/profile", label: "Profile", aliases: ["/goals", "/documents", "/metrics", "/billing"] },
 ] as const;
 
 /** Secondary read-only plan views — routeable but not primary nav tabs. */

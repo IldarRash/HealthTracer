@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm";
 import {
   aiProposals,
+  chatAiUsageDaily,
   chatMessages,
   chatThreads,
   dailyChecklists,
@@ -17,6 +18,7 @@ import {
   nutritionPlans,
   nutritionAdherence,
   recipes,
+  subscriptions,
   trendObservations,
   userProfiles,
   userRecipeRecommendations,
@@ -48,6 +50,25 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   healthMetricSnapshots: many(healthMetricSnapshots),
   healthMetricAggregates: many(healthMetricAggregates),
   wellbeingCheckIns: many(wellbeingCheckIns),
+  subscription: one(subscriptions, {
+    fields: [users.id],
+    references: [subscriptions.userId],
+  }),
+  aiUsageDaily: many(chatAiUsageDaily),
+}));
+
+export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
+  user: one(users, {
+    fields: [subscriptions.userId],
+    references: [users.id],
+  }),
+}));
+
+export const chatAiUsageDailyRelations = relations(chatAiUsageDaily, ({ one }) => ({
+  user: one(users, {
+    fields: [chatAiUsageDaily.userId],
+    references: [users.id],
+  }),
 }));
 
 export const userProfilesRelations = relations(userProfiles, ({ one }) => ({

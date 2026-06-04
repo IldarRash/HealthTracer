@@ -119,6 +119,19 @@ export function ProfileDashboard() {
         }
       />
 
+      <CompactDomainCard
+        className="profile-billing-bridge"
+        label="Billing"
+        title="Subscription and AI usage"
+        titleId="profile-billing-bridge-heading"
+        summary="View your current plan, today's AI message usage, and manage or upgrade your subscription."
+        actions={
+          <Link href="/billing" className="confirmation-card__link">
+            Open Billing →
+          </Link>
+        }
+      />
+
       {data.errors.length > 0 ? (
         <section className="notice notice-inline" role="status">
           <p>

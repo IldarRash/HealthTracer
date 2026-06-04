@@ -71,8 +71,21 @@ Create a new service from the GitHub repo (or empty service + connect repo).
 | `OPENAI_MODEL`           | `gpt-4o-mini` (or chosen model)                     | Optional; defaults in code                 |
 | `DOCUMENT_STORAGE_PATH`  | `/app/.data/documents`                              | Local container path; see storage note     |
 | `CORS_ORIGINS`           | `https://<web-service-public-domain>`               | Optional; Safari needs explicit origins for Bearer auth |
+| `STRIPE_SECRET_KEY`      | Stripe → Developers → API keys → **Secret key**     | Billing. `sk_live_...` (prod) / `sk_test_...` (test). Without it checkout/portal fail closed |
+| `STRIPE_PRICE_PRO`       | Stripe → Products → Pro price → **Price ID**        | Billing. `price_...` (the recurring price, **not** the `prod_...` id) |
+| `STRIPE_WEBHOOK_SECRET`  | Stripe → Developers → Webhooks → endpoint signing secret | Billing. `whsec_...`; see "Stripe billing setup" below |
+| `WEB_APP_BASE_URL`       | `https://<web-service-public-domain>`               | Billing. Used for checkout success/cancel and portal return URLs |
 
-Store secrets (`OPENAI_API_KEY`, `DATABASE_URL` if not referenced) in Railway **Variables** marked as secrets. Do not commit them.
+Store secrets (`OPENAI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `DATABASE_URL` if not referenced) in Railway **Variables** marked as secrets. Do not commit them.
+
+**Stripe billing setup**
+
+The billing feature (Free vs Pro, AI-chat quota; migration `0031_billing_subscriptions`) needs the four `STRIPE_*` / `WEB_APP_BASE_URL` vars above. The app **fails closed** without them — the `/billing` screen (plan + quota) still renders, but checkout/portal return an error until they are set. Keep all values in the **same mode**: live keys with a live price, or test keys with a test price.
+
+1. **Secret key** (`STRIPE_SECRET_KEY`): Stripe Dashboard → toggle **Test/Live** mode (top-right) → **Developers → API keys** → reveal/copy the **Secret key** (`sk_live_...` / `sk_test_...`). Not the publishable (`pk_`) or restricted (`rk_`) key. A rolled key invalidates the old one.
+2. **Price ID** (`STRIPE_PRICE_PRO`): **Products** → create/open the **Pro** product with a recurring price → copy its **Price ID** (`price_...`).
+3. **Webhook** (`STRIPE_WEBHOOK_SECRET`): **Developers → Webhooks → Add endpoint** → URL `https://<api-domain>/webhooks/stripe` → subscribe to at least `checkout.session.completed` and `customer.subscription.created|updated|deleted` → copy the endpoint **Signing secret** (`whsec_...`). The Pro upgrade is persisted to the DB only when this webhook is delivered and verified.
+4. **`WEB_APP_BASE_URL`**: the public web domain (no trailing slash) — Stripe redirects back to `…/billing?checkout=success|cancel` and the customer portal returns to `…/billing`.
 
 **Generate a public domain** for the API service, then use it as `https://<api-domain>`.
 
@@ -249,7 +262,8 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 - [ ] Postgres service running; `DATABASE_URL` available
 - [ ] `health-api` deployed from `apps/api/Dockerfile`
 - [ ] API env vars set (Clerk JWKS, DB, AI provider)
-- [ ] Migrations applied: `pnpm --dir packages/db db:migrate`
+- [ ] Billing env vars set on `health-api` (`STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_WEBHOOK_SECRET`, `WEB_APP_BASE_URL`), same Stripe mode; webhook endpoint `…/webhooks/stripe` created
+- [ ] Migrations applied: `pnpm --dir packages/db db:migrate` (includes `0031_billing_subscriptions`)
 - [ ] `GET /health` returns 200 on API public URL
 - [ ] `GET /health/ready` returns 200 with `status: "ok"`
 - [ ] `health-web` deployed from `apps/web/Dockerfile`

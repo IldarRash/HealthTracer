@@ -17,6 +17,7 @@ export * from "./documents.js";
 export * from "./exercises.js";
 export * from "./wellbeing-check-ins.js";
 export * from "./recovery.js";
+export * from "./subscriptions.js";
 
 export const migrationChecks = pgTable("migration_checks", {
   id: uuid("id").defaultRandom().primaryKey(),
