@@ -293,6 +293,65 @@ describe("domainLlmStepOutputSchema discriminated union", () => {
 
     expect(result.success).toBe(false);
   });
+
+  // -------------------------------------------------------------------------
+  // workoutCaloriePerHourRate source-exclusivity: only workout domain may set it
+  // -------------------------------------------------------------------------
+
+  it("REJECTS workoutCaloriePerHourRate on a nutrition domain_answer", () => {
+    const result = domainLlmStepOutputSchema.safeParse({
+      kind: "domain_answer",
+      domain: "nutrition",
+      summary: "Nutrition advice.",
+      candidateProposals: [],
+      domainSignals: [],
+      workoutCaloriePerHourRate: 350,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message);
+      expect(messages.some((m) => m.includes("workoutCaloriePerHourRate"))).toBe(true);
+      expect(messages.some((m) => m.includes('"workout"'))).toBe(true);
+    }
+  });
+
+  it("REJECTS workoutCaloriePerHourRate on a health domain_answer", () => {
+    const result = domainLlmStepOutputSchema.safeParse({
+      kind: "domain_answer",
+      domain: "health",
+      summary: "Health context.",
+      candidateProposals: [],
+      domainSignals: [],
+      workoutCaloriePerHourRate: 280,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message);
+      expect(messages.some((m) => m.includes("workoutCaloriePerHourRate"))).toBe(true);
+    }
+  });
+
+  it("ACCEPTS workoutCaloriePerHourRate on a workout domain_answer", () => {
+    const result = domainLlmStepOutputSchema.safeParse({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Workout plan reviewed.",
+      candidateProposals: [],
+      domainSignals: [],
+      workoutCaloriePerHourRate: 280,
+      workoutCalorieEstimate: 560,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      if (result.data.kind === "domain_answer") {
+        expect(result.data.workoutCaloriePerHourRate).toBe(280);
+        expect(result.data.workoutCalorieEstimate).toBe(560);
+      }
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ import {
   todayChecklistPayloadSchema,
   updateGoalProposalChangesSchema,
   workoutPlanProposalChangesSchema,
+  logWorkoutActivityProposalPayloadSchema,
 } from "@health/types";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { HealthDatabaseTransaction } from "../../database/database.types.js";
@@ -82,7 +83,6 @@ export class ProposalApplyService {
           userId,
           payload,
           proposal.reason,
-          proposal.intent,
         );
       }
       case "adapt_workout_plan_from_progress": {
@@ -98,7 +98,6 @@ export class ProposalApplyService {
           userId,
           payload,
           proposal.reason,
-          "adapt_workout_plan",
         );
       }
       case "create_nutrition_plan":
@@ -195,6 +194,18 @@ export class ProposalApplyService {
         );
 
         return `nutrition_incident:${incidentId}`;
+      }
+      case "log_workout_activity": {
+        const payload = logWorkoutActivityProposalPayloadSchema.parse(
+          proposal.proposedChanges,
+        );
+
+        return this.workoutsService.applyLogWorkoutActivityProposal(
+          userId,
+          payload,
+          proposal.reason,
+          tx,
+        );
       }
       default:
         throw new BadRequestException("Unsupported proposal intent.");

@@ -93,19 +93,6 @@ export function trendDataSufficiencyLabel(sufficiency: TrendDataSufficiency): st
   }
 }
 
-export function trendDataSufficiencyBadgeTone(
-  sufficiency: TrendDataSufficiency,
-): "success" | "pending" | "neutral" {
-  switch (sufficiency) {
-    case "sufficient":
-      return "success";
-    case "partial":
-      return "pending";
-    case "insufficient":
-      return "neutral";
-  }
-}
-
 export function trendTypeLabel(type: TrendType): string {
   switch (type) {
     case "completion_rate":

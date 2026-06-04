@@ -63,12 +63,14 @@ import { ChatAttachmentsRepository } from "../chat-attachments/chat-attachments.
 import { toOwnedChatAttachmentRef } from "../chat-attachments/chat-attachment.mapper.js";
 import {
   captureWellbeingCheckinProposalPayloadSchema,
+  getLogWorkoutActivityDomainErrors,
   getNutritionIncidentDomainErrors,
   getNutritionIncidentImageRefOwnershipErrors,
   getRecipeRecommendationRevisionErrors,
   getWellbeingCheckinProposalDomainErrors,
   getTodayIsoDateInTimezone,
   logNutritionIncidentProposalPayloadSchema,
+  logWorkoutActivityProposalPayloadSchema,
   getChatAttachmentProposalRefErrors,
 } from "@health/types";
 
@@ -510,6 +512,19 @@ export class ProposalValidationService {
     if (intent === "log_nutrition_incident") {
       const domainErrors = getNutritionIncidentDomainErrors(
         result.data as z.infer<typeof logNutritionIncidentProposalPayloadSchema>,
+      );
+
+      if (domainErrors.length > 0) {
+        return {
+          valid: false,
+          errors: domainErrors.map((error) => `proposedChanges: ${error}`),
+        };
+      }
+    }
+
+    if (intent === "log_workout_activity") {
+      const domainErrors = getLogWorkoutActivityDomainErrors(
+        result.data as z.infer<typeof logWorkoutActivityProposalPayloadSchema>,
       );
 
       if (domainErrors.length > 0) {
@@ -1076,6 +1091,8 @@ function getChangesSchemaForIntent(
       return captureWellbeingCheckinProposalPayloadSchema;
     case "log_nutrition_incident":
       return logNutritionIncidentProposalPayloadSchema;
+    case "log_workout_activity":
+      return logWorkoutActivityProposalPayloadSchema;
     default:
       return null;
   }

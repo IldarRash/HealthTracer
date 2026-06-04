@@ -1213,3 +1213,116 @@ describe("TodayService", () => {
     expect(day.nutrition).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Part B — nutrition_incident for the day appears in TodayNutritionDetail.eaten
+// ---------------------------------------------------------------------------
+
+describe("TodayService — TodayNutritionDetail.eaten from nutrition incidents (Part B)", () => {
+  const nutritionPlanId = "a1000001-0000-4000-8000-000000000001";
+  const nutritionRevisionId = "b2000002-0000-4000-8000-000000000002";
+
+  it("populates eaten totals from confirmed nutrition incidents via NutritionService", async () => {
+    const service = createService(
+      {
+        findByUserAndDate: async () => null,
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: Record<string, unknown>[],
+        ) => buildChecklistRow(items),
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {},
+      {
+        getNutritionDayDetail: async () => ({
+          date,
+          plan: {
+            id: nutritionPlanId,
+            userId,
+            activeRevisionId: nutritionRevisionId,
+            status: "active",
+            createdAt: timestamp.toISOString(),
+            updatedAt: timestamp.toISOString(),
+          },
+          activeRevision: {
+            id: nutritionRevisionId,
+            nutritionPlanId,
+            revisionNumber: 1,
+            reason: "Initial plan",
+            source: "ai_proposal",
+            payload: nutritionPlanPayload,
+            createdAt: timestamp.toISOString(),
+          },
+          adherence: null,
+          eaten: {
+            calories: 900,
+            proteinGrams: 54,
+            carbsGrams: 85,
+            fatGrams: 28,
+            incidentCount: 2,
+          },
+        }),
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    // The eaten block from NutritionService should pass through to the TodayDayResponse
+    expect(day.nutrition?.eaten).not.toBeNull();
+    expect(day.nutrition?.eaten?.calories).toBe(900);
+    expect(day.nutrition?.eaten?.proteinGrams).toBe(54);
+    expect(day.nutrition?.eaten?.carbsGrams).toBe(85);
+    expect(day.nutrition?.eaten?.fatGrams).toBe(28);
+    expect(day.nutrition?.eaten?.incidentCount).toBe(2);
+  });
+
+  it("returns null eaten when no incidents were logged for the date", async () => {
+    const service = createService(
+      {
+        findByUserAndDate: async () => null,
+        upsertChecklist: async (
+          _resolvedUserId: string,
+          _resolvedDate: string,
+          items: Record<string, unknown>[],
+        ) => buildChecklistRow(items),
+      } as never,
+      {
+        listSessionsByUserAndPlannedDate: async () => [],
+      } as never,
+      {},
+      {},
+      {
+        getNutritionDayDetail: async () => ({
+          date,
+          plan: {
+            id: nutritionPlanId,
+            userId,
+            activeRevisionId: nutritionRevisionId,
+            status: "active",
+            createdAt: timestamp.toISOString(),
+            updatedAt: timestamp.toISOString(),
+          },
+          activeRevision: {
+            id: nutritionRevisionId,
+            nutritionPlanId,
+            revisionNumber: 1,
+            reason: "Initial plan",
+            source: "ai_proposal",
+            payload: nutritionPlanPayload,
+            createdAt: timestamp.toISOString(),
+          },
+          adherence: null,
+          eaten: null, // No incidents
+        }),
+      },
+    );
+
+    const day = await service.getOrGenerateDay(auth, date);
+
+    expect(day.nutrition?.eaten).toBeNull();
+  });
+});

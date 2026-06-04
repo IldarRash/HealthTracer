@@ -439,8 +439,17 @@ timeouts bound latency.
 Output shape (`packages/types/src/domain-llm-step.ts`) — union of
 `tool_request` or `domain_answer`, where
 `domain_answer = { domain, summary, candidateProposals[], domainSignals[],
-workoutCalorieEstimate? }`. Only the **workout** domain may populate
-`workoutCalorieEstimate`.
+workoutCalorieEstimate?, workoutCaloriePerHourRate? }`. Only the **workout** domain may
+populate `workoutCalorieEstimate` or `workoutCaloriePerHourRate` — `domainAnswerSchema`'s
+`superRefine` rejects both fields for any other domain. `workoutCaloriePerHourRate` is the
+**trusted kcal/hour burn rate** used downstream to recompute editable display-contract
+totals; the decision-maker and non-workout domains can never source it.
+
+The workout domain LLM may also emit a `displayContract` on a candidate workout/activity
+proposal — a **non-authoritative render hint** (see Stage 10 / `display-contract.ts`) for
+an editable card with a duration slider and a `rate_per_hour` derived total. The contract
+is render metadata only; it is stripped before any plan revision is written and its total
+is recomputed server-side on accept.
 
 ### `AgentToolRegistryService`
 
@@ -489,12 +498,35 @@ allowlist and the action-variant catalog, producing one of:
 - a **workout proposal** with numeric prescription fields (the user sets their own
   completion time) plus a calorie-burn estimate copied from the workout domain LLM
   with provenance `workout_llm`
-- a **nutrition proposal** with approximate calories/macros
+- a **log_workout_activity proposal** — a LOG (revision-free) intent that records a
+  one-off performed activity (e.g. "played volleyball 90 min") and, on accept, creates an
+  `ad_hoc` `workout_sessions` row rather than a plan revision (see Stage 11 / the
+  domain-model doc)
+- a **nutrition proposal** with approximate calories/macros (incl.
+  `log_nutrition_incident`)
 - a **mental-health survey** (`capture_wellbeing_checkin`)
 - a **plain reply**
 
 It filters proposals to the active capability allowlist. It does **not** mutate
 domain state and does **not** persist proposals.
+
+**Trusted calorie-rate stamping (`scrubAndStampWorkoutCalorieEstimate`).** For every
+workout-plan and `log_workout_activity` proposal, ActionResolver **always scrubs** the
+calorie fields from the decision-maker output and re-stamps only from values passed by the
+orchestrator (`AgentOrchestratorService`, sourced exclusively from the workout
+`domain_answer`):
+
+- `workoutCalorieEstimate` → `estimatedSessionCalorieBurn` (plan) /
+  `estimatedCalories` (log activity), with provenance `workout_llm`.
+- `workoutCaloriePerHourRate` → the **trusted** `caloriePerHourRate` (plan) /
+  `ratePerHour` (log activity), used later to recompute editable-card totals.
+
+Branching mirrors the payload shape: flat (`create_workout_plan` / `adapt_workout_plan`),
+nested `.plan` (`adapt_workout_plan_from_progress`), and the top-level
+`log_workout_activity` payload. If neither trusted value is available, the
+`log_workout_activity` calorie fields are left unset — its `.refine()` then rejects the
+proposal downstream (fail-closed). The `displayContract` itself is carried through as a
+non-authoritative render hint; the decision-maker can never fabricate the trusted rate.
 
 ## Stage 11: Proposal Validation And Persistence
 
@@ -522,7 +554,35 @@ File: `apps/api/src/modules/chat/chat.repository.ts`
 
 Persists raw proposals with validation status and validation errors. Nothing is
 applied to structured state until the user accepts a valid proposal through the
-proposal apply flow. Accepted workout/nutrition changes create new revisions.
+proposal apply flow. Accepted workout/nutrition changes create new revisions; the
+`log_workout_activity` LOG intent instead creates an `ad_hoc` `workout_sessions` row and
+**never** a revision (`ProposalApplyService` → `WorkoutsService.applyLogWorkoutActivityProposal`).
+
+### Accept-time display-contract recompute seam
+
+File: `apps/api/src/modules/proposals/proposals.service.ts`
+(`ProposalsService.decideProposal`)
+
+When a proposal carrying a `displayContract` is accepted, the calorie total is a
+**safety-critical recompute**, never the client's submitted total:
+
+- The **stored** proposal supplies the `displayContract` STRUCTURE and the trusted
+  `caloriePerHourRate` / `ratePerHour` — the client can substitute neither a different
+  contract nor a higher rate.
+- Only the client-submitted **editable** field values are applied
+  (`extractClientEditableFieldValues`), each clamped to the stored field's own `min`/`max`
+  (`clampFieldValue`). The rate input field is always overwritten with the trusted stored
+  rate.
+- The primary-total derived value is recomputed via `computeDerivedValues`, `Math.round`-ed,
+  and clamped to `[0, 20000]`; `calorieEstimateProvenance` is forced to `workout_llm`.
+- Branching matches the payload shape:
+  `recomputeWorkoutProposalCaloriesFromDisplayContract` for flat
+  (`create_workout_plan` / `adapt_workout_plan`) and nested
+  (`adapt_workout_plan_from_progress` `.plan`) workout proposals, and
+  `recomputeLogWorkoutActivityCaloriesFromDisplayContract` for `log_workout_activity`.
+
+The `displayContract` and trusted rate are dropped (`stripWorkoutPlanProposalExtras`)
+before a plan revision is written; they never persist on revisions.
 
 ## Coach AI Provider Surface
 
@@ -663,8 +723,14 @@ Schemas and defaults:
 - Domain LLMs run only-selected and in parallel; each enforces its own tool
   allowlist and reply safety, and a failed domain degrades to a safe empty output.
 - The decision-maker emits typed proposals only; only the workout domain LLM may set
-  a workout calorie estimate.
-- `ActionResolver` filters proposal intents to the active capability allowlist.
+  a workout calorie estimate **or the trusted `workoutCaloriePerHourRate`**.
+- A `displayContract` is a **non-authoritative render hint**: on accept the backend
+  recomputes the calorie total from the STORED contract structure and STORED trusted rate,
+  applies only clamped editable field values, and discards the client total. The contract
+  and trusted rate are stripped before any revision is written.
+- `ActionResolver` filters proposal intents to the active capability allowlist, scrubs
+  any decision-maker / non-workout calorie fields, and re-stamps the estimate and trusted
+  rate only from the workout `domain_answer` (fail-closed when absent).
 - `ChatService` validates every proposal before persistence.
 - The AI layer never writes directly to domain tables; accepted workout/nutrition
   changes create new revisions.

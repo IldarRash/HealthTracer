@@ -352,21 +352,25 @@ export class AgentOrchestratorService {
       provider: this.provider,
     });
 
-    // Extract the workout domain calorie estimate from the fan-out results.
-    // ONLY the workout domain LLM may provide workoutCalorieEstimate — this is
-    // enforced structurally by domainAnswerSchema's superRefine. We extract it
-    // here so ActionResolver can stamp it onto workout proposals with provenance
-    // 'workout_llm'. The decision-maker output must never be the source.
+    // Extract the workout domain calorie estimate and rate from the fan-out results.
+    // ONLY the workout domain LLM may provide workoutCalorieEstimate /
+    // workoutCaloriePerHourRate — this is enforced structurally by domainAnswerSchema's
+    // superRefine. We extract them here so ActionResolver can stamp them onto workout
+    // proposals with provenance 'workout_llm'. The decision-maker output must never
+    // be the source.
     const workoutCalorieEstimate = extractWorkoutCalorieEstimate(domainResults);
+    const workoutCaloriePerHourRate = extractWorkoutCaloriePerHourRate(domainResults);
 
     // Resolve the decision-maker output through ActionResolver (Stage 10).
     // ActionResolver filters proposals to the union of the selected domains'
     // allowedProposalIntents and handles the consent-gated medical-save action.
-    // When a workout calorie estimate is present, it is stamped onto workout proposals.
+    // When a workout calorie estimate or rate is present, it is stamped onto
+    // workout proposals.
     const resolved = this.actionResolverService.resolveFinalDecisionOutput({
       finalDecision: decisionResult.output,
       selectedDomains,
       workoutCalorieEstimate,
+      workoutCaloriePerHourRate,
     });
 
     // Safety floor: validate the decision-maker's synthesized reply for diagnosis/treatment language.
@@ -758,6 +762,34 @@ function extractWorkoutCalorieEstimate(
 
       if (estimate !== undefined) {
         return estimate;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract the workout domain LLM's kcal/hour burn rate from fan-out domain results.
+ *
+ * Returns the first (and only expected) non-undefined workoutCaloriePerHourRate from
+ * a domain result whose domain is 'workout'. Returns undefined when no workout
+ * domain was selected or its answer carries no rate.
+ *
+ * Source restriction: this function ONLY reads from the workout domain answer.
+ * The decision-maker LLM and non-workout domains must never be the source of
+ * the workout calorie per hour rate. The domainAnswerSchema superRefine guarantees
+ * workoutCaloriePerHourRate is absent on non-workout answers at the Zod level.
+ */
+function extractWorkoutCaloriePerHourRate(
+  domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,
+): number | undefined {
+  for (const entry of domainResults) {
+    if (entry.domain === "workout" && !entry.result.degraded) {
+      const rate = entry.result.domainAnswer.workoutCaloriePerHourRate;
+
+      if (rate !== undefined) {
+        return rate;
       }
     }
   }

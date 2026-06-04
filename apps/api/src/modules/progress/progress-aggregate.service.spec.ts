@@ -1,4 +1,5 @@
 import type { WorkoutSession } from "@health/types";
+import { aggregateNutritionIncidentsWeek } from "@health/types";
 import { describe, expect, it } from "vitest";
 import {
   aggregateWorkoutSessions,
@@ -22,11 +23,13 @@ function buildSession(
   return {
     id: overrides.id ?? "78d40655-b4b5-47b3-b28e-470192e05f04",
     userId,
-    workoutPlanId: planId,
-    workoutPlanRevisionId: revisionId,
+    workoutPlanId: overrides.workoutPlanId !== undefined ? overrides.workoutPlanId : planId,
+    workoutPlanRevisionId:
+      overrides.workoutPlanRevisionId !== undefined ? overrides.workoutPlanRevisionId : revisionId,
     plannedDate: overrides.plannedDate,
     title: overrides.title ?? "Training day",
     status: overrides.status,
+    source: overrides.source ?? "planned",
     exercises: overrides.exercises ?? [],
     feedback: overrides.feedback ?? {},
     completedAt: overrides.completedAt ?? null,
@@ -271,5 +274,198 @@ describe("ProgressAggregateService", () => {
       weekStart: "2026-05-11",
       weekEnd: "2026-05-17",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part B — aggregateWorkoutSessions: ad_hoc completed sessions
+// ---------------------------------------------------------------------------
+
+describe("aggregateWorkoutSessions — ad_hoc completed sessions (Part B)", () => {
+  it("counts an ad_hoc completed session in completedCount and adHocCompletedCount", () => {
+    const adHocSession = buildSession({
+      id: "a1000001-0000-4000-8000-000000000001",
+      plannedDate: "2026-05-19",
+      status: "completed",
+      source: "ad_hoc",
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+    });
+
+    const aggregate = aggregateWorkoutSessions(
+      [adHocSession],
+      "2026-05-18",
+      "2026-05-24",
+    );
+
+    expect(aggregate.completedCount).toBe(1);
+    expect(aggregate.adHocCompletedCount).toBe(1);
+  });
+
+  it("does NOT inflate plannedCount for ad_hoc sessions", () => {
+    const adHocSession = buildSession({
+      id: "a1000001-0000-4000-8000-000000000001",
+      plannedDate: "2026-05-19",
+      status: "completed",
+      source: "ad_hoc",
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+    });
+
+    const aggregate = aggregateWorkoutSessions(
+      [adHocSession],
+      "2026-05-18",
+      "2026-05-24",
+    );
+
+    expect(aggregate.plannedCount).toBe(0);
+  });
+
+  it("counts ad_hoc completed sessions in activeDays", () => {
+    const adHocSession = buildSession({
+      id: "a1000001-0000-4000-8000-000000000001",
+      plannedDate: "2026-05-19",
+      status: "completed",
+      source: "ad_hoc",
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+    });
+
+    const aggregate = aggregateWorkoutSessions(
+      [adHocSession],
+      "2026-05-18",
+      "2026-05-24",
+    );
+
+    expect(aggregate.activeDays).toBe(1);
+  });
+
+  it("does NOT count an ad_hoc non-completed session in adHocCompletedCount", () => {
+    // An ad_hoc session with status=planned (shouldn't exist in practice but must be safe)
+    const adHocPlanned = buildSession({
+      id: "a1000001-0000-4000-8000-000000000002",
+      plannedDate: "2026-05-19",
+      status: "planned",
+      source: "ad_hoc",
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+    });
+
+    const aggregate = aggregateWorkoutSessions(
+      [adHocPlanned],
+      "2026-05-18",
+      "2026-05-24",
+    );
+
+    expect(aggregate.adHocCompletedCount).toBe(0);
+    expect(aggregate.completedCount).toBe(0);
+  });
+
+  it("mixes planned and ad_hoc sessions correctly", () => {
+    const planned = buildSession({
+      id: "88d40655-b4b5-47b3-b28e-470192e05f01",
+      plannedDate: "2026-05-19",
+      status: "completed",
+    });
+    const adHoc = buildSession({
+      id: "a1000001-0000-4000-8000-000000000001",
+      plannedDate: "2026-05-20",
+      status: "completed",
+      source: "ad_hoc",
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+    });
+
+    const aggregate = aggregateWorkoutSessions(
+      [planned, adHoc],
+      "2026-05-18",
+      "2026-05-24",
+    );
+
+    expect(aggregate.plannedCount).toBe(1);
+    expect(aggregate.completedCount).toBe(2);
+    expect(aggregate.adHocCompletedCount).toBe(1);
+    expect(aggregate.activeDays).toBe(2);
+    // Adherence is measured against planned only: 1/1 = 100
+    expect(aggregate.adherencePercent).toBe(100);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part B — aggregateNutritionIncidentsWeek
+// ---------------------------------------------------------------------------
+
+describe("aggregateNutritionIncidentsWeek (Part B)", () => {
+  it("returns zero totals when no incidents are provided", () => {
+    const result = aggregateNutritionIncidentsWeek([]);
+
+    expect(result.incidentCount).toBe(0);
+    expect(result.daysWithIncidentsLogged).toBe(0);
+    expect(result.totalCalories).toBe(0);
+    expect(result.totalProteinGrams).toBe(0);
+    expect(result.totalCarbsGrams).toBe(0);
+    expect(result.totalFatGrams).toBe(0);
+    expect(result.averageDailyCalories).toBeNull();
+  });
+
+  it("sums calories and macros from multiple incidents", () => {
+    const result = aggregateNutritionIncidentsWeek([
+      { date: "2026-05-19", estimatedCalories: 620, proteinGrams: 42, carbsGrams: 55, fatGrams: 18 },
+      { date: "2026-05-19", estimatedCalories: 280, proteinGrams: 12, carbsGrams: 30, fatGrams: 10 },
+      { date: "2026-05-20", estimatedCalories: 500, proteinGrams: 35, carbsGrams: 45, fatGrams: 15 },
+    ]);
+
+    expect(result.incidentCount).toBe(3);
+    expect(result.daysWithIncidentsLogged).toBe(2);
+    expect(result.totalCalories).toBe(1400);
+    expect(result.totalProteinGrams).toBe(89);
+    expect(result.totalCarbsGrams).toBe(130);
+    expect(result.totalFatGrams).toBe(43);
+  });
+
+  it("rounds non-integer macro sums to satisfy .int() schema constraint", () => {
+    // Per-incident macros that produce non-integer totals
+    const result = aggregateNutritionIncidentsWeek([
+      { date: "2026-05-19", estimatedCalories: 300, proteinGrams: 33.3, carbsGrams: 44.7, fatGrams: 10.2 },
+      { date: "2026-05-20", estimatedCalories: 300, proteinGrams: 33.3, carbsGrams: 44.7, fatGrams: 10.2 },
+    ]);
+
+    // All totals must be integers (Math.round applied)
+    expect(Number.isInteger(result.totalCalories)).toBe(true);
+    expect(Number.isInteger(result.totalProteinGrams)).toBe(true);
+    expect(Number.isInteger(result.totalCarbsGrams)).toBe(true);
+    expect(Number.isInteger(result.totalFatGrams)).toBe(true);
+    // Should be Math.round(66.6)=67, Math.round(89.4)=89, Math.round(20.4)=20
+    expect(result.totalProteinGrams).toBe(67);
+    expect(result.totalCarbsGrams).toBe(89);
+    expect(result.totalFatGrams).toBe(20);
+  });
+
+  it("counts unique days with incidents correctly", () => {
+    // 3 incidents across 2 days
+    const result = aggregateNutritionIncidentsWeek([
+      { date: "2026-05-19", estimatedCalories: 400, proteinGrams: 30, carbsGrams: 40, fatGrams: 12 },
+      { date: "2026-05-19", estimatedCalories: 200, proteinGrams: 15, carbsGrams: 20, fatGrams: 6 },
+      { date: "2026-05-21", estimatedCalories: 600, proteinGrams: 45, carbsGrams: 60, fatGrams: 18 },
+    ]);
+
+    expect(result.daysWithIncidentsLogged).toBe(2);
+    expect(result.incidentCount).toBe(3);
+  });
+
+  it("computes averageDailyCalories across days with incidents", () => {
+    // Day 1: 400+200=600 kcal, Day 2: 600 kcal → average = round(1200/2) = 600
+    const result = aggregateNutritionIncidentsWeek([
+      { date: "2026-05-19", estimatedCalories: 400, proteinGrams: 30, carbsGrams: 40, fatGrams: 12 },
+      { date: "2026-05-19", estimatedCalories: 200, proteinGrams: 15, carbsGrams: 20, fatGrams: 6 },
+      { date: "2026-05-21", estimatedCalories: 600, proteinGrams: 45, carbsGrams: 60, fatGrams: 18 },
+    ]);
+
+    expect(result.averageDailyCalories).toBe(600);
+  });
+
+  it("returns averageDailyCalories as null when no incidents", () => {
+    const result = aggregateNutritionIncidentsWeek([]);
+    expect(result.averageDailyCalories).toBeNull();
   });
 });

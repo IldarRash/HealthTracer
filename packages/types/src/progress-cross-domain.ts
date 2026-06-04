@@ -21,12 +21,31 @@ export const todayProgressAggregateSchema = z.object({
 
 export type TodayProgressAggregate = z.infer<typeof todayProgressAggregateSchema>;
 
+/**
+ * Weekly aggregate of confirmed nutrition_incidents for the performed (eaten) log.
+ * Separate from adherence tracking — captures what was actually logged via proposals.
+ */
+export const nutritionPerformedAggregateSchema = z.object({
+  daysWithIncidentsLogged: z.number().int().min(0).max(7),
+  incidentCount: z.number().int().nonnegative(),
+  totalCalories: z.number().int().nonnegative(),
+  totalProteinGrams: z.number().int().nonnegative(),
+  totalCarbsGrams: z.number().int().nonnegative(),
+  totalFatGrams: z.number().int().nonnegative(),
+  /** Average daily calories across days that had at least one incident. Null when no incidents. */
+  averageDailyCalories: z.number().int().nonnegative().nullable(),
+});
+
+export type NutritionPerformedAggregate = z.infer<typeof nutritionPerformedAggregateSchema>;
+
 export const nutritionProgressAggregateSchema = z.object({
   hasActivePlan: z.boolean(),
   daysWithAdherenceLogged: z.number().int().min(0).max(7),
   averageTargetCompletionPercent: z.number().min(0).max(100).nullable(),
   dataSufficiency: domainSufficiencyLevelSchema,
   message: z.string().min(1).max(500),
+  /** Aggregated performed (eaten) incidents for the week. Null when no incidents were logged. */
+  performed: nutritionPerformedAggregateSchema.nullable().optional(),
 });
 
 export type NutritionProgressAggregate = z.infer<typeof nutritionProgressAggregateSchema>;
@@ -118,6 +137,69 @@ export interface HabitCompletionSnapshot {
   habitDefinitionId: string;
   date: string;
   status: "completed" | "skipped" | "pending" | "missed";
+}
+
+/**
+ * Lightweight snapshot of a single nutrition_incident row for weekly aggregation.
+ * All macro/calorie fields are the final stored values after any user edits.
+ */
+export interface NutritionIncidentSnapshot {
+  date: string;
+  estimatedCalories: number;
+  proteinGrams: number;
+  carbsGrams: number;
+  fatGrams: number;
+}
+
+/**
+ * Aggregate confirmed nutrition_incidents for a week into a performed summary.
+ * Pure helper — mirrors the shape of aggregateNutritionAdherenceWeek.
+ */
+export function aggregateNutritionIncidentsWeek(
+  incidents: readonly NutritionIncidentSnapshot[],
+): NutritionPerformedAggregate {
+  if (incidents.length === 0) {
+    return {
+      daysWithIncidentsLogged: 0,
+      incidentCount: 0,
+      totalCalories: 0,
+      totalProteinGrams: 0,
+      totalCarbsGrams: 0,
+      totalFatGrams: 0,
+      averageDailyCalories: null,
+    };
+  }
+
+  let totalCalories = 0;
+  let totalProteinGrams = 0;
+  let totalCarbsGrams = 0;
+  let totalFatGrams = 0;
+
+  const uniqueDates = new Set<string>();
+
+  for (const incident of incidents) {
+    uniqueDates.add(incident.date);
+    totalCalories += incident.estimatedCalories;
+    totalProteinGrams += incident.proteinGrams;
+    totalCarbsGrams += incident.carbsGrams;
+    totalFatGrams += incident.fatGrams;
+  }
+
+  // C5: clamp to 7 so a >7-day window cannot exceed nutritionPerformedAggregateSchema .max(7).
+  const daysWithIncidentsLogged = Math.min(7, uniqueDates.size);
+  // The divisor is ≥1 here (non-empty input past the early-return above).
+  const averageDailyCalories = Math.round(totalCalories / daysWithIncidentsLogged);
+
+  return {
+    daysWithIncidentsLogged,
+    incidentCount: incidents.length,
+    // Math.round so non-integer per-incident macro values never fail .int() parsing.
+    totalCalories: Math.round(totalCalories),
+    totalProteinGrams: Math.round(totalProteinGrams),
+    totalCarbsGrams: Math.round(totalCarbsGrams),
+    totalFatGrams: Math.round(totalFatGrams),
+    averageDailyCalories,
+  };
 }
 
 export function aggregateTodayChecklists(

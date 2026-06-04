@@ -16,19 +16,11 @@ import {
   sumNutritionItemMacros,
 } from "../../lib/action-proposal-ui-state";
 import {
-  canDecideProposal,
-  getProposalDomainLabel,
-  getProposalDomainPillClass,
-  getProposalIntentLabel,
   getProposalNavigationRoute,
-  getProposalRejectedMessage,
-  getProposalStatusBadgeTone,
-  getProposalStatusLabel,
-  getProposalSupersededMessage,
-  shouldShowInlineProposalIntentLabel,
 } from "../../lib/proposal-ui-state";
 import { useInlineProposalActions } from "../../lib/use-inline-proposal-actions";
-import { Badge, Button, ProposalConfirmation } from "../ui";
+import { Button, ProposalConfirmation } from "../ui";
+import { ProposalCardShell } from "./proposal-card-shell";
 
 type NutritionIncidentProposalCardProps = {
   proposal: AiProposal;
@@ -52,35 +44,20 @@ export function NutritionIncidentProposalCard({
   const [form, setForm] = useState(() =>
     parsedPayload ? createNutritionIncidentFormState(parsedPayload) : null,
   );
-  const modifyFeedbackId = useId();
+  const itemNameBaseId = useId();
 
-  const {
-    decisionMutation,
-    modifyMutation,
-    isActionPending,
-    isModifyMode,
-    setIsModifyMode,
-    modificationFeedback,
-    setModificationFeedback,
-    trimmedModifyFeedback,
-  } = useInlineProposalActions({
+  const hookValues = useInlineProposalActions({
     proposal,
     onDecision,
     onModifyRequest,
     getAcceptPayload: () => (form ? buildNutritionIncidentAcceptPayload(form) : null),
   });
+  const { isActionPending } = hookValues;
 
   const isPending = proposal.status === "pending";
-  const canDecide = canDecideProposal(proposal);
   const acceptBlockReason = form ? getNutritionIncidentAcceptBlockReason(form) : "Nutrition incident details are unavailable.";
   const canAccept = isPending && acceptBlockReason == null;
   const domainRoute = getProposalNavigationRoute(proposal);
-  const domainLabel = getProposalDomainLabel(proposal.targetDomain);
-  const intentLabel = getProposalIntentLabel(proposal.intent, proposal.proposedChanges);
-  const showIntentLabel = shouldShowInlineProposalIntentLabel(
-    proposal.intent,
-    proposal.proposedChanges,
-  );
 
   const previewCalories = form ? sumNutritionItemCalories(form.items) : 0;
   const previewMacros = form ? sumNutritionItemMacros(form.items) : null;
@@ -116,73 +93,32 @@ export function NutritionIncidentProposalCard({
     );
   }
 
-  return (
-    <ProposalConfirmation
-      status={proposal.status}
-      title={proposal.title}
-      inline
-      aria-busy={isActionPending || undefined}
-      aria-live="polite"
-      meta={
+  const acceptedSuccessNode = (
+    <>
+      Nutrition incident logged. Your nutrition plan targets are unchanged.
+      {domainRoute ? (
         <>
-          <span
-            className={`proposal-domain-pill ${getProposalDomainPillClass(proposal.targetDomain)}`}
-          >
-            {domainLabel}
-          </span>
-          {showIntentLabel && intentLabel ? (
-            <span className="confirmation-card__meta proposal-meta">{intentLabel}</span>
-          ) : null}
+          {" "}
+          <Link href={domainRoute} className="confirmation-card__link">
+            View nutrition →
+          </Link>
         </>
-      }
-      badges={
-        <Badge tone={getProposalStatusBadgeTone(proposal.status)}>
-          {getProposalStatusLabel(proposal.status)}
-        </Badge>
-      }
-      actions={
-        canDecide ? (
-          <>
-            <Button
-              type="button"
-              className="button-coach"
-              disabled={!canAccept || isActionPending || isModifyMode}
-              title={!canAccept ? (acceptBlockReason ?? undefined) : undefined}
-              onClick={() => decisionMutation.mutate("accept")}
-            >
-              {decisionMutation.isPending ? "Saving…" : "Apply"}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={isActionPending}
-              aria-expanded={isModifyMode}
-              onClick={() => {
-                setIsModifyMode((current) => !current);
-                modifyMutation.reset();
-              }}
-            >
-              Modify
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={isActionPending || isModifyMode}
-              onClick={() => decisionMutation.mutate("reject")}
-            >
-              Reject
-            </Button>
-            {domainRoute ? (
-              <Link href={domainRoute} className="confirmation-card__link">
-                View on Nutrition →
-              </Link>
-            ) : null}
-          </>
-        ) : null
-      }
-    >
-      {proposal.reason ? <p className="proposal-meta">{proposal.reason}</p> : null}
+      ) : null}
+    </>
+  );
 
+  return (
+    <ProposalCardShell
+      {...hookValues}
+      proposal={proposal}
+      acceptLabel="Apply"
+      canAccept={canAccept}
+      acceptDisabledTitle={acceptBlockReason ?? undefined}
+      viewOnLinkLabel="View on Nutrition →"
+      modifyFormLabel="What would you like to change about this nutrition estimate?"
+      modifyFormPlaceholder="For example: split this into two smaller items."
+      acceptedSuccessNode={acceptedSuccessNode}
+    >
       {form.mealContextLabel ? (
         <p className="proposal-meta" role="status">
           Meal context: {form.mealContextLabel}
@@ -217,11 +153,11 @@ export function NutritionIncidentProposalCard({
             {form.items.map((item, index) => (
               <div key={`${proposal.id}-item-${index}`} className="nutrition-incident-item-row">
                 <div className="form-field">
-                  <label className="proposal-meta" htmlFor={`item-name-${proposal.id}-${index}`}>
+                  <label className="proposal-meta" htmlFor={`${itemNameBaseId}-name-${index}`}>
                     Item
                   </label>
                   <input
-                    id={`item-name-${proposal.id}-${index}`}
+                    id={`${itemNameBaseId}-name-${index}`}
                     className="form-input"
                     value={item.name}
                     disabled={isActionPending}
@@ -229,11 +165,11 @@ export function NutritionIncidentProposalCard({
                   />
                 </div>
                 <div className="form-field">
-                  <label className="proposal-meta" htmlFor={`item-qty-${proposal.id}-${index}`}>
+                  <label className="proposal-meta" htmlFor={`${itemNameBaseId}-qty-${index}`}>
                     Quantity
                   </label>
                   <input
-                    id={`item-qty-${proposal.id}-${index}`}
+                    id={`${itemNameBaseId}-qty-${index}`}
                     className="form-input"
                     value={item.quantity ?? ""}
                     disabled={isActionPending}
@@ -241,11 +177,11 @@ export function NutritionIncidentProposalCard({
                   />
                 </div>
                 <div className="form-field">
-                  <label className="proposal-meta" htmlFor={`item-cal-${proposal.id}-${index}`}>
+                  <label className="proposal-meta" htmlFor={`${itemNameBaseId}-cal-${index}`}>
                     Calories
                   </label>
                   <input
-                    id={`item-cal-${proposal.id}-${index}`}
+                    id={`${itemNameBaseId}-cal-${index}`}
                     className="form-input"
                     inputMode="numeric"
                     value={item.calories ?? ""}
@@ -288,87 +224,6 @@ export function NutritionIncidentProposalCard({
           ) : null}
         </div>
       ) : null}
-
-      {isModifyMode && canDecide ? (
-        <div className="proposal-modify-form">
-          <label className="proposal-meta" htmlFor={modifyFeedbackId}>
-            What would you like to change about this nutrition estimate?
-          </label>
-          <textarea
-            id={modifyFeedbackId}
-            className="form-textarea"
-            rows={3}
-            value={modificationFeedback}
-            disabled={modifyMutation.isPending}
-            placeholder="For example: split this into two smaller items."
-            onChange={(event) => setModificationFeedback(event.target.value)}
-          />
-          <div className="action-row proposal-modify-actions">
-            <Button
-              type="button"
-              className="button-coach"
-              disabled={!trimmedModifyFeedback || modifyMutation.isPending}
-              onClick={() => modifyMutation.mutate(trimmedModifyFeedback)}
-            >
-              {modifyMutation.isPending ? "Sending…" : "Send revision request"}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={modifyMutation.isPending}
-              onClick={() => {
-                setIsModifyMode(false);
-                setModificationFeedback("");
-                modifyMutation.reset();
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {proposal.status === "accepted" ? (
-        <div className="confirmation-card__success">
-          Nutrition incident logged. Your nutrition plan targets are unchanged.
-          {domainRoute ? (
-            <>
-              {" "}
-              <Link href={domainRoute} className="confirmation-card__link">
-                View nutrition →
-              </Link>
-            </>
-          ) : null}
-        </div>
-      ) : null}
-
-      {proposal.status === "rejected" ? (
-        <div className="confirmation-card__notice" role="status">
-          {getProposalRejectedMessage(proposal)}
-        </div>
-      ) : null}
-
-      {proposal.status === "superseded" ? (
-        <div className="confirmation-card__notice" role="status">
-          {getProposalSupersededMessage()}
-        </div>
-      ) : null}
-
-      {decisionMutation.isError ? (
-        <p className="form-error" role="alert">
-          {decisionMutation.error instanceof Error
-            ? decisionMutation.error.message
-            : "Could not record proposal decision."}
-        </p>
-      ) : null}
-
-      {modifyMutation.isError ? (
-        <p className="form-error" role="alert">
-          {modifyMutation.error instanceof Error
-            ? modifyMutation.error.message
-            : "Could not request a proposal revision."}
-        </p>
-      ) : null}
-    </ProposalConfirmation>
+    </ProposalCardShell>
   );
 }

@@ -21,13 +21,39 @@ flowchart TD
   progress --> aiCoach
 ```
 
+## Current Direction: Editable Proposals + Performed Log
+
+The active product direction is the **editable-proposals + performed-log** model. It
+adds two things to the coaching loop:
+
+- **A universal editable display contract.** Any proposal can carry an optional,
+  non-authoritative `displayContract` render hint (`packages/types/src/display-contract.ts`)
+  so the frontend renders an interactive card with live-recomputed derived values (e.g. a
+  duration slider that updates an estimated-calories total). The contract carries no
+  formulas — derived values use a closed `op` enum. On accept the backend **always
+  recomputes** the total from the **stored** contract structure and a **stored, trusted
+  rate** sourced only from the workout domain LLM, clamping each editable field to its
+  stored bounds and discarding the client total
+  (`recomputeWorkoutProposalCaloriesFromDisplayContract`; accept seam in
+  `ProposalsService.decideProposal`). The contract and rate never persist on a revision.
+- **Plan vs performed separation.** What was *planned* (authoritative recurring plans) is
+  kept distinct from what was actually *performed*:
+  - **Ad-hoc workout logging** via the `log_workout_activity` LOG intent creates an
+    `ad_hoc` `workout_sessions` row (nullable plan/revision FKs, `activityType`,
+    `estimatedCalories`) and **never** a plan revision.
+  - **Nutrition incidents** feed `Today.eaten` (per-date aggregate) and a weekly
+    `performed` aggregate (`aggregateNutritionIncidentsWeek`), separate from plan
+    adherence, and still never mutate nutrition plan targets.
+
+Brief: [editable-proposals-performed-log.md](features/editable-proposals-performed-log.md).
+
 ## Product Surfaces
 
 The user-facing web IA is intentionally small. The primary navigation has four surfaces:
 
-- Chat: the dominant coaching conversation for planning, feedback, explanations, message-first attachment recognition, typed proposals, and approval decisions.
-- Today: the daily execution loop for the current workout, today's nutrition plan, stress/recovery check-in, mental wellbeing checkpoints, habits, adherence, and quick feedback.
-- Longevity: the weekly overview for consistency, cross-domain trends, goals, recovery/wellbeing context, and safe coach prompts.
+- Chat: the dominant coaching conversation for planning, feedback, explanations, image attachment context, typed (now editable) proposals, and approval decisions.
+- Today: the daily execution loop for the current workout, today's nutrition plan and eaten/performed totals, stress/recovery check-in, mental wellbeing checkpoints, habits, adherence, and quick feedback.
+- Longevity: the weekly overview for consistency, cross-domain trends (incl. nutrition performed and ad-hoc activity), goals, recovery/wellbeing context, and safe coach prompts.
 - Profile: account identity, onboarding, personal context, goal hierarchy, documents, consent, device/data settings, and preferences.
 
 Secondary read-only plan views remain routeable but are not primary tabs:
@@ -90,13 +116,13 @@ As of the completed longevity foundation pass, the core coaching loop is impleme
 
 | Surface | Status | Notes |
 |---------|--------|-------|
-| Chat / Proposals | Implemented foundation | Typed proposal pipeline, evidence refs, wellbeing/recovery context, message-first attachment recognition, nutrition incident cards, recipe proposals, and safety gates; AI is still stub-based for many flows |
-| Today / Workouts / Nutrition | Implemented web MVP | Current workout with catalog metadata and bounded feedback, checklist, wellbeing, recovery, nutrition-today, adherence, reflection, and secondary Training/Nutrition links |
+| Chat / Proposals | Implemented foundation | Multi-domain fan-out LLM pipeline, typed **editable** proposals (universal display contract with accept-time backend recompute), evidence refs, wellbeing/recovery context, image attachment context, nutrition incident cards, recipe proposals, and safety gates |
+| Today / Workouts / Nutrition | Implemented web MVP | Current workout with catalog metadata and bounded feedback, ad-hoc activity sessions on the checklist (non-required), nutrition `eaten` totals, checklist, wellbeing, recovery, adherence, reflection, and secondary Training/Nutrition links |
 | Profile / Onboarding / Goals | Implemented web MVP | First-run onboarding, structured personal context, goal hierarchy, document consent, and profile hierarchy summary |
 | Metrics / Device Sync | Partial | API, consent, and aggregate support exist; native HealthKit/Health Connect ingestion is not live |
 | Documents / Labs | Implemented MVP | Text/PDF upload, structured signal extraction, signal approval/revocation, document-backed correlation preview, proposal evidence refs, and Chat attachment consent/review routing |
 | Recipes / Nutrition incidents | Implemented MVP | Recipe intake/recommendations, recommendation lifecycle, recipe-backed nutrition incident proposals, and food/photo nutrition incident proposal flow |
-| Progress / Adaptation | Partial | Weekly progress includes workout and recovery context; broader cross-domain review is still planned |
+| Progress / Adaptation | Partial | Weekly progress includes workout (incl. ad-hoc activity), recovery, and nutrition `performed` (eaten) aggregates; broader cross-domain review is still expanding |
 
 The backend supports `Chat -> AIProposal -> approval -> structured state` for core domains. Completed feature briefs are removed once their MVP behavior is captured in this roadmap and architecture docs.
 
@@ -115,22 +141,25 @@ These capabilities extend the product toward AI-first coaching for a longer and 
 | Medical/lab correlations | Implemented MVP | Consent-gated text/PDF document upload, structured signal extraction/review/revocation, document-backed correlation preview, and proposal evidence validation |
 | Adaptive workout execution | Implemented MVP | Exercise catalog taxonomy, catalog-enriched Training/Today views, execution feedback, and revision-safe workout proposal validation |
 | Recipe recommendations | Implemented MVP | Provider-backed recipe normalization, confidence/provenance, Nutrition recipe panel, chat recipe proposals, and recipe-to-nutrition-incident proposal flow |
-| Chat action proposals | Implemented MVP | Wellbeing check-in and nutrition incident proposals with edit-before-apply, crisis-safe behavior, food-photo analysis, and no-write-before-confirm guards |
-| Message-first chat attachments | Implemented MVP | Chat uploads food, medical, and workout/training attachments as message context; backend classifies/extracts into typed proposal candidates with provider isolation |
+| Chat action proposals | Implemented MVP | Wellbeing check-in, nutrition incident, and `log_workout_activity` (ad-hoc) proposals with edit-before-apply, the universal editable display contract + accept-time backend recompute, crisis-safe behavior, and no-write-before-confirm guards |
+| Image chat attachments (context-only) | Implemented MVP | Chat uploads images as bounded context for the multimodal domain LLMs; no upfront classification/recognition machinery and no attachment proposal side channel (see `docs/architecture/llm-pipeline.md`) |
 
 ### Remaining Recommended Sequence
 
-1. [Habit System and Daily Coaching](features/habit-system-daily-coaching.md) — durable habits materialized into Today.
-2. [Weekly Review and Cross-Domain Adaptation](features/weekly-review-cross-domain-adaptation.md) — extends Phase 10 beyond workout-only summaries and surfaces through Longevity + Chat.
-3. [Longevity Dashboard](features/longevity-dashboard.md) — consumer overview once enough structured signals exist.
+1. **Editable proposals + performed log follow-ups** — mobile UI for the editable contract
+   cards and performed log, and migrating the nutrition-incident card onto the universal
+   display contract once it supports repeatable item groups (see brief below).
+2. **Weekly cross-domain review expansion** — extend Phase 10 beyond workout-only summaries
+   (nutrition `performed`, ad-hoc activity, habits, recovery) surfaced through Longevity + Chat.
+3. **Longevity dashboard** — consumer overview once enough structured signals exist.
+
+(2) and (3) do not yet have written briefs in `docs/product/features/`.
 
 ### Open Feature Brief Index
 
 | Feature | Brief | Depends on |
 |---------|-------|------------|
-| Habit system | [habit-system-daily-coaching.md](features/habit-system-daily-coaching.md) | Today, proposals |
-| Weekly cross-domain review | [weekly-review-cross-domain-adaptation.md](features/weekly-review-cross-domain-adaptation.md) | Progress, wellbeing, recovery, habits |
-| Longevity dashboard | [longevity-dashboard.md](features/longevity-dashboard.md) | Weekly review, metrics, goals |
+| Editable proposals + performed log | [editable-proposals-performed-log.md](features/editable-proposals-performed-log.md) | Proposals, workouts, nutrition, Today, progress |
 
 ## AI Safety and State Rules
 

@@ -48,6 +48,8 @@ describe("progress UI state", () => {
         exerciseAdjustedCount: 0,
         exerciseCompletionPercent: null,
         partialSessionCount: 0,
+        adHocCompletedCount: 0,
+        plannedCompletedCount: 0,
       }).headline,
     ).toBe("2 of 3 sessions completed");
   });
@@ -67,6 +69,8 @@ describe("progress UI state", () => {
       exerciseAdjustedCount: 1,
       exerciseCompletionPercent: 75,
       partialSessionCount: 1,
+      adHocCompletedCount: 0,
+      plannedCompletedCount: 0,
     });
 
     expect(summary.detail).toContain("75% exercises completed");

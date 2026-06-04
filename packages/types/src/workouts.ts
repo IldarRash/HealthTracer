@@ -9,6 +9,20 @@ import {
   type CreateExerciseInput,
 } from "./exercises.js";
 import { recoveryContextSourceRefSchema } from "./recovery.js";
+import { displayContractSchema, computeDerivedValues, clampFieldValue } from "./display-contract.js";
+
+// ---------------------------------------------------------------------------
+// Calorie ceiling constant — declared early so Zod schemas can reference it.
+// See the helper section later in this file for clampWorkoutCalories and
+// deriveActivityCalories.
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum calorie value accepted by workout schemas and recompute helpers.
+ * Used by clampWorkoutCalories, recompute helpers, domain-error guards, and
+ * .max() schema validators.  Change only here; do not hardcode 20000 elsewhere.
+ */
+export const WORKOUT_CALORIE_MAX = 20000;
 
 export const workoutWeekdaySchema = z.enum([
   "monday",
@@ -208,13 +222,28 @@ export const workoutPlanPayloadSchema = z.object({
    * Revisions carry this field so accepted proposals preserve the estimate.
    * If present, calorieEstimateProvenance MUST also be set.
    */
-  estimatedSessionCalorieBurn: z.number().int().nonnegative().max(20000).optional(),
+  estimatedSessionCalorieBurn: z.number().int().nonnegative().max(WORKOUT_CALORIE_MAX).optional(),
   /**
    * Who provided estimatedSessionCalorieBurn. Required whenever
    * estimatedSessionCalorieBurn is present (enforced in
    * getWorkoutProposalDomainErrors).
    */
   calorieEstimateProvenance: calorieEstimateProvenanceSchema.optional(),
+  /**
+   * Trusted kcal/hour burn rate from the workout domain LLM.
+   * Used together with displayContract to recompute estimatedSessionCalorieBurn
+   * server-side on accept (backend re-computes; client total is discarded).
+   * Sourced from workoutCaloriePerHourRate in domain_answer (ActionResolver stamps it).
+   * Max 5000 kcal/hour is a generous ceiling for any activity.
+   * Never set by the decision-maker, non-workout domains, or client override.
+   */
+  caloriePerHourRate: z.number().int().nonnegative().max(5000).optional(),
+  /**
+   * Declarative display contract for the frontend editable card.
+   * Render metadata only — DROPPED by stripWorkoutPlanProposalExtras before
+   * the plan revision is written. Never persisted on revisions.
+   */
+  displayContract: displayContractSchema.optional(),
 });
 
 export type WorkoutPlanPayload = z.infer<typeof workoutPlanPayloadSchema>;
@@ -348,11 +377,14 @@ export type WorkoutPlanRevision = z.infer<typeof workoutPlanRevisionSchema>;
 export const workoutSessionSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
-  workoutPlanId: z.string().uuid(),
-  workoutPlanRevisionId: z.string().uuid(),
+  workoutPlanId: z.string().uuid().nullable(),
+  workoutPlanRevisionId: z.string().uuid().nullable(),
   plannedDate: isoDateSchema,
   title: z.string().min(1).max(160),
   status: workoutSessionStatusSchema,
+  source: z.enum(["planned", "ad_hoc"]).default("planned"),
+  activityType: z.string().min(1).max(120).nullable().optional(),
+  estimatedCalories: z.number().int().nonnegative().max(WORKOUT_CALORIE_MAX).nullable().optional(),
   exercises: z.array(workoutSessionExerciseEntrySchema),
   feedback: workoutCompletionFeedbackSchema,
   completedAt: isoDateTimeSchema.nullable(),
@@ -446,6 +478,112 @@ export type WorkoutPlanProposalExtras = z.infer<typeof workoutPlanProposalExtras
 export const workoutPlanProposalChangesSchema = workoutPlanPayloadSchema.merge(
   workoutPlanProposalExtrasSchema,
 );
+
+/**
+ * Payload for a log_workout_activity proposal.
+ *
+ * Logs a one-off activity performed by the user (e.g. "played volleyball 90 min").
+ * NEVER creates a workout plan revision — it creates an ad_hoc workout_session row on accept.
+ *
+ * Validation invariant: estimatedCalories OR ratePerHour must be provided so the
+ * backend can always derive a calorie estimate. The backend recomputes the final
+ * value from the trusted ratePerHour; any client-submitted estimatedCalories is
+ * treated as an advisory fallback only.
+ */
+export const logWorkoutActivityProposalPayloadSchema = z
+  .object({
+    activityType: z.string().min(1).max(120),
+    title: z.string().min(1).max(160),
+    durationMinutes: z.number().int().positive().max(600),
+    intensity: z.enum(["light", "moderate", "vigorous"]).optional(),
+    /**
+     * ISO datetime of when the activity was performed.
+     * Reuses the same datetime schema as nutrition incidents.
+     */
+    performedAt: isoDateTimeSchema,
+    /**
+     * Advisory calorie estimate (kcal). Ignored on accept in favour of
+     * ratePerHour * durationMinutes when ratePerHour is present.
+     * Never trusted as-is from the client; the backend always recomputes
+     * from the stored ratePerHour or falls back to this value.
+     */
+    estimatedCalories: z.number().int().nonnegative().max(WORKOUT_CALORIE_MAX).optional(),
+    /**
+     * Trusted kcal/hour rate from the workout domain LLM.
+     * Backend uses this to compute final calories: round(ratePerHour * durationMinutes / 60).
+     * Max 3000 kcal/hr is a generous ceiling for any typical activity.
+     * Never set by the decision-maker, non-workout domains, or client override.
+     */
+    ratePerHour: z.number().int().positive().max(3000).optional(),
+    /**
+     * Optional display contract for a client-side editable activity card.
+     * Stripped before the workout_session row is written.
+     */
+    displayContract: displayContractSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (payload) =>
+      payload.estimatedCalories !== undefined || payload.ratePerHour !== undefined,
+    {
+      message:
+        "log_workout_activity: estimatedCalories or ratePerHour must be provided.",
+    },
+  );
+
+export type LogWorkoutActivityProposalPayload = z.infer<
+  typeof logWorkoutActivityProposalPayloadSchema
+>;
+
+/**
+ * Domain-level validation errors for a log_workout_activity proposal.
+ * Mirrors the shape of getWorkoutPlanDomainErrors — validates calories sanity
+ * and rejects unsupported medical/diagnosis wording.
+ */
+export function getLogWorkoutActivityDomainErrors(
+  payload: LogWorkoutActivityProposalPayload,
+): string[] {
+  const errors: string[] = [];
+
+  // Bound calorie sanity: ratePerHour * durationMinutes / 60 must not exceed WORKOUT_CALORIE_MAX.
+  if (payload.ratePerHour !== undefined) {
+    const computed = deriveActivityCalories(payload.ratePerHour, payload.durationMinutes);
+
+    if (computed > WORKOUT_CALORIE_MAX) {
+      errors.push(
+        "log_workout_activity: Computed calorie estimate (ratePerHour × durationMinutes / 60) exceeds 20 000 kcal.",
+      );
+    }
+  }
+
+  if (
+    payload.estimatedCalories !== undefined &&
+    payload.ratePerHour !== undefined
+  ) {
+    const computed = deriveActivityCalories(payload.ratePerHour, payload.durationMinutes);
+    const diff = Math.abs(computed - payload.estimatedCalories);
+
+    if (diff > 2000) {
+      errors.push(
+        "log_workout_activity: estimatedCalories differs substantially from the ratePerHour-based estimate.",
+      );
+    }
+  }
+
+  // Reject medical/diagnosis wording in all text fields.
+  const textsToCheck = [payload.activityType, payload.title];
+
+  for (const text of textsToCheck) {
+    if (UNSAFE_WORKOUT_MEDICAL_PATTERNS.some((pattern) => pattern.test(text))) {
+      errors.push(
+        "log_workout_activity: Activity copy must avoid diagnosis, treatment, or other unsupported medical wording.",
+      );
+      break;
+    }
+  }
+
+  return errors;
+}
 
 export type WorkoutPlanProposalChanges = z.infer<typeof workoutPlanProposalChangesSchema>;
 
@@ -731,9 +869,300 @@ export function getResolvedWorkoutPlanCatalogErrors(payload: WorkoutPlanPayload)
 export function stripWorkoutPlanProposalExtras(
   changes: WorkoutPlanProposalChanges,
 ): WorkoutPlanPayload {
-  const { pendingExercises: _pendingExercises, ...plan } = changes;
+  const {
+    pendingExercises: _pendingExercises,
+    displayContract: _displayContract,
+    caloriePerHourRate: _caloriePerHourRate,
+    ...plan
+  } = changes;
 
   return workoutPlanPayloadSchema.parse(plan);
+}
+
+// ---------------------------------------------------------------------------
+// Calorie helpers — clamp and formula (WORKOUT_CALORIE_MAX declared above)
+// ---------------------------------------------------------------------------
+
+/**
+ * Clamp a raw calorie value to [0, WORKOUT_CALORIE_MAX] after rounding.
+ * Use at every site that produces a calorie integer from a float computation.
+ */
+export function clampWorkoutCalories(value: number): number {
+  return Math.min(WORKOUT_CALORIE_MAX, Math.max(0, Math.round(value)));
+}
+
+/**
+ * Derive an activity calorie value from rate × duration.
+ *
+ * Formula: Math.round(ratePerHour * durationMinutes / 60)
+ * When opts.clampMax is provided, the result is further clamped to [0, clampMax].
+ *
+ * Use at sites that compute calories from a rate-per-hour and duration in minutes.
+ * Do NOT route displayContract recompute helpers through this — those go through
+ * computeDerivedValues / rate_per_hour to keep the displayContract formula path
+ * self-contained.
+ *
+ * @param ratePerHour     kcal/hour burn rate.
+ * @param durationMinutes Activity duration in minutes.
+ * @param opts.clampMax   Optional upper clamp (pass WORKOUT_CALORIE_MAX for accept-time paths).
+ */
+export function deriveActivityCalories(
+  ratePerHour: number,
+  durationMinutes: number,
+  opts?: { clampMax?: number },
+): number {
+  const raw = Math.round((ratePerHour * durationMinutes) / 60);
+
+  if (opts?.clampMax !== undefined) {
+    return Math.min(opts.clampMax, Math.max(0, raw));
+  }
+
+  return raw;
+}
+
+// ---------------------------------------------------------------------------
+// Recompute result types and generalized contract-driven recompute
+// ---------------------------------------------------------------------------
+
+/**
+ * Descriptor that tells recomputeCaloriesFromDisplayContract which field keys
+ * on the proposal payload carry the trusted rate, the total calorie, and
+ * (optionally) the provenance flag.
+ *
+ * Use:
+ *   - Workout-plan intents: { rateField: 'caloriePerHourRate', totalField: 'estimatedSessionCalorieBurn', provenanceField: 'calorieEstimateProvenance' }
+ *   - log_workout_activity:  { rateField: 'ratePerHour', totalField: 'estimatedCalories' }
+ */
+export interface CalorieRecomputeFields {
+  /** Key of the trusted kcal/hour rate field on the payload. */
+  rateField: string;
+  /** Key of the integer calorie total field on the payload. */
+  totalField: string;
+  /** Optional key of the provenance field; when set, will be forced to 'workout_llm'. */
+  provenanceField?: string;
+}
+
+/**
+ * Result type for recomputeCaloriesFromDisplayContract (and the plan-specific wrapper).
+ *
+ * `recomputedTotal` is the fresh trusted calorie value when the recompute
+ * actually produced a primary-total (non-null/non-undefined, finite number).
+ * It is `null` when the recompute was a no-op — i.e. no stored displayContract,
+ * no isPrimaryTotal derived entry, or no resolvable rate input.
+ *
+ * Callers MUST check `recomputedTotal !== null` (NOT the presence of a displayContract) to
+ * decide whether to preserve the freshly computed total or to fall back to
+ * hard-pinning the stored calorie fields.
+ */
+export interface RecomputeCaloriesResult<T extends Record<string, unknown>> {
+  payload: T;
+  /** The fresh recomputed total written into `payload`, or null when the recompute was a no-op. */
+  recomputedTotal: number | null;
+}
+
+/** Legacy alias kept for the plan-specific call sites; payload key is `changes`. */
+export interface WorkoutProposalRecomputeResult {
+  changes: WorkoutPlanProposalChanges;
+  /** The fresh recomputed total that was written into `changes`, or null if no-op. */
+  recomputedTotal: number | null;
+}
+
+/**
+ * Generalized contract-driven calorie recompute.
+ *
+ * Recomputes the calorie total on `effective` using:
+ *   - the displayContract STRUCTURE from `stored` (never the client's),
+ *   - the trusted rate from `stored[fields.rateField]` (never the client's),
+ *   - the client-submitted EDITABLE field values from `clientFieldValues` (each
+ *     clamped to the stored field's own min/max via clampFieldValue),
+ *   - the `isPrimaryTotal` derived entry as the target.
+ *
+ * Safety invariants (must never be weakened):
+ *  - `stored` is the authoritative source for the displayContract STRUCTURE and
+ *    the trusted rate.  The client cannot substitute a different contract or a
+ *    higher rate.
+ *  - `clientFieldValues` provides editable-field overrides ONLY.  Non-editable
+ *    fields always use the stored field.value.
+ *  - The rate input field (inputs[0] of the rate_per_hour derived with isPrimaryTotal;
+ *    fallback: any field whose key equals fields.rateField) is ALWAYS overwritten
+ *    with the trusted stored rate, regardless of what the client submitted.
+ *  - The resulting total is `Math.round(primaryTotal)` clamped to [0, WORKOUT_CALORIE_MAX].
+ *  - When `fields.provenanceField` is set, it is forced to the stored value or 'workout_llm'.
+ *  - Returns `{ payload: effective, recomputedTotal: null }` when:
+ *      · stored has no displayContract,
+ *      · the stored displayContract has no isPrimaryTotal derived entry, or
+ *      · the rate input key is unresolvable.
+ *    In all null cases the CALLER must hard-pin the stored calorie fields (C1 fix).
+ *
+ * @param effective         The client-submitted payload (calorie fields may be present
+ *                          but are ignored in favour of the recomputed value).
+ * @param stored            The STORED proposal's payload — source of the trusted rate
+ *                          and the displayContract structure.
+ * @param clientFieldValues Editable field values submitted by the client, keyed by
+ *                          field key.  Values for non-editable fields are silently discarded.
+ * @param fields            Descriptor identifying which keys carry rate / total / provenance.
+ */
+export function recomputeCaloriesFromDisplayContract<T extends Record<string, unknown>>(
+  effective: T,
+  stored: T,
+  clientFieldValues: Record<string, number>,
+  fields: CalorieRecomputeFields,
+): RecomputeCaloriesResult<T> {
+  // Use the STORED contract as the authoritative structure.
+  const storedContract = (stored as Record<string, unknown>)[
+    "displayContract"
+  ] as import("./display-contract.js").DisplayContract | undefined;
+
+  // No stored displayContract — nothing to recompute.
+  if (!storedContract) {
+    return { payload: effective, recomputedTotal: null };
+  }
+
+  // Read the trusted kcal/hour rate from the STORED payload (never the client value).
+  const trustedRate = (stored as Record<string, unknown>)[fields.rateField] as number | undefined;
+
+  // Identify the rate input field:
+  //   Primary: inputs[0] of the rate_per_hour derived entry that has isPrimaryTotal.
+  //   Fallback: any field whose key equals fields.rateField.
+  const primaryTotalEntry = storedContract.derived.find(
+    (d) => d.isPrimaryTotal && d.op === "rate_per_hour",
+  );
+  const rateInputKey: string | undefined =
+    primaryTotalEntry?.inputs[0] ??
+    storedContract.fields.find((f) => f.key === fields.rateField)?.key;
+
+  // Build fieldValues from the stored contract's own field values as the base,
+  // then overlay clamped client values for editable fields only.
+  const fieldValues: Record<string, number> = {};
+
+  for (const field of storedContract.fields) {
+    if (field.value === undefined) continue;
+
+    if (field.editable && field.key in clientFieldValues) {
+      // Apply clamped client override for this editable field.
+      fieldValues[field.key] = clampFieldValue(field, clientFieldValues[field.key]!);
+    } else {
+      // Non-editable field or no client value: keep the stored value.
+      fieldValues[field.key] = field.value;
+    }
+  }
+
+  // Always overwrite the rate input field with the trusted stored rate so the
+  // rate_per_hour computation cannot be inflated by a client-submitted value.
+  if (trustedRate !== undefined && rateInputKey !== undefined) {
+    fieldValues[rateInputKey] = trustedRate;
+  }
+
+  // Find the primary total derived entry (any op, not just rate_per_hour).
+  const primaryTotalDerived = storedContract.derived.find((d) => d.isPrimaryTotal);
+
+  if (!primaryTotalDerived) {
+    // No primary total declared — recompute is a no-op.
+    // Return null so the caller knows to hard-pin the stored calorie fields rather
+    // than trust whatever the client supplied.
+    return { payload: effective, recomputedTotal: null };
+  }
+
+  const derivedResults = computeDerivedValues(storedContract, fieldValues);
+  const rawTotal = derivedResults[primaryTotalDerived.target];
+
+  if (rawTotal === undefined || !isFinite(rawTotal)) {
+    // Rate input unresolvable — treat as no-op so caller pins stored values.
+    return { payload: effective, recomputedTotal: null };
+  }
+
+  // Clamp to [0, WORKOUT_CALORIE_MAX] — generic output safety floor.
+  const recomputed = clampWorkoutCalories(rawTotal);
+
+  const result: Record<string, unknown> = {
+    ...(effective as Record<string, unknown>),
+    [fields.totalField]: recomputed,
+  };
+
+  // Force provenance when descriptor declares it.
+  if (fields.provenanceField !== undefined) {
+    const storedProvenance = (stored as Record<string, unknown>)[fields.provenanceField];
+    result[fields.provenanceField] = storedProvenance ?? "workout_llm";
+  }
+
+  return {
+    payload: result as T,
+    recomputedTotal: recomputed,
+  };
+}
+
+/**
+ * Result type for recomputeWorkoutProposalCaloriesFromDisplayContract.
+ *
+ * `recomputedTotal` is the fresh trusted calorie value when the recompute
+ * actually produced a primary-total (non-null/non-undefined, finite number).
+ * It is `null` when the recompute was a no-op — i.e. no stored displayContract,
+ * no isPrimaryTotal derived entry, or no resolvable rate input.
+ *
+ * Callers MUST check `recomputedTotal` (not the presence of a displayContract) to
+ * decide whether to preserve the freshly computed estimatedSessionCalorieBurn or to
+ * fall back to hard-pinning the stored value.
+ */
+
+/**
+ * Recompute estimatedSessionCalorieBurn exclusively from the STORED displayContract
+ * structure and STORED trustedRate, applying only the client-submitted EDITABLE field
+ * values (clamped to the stored field's own min/max).
+ *
+ * Safety invariants (must never be weakened):
+ *  - storedChanges is the source of the displayContract STRUCTURE and the
+ *    caloriePerHourRate.  The client cannot substitute a different contract or a
+ *    higher rate.
+ *  - clientFieldValues is the source of editable-field overrides ONLY.
+ *    Non-editable fields always use the stored field.value.
+ *  - The rate input field (inputs[0] of the rate_per_hour derived with isPrimaryTotal;
+ *    fallback: any field whose key === 'caloriePerHourRate') is ALWAYS set to the
+ *    trusted stored rate, regardless of what the client submitted.
+ *  - Each editable field override is clamped via clampFieldValue (stored field min/max).
+ *  - The resulting estimatedSessionCalorieBurn is Math.round(primaryTotal) and bounded
+ *    to [0, 20000] to match workoutPlanPayloadSchema.estimatedSessionCalorieBurn.
+ *    This output clamp is the generic safety floor for extreme values.
+ *  - calorieEstimateProvenance is hardcoded to 'workout_llm'.
+ *  - If no displayContract is present on the STORED changes, the effectiveChanges are
+ *    returned unchanged and recomputedTotal is null.
+ *  - If the stored displayContract has NO isPrimaryTotal derived entry, the
+ *    effectiveChanges are returned unchanged and recomputedTotal is null.  The caller
+ *    MUST treat this as a no-op and pin the stored calorie fields (not trust whatever
+ *    the client supplied), because a schema-valid displayContract that lacks
+ *    isPrimaryTotal cannot produce a trusted total.
+ *
+ * @param effectiveChanges  The client-submitted proposedChanges (calorie fields may be
+ *                          present but are ignored in favour of the recomputed value).
+ * @param storedChanges     The STORED proposal's proposedChanges — source of the
+ *                          trusted rate and the displayContract structure.
+ * @param clientFieldValues Editable field values submitted by the client, keyed by
+ *                          field key.  Values for non-editable fields are silently
+ *                          discarded.
+ * @returns WorkoutProposalRecomputeResult with `changes` containing the rebuilt
+ *          proposedChanges and `recomputedTotal` set to the fresh value or null when
+ *          the recompute was a no-op (callers must pin stored calorie fields in that
+ *          case).
+ */
+export function recomputeWorkoutProposalCaloriesFromDisplayContract(
+  effectiveChanges: WorkoutPlanProposalChanges,
+  storedChanges: WorkoutPlanProposalChanges,
+  clientFieldValues: Record<string, number>,
+): WorkoutProposalRecomputeResult {
+  const result = recomputeCaloriesFromDisplayContract(
+    effectiveChanges as Record<string, unknown>,
+    storedChanges as Record<string, unknown>,
+    clientFieldValues,
+    {
+      rateField: "caloriePerHourRate",
+      totalField: "estimatedSessionCalorieBurn",
+      provenanceField: "calorieEstimateProvenance",
+    },
+  );
+
+  return {
+    changes: result.payload as WorkoutPlanProposalChanges,
+    recomputedTotal: result.recomputedTotal,
+  };
 }
 
 export interface WorkoutPlanLoadMetrics {
@@ -903,7 +1332,7 @@ export function getWorkoutProposalDomainErrors(
           errors.push(
             `workout: ${path}.estimatedCalorieBurn must be a non-negative integer.`,
           );
-        } else if (entry.estimatedCalorieBurn > 5000) {
+        } else if (entry.estimatedCalorieBurn > 5000) {  // per-exercise ceiling stays 5000
           errors.push(
             `workout: ${path}.estimatedCalorieBurn must not exceed 5 000 kcal.`,
           );
@@ -921,7 +1350,7 @@ export function getWorkoutProposalDomainErrors(
       errors.push(
         "workout: estimatedSessionCalorieBurn must be a non-negative integer.",
       );
-    } else if (sessionCalorie > 20000) {
+    } else if (sessionCalorie > WORKOUT_CALORIE_MAX) {
       errors.push(
         "workout: estimatedSessionCalorieBurn must not exceed 20 000 kcal.",
       );

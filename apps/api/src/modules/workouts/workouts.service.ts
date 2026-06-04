@@ -1,9 +1,14 @@
 import {
   collectWorkoutPlanExerciseIds,
+  deriveActivityCalories,
   deriveWorkoutSessionStatusFromExercises,
+  formatIsoDateInTimezone,
+  getLogWorkoutActivityDomainErrors,
   getResolvedWorkoutPlanCatalogErrors,
   getWorkoutPlanDomainErrors,
+  logWorkoutActivityProposalPayloadSchema,
   normalizeWorkoutSessionExercises,
+  WORKOUT_CALORIE_MAX,
   workoutPlanPayloadSchema,
   type ActiveWorkoutPlanResponse,
   type CompleteWorkoutSessionInput,
@@ -16,6 +21,7 @@ import {
 } from "@health/types";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
+import type { HealthDatabaseTransaction } from "../../database/database.types.js";
 import { ExercisesService } from "../exercises/exercises.service.js";
 import { UsersService } from "../users/users.service.js";
 import { resolveWorkoutPlanProposalForApply } from "./workout-plan-resolver.js";
@@ -235,11 +241,68 @@ export class WorkoutsService {
     return toWorkoutSession(sessionRow);
   }
 
+  /**
+   * Apply a log_workout_activity proposal.
+   *
+   * Invariants:
+   * - NEVER calls appendRevision or createPlanWithRevision — no plan revision is created.
+   * - estimatedCalories is always recomputed from the stored ratePerHour when present;
+   *   the advisory estimatedCalories from the payload is only the fallback.
+   * - When tx is provided, the ad-hoc session insert runs inside that transaction so
+   *   the domain write is atomic with the proposal status flip in the caller.
+   */
+  async applyLogWorkoutActivityProposal(
+    userId: string,
+    rawPayload: unknown,
+    _reason: string,
+    tx?: HealthDatabaseTransaction,
+  ): Promise<string> {
+    const payload = logWorkoutActivityProposalPayloadSchema.parse(rawPayload);
+    const domainErrors = getLogWorkoutActivityDomainErrors(payload);
+
+    if (domainErrors.length > 0) {
+      throw new BadRequestException({
+        message: "log_workout_activity payload failed domain validation.",
+        validationErrors: domainErrors,
+      });
+    }
+
+    // Recompute from trusted ratePerHour; fall back to advisory estimatedCalories.
+    // Clamp to [0, WORKOUT_CALORIE_MAX] to match schema ceiling.
+    const resolvedCalories =
+      payload.ratePerHour !== undefined
+        ? deriveActivityCalories(payload.ratePerHour, payload.durationMinutes, { clampMax: WORKOUT_CALORIE_MAX })
+        : Math.min(WORKOUT_CALORIE_MAX, payload.estimatedCalories ?? 0);
+
+    const performedAt = new Date(payload.performedAt);
+
+    // Derive the user's local calendar date for plannedDate so that ad-hoc
+    // sessions logged in the evening (negative-UTC offset) land on the correct
+    // day in Today.  Raw .slice(0,10) would give the UTC date and break Today
+    // for those users.
+    const user = await this.usersService.getUserById(userId);
+    const userTimezone = user?.timezone ?? "UTC";
+    const plannedDate = formatIsoDateInTimezone(userTimezone, performedAt);
+
+    const session = await this.workoutsRepository.insertAdHocSession(
+      userId,
+      {
+        title: payload.title,
+        activityType: payload.activityType,
+        performedAt,
+        plannedDate,
+        estimatedCalories: resolvedCalories,
+      },
+      tx,
+    );
+
+    return `workout_session:${session.id}`;
+  }
+
   async applyWorkoutPlanProposal(
     userId: string,
     changes: WorkoutPlanProposalChanges,
     reason: string,
-    _intent: "create_workout_plan" | "adapt_workout_plan",
   ): Promise<string> {
     const resolvedPayload = await resolveWorkoutPlanProposalForApply(
       this.exercisesService,

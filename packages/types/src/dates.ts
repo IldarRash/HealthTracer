@@ -31,3 +31,17 @@ export const isoDateSchema = z
   });
 
 export const isoDateTimeSchema = z.string().datetime();
+
+/**
+ * Extract the YYYY-MM-DD calendar-date prefix from a UTC ISO-8601 datetime string.
+ *
+ * Use this ONLY when the datetime value is already normalised to UTC and you
+ * genuinely want the UTC calendar date (e.g. storing a DB timestamp as its own
+ * UTC date column).  Do NOT use this when the intent is to derive the user's
+ * local calendar date — use `formatIsoDateInTimezone(timezone, new Date(value))`
+ * from `packages/types/src/habits.ts` for that.
+ */
+export function isoDateOnly(value: string): string {
+  isoDateTimeSchema.parse(value);
+  return value.slice(0, 10);
+}

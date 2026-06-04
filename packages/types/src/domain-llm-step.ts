@@ -157,6 +157,14 @@ export const domainAnswerSchema = z.object({
    * on domainLlmStepOutputSchema below).
    */
   workoutCalorieEstimate: z.number().int().nonnegative().max(5000).optional(),
+  /**
+   * Trusted kcal/hour burn rate from the workout domain LLM.
+   * Used to stamp caloriePerHourRate on workout proposals via ActionResolver.
+   * Must only be present when domain === 'workout' (same superRefine guard as
+   * workoutCalorieEstimate below).
+   * Max 5000 kcal/hour is a generous ceiling for any activity.
+   */
+  workoutCaloriePerHourRate: z.number().int().nonnegative().max(5000).optional(),
 });
 
 export type DomainAnswer = z.infer<typeof domainAnswerSchema>;
@@ -170,17 +178,24 @@ export type DomainAnswer = z.infer<typeof domainAnswerSchema>;
 export const domainLlmStepOutputSchema = z
   .discriminatedUnion("kind", [domainLlmToolRequestSchema, domainAnswerSchema])
   .superRefine((value, ctx) => {
-    if (
-      value.kind === "domain_answer" &&
-      value.workoutCalorieEstimate !== undefined &&
-      value.domain !== "workout"
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          `workoutCalorieEstimate is only permitted when domain is "workout"; got "${value.domain}".`,
-        path: ["workoutCalorieEstimate"],
-      });
+    if (value.kind === "domain_answer" && value.domain !== "workout") {
+      if (value.workoutCalorieEstimate !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `workoutCalorieEstimate is only permitted when domain is "workout"; got "${value.domain}".`,
+          path: ["workoutCalorieEstimate"],
+        });
+      }
+
+      if (value.workoutCaloriePerHourRate !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `workoutCaloriePerHourRate is only permitted when domain is "workout"; got "${value.domain}".`,
+          path: ["workoutCaloriePerHourRate"],
+        });
+      }
     }
   });
 

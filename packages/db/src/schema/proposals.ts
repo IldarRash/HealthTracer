@@ -55,6 +55,7 @@ export const proposalIntentEnum = pgEnum("proposal_intent", [
   "adapt_habit_plan",
   "capture_wellbeing_checkin",
   "log_nutrition_incident",
+  "log_workout_activity",
 ]);
 
 export const aiProposals = pgTable(

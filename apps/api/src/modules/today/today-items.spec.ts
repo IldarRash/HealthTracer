@@ -45,6 +45,7 @@ function buildSessionSummary(
   id: string,
   revision: string = revisionId,
   title = "Strength day",
+  source: "planned" | "ad_hoc" = "planned",
 ) {
   return {
     id,
@@ -52,6 +53,7 @@ function buildSessionSummary(
     status: "planned" as const,
     workoutPlanId: planId,
     workoutPlanRevisionId: revision,
+    source,
   };
 }
 
@@ -379,5 +381,83 @@ describe("today-items merge and reconciliation", () => {
       ),
     ).toBe(false);
     expect(merged.some((item) => item.label === "Stretch")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part B — ad_hoc completed sessions in the Today checklist
+// ---------------------------------------------------------------------------
+
+describe("filterWorkoutSessionsForChecklist — ad_hoc sessions (Part B)", () => {
+  const adHocSessionId = "a1000001-0000-4000-8000-000000000001";
+
+  it("always includes ad_hoc sessions regardless of active plan context", () => {
+    const adHocSession = {
+      id: adHocSessionId,
+      title: "Volleyball session",
+      status: "completed" as const,
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+      source: "ad_hoc" as const,
+    };
+
+    const filtered = filterWorkoutSessionsForChecklist(
+      [adHocSession, buildSessionSummary(sessionId, revisionId)],
+      { planId, activeRevisionId: revisionId },
+    );
+
+    expect(filtered.some((s) => s.id === adHocSessionId)).toBe(true);
+    expect(filtered.some((s) => s.id === sessionId)).toBe(true);
+  });
+
+  it("includes ad_hoc sessions even when there is no active plan", () => {
+    const adHocSession = {
+      id: adHocSessionId,
+      title: "Volleyball session",
+      status: "completed" as const,
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+      source: "ad_hoc" as const,
+    };
+
+    // No active plan context (null)
+    const filtered = filterWorkoutSessionsForChecklist([adHocSession], null);
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.id).toBe(adHocSessionId);
+  });
+
+  it("creates a workout-linked checklist item from an ad_hoc session", () => {
+    const adHocSession = {
+      id: adHocSessionId,
+      title: "Volleyball session",
+      status: "completed" as const,
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+      source: "ad_hoc" as const,
+    };
+
+    const item = createWorkoutChecklistItem(adHocSession);
+
+    expect(item.source).toEqual({ type: "workout_session", id: adHocSessionId });
+    // Status should reflect the session status (completed → completed item)
+    expect(item.status).toBe("completed");
+  });
+
+  it("syncs ad_hoc session into the checklist as a completed item", () => {
+    const adHocSession = {
+      id: adHocSessionId,
+      title: "Volleyball session",
+      status: "completed" as const,
+      workoutPlanId: null,
+      workoutPlanRevisionId: null,
+      source: "ad_hoc" as const,
+    };
+
+    const synced = syncTodayChecklistWorkoutItems([], [adHocSession]);
+
+    expect(synced).toHaveLength(1);
+    expect(synced[0]?.source).toEqual({ type: "workout_session", id: adHocSessionId });
+    expect(synced[0]?.status).toBe("completed");
   });
 });

@@ -370,13 +370,6 @@ export async function listProposals(
   return apiFetch(`/proposals${query}`, token, aiProposalSchema.array());
 }
 
-export async function getProposal(
-  token: string,
-  proposalId: string,
-): Promise<ApiResult<AiProposal>> {
-  return apiFetch(`/proposals/${proposalId}`, token, aiProposalSchema);
-}
-
 export async function decideProposal(
   token: string,
   proposalId: string,
@@ -991,17 +984,6 @@ export async function upsertTodayNutritionAdherence(
     method: "PUT",
     body,
   });
-}
-
-export async function getNutritionAdherenceForDate(
-  token: string,
-  date: string,
-): Promise<ApiResult<NutritionAdherenceResponse>> {
-  return apiFetch(
-    `/nutrition/adherence/${encodeURIComponent(date)}`,
-    token,
-    nutritionAdherenceResponseSchema,
-  );
 }
 
 export async function upsertNutritionAdherence(

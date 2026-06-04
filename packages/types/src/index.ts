@@ -29,10 +29,11 @@ import {
 } from "./recipes.js";
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
+  logWorkoutActivityProposalPayloadSchema,
   workoutPlanProposalChangesSchema,
 } from "./workouts.js";
 
-export { isoDateSchema, isoDateTimeSchema, isCalendarValidIsoDate } from "./dates.js";
+export { isoDateSchema, isoDateTimeSchema, isCalendarValidIsoDate, isoDateOnly } from "./dates.js";
 
 export const apiStatusSchema = z.enum(["ok"]);
 
@@ -325,6 +326,7 @@ export const proposalIntentSchema = z.enum([
   "adapt_habit_plan",
   "capture_wellbeing_checkin",
   "log_nutrition_incident",
+  "log_workout_activity",
 ]);
 
 export type ProposalIntent = z.infer<typeof proposalIntentSchema>;
@@ -359,7 +361,14 @@ export {
   scheduleWorkoutSessionSchema,
   toWorkoutSessionExercisePrescription,
   updateWorkoutSessionExerciseSchema,
+  getLogWorkoutActivityDomainErrors,
+  logWorkoutActivityProposalPayloadSchema,
   stripWorkoutPlanProposalExtras,
+  recomputeWorkoutProposalCaloriesFromDisplayContract,
+  recomputeCaloriesFromDisplayContract,
+  clampWorkoutCalories,
+  deriveActivityCalories,
+  WORKOUT_CALORIE_MAX,
   summarizeWorkoutPlanForCoaching,
   estimateWorkoutPlanLoadMetrics,
   workoutAdaptationIncreasesVolumeOrLoad,
@@ -414,6 +423,10 @@ export {
   type WorkoutPlanPayload,
   type WorkoutPlanProposalChanges,
   type WorkoutPlanProposalExtras,
+  type WorkoutProposalRecomputeResult,
+  type RecomputeCaloriesResult,
+  type CalorieRecomputeFields,
+  type LogWorkoutActivityProposalPayload,
   type WorkoutPlanRevision,
   type WorkoutPlanStatus,
   type WorkoutSession,
@@ -723,6 +736,21 @@ export const todayNutritionDetailSchema = z.object({
   plan: nutritionPlanSchema.nullable(),
   activeRevision: nutritionPlanRevisionSchema.nullable(),
   adherence: nutritionAdherenceRecordSchema.nullable(),
+  /**
+   * Aggregated totals from confirmed nutrition_incidents for this date.
+   * Null when no incidents have been logged for the date.
+   * Optional at the API response level for backward compatibility — absent means no incidents.
+   */
+  eaten: z
+    .object({
+      calories: z.number().int().nonnegative(),
+      proteinGrams: z.number().int().nonnegative(),
+      carbsGrams: z.number().int().nonnegative(),
+      fatGrams: z.number().int().nonnegative(),
+      incidentCount: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export type TodayNutritionDetail = z.infer<typeof todayNutritionDetailSchema>;
@@ -985,6 +1013,8 @@ export function getProposedChangesSchemaForIntent(
       return captureWellbeingCheckinProposalPayloadSchema;
     case "log_nutrition_incident":
       return logNutritionIncidentProposalPayloadSchema;
+    case "log_workout_activity":
+      return logWorkoutActivityProposalPayloadSchema;
     default: {
       const _exhaustive: never = intent;
       return _exhaustive;
@@ -1122,6 +1152,12 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
     targetDomain: proposalTargetDomainSchema,
     ...proposalTitleReasonFields,
     proposedChanges: logNutritionIncidentProposalPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("log_workout_activity"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: logWorkoutActivityProposalPayloadSchema,
   }),
 ]);
 
@@ -1424,6 +1460,14 @@ export const workoutProgressAggregateSchema = z.object({
   exerciseAdjustedCount: z.number().int().nonnegative().default(0),
   exerciseCompletionPercent: z.number().min(0).max(100).nullable().default(null),
   partialSessionCount: z.number().int().nonnegative().default(0),
+  /** Number of ad-hoc activity sessions completed this week (source = 'ad_hoc', status = 'completed'). */
+  adHocCompletedCount: z.number().int().nonnegative().default(0),
+  /**
+   * Number of *planned* sessions (source != 'ad_hoc') that were marked completed this week.
+   * Use this — not completedCount — whenever the narrative refers to "X of Y planned sessions".
+   * Defaults to 0 for back-compat with callers that don't provide it yet.
+   */
+  plannedCompletedCount: z.number().int().nonnegative().default(0),
 });
 
 export type WorkoutProgressAggregate = z.infer<typeof workoutProgressAggregateSchema>;
@@ -1493,6 +1537,7 @@ export type GenerateWeeklyProgressSummaryInput = z.infer<
 export {
   aggregateHabitsProgressWeek,
   aggregateNutritionAdherenceWeek,
+  aggregateNutritionIncidentsWeek,
   aggregateRecipesActivityWeek,
   aggregateTodayChecklists,
   countSufficientDomains,
@@ -1500,6 +1545,7 @@ export {
   domainSufficiencyLevelSchema,
   evaluateWeeklyReviewLaneEligibility,
   habitsProgressAggregateSchema,
+  nutritionPerformedAggregateSchema,
   nutritionProgressAggregateSchema,
   packWeeklyReviewProposals,
   recipesProgressAggregateSchema,
@@ -1518,6 +1564,8 @@ export {
   type HabitsProgressAggregate,
   type HabitCompletionSnapshot,
   type NutritionAdherenceSnapshot,
+  type NutritionIncidentSnapshot,
+  type NutritionPerformedAggregate,
   type NutritionProgressAggregate,
   type RecipesProgressAggregate,
   type TodayProgressAggregate,
@@ -2069,3 +2117,16 @@ export {
   type SubscriptionSummary,
   type SubscriptionTier,
 } from "./billing.js";
+export {
+  clampFieldValue,
+  computeDerivedValues,
+  displayContractSchema,
+  displayDerivedSchema,
+  displayFieldKindSchema,
+  displayFieldSchema,
+  extractEditableFieldValues,
+  type DisplayContract,
+  type DisplayDerived,
+  type DisplayField,
+  type DisplayFieldKind,
+} from "./display-contract.js";

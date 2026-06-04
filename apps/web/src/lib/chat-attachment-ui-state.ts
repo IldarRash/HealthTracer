@@ -406,16 +406,3 @@ export function resolveAttachmentOutcomeFallbackCopy(
   return null;
 }
 
-export function summarizeAttachmentOutcomesForMessage(
-  outcomes: readonly ChatAttachmentOutcome[],
-): string {
-  if (outcomes.length === 0) {
-    return "";
-  }
-
-  const labels = outcomes.map(
-    (outcome) => `${outcome.category} (${outcome.status})`,
-  );
-
-  return `Processed ${outcomes.length} attachment${outcomes.length === 1 ? "" : "s"}: ${labels.join("; ")}`;
-}

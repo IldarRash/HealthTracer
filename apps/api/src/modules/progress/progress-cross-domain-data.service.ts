@@ -3,6 +3,7 @@ import type {
   HabitCompletionSnapshot,
   HabitsProgressAggregate,
   NutritionAdherenceSnapshot,
+  NutritionIncidentSnapshot,
   NutritionProgressAggregate,
   NutritionTargetCompletion,
   RecipesProgressAggregate,
@@ -12,6 +13,7 @@ import type {
 import {
   aggregateHabitsProgressWeek,
   aggregateNutritionAdherenceWeek,
+  aggregateNutritionIncidentsWeek,
   aggregateRecipesActivityWeek,
   aggregateTodayChecklists,
   getTodayIsoDateInTimezone,
@@ -21,6 +23,7 @@ import {
   resolveHabitAdherenceOutcome,
   shiftIsoDate,
   todayChecklistItemSchema,
+  toNutritionIncidentSnapshot,
 } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import { HabitsRepository } from "../habits/habits.repository.js";
@@ -56,12 +59,11 @@ export class ProgressCrossDomainDataService {
     weekStart: string,
     weekEnd: string,
   ): Promise<NutritionProgressAggregate> {
-    const plan = await this.nutritionRepository.findActivePlanByUserId(userId);
-    const adherenceRows = await this.nutritionRepository.listAdherenceByUserAndDateRange(
-      userId,
-      weekStart,
-      weekEnd,
-    );
+    const [plan, adherenceRows, incidentRows] = await Promise.all([
+      this.nutritionRepository.findActivePlanByUserId(userId),
+      this.nutritionRepository.listAdherenceByUserAndDateRange(userId, weekStart, weekEnd),
+      this.nutritionRepository.listIncidentsByUserAndDateRange(userId, weekStart, weekEnd),
+    ]);
 
     const snapshots: NutritionAdherenceSnapshot[] = adherenceRows.map((row) => ({
       date: row.date,
@@ -69,10 +71,28 @@ export class ProgressCrossDomainDataService {
       mealCompletionCount: Array.isArray(row.mealCompletion) ? row.mealCompletion.length : 0,
     }));
 
-    return aggregateNutritionAdherenceWeek({
+    const incidentSnapshots: NutritionIncidentSnapshot[] = incidentRows.map((row) =>
+      toNutritionIncidentSnapshot({
+        date: row.date,
+        estimatedCalories: row.estimatedCalories,
+        estimatedMacros: row.estimatedMacros as Record<string, number>,
+      }),
+    );
+
+    const performed =
+      incidentSnapshots.length > 0
+        ? aggregateNutritionIncidentsWeek(incidentSnapshots)
+        : null;
+
+    const base = aggregateNutritionAdherenceWeek({
       hasActivePlan: Boolean(plan?.activeRevisionId),
       adherenceRows: snapshots,
     });
+
+    return {
+      ...base,
+      performed,
+    };
   }
 
   async buildHabitsAggregate(

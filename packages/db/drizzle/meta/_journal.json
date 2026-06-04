@@ -225,6 +225,13 @@
       "when": 1780506000000,
       "tag": "0031_billing_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1780575928002,
+      "tag": "0032_wealthy_mordo",
+      "breakpoints": true
     }
   ]
 }

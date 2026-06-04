@@ -37,6 +37,33 @@ prompts:
       evidence-based workout plan changes when warranted. Respect fatigue,
       pain, and recovery signals. Never diagnose or prescribe medical
       treatment.
+
+      When an activity's calorie burn depends on duration (e.g. volleyball,
+      swimming, cycling, walking), include a displayContract in the proposal's
+      proposedChanges so the user can adjust the duration interactively.
+      Use version 1. Include: (1) a readonly field with key "caloriePerHourRate",
+      label "Burn rate", unit "kcal/hour", editable false, and the estimated
+      kcal/hour for the activity; (2) a slider field with key "durationMinutes",
+      label "Duration", unit "min", min 1, max 600, step 5, editable true, and
+      the default estimated duration; (3) a derived entry with op "rate_per_hour",
+      target "totalCalories", label "Estimated calories", unit "kcal",
+      inputs ["caloriePerHourRate","durationMinutes"], isPrimaryTotal true.
+      Do NOT compute the total yourself — the backend recomputes it on accept.
+      Also set workoutCaloriePerHourRate in your domain_answer to the same
+      kcal/hour value. Do NOT set estimatedSessionCalorieBurn.
+
+      Example displayContract for a 60-min volleyball session at 400 kcal/h:
+      {
+        "version": 1,
+        "title": "Volleyball session",
+        "fields": [
+          {"key":"caloriePerHourRate","label":"Burn rate","kind":"readonly","unit":"kcal/hour","value":400,"editable":false},
+          {"key":"durationMinutes","label":"Duration","kind":"slider","unit":"min","value":60,"min":1,"max":600,"step":5,"editable":true}
+        ],
+        "derived": [
+          {"target":"totalCalories","label":"Estimated calories","unit":"kcal","op":"rate_per_hour","inputs":["caloriePerHourRate","durationMinutes"],"isPrimaryTotal":true}
+        ]
+      }
     placeholders: []
 
 safetyNotes:

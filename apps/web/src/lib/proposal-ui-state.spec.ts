@@ -273,6 +273,8 @@ describe("proposal UI state", () => {
   it("labels wellbeing and nutrition incident intents", () => {
     expect(getProposalIntentLabel("capture_wellbeing_checkin")).toBe("Wellbeing check-in");
     expect(getProposalIntentLabel("log_nutrition_incident")).toBe("Nutrition incident log");
+    // C10: log_workout_activity returns user-facing "Log activity" label
+    expect(getProposalIntentLabel("log_workout_activity")).toBe("Log activity");
     expect(
       getProposalNavigationRoute({
         intent: "capture_wellbeing_checkin",
