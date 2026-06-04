@@ -11,7 +11,16 @@ import {
   getEntitlement,
   getSubscription,
 } from "../../lib/api";
-import { Button, EmptyState, ErrorState, LoadingState } from "../ui";
+import {
+  Badge,
+  Button,
+  DashboardCard,
+  DashboardGrid,
+  DetailLineList,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+} from "../ui";
 
 function formatPeriodEnd(isoDateTime: string): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
@@ -149,8 +158,39 @@ export function BillingDashboard() {
         ? portalMutation.error.message
         : null;
 
+  const planFacts: string[] = [];
+  if (isPro && subscription.currentPeriodEnd) {
+    planFacts.push(
+      `${subscription.cancelAtPeriodEnd ? "Cancels on" : "Renews on"} ${formatPeriodEnd(
+        subscription.currentPeriodEnd,
+      )}`,
+    );
+  }
+  if (isPro && subscription.status) {
+    planFacts.push(`Status: ${subscription.status.replace(/_/g, " ")}`);
+  }
+
+  const planAction = isPro ? (
+    <Button
+      type="button"
+      variant="secondary"
+      disabled={portalMutation.isPending}
+      onClick={() => portalMutation.mutate()}
+    >
+      {portalMutation.isPending ? "Opening portal…" : "Manage subscription"}
+    </Button>
+  ) : (
+    <Button
+      type="button"
+      disabled={checkoutMutation.isPending}
+      onClick={() => checkoutMutation.mutate()}
+    >
+      {checkoutMutation.isPending ? "Redirecting…" : "Subscribe to Pro"}
+    </Button>
+  );
+
   return (
-    <div className="billing-dashboard">
+    <div className="page-content">
       {checkoutResult === "success" ? (
         <div className="notice notice-inline" role="status" aria-live="polite">
           <p>You are now subscribed to Pro. Your plan has been upgraded.</p>
@@ -163,93 +203,61 @@ export function BillingDashboard() {
         </div>
       ) : null}
 
-      <section className="billing-plan" aria-labelledby="billing-plan-heading">
-        <h2 id="billing-plan-heading" className="billing-plan__heading">
-          Current plan
-        </h2>
-
-        <dl className="billing-plan__details">
-          <dt>Plan</dt>
-          <dd>
-            <span className="billing-plan__tier">
-              {isPro ? "Pro" : "Free"}
-            </span>
-          </dd>
-
-          {isPro && subscription.currentPeriodEnd ? (
+      <DashboardGrid>
+        <DashboardCard
+          label="Subscription"
+          title="Current plan"
+          value={<Badge tone={isPro ? "success" : "neutral"}>{isPro ? "Pro" : "Free"}</Badge>}
+          footer={
             <>
-              <dt>{subscription.cancelAtPeriodEnd ? "Cancels on" : "Renews on"}</dt>
-              <dd>{formatPeriodEnd(subscription.currentPeriodEnd)}</dd>
+              {planAction}
+              {mutationError ? (
+                <p className="form-error" role="alert">
+                  {mutationError}
+                </p>
+              ) : null}
             </>
-          ) : null}
-
-          {isPro && subscription.status ? (
-            <>
-              <dt>Status</dt>
-              <dd className="billing-plan__status">{subscription.status.replace(/_/g, " ")}</dd>
-            </>
-          ) : null}
-        </dl>
+          }
+        >
+          {isPro ? (
+            <DetailLineList lines={planFacts} />
+          ) : (
+            <p className="dashboard-card__hint">
+              Upgrade to Pro for unlimited AI coaching messages every day.
+            </p>
+          )}
+        </DashboardCard>
 
         {!isPro ? (
-          <div className="billing-plan__usage" aria-label="AI message usage">
-            <h3 className="billing-plan__usage-heading">Today&apos;s AI usage</h3>
-            <dl>
-              <dt>Messages used</dt>
-              <dd>
+          <DashboardCard
+            label="Today's AI usage"
+            title="AI coaching messages"
+            value={
+              <>
                 {entitlement.aiMessagesUsedToday}
                 {entitlement.aiMessagesPerDay != null
-                  ? ` of ${entitlement.aiMessagesPerDay}`
+                  ? ` / ${entitlement.aiMessagesPerDay}`
                   : ""}
-              </dd>
-              <dt>Remaining</dt>
-              <dd>
-                {entitlement.aiMessagesRemaining != null
-                  ? entitlement.aiMessagesRemaining
-                  : "Unlimited"}
-              </dd>
-            </dl>
-          </div>
+              </>
+            }
+            hint={
+              entitlement.aiMessagesRemaining != null
+                ? `${entitlement.aiMessagesRemaining} remaining today`
+                : "Unlimited messages"
+            }
+          />
         ) : null}
-
-        <div className="billing-plan__actions">
-          {isPro ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={portalMutation.isPending}
-              onClick={() => portalMutation.mutate()}
-            >
-              {portalMutation.isPending ? "Opening portal…" : "Manage subscription"}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              disabled={checkoutMutation.isPending}
-              onClick={() => checkoutMutation.mutate()}
-            >
-              {checkoutMutation.isPending ? "Redirecting…" : "Subscribe to Pro"}
-            </Button>
-          )}
-        </div>
-
-        {mutationError ? (
-          <p className="form-error" role="alert">
-            {mutationError}
-          </p>
-        ) : null}
-      </section>
+      </DashboardGrid>
 
       {!isPro ? (
-        <section className="billing-pro-benefits" aria-labelledby="billing-pro-heading">
-          <h2 id="billing-pro-heading" className="billing-pro-benefits__heading">
-            Pro benefits
-          </h2>
-          <ul className="billing-pro-benefits__list">
-            <li>Unlimited AI coaching messages per day</li>
-            <li>Priority coaching responses</li>
-          </ul>
-        </section>
+        <DashboardCard label="Pro" title="Pro benefits">
+          <DetailLineList
+            lines={[
+              "Unlimited AI coaching messages per day",
+              "Priority coaching responses",
+            ]}
+          />
+        </DashboardCard>
       ) : null}
     </div>
   );
