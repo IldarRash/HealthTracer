@@ -1,13 +1,13 @@
 export const authAppearance = {
   variables: {
-    colorPrimary: "#0d9488",
-    colorText: "#111827",
-    colorTextSecondary: "#5c5c58",
+    colorPrimary: "#19c37d",
+    colorText: "#0e0e0d",
+    colorTextSecondary: "#76766f",
     colorBackground: "#ffffff",
-    colorInputBackground: "#f7f7f5",
-    colorInputText: "#111827",
+    colorInputBackground: "#f9f9f8",
+    colorInputText: "#0e0e0d",
     borderRadius: "1rem",
-    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+    fontFamily: '"Helvetica Neue", Helvetica, "Segoe UI", system-ui, -apple-system, sans-serif',
   },
   elements: {
     rootBox: "auth-clerk-root",
