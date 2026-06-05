@@ -20,7 +20,7 @@ const supersededProposal = aiProposalSchema.parse({
   proposedChanges: {
     title: "Strength base",
     summary: "Three-day split with compound lifts.",
-    days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+    days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
   },
   status: "superseded",
   validationStatus: "valid",

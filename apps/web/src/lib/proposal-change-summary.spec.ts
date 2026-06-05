@@ -14,7 +14,7 @@ describe("summarizeProposalChanges", () => {
           {
             weekday: "monday",
             focus: "Recovery + mobility",
-            exercises: ["Easy walk", "Hip mobility"],
+            exercises: [{ name: "Easy walk" }, { name: "Hip mobility" }],
           },
         ],
         notes: [],
