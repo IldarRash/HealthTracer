@@ -124,7 +124,7 @@ When changing AI/chat or attachment behavior, **prefer editing repo config + add
 
 ## Refactoring
 
-When refactoring, **remove the superseded path** — dead files, exports, obsolete tests, stale config keys, duplicate abstractions — in the same change. Don't layer a new path while leaving the old one. If legacy must stay (rollout, persisted data, public contract), mark it as compatibility code and state the removal condition. Call out any remaining legacy by name in your final summary.
+When refactoring, **remove the superseded path** — dead files, exports, obsolete tests, stale config keys, duplicate abstractions — in the same change. Don't layer a new path while leaving the old one. **Pre-launch default is to delete, not preserve:** this is a new startup with no live users and a disposable database, so backward-compat (old persisted shapes, deprecated-but-kept enums, dual code paths, "read old shape" parsers) is **not** a reason to keep old code — remove it. Only keep a legacy path when removal would break a still-needed capability; then mark it as compatibility code and state the removal condition. Call out any remaining legacy by name in your final summary. See `.claude/rules/refactor-cleanup.md`.
 
 ## Git & deployment
 
