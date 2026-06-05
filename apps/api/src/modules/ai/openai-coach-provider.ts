@@ -97,7 +97,8 @@ export class OpenAiCoachProvider implements CoachAiProvider {
   }
 
   // ---------------------------------------------------------------------------
-  // Phase 2 — parallel-domain pipeline methods (dark; not called by orchestrator yet)
+  // Parallel-domain pipeline methods — live via the fan-out path
+  // (RouterLlm → parallel domain LLMs → DecisionMaker).
   // ---------------------------------------------------------------------------
 
   async generateRouterDecision(request: RouterDecisionRequest): Promise<RouterDecisionOutputInput> {

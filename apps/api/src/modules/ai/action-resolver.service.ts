@@ -17,7 +17,7 @@ import { Injectable } from "@nestjs/common";
 import { PLAIN_REPLY_ACTION_VARIANT_ID } from "./action-variant-catalog.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
 
-/** Reserved for future coach payloads; Phase 2 never executes these. */
+/** Direct mutation actions are never executed — the pipeline is proposal-only; these are ignored. */
 export type CoachDirectActionAttempt = {
   type: string;
   payload?: unknown;
@@ -154,7 +154,7 @@ export class ActionResolverService {
   }
 
   resolveProposalOnlyOutput(input: ActionResolverResolveInput): AiStructuredOutput {
-    // Phase 2: direct mutation actions are deferred; any supplied directActions are ignored.
+    // Pipeline is proposal-only: direct mutation actions are never executed; ignore any supplied directActions.
     void input.directActions;
 
     return {
