@@ -2,6 +2,7 @@ import type { CoachAiProvider } from "@health/ai";
 import { validateReplySafety } from "@health/ai";
 import type {
   AgentContextPacket,
+  AgentFanOutDiagnostics,
   AgentIntent,
   AgentTurnCapabilityPresentation,
   AgentTurnMetadata,
@@ -21,7 +22,7 @@ import {
   isDeterministicResponseModeExecutorMode,
   resolveResponseModeExecutorLoopPolicy,
 } from "@health/types";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { CoachingContextService } from "../coaching-context/coaching-context.service.js";
 import { ContextCompressionService } from "../coaching-context/context-compression.service.js";
@@ -32,6 +33,7 @@ import { ActionVariantCatalogService } from "./action-variant-catalog.service.js
 import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import { createCoachAiProvider, resolveAiCoachProviderMode } from "./coach-provider.factory.js";
 import { DecisionMakerExecutorService } from "./decision-maker-executor.service.js";
+import type { DecisionMakerResult } from "./decision-maker-executor.service.js";
 import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import type { DomainLlmExecutorResult } from "./domain-llm-executor.service.js";
 import { MessagePreprocessorService } from "./message-preprocessor.service.js";
@@ -101,6 +103,7 @@ const DETERMINISTIC_PRE_AI_GATE_REPLY =
 
 @Injectable()
 export class AgentOrchestratorService {
+  private readonly logger = new Logger(AgentOrchestratorService.name);
   private readonly provider: CoachAiProvider;
 
   constructor(
@@ -403,6 +406,38 @@ export class AgentOrchestratorService {
       primaryCoachingContext,
     );
 
+    // Structured log: router stage done (counts/ids/flags only — no message text).
+    if (routerResult !== undefined) {
+      this.logger.log({
+        stage: "router_done",
+        source: routerResult.source,
+        confidence: routerResult.output.confidence,
+        selectedDomainCount: routerResult.output.selectedDomains.length,
+        selectedDomains: routerResult.output.selectedDomains.map((d) => ({
+          domain: d.domain,
+          confidence: d.confidence,
+        })),
+        validationErrorCount: routerResult.validationErrors.length,
+      });
+    }
+
+    // Structured log: each domain done (counts/ids/flags only — no health content).
+    for (const { domain, result } of domainResults) {
+      this.logger.log({
+        stage: "domain_done",
+        domain,
+        degraded: result.degraded,
+        degradedReasonCount: result.degradedReasons.length,
+        candidateProposalCount: result.domainAnswer.candidateProposals.length,
+        loopIterations: result.loopIterations,
+        toolsInvoked: result.toolsInvoked,
+        hasWorkoutCalorieEstimate:
+          result.domainAnswer.workoutCalorieEstimate !== undefined,
+        hasWorkoutCaloriePerHourRate:
+          result.domainAnswer.workoutCaloriePerHourRate !== undefined,
+      });
+    }
+
     const degradedDomains = domainResults
       .filter((r) => r.result.degraded)
       .map((r) => r.domain);
@@ -428,6 +463,16 @@ export class AgentOrchestratorService {
       safetyFlags,
       safetyConstraints,
       provider: this.provider,
+    });
+
+    // Structured log: decision stage done (counts/ids/flags only — no text/health content).
+    this.logger.log({
+      stage: "decision_done",
+      degraded: decisionResult.degraded,
+      degradedReasonCount: decisionResult.degradedReasons.length,
+      selectedAction: decisionResult.output.selectedAction ?? null,
+      proposalCount: decisionResult.output.proposals.length,
+      consentRequired: decisionResult.output.consentRequired,
     });
 
     // Extract the workout domain calorie estimate and rate from the fan-out results.
@@ -468,6 +513,22 @@ export class AgentOrchestratorService {
       ? { reply: FAN_OUT_SAFE_FALLBACK_REPLY, proposals: [] }
       : { reply: resolved.reply, proposals: resolved.proposals };
 
+    // droppedByAllowlist = proposals the decision-maker emitted but ActionResolver filtered out.
+    // Clamped >=0 in case of unexpected shape mismatch.
+    const decisionProposalCount = decisionResult.output.proposals.length;
+    const resolvedProposalCount = resolved.proposals.length;
+    const droppedByAllowlist = Math.max(0, decisionProposalCount - resolvedProposalCount);
+    const finalProposalCount = finalOutput.proposals.length;
+
+    // Structured log: resolution stage done (counts/flags only — no text/health content).
+    this.logger.log({
+      stage: "resolution_done",
+      resolvedProposalCount,
+      droppedByAllowlist,
+      replyBlocked,
+      finalProposalCount,
+    });
+
     const parseErrors: string[] = [];
 
     if (degradedDomains.length > 0) {
@@ -498,8 +559,11 @@ export class AgentOrchestratorService {
           capabilityTurnMetadata,
           routerResult,
           domainResults,
-          mergedOutput: finalOutput,
-          decisionDegraded: decisionResult.degraded,
+          decisionResult,
+          resolvedProposalCount,
+          droppedByAllowlist,
+          replyBlocked,
+          finalProposalCount,
         }),
         safety: {
           status: safetyStatus,
@@ -701,6 +765,11 @@ function toAgentTurnCapabilityPresentation(
  * was skipped). In those cases, the router-derived fields default to
  * `ran: false` / `llmRouterInvoked: false` so metadata parity is preserved
  * without fabricating router data (R3).
+ *
+ * The `fanOut` diagnostics block records per-stage structural counts/ids/flags only
+ * (never message text or health content — safety floor). The same data is used for
+ * structured per-stage logs by the caller; this function builds it once so both
+ * the persisted metadata and logs share a single derivation.
  */
 function buildFanOutTurnMetadata(params: {
   plan: DomainFanoutPlan;
@@ -709,10 +778,29 @@ function buildFanOutTurnMetadata(params: {
   /** undefined for revision/explainer turns where the router was skipped */
   routerResult: RouterLlmResult | undefined;
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>;
-  mergedOutput: AiStructuredOutput;
-  decisionDegraded?: boolean;
+  /** The full decision-maker result (output + degraded flag). */
+  decisionResult: DecisionMakerResult;
+  /** Proposal count after ActionResolver (union-allowlist filtering applied). */
+  resolvedProposalCount: number;
+  /** Proposals emitted by decision-maker but dropped by ActionResolver allowlist. */
+  droppedByAllowlist: number;
+  /** True when reply safety validation blocked the reply. */
+  replyBlocked: boolean;
+  /** Final proposal count after reply-block zeroing. */
+  finalProposalCount: number;
 }): AgentTurnMetadata {
-  const { plan, contextPacket, capabilityTurnMetadata, routerResult, domainResults } = params;
+  const {
+    plan,
+    contextPacket,
+    capabilityTurnMetadata,
+    routerResult,
+    domainResults,
+    decisionResult,
+    resolvedProposalCount,
+    droppedByAllowlist,
+    replyBlocked,
+    finalProposalCount,
+  } = params;
   const { route } = plan;
 
   const providerMode = resolveAiCoachProviderMode();
@@ -740,6 +828,49 @@ function buildFanOutTurnMetadata(params: {
         ...(degradedDomains.length > 0 ? { blockedFallback: false } : {}),
       }
     : { ran: false };
+
+  // ---------------------------------------------------------------------------
+  // Build fan-out diagnostics (structural fields only — no text/health content).
+  // Reused in persisted metadata; caller emits per-stage logs from the same data.
+  // ---------------------------------------------------------------------------
+  const fanOut: AgentFanOutDiagnostics = {
+    router: routerResult !== undefined
+      ? {
+          ran: true,
+          source: routerResult.source,
+          confidence: routerResult.output.confidence,
+          selectedDomains: routerResult.output.selectedDomains.map((d) => ({
+            domain: d.domain,
+            confidence: d.confidence,
+          })),
+          blockedFallback: degradedDomains.length === domainResults.length && domainResults.length > 0,
+        }
+      : {
+          ran: false,
+          selectedDomains: [],
+        },
+    domains: domainResults.map(({ domain, result }) => ({
+      domain,
+      degraded: result.degraded,
+      degradedReasons: result.degradedReasons,
+      candidateProposalCount: result.domainAnswer.candidateProposals.length,
+      loopIterations: result.loopIterations,
+      toolsInvoked: result.toolsInvoked,
+      hasWorkoutCalorieEstimate: result.domainAnswer.workoutCalorieEstimate !== undefined,
+    })),
+    decision: {
+      degraded: decisionResult.degraded,
+      selectedAction: decisionResult.output.selectedAction ?? null,
+      proposalCount: decisionResult.output.proposals.length,
+      consentRequired: decisionResult.output.consentRequired,
+    },
+    resolution: {
+      resolvedProposalCount,
+      droppedByAllowlist,
+      replyBlocked,
+      finalProposalCount,
+    },
+  };
 
   return {
     provider: providerMode,
@@ -774,6 +905,7 @@ function buildFanOutTurnMetadata(params: {
       delegatedToPreAiGate: false,
       preAiGateDelegationMissed: false,
     },
+    fanOut,
     safety: {
       status: degradedDomains.length === domainResults.length ? "parse_failed" : "passed",
       blockedReasons: [],

@@ -103,18 +103,16 @@ and must be read before changing the AI/chat subsystem.
 - `docs/architecture/overview.md`
 - `docs/architecture/product-surface-architecture.md`
 - `docs/architecture/domain-model.md`
-- `docs/architecture/ai-update-flow.md`
 - `docs/architecture/ai-behavior-config.md`
 - `docs/architecture/database.md`
 - `docs/architecture/auth.md`
-- `docs/architecture/foundation-slice.md`
 - `docs/architecture/mcp.md`
 - `docs/product/feature-roadmap.md`
 
 ## Learned Workspace Facts
 
 - AI/chat behavior is files-first and repo-backed via `packages/ai-behavior/config/ai-behavior.json`, `packages/ai-behavior/config/attachments.json`, `packages/ai-behavior/config/domains/*.yml`, and the `@health/ai-behavior` loaders; there is no DB overlay.
-- `ai-behavior.json` owns chat/LLM behavior; `attachments.json` owns attachment consent, categories, retention, and plumbing stage order (no classification/recognition); per-domain `domains/*.yml` own each domain's `intents[]/tools[]/signals[]/prompts[]`.
+- `ai-behavior.json` owns chat/LLM behavior and live fan-out `promptTemplates`; `attachments.json` owns attachment consent, categories, retention, and plumbing stage order (no classification/recognition); per-domain `domains/*.yml` own each domain's `intents[]/tools[]/signals[]/prompts[]`, but YAML `prompts[]` are not directly injected into `OpenAiCoachProvider.generateDomainStep` today.
 - Domain YAML can only **narrow** the capability-catalog allowlists, never widen them; the loader is fail-closed per file and drops anything outside the catalog.
 - Attachments are context-only plumbing stages (validate→link→apply disposition); there is no recognition/classification machinery — the multimodal router and domain LLMs read attachment content directly.
 - RouterLlm runs for eligible turns (revision/explainer excluded) before SystemPlanner and returns strictly typed, read-only domain selections (≤3 domains); it never emits replies or proposals.
@@ -126,4 +124,4 @@ and must be read before changing the AI/chat subsystem.
 - Context budgets deny documents and sensitive health context by default, re-applied to every per-domain packet; config cannot enable those contexts because code-level safety floors remain authoritative.
 - Preserve chat safety invariants in code when changing orchestration: schemas, fail-closed config loading, safety floors, proposal validation, permissions, consent, no raw documents, no direct LLM mutation, executor guards, crisis boundaries, and provider isolation.
 - Runtime verification for the unified AI pipeline: AppModule/API startup OK, config sources are `file`, health/ready pass, and authenticated chat E2E requires a Clerk bearer token.
-- Medical attachments are consent-gated at upload by the user-declared category/document-type + MIME (no classifier); content is context-only and a save is a consent-gated proposal — never an auto-persisted `health_document`.
+- Image attachments, including photos of medical documents, are currently sent to the LLM as context without an upfront upload consent gate; the consent-gated medical special-save proposal is deferred, and no attachment path may auto-persist a `health_document`.

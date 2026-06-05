@@ -100,7 +100,9 @@ Pending proposals must not change active plan state. Rejected proposals must rem
 
 ## Attachment And Incident Pattern
 
-Message attachments and nutrition incidents are structured records, but recognition itself is not a direct state mutation.
+Message attachments and nutrition incidents are structured records. Attachments are
+context-only image records for chat turns; nutrition incidents are written only through
+accepted proposals.
 
 ```text
 chat_attachments
@@ -108,11 +110,11 @@ chat_attachments
   user_id
   thread_id
   message_id
-  category -- unclassified, food_photo, medical_document, workout_attachment
+  category -- currently unclassified at runtime
   status
   mime_type
   storage_key
-  recognition
+  recognition -- legacy readable field, not a runtime branch
   retention_policy
   expires_at
 
@@ -126,7 +128,11 @@ nutrition_incidents
   provenance
 ```
 
-Chat attachments are ownership scoped and may expire. Food and workout/training recognition can create proposal candidates; medical document attachments follow document consent and review rules. Nutrition incidents are written only after an accepted `log_nutrition_incident` proposal.
+Chat attachments are ownership scoped and may expire. They do not run a separate
+food/workout/medical recognition pipeline and do not create proposal candidates outside
+the unified LLM proposal path. Medical document save from an image is deferred; no
+attachment path may auto-create `health_documents`. Nutrition incidents are written only
+after an accepted `log_nutrition_incident` proposal.
 
 ## Migration Rules
 

@@ -532,6 +532,64 @@ export type AgentUnifiedTurnDecisionMetadata = z.infer<
   typeof agentUnifiedTurnDecisionMetadataSchema
 >;
 
+// ---------------------------------------------------------------------------
+// Fan-out diagnostics — per-stage observability for the multi-domain pipeline.
+// All blocks are additive/optional so existing persisted metadata stays valid.
+// Structural fields only (counts, ids, flags) — never message text or health
+// content (safety floor). The three-domain enum is defined locally here to
+// avoid a circular import with router-decision.ts (which imports this module).
+// ---------------------------------------------------------------------------
+const fanOutDomainEnumSchema = z.enum(["workout", "nutrition", "health"]);
+
+export const agentFanOutRouterDiagnosticsSchema = z.object({
+  ran: z.boolean(),
+  source: z.enum(["llm", "fallback"]).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  selectedDomains: z
+    .array(
+      z.object({
+        domain: fanOutDomainEnumSchema,
+        confidence: z.number().min(0).max(1),
+      }),
+    )
+    .max(3)
+    .default([]),
+  blockedFallback: z.boolean().optional(),
+});
+
+export const agentFanOutDomainDiagnosticsSchema = z.object({
+  domain: fanOutDomainEnumSchema,
+  degraded: z.boolean(),
+  degradedReasons: z.array(z.string().min(1).max(240)).max(10).default([]),
+  candidateProposalCount: z.number().int().min(0).max(5),
+  loopIterations: z.number().int().min(0).max(20),
+  toolsInvoked: z.array(agentToolNameSchema).max(15).default([]),
+  hasWorkoutCalorieEstimate: z.boolean().default(false),
+});
+
+export const agentFanOutDecisionDiagnosticsSchema = z.object({
+  degraded: z.boolean(),
+  selectedAction: z.string().min(1).max(80).nullable().default(null),
+  proposalCount: z.number().int().min(0).max(5),
+  consentRequired: z.boolean().default(false),
+});
+
+export const agentFanOutResolutionDiagnosticsSchema = z.object({
+  resolvedProposalCount: z.number().int().min(0).max(5),
+  droppedByAllowlist: z.number().int().min(0).max(10),
+  replyBlocked: z.boolean(),
+  finalProposalCount: z.number().int().min(0).max(5),
+});
+
+export const agentFanOutDiagnosticsSchema = z.object({
+  router: agentFanOutRouterDiagnosticsSchema.optional(),
+  domains: z.array(agentFanOutDomainDiagnosticsSchema).max(3).default([]),
+  decision: agentFanOutDecisionDiagnosticsSchema.optional(),
+  resolution: agentFanOutResolutionDiagnosticsSchema.optional(),
+});
+
+export type AgentFanOutDiagnostics = z.infer<typeof agentFanOutDiagnosticsSchema>;
+
 export const agentTurnMetadataSchema = z.object({
   provider: z.literal("openai"),
   intent: agentIntentSchema,
@@ -576,6 +634,8 @@ export const agentTurnMetadataSchema = z.object({
     })
     .optional(),
   missingContextNotes: z.array(z.string().min(1).max(240)).max(5).default([]),
+  /** Per-stage fan-out diagnostics (router/domains/decision/resolution). Optional/additive. */
+  fanOut: agentFanOutDiagnosticsSchema.optional(),
 });
 
 export type AgentTurnMetadata = z.infer<typeof agentTurnMetadataSchema>;

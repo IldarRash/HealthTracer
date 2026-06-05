@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentContextPacketSchema,
+  agentFanOutDiagnosticsSchema,
   agentRoutingMethodSchema,
   agentToolCallRequestSchema,
   agentToolCallResultSchema,
@@ -292,5 +293,191 @@ describe("agent context contracts", () => {
         );
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W4 — fan-out diagnostics block (Workstream 1)
+// ---------------------------------------------------------------------------
+
+describe("agentFanOutDiagnosticsSchema (W1 — optional fan-out block)", () => {
+  it("parses a minimal fanOut block with only defaults", () => {
+    const parsed = agentFanOutDiagnosticsSchema.parse({});
+    expect(parsed.domains).toEqual([]);
+    expect(parsed.router).toBeUndefined();
+    expect(parsed.decision).toBeUndefined();
+    expect(parsed.resolution).toBeUndefined();
+  });
+
+  it("parses a full router + domains + decision + resolution block", () => {
+    const parsed = agentFanOutDiagnosticsSchema.parse({
+      router: {
+        ran: true,
+        source: "llm",
+        confidence: 0.93,
+        selectedDomains: [
+          { domain: "workout", confidence: 0.93 },
+        ],
+        blockedFallback: false,
+      },
+      domains: [
+        {
+          domain: "workout",
+          degraded: false,
+          degradedReasons: [],
+          candidateProposalCount: 1,
+          loopIterations: 1,
+          toolsInvoked: [],
+          hasWorkoutCalorieEstimate: true,
+        },
+      ],
+      decision: {
+        degraded: false,
+        selectedAction: "create_workout_plan",
+        proposalCount: 1,
+        consentRequired: false,
+      },
+      resolution: {
+        resolvedProposalCount: 1,
+        droppedByAllowlist: 0,
+        replyBlocked: false,
+        finalProposalCount: 1,
+      },
+    });
+
+    expect(parsed.router?.ran).toBe(true);
+    expect(parsed.router?.source).toBe("llm");
+    expect(parsed.router?.confidence).toBe(0.93);
+    expect(parsed.router?.selectedDomains).toHaveLength(1);
+    expect(parsed.domains).toHaveLength(1);
+    expect(parsed.domains[0]?.candidateProposalCount).toBe(1);
+    expect(parsed.domains[0]?.hasWorkoutCalorieEstimate).toBe(true);
+    expect(parsed.decision?.selectedAction).toBe("create_workout_plan");
+    expect(parsed.resolution?.finalProposalCount).toBe(1);
+  });
+
+  it("agentTurnMetadataSchema accepts a fanOut block (W1 additive extension)", () => {
+    const metadata = agentTurnMetadataSchema.parse({
+      provider: "openai",
+      intent: "adjust_workout",
+      purpose: "workout_adaptation",
+      depth: "medium",
+      timeRange: "14d",
+      safety: { status: "passed" },
+      fanOut: {
+        router: {
+          ran: true,
+          source: "llm",
+          confidence: 0.91,
+          selectedDomains: [{ domain: "workout", confidence: 0.91 }],
+        },
+        domains: [
+          {
+            domain: "workout",
+            degraded: false,
+            degradedReasons: [],
+            candidateProposalCount: 1,
+            loopIterations: 1,
+            toolsInvoked: ["getUserContextSlice"],
+            hasWorkoutCalorieEstimate: false,
+          },
+        ],
+        decision: {
+          degraded: false,
+          selectedAction: "create_workout_plan",
+          proposalCount: 1,
+          consentRequired: false,
+        },
+        resolution: {
+          resolvedProposalCount: 1,
+          droppedByAllowlist: 0,
+          replyBlocked: false,
+          finalProposalCount: 1,
+        },
+      },
+    });
+
+    expect(metadata.fanOut).toBeDefined();
+    expect(metadata.fanOut?.router?.ran).toBe(true);
+    expect(metadata.fanOut?.domains).toHaveLength(1);
+    expect(metadata.fanOut?.decision?.selectedAction).toBe("create_workout_plan");
+  });
+
+  it("agentTurnMetadataSchema accepts metadata WITHOUT fanOut (back-compat)", () => {
+    // Existing metadata persisted before W1 must still parse correctly.
+    const metadata = agentTurnMetadataSchema.parse({
+      provider: "openai",
+      intent: "general",
+      purpose: "general_chat",
+      depth: "small",
+      timeRange: "7d",
+      safety: { status: "passed" },
+      // fanOut field is absent — must not fail validation
+    });
+
+    expect(metadata.fanOut).toBeUndefined();
+    expect(metadata.intent).toBe("general");
+  });
+
+  it("fanOut block with degraded domain and null selectedAction represents a fallback turn", () => {
+    const parsed = agentFanOutDiagnosticsSchema.parse({
+      router: {
+        ran: true,
+        source: "llm",
+        confidence: 0.6,
+        selectedDomains: [],
+      },
+      domains: [],
+      decision: {
+        degraded: true,
+        selectedAction: null,
+        proposalCount: 0,
+        consentRequired: false,
+      },
+      resolution: {
+        resolvedProposalCount: 0,
+        droppedByAllowlist: 0,
+        replyBlocked: false,
+        finalProposalCount: 0,
+      },
+    });
+
+    expect(parsed.decision?.degraded).toBe(true);
+    expect(parsed.decision?.selectedAction).toBeNull();
+    expect(parsed.resolution?.finalProposalCount).toBe(0);
+  });
+
+  it("fanOut domains block rejects unknown domain values", () => {
+    const result = agentFanOutDiagnosticsSchema.safeParse({
+      domains: [
+        {
+          domain: "medical", // not a valid RouterDomain
+          degraded: false,
+          degradedReasons: [],
+          candidateProposalCount: 0,
+          loopIterations: 1,
+          toolsInvoked: [],
+          hasWorkoutCalorieEstimate: false,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("fanOut domains block rejects unknown tool names", () => {
+    const result = agentFanOutDiagnosticsSchema.safeParse({
+      domains: [
+        {
+          domain: "workout",
+          degraded: false,
+          degradedReasons: [],
+          candidateProposalCount: 0,
+          loopIterations: 1,
+          toolsInvoked: ["deleteUserData"], // not a valid AgentToolName
+          hasWorkoutCalorieEstimate: false,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
   });
 });

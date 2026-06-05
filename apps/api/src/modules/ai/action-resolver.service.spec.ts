@@ -159,6 +159,96 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
   });
 
 
+  // -------------------------------------------------------------------------
+  // W4 — happy-path: create_workout_plan candidate survives to non-empty proposals[]
+  // This is the missing end-to-end happy path the explore agents flagged.
+  // -------------------------------------------------------------------------
+
+  describe("W4 — happy-path: create_workout_plan workout candidate survives to non-empty proposals[]", () => {
+    const CREATE_WORKOUT_PROPOSAL = {
+      intent: "create_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "3-Day Strength Plan",
+      reason: "User requested a new strength training program.",
+      proposedChanges: {
+        title: "3-Day Strength Plan",
+        summary: "Full-body strength program with progressive overload.",
+        days: [
+          {
+            weekday: "monday" as const,
+            focus: "Upper body push",
+            exercises: [{ name: "Bench Press", sets: 4, reps: "8-10" }],
+          },
+          {
+            weekday: "wednesday" as const,
+            focus: "Lower body",
+            exercises: [{ name: "Squat", sets: 4, reps: "8" }],
+          },
+        ],
+        notes: [],
+      },
+    };
+
+    it("create_workout_plan candidate + matching allowlist + selectedAction produces non-empty proposals[]", () => {
+      // This is the core end-to-end happy path: workout domain emits a create_workout_plan
+      // candidate, the decision-maker selects create_workout_plan, and ActionResolver
+      // must NOT drop it. The result must have proposals.length >= 1.
+      const result = resolveDecision(
+        {
+          selectedAction: "create_workout_plan",
+          proposals: [CREATE_WORKOUT_PROPOSAL],
+          reply: "Here is your 3-day strength plan!",
+        },
+        [makeDomainEntry("workout", ["create_workout_plan"])],
+      );
+
+      // The key invariant: proposals must NOT be empty.
+      expect(result.proposals).toHaveLength(1);
+      expect(result.proposals[0]?.intent).toBe("create_workout_plan");
+      expect(result.proposals[0]?.targetDomain).toBe("workout");
+      expect(result.reply).toContain("strength plan");
+    });
+
+    it("create_workout_plan proposal is filtered when it is NOT in the domain allowlist", () => {
+      // Even if the decision-maker selects it, if the planner did NOT include
+      // create_workout_plan in allowedProposalIntents, it must be dropped.
+      const result = resolveDecision(
+        {
+          selectedAction: "create_workout_plan",
+          proposals: [CREATE_WORKOUT_PROPOSAL],
+        },
+        // allowlist is empty — no workout proposal intents allowed
+        [makeDomainEntry("workout", [])],
+      );
+
+      expect(result.proposals).toHaveLength(0);
+    });
+
+    it("workoutCalorieEstimate from the trusted workout LLM source is stamped onto the create_workout_plan proposal", () => {
+      // End-to-end: trusted calorie estimate flows from the workout domain answer
+      // through ActionResolver into the final proposal's proposedChanges.
+      const result = service.resolveFinalDecisionOutput({
+        finalDecision: {
+          reply: "Here is your strength plan.",
+          selectedAction: "create_workout_plan",
+          proposals: [CREATE_WORKOUT_PROPOSAL],
+          consentRequired: false,
+        },
+        selectedDomains: [makeDomainEntry("workout", ["create_workout_plan"])],
+        workoutCalorieEstimate: 420,
+        workoutCaloriePerHourRate: 300,
+      });
+
+      expect(result.proposals).toHaveLength(1);
+      const changes = result.proposals[0]?.proposedChanges as Record<string, unknown>;
+      // Trusted calorie estimate must be stamped
+      expect(changes["estimatedSessionCalorieBurn"]).toBe(420);
+      expect(changes["calorieEstimateProvenance"]).toBe("workout_llm");
+      // Trusted rate must be stamped
+      expect(changes["caloriePerHourRate"]).toBe(300);
+    });
+  });
+
   describe("mutation safety", () => {
     it("does not mutate the input proposals array", () => {
       const proposals = [WORKOUT_PROPOSAL, NUTRITION_PROPOSAL];

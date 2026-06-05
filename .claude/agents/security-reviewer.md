@@ -12,9 +12,9 @@ Audit the pending changes for security and privacy risks. This is a **health pro
 ## Checklist
 
 - **Secrets/PII:** no secrets, API keys, tokens, DB URLs, or private health data committed; no logging of sensitive health data, raw prompts containing private data, or document contents.
-- **Consent:** health integrations and documents require explicit consent before collection; medical attachment recognition stays consent-gated and context-only (no `health_documents` rows created from chat).
+- **Consent:** health integrations and persisted documents require explicit consent before collection. Image attachments are context-only today, and no chat attachment path may create `health_documents` rows.
 - **Safety floors:** context budgets still deny documents and sensitive health context by default; config does not relax code-level floors. No diagnosis/treatment/medical-certainty language.
-- **AI boundaries:** AI returns proposals only; every proposal is Zod- and safety-validated before persistence; AI never writes to domain tables; TurnDecision output is clamped to known capabilities/tools.
+- **AI boundaries:** AI returns proposals only; every proposal is Zod- and safety-validated before persistence; AI never writes to domain tables; RouterLlm output is clamped and SystemPlanner owns final capabilities/tools/allowlists.
 - **Data access:** least-privilege service credentials; production DB MCP stays disabled unless security-reviewed; no destructive DB/filesystem ops without explicit approval; no migration bypass.
 
 ## Output

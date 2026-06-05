@@ -40,6 +40,37 @@ flowchart LR
   Nutrition --> Recipes
 ```
 
+## User Flow
+
+The user mostly sees these surfaces; the system keeps detailed structured state behind
+them. Change requests flow through Chat as typed proposals, and every surface can link
+back into Chat to discuss or request a change:
+
+```mermaid
+flowchart TD
+  Chat["Chat — change and explain"] --> Proposal["Typed proposal"]
+  Proposal --> Approval["User approves or rejects"]
+  Approval --> State["Structured state"]
+
+  State --> Today["Today — do today's work"]
+  State --> Longevity["Longevity — see weekly patterns"]
+  State --> Profile["Profile — manage context"]
+  State --> Training["Training — read-only weekly plan"]
+  State --> Nutrition["Nutrition — read-only weekly plan"]
+
+  Today --> Chat
+  Longevity --> Chat
+  Training --> Chat
+  Nutrition --> Chat
+```
+
+Navigation rules: Chat is the dominant header action and the preferred default landing
+route after authentication. Today, Longevity, and Profile are the other primary tabs.
+Training and Nutrition are not primary tabs but must stay easy to open from Today,
+Longevity, and proposal cards. Metrics, Documents, Goals, Recipes, Progress, and developer
+tools are never primary tabs. Mobile may keep placeholders but should follow the same
+hierarchy when brought to parity.
+
 ## Primary Surfaces
 
 - **Chat** is the dominant coaching surface. It is the default place to ask questions, attach food/document/workout context, receive explanations, review typed proposals, and approve or reject changes.
@@ -66,7 +97,7 @@ Users do not manually edit active workout or nutrition plans on these screens. P
 ## State And Mutation Rules
 
 - Chat history is never the source of truth for plans, goals, metrics, wellbeing, or progress.
-- Chat attachments are interaction input. Attachment classification and extraction can create typed proposal cards, but structured state changes still require domain validation and user confirmation.
+- Chat attachments are interaction input. Image attachments provide context to the unified LLM pipeline; there is no separate attachment classification/extraction proposal path.
 - Structured state drives every primary and secondary surface.
 - AI can explain, summarize, and propose changes, but cannot silently mutate domain tables.
 - Workout and nutrition plan changes create revisions; they are not edited in place from read-only plan screens.
@@ -99,6 +130,18 @@ Longevity answers "how am I doing overall?" It should aggregate:
 - static prompts or deep links into Chat.
 
 Longevity must not expose diagnosis, treatment guidance, biological age, clinical risk scores, or vendor readiness scores as product truth.
+
+## Feature Placement
+
+- **Mental wellbeing check-ins:** capture on Today; trends on Longevity; privacy and
+  settings on Profile.
+- **Recovery / readiness:** daily focus on Today; weekly trends on Longevity; no exposed
+  clinical score.
+- **Habit system:** materialize daily habits into Today; consistency appears on Longevity.
+- **Weekly review:** initiated from Chat or Longevity; proposals reviewed in Chat.
+- **Medical / lab correlations:** consent and uploads in Profile; safe insights in Chat
+  and Longevity only when bounded and consented.
+- **Recipes:** backend support for Nutrition, not a standalone user-facing tab.
 
 ## Implementation Implications
 

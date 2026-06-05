@@ -11,8 +11,8 @@ Keep this repo's documentation accurate against the actual code. Documentation t
 
 ## What this project documents
 
-- `docs/architecture/` — `overview.md`, `domain-model.md`, `database.md`, `auth.md`, `ai-update-flow.md`, `ai-behavior-config.md`, `product-surface-architecture.md`, and the canonical **`llm-pipeline.md`** (file-by-file map of the chat/AI pipeline).
-- `docs/product/` — `feature-roadmap.md`, `ux-information-architecture.md`, and feature briefs in `docs/product/features/<slug>.md`.
+- `docs/architecture/` — `overview.md`, `domain-model.md`, `database.md`, `auth.md`, `ai-behavior-config.md`, `product-surface-architecture.md`, and the canonical **`llm-pipeline.md`** (file-by-file map of the chat/AI pipeline, incl. proposal-lifecycle overview and the diagnosis/troubleshooting checklist).
+- `docs/product/` — `feature-roadmap.md` and feature briefs in `docs/product/features/<slug>.md`.
 - `docs/architecture/adr/` — architecture decision records.
 - `README.md` (setup/commands), `AGENTS.md` (agent workflow + "Learned Workspace Facts").
 
