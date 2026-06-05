@@ -16,7 +16,6 @@ import { DecisionMakerExecutorService } from "./decision-maker-executor.service.
 import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
 import { ResponseModeExecutorService } from "./response-mode-executor.service.js";
-import { StubContextCompressionProvider } from "../coaching-context/stub-context-compression.provider.js";
 import { createAiPolicyTestStack } from "./test-ai-behavior-fixtures.js";
 import * as coachProviderFactory from "./coach-provider.factory.js";
 import {
@@ -1377,7 +1376,7 @@ describe("AgentOrchestratorService provider failures", () => {
 });
 
 describe("AgentOrchestratorService compression review flow", () => {
-  it("includes typed compression summary in coach context for monthly review turns", async () => {
+  it("passes typed compression summary from provider to coach context for monthly review turns", async () => {
     const contextPacket = createSlicePacket("weekly_review", "review_progress", {
       weeklyProgress: {
         weekStart: "2026-05-19",
@@ -1431,9 +1430,26 @@ describe("AgentOrchestratorService compression review flow", () => {
         createConfidentRouterResultForTests({ domain: "workout" }),
       ),
     );
+
+    // Wire a mock provider that returns a valid summary (simulates OpenAiContextCompressionProvider
+    // succeeding — the provider is injected; tests don't need a real API key).
+    const mockCompressionSummary = {
+      reviewKind: "monthly_review" as const,
+      keyFindings: ["Training volume held steady."],
+      risks: [],
+      focusAreas: ["Weekly progress"],
+      sourceRanges: [],
+      sourceRefs: [],
+      dataQuality: "sufficient" as const,
+      confidence: "medium" as const,
+    };
+    const mockProvider = {
+      compress: vi.fn().mockResolvedValue(mockCompressionSummary),
+    };
+
     const service = new AgentOrchestratorService(
       coachingContextService as never,
-      new ContextCompressionService(),
+      new ContextCompressionService(mockProvider),
       new ContextExpansionPolicyService(),
       systemPlannerService,
       createResponseModeExecutorService(agentToolRegistryService as never),
@@ -1488,7 +1504,7 @@ describe("AgentOrchestratorService compression review flow", () => {
     );
   });
 
-  it("uses stub compression fallback when the primary provider fails on review turns", async () => {
+  it("degrades to null summary when the provider fails on review turns (S2 — no second LLM call)", async () => {
     const contextPacket = createSlicePacket("weekly_review", "review_progress", {
       weeklyProgress: {
         weekStart: "2026-05-19",
@@ -1546,7 +1562,7 @@ describe("AgentOrchestratorService compression review flow", () => {
     );
     const service = new AgentOrchestratorService(
       coachingContextService as never,
-      new ContextCompressionService(failingProvider as never, new StubContextCompressionProvider()),
+      new ContextCompressionService(failingProvider as never),
       new ContextExpansionPolicyService(),
       systemPlannerService,
       createResponseModeExecutorService(agentToolRegistryService as never),
@@ -1573,23 +1589,20 @@ describe("AgentOrchestratorService compression review flow", () => {
       recentMessages: [],
     });
 
-    // Fan-out path: check domain step for compression context.
+    // Fan-out path: provider failure degrades to null summary without a second LLM call (S2).
     const domainRequest = generateDomainStep.mock.calls[0]?.[0] as {
       coachingContext: Record<string, unknown>;
     };
 
-    expect(domainRequest.coachingContext.contextCompressionSummary).toEqual(
-      expect.objectContaining({
-        reviewKind: "monthly_review",
-        keyFindings: expect.arrayContaining([expect.any(String)]),
-      }),
-    );
+    // S2: summary is null; turn still completes (fail-closed, not turn-fatal).
+    expect(domainRequest.coachingContext.contextCompressionSummary).toBeUndefined();
     expect(domainRequest.coachingContext.contextCompressionNotes).toEqual(
       expect.arrayContaining([expect.stringContaining("failed")]),
     );
+    // contextCompressionApplied should be false since summary is null.
     expect(
       (domainRequest.coachingContext.agentContext as Record<string, unknown>).contextCompressionApplied,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("does not attach compression summary for routine coaching turns", async () => {
