@@ -3,7 +3,12 @@
  * Web maps these to CSS custom properties in apps/web/app/styles.css.
  * Mobile should mirror semantic names when NativeWind tokens are added.
  *
- * Visual direction: dark/high-contrast shell, coach teal accent, metric-forward cards.
+ * Visual direction: two worlds — LIGHT (chat / profile / onboarding / billing)
+ * and DARK (today / longevity / plans). Shared metric color scale. Coach accent
+ * is now a green (#19c37d) palette, replacing the old teal scale. Surface/text/
+ * border/shadow vars are scoped by [data-theme] in CSS; tokens.ts mirrors them
+ * as dark-world defaults (legacy callers) while light-world values live in the
+ * `color.light` group.
  */
 export const tokens = {
   color: {
@@ -20,52 +25,90 @@ export const tokens = {
       800: "#1e3a8a",
       900: "#172554",
     },
-    /** Wellness coach accent — primary actions, links, metrics, focus rings. */
+    /** Wellness coach accent — primary actions, links, metrics, focus rings. Green palette. */
     coach: {
-      50: "#f0fdfa",
-      100: "#ccfbf1",
-      400: "#2dd4bf",
-      500: "#14b8a6",
-      600: "#0d9488",
-      700: "#0f766e",
+      50: "#f0fbf6",
+      100: "rgba(25,195,125,0.16)",
+      400: "#3ddc94",
+      500: "#19c37d",
+      600: "#19c37d",
+      700: "#15a76b",
+    },
+    /** Semantic metric scale — shared between light and dark worlds. */
+    metric: {
+      green: "#19c37d",
+      greenDim: "rgba(25,195,125,0.16)",
+      amber: "#f5a524",
+      amberDim: "rgba(245,165,36,0.16)",
+      red: "#f0506a",
+      redDim: "rgba(240,80,106,0.16)",
+      blue: "#3a8dff",
+      blueDim: "rgba(58,141,255,0.16)",
+      indigo: "#7b7bff",
+      indigoDim: "rgba(123,123,255,0.16)",
     },
     surface: {
-      /** App canvas — dark shell default in current web pass. */
-      app: "#0a0a0a",
-      card: "#141414",
-      muted: "#1c1c1c",
-      inset: "#111111",
-      elevated: "#1a1a1a",
+      /** App canvas — dark world default. */
+      app: "#0b0d0e",
+      card: "#131618",
+      muted: "#1a1e21",
+      inset: "#131618",
+      elevated: "#20262a",
       /** Dark nav strip / mobile tab bar. */
-      nav: "#121212",
+      nav: "#0e1113",
       navHover: "#1e1e1e",
       navActive: "#262626",
       /** Profile hero anchor card. */
-      heroDark: "#1a1a1a",
-      /** Light content canvas tokens — for routes that migrate to light panels. */
-      content: "#f7f7f5",
+      heroDark: "#131618",
+      /** Light content canvas tokens — for routes that use light theme. */
+      content: "#f9f9f8",
       contentElevated: "#ffffff",
-      contentMuted: "#f0f0ed",
+      contentMuted: "#f3f3f1",
+    },
+    /** Light-world surface/text/border raw values (mirrors CSS [data-theme="light"] block). */
+    light: {
+      bg: "#ffffff",
+      panel: "#f9f9f8",
+      panel2: "#f3f3f1",
+      line: "#ececea",
+      line2: "#e2e2df",
+      ink: "#0e0e0d",
+      ink2: "#3b3b38",
+      mut: "#76766f",
+      mut2: "#9a9a92",
+    },
+    /** Dark-world surface/text/border raw values (mirrors CSS [data-theme="dark"] block). */
+    dark: {
+      bg: "#0b0d0e",
+      panel: "#131618",
+      panel2: "#1a1e21",
+      elev: "#20262a",
+      line: "rgba(255,255,255,0.075)",
+      line2: "rgba(255,255,255,0.14)",
+      ink: "#f3f5f6",
+      ink2: "#cfd4d7",
+      mut: "#878d92",
+      mut2: "#5e656a",
     },
     text: {
-      primary: "#f5f5f3",
-      secondary: "#c8c8c4",
-      muted: "#9a9a96",
-      inverse: "#0a0a0a",
-      onDark: "#f5f5f3",
-      nav: "#ececea",
-      navMuted: "#9a9a96",
+      primary: "#f3f5f6",
+      secondary: "#cfd4d7",
+      muted: "#878d92",
+      inverse: "#0b0d0e",
+      onDark: "#f3f5f6",
+      nav: "#f3f5f6",
+      navMuted: "#878d92",
       /** Text on light content surfaces when used. */
-      onLight: "#0f0f0f",
-      onLightSecondary: "#5c5c58",
+      onLight: "#0e0e0d",
+      onLightSecondary: "#3b3b38",
     },
     border: {
-      default: "#2a2a2a",
-      strong: "#3a3a3a",
-      focus: "#2dd4bf",
+      default: "rgba(255,255,255,0.075)",
+      strong: "rgba(255,255,255,0.14)",
+      focus: "#19c37d",
       /** Light-surface borders from visual direction. */
-      subtle: "#e5e5e0",
-      strongLight: "#d4d4ce",
+      subtle: "#ececea",
+      strongLight: "#e2e2df",
     },
     status: {
       pending: { bg: "#fef3c7", text: "#d97706", border: "#fcd34d" },
@@ -102,18 +145,18 @@ export const tokens = {
     touchTargetMin: "2.75rem",
   },
   shadow: {
-    /** Dark-theme card elevation (current web shell). */
+    /** Dark-theme card elevation. */
     card: "0 1px 3px rgb(0 0 0 / 35%), 0 8px 24px rgb(0 0 0 / 25%)",
-    /** Light-surface card from visual direction. */
-    cardLight: "0 1px 2px rgb(0 0 0 / 4%), 0 4px 16px rgb(0 0 0 / 6%)",
+    /** Light-surface card shadow. */
+    cardLight: "0 1px 3px rgb(0 0 0 / 8%), 0 4px 16px rgb(0 0 0 / 6%)",
     elevated: "0 24px 60px rgb(0 0 0 / 45%)",
     composer: "0 -4px 24px rgb(0 0 0 / 8%)",
-    focus: "0 0 0 3px rgb(45 212 191 / 28%)",
-    brandSoft: "0 8px 24px rgb(20 184 166 / 18%)",
+    focus: "0 0 0 3px rgb(25 195 125 / 28%)",
+    brandSoft: "0 8px 24px rgb(25 195 125 / 18%)",
   },
   focus: {
     width: "2px",
-    color: "#2dd4bf",
+    color: "#19c37d",
     offset: "2px",
   },
   typography: {
@@ -128,64 +171,65 @@ export const tokens = {
     metricHero: { sizeMin: "2.5rem", sizeMax: "3rem", weight: 600 },
     meta: { size: "0.8125rem" },
   },
-  /** Chat transcript surfaces — dark shell with elevated coach bubbles. */
+  /** Chat transcript surfaces — themed per world. */
   chat: {
     bubble: {
       user: {
-        bg: "#f0fdfa",
-        border: "rgb(45 212 191 / 35%)",
-        text: "#0f766e",
+        bg: "#f0fbf6",
+        border: "rgba(25,195,125,0.35)",
+        text: "#15a76b",
       },
       assistant: {
-        bg: "#1a1a1a",
-        border: "#3a3a3a",
-        text: "#f5f5f3",
-        accent: "#2dd4bf",
+        bg: "#131618",
+        border: "rgba(255,255,255,0.075)",
+        text: "#f3f5f6",
+        accent: "#3ddc94",
       },
       crisis: {
-        bg: "#1a1a1a",
+        bg: "#131618",
         border: "#fca5a5",
         accent: "#b91c1c",
       },
     },
     metadata: {
-      neutral: { bg: "#111111", border: "#2a2a2a", text: "#c8c8c4" },
+      neutral: { bg: "#131618", border: "rgba(255,255,255,0.075)", text: "#cfd4d7" },
       notice: { bg: "#fff7ed", border: "#fed7aa", text: "#9a3412" },
       crisis: { bg: "#fef2f2", border: "#fca5a5", text: "#991b1b" },
     },
     promptChip: {
-      bg: "#141414",
-      border: "#3a3a3a",
-      text: "#c8c8c4",
-      hoverBorder: "#0d9488",
-      hoverText: "#0f766e",
+      bg: "#131618",
+      border: "rgba(255,255,255,0.14)",
+      text: "#cfd4d7",
+      hoverBorder: "#19c37d",
+      hoverText: "#15a76b",
     },
   },
   /** Premium overview cards — dark hero on light canvas, read-only trend sections. */
   overview: {
     hero: {
-      surface: "#1a1a1a",
-      text: "#f5f5f3",
-      textMuted: "rgb(245 245 243 / 72%)",
+      surface: "#131618",
+      text: "#f3f5f6",
+      textMuted: "rgb(243 245 246 / 72%)",
     },
     card: {
       surface: "#ffffff",
-      surfaceMuted: "#f0f0ed",
-      border: "#e5e5e0",
-      shadow: "0 1px 2px rgb(0 0 0 / 4%), 0 4px 16px rgb(0 0 0 / 6%)",
+      surfaceMuted: "#f3f3f1",
+      border: "#ececea",
+      shadow: "0 1px 3px rgb(0 0 0 / 8%), 0 4px 16px rgb(0 0 0 / 6%)",
     },
     coachCard: {
-      border: "rgb(45 212 191 / 45%)",
-      shadow: "0 8px 24px rgb(20 184 166 / 18%)",
+      border: "rgba(25,195,125,0.45)",
+      shadow: "0 8px 24px rgb(25 195 125 / 18%)",
     },
     trend: {
       barBg: "rgb(255 255 255 / 14%)",
       barBgSparse: "rgb(255 255 255 / 8%)",
-      fill: "#14b8a6",
+      fill: "#19c37d",
     },
   },
   font: {
-    sans: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    sans: '"Helvetica Neue", Helvetica, "Segoe UI", system-ui, -apple-system, sans-serif',
+    mono: '"SF Mono", ui-monospace, "Roboto Mono", Menlo, monospace',
   },
 } as const;
 
