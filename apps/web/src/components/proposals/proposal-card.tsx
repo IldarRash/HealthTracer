@@ -56,7 +56,7 @@ export function ProposalCard({ proposal, compact = false, onDecision }: Proposal
     compact && isPending && (!canAccept || validationErrors.length > 0);
 
   return (
-    <article className={`proposal-card status-${proposal.status}`}>
+    <article className={`proposal-card status-${proposal.status} domain-${proposal.targetDomain}`}>
       <header className="proposal-header">
         <div>
           <strong>{proposal.title}</strong>

@@ -5,6 +5,7 @@ import type { ProposalStatus } from "@health/types";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { listProposals } from "../../lib/api";
+import { EmptyState, ErrorState, LoadingState } from "../ui";
 import { ProposalCard } from "./proposal-card";
 
 const statusFilters: Array<ProposalStatus | "all"> = [
@@ -45,12 +46,30 @@ export function ProposalInspector() {
     return proposals.filter((proposal) => proposal.status === statusFilter);
   }, [proposalsQuery.data, statusFilter]);
 
+  if (proposalsQuery.isLoading) {
+    return <LoadingState title="Loading proposals…" />;
+  }
+
+  if (proposalsQuery.isError) {
+    return (
+      <ErrorState
+        title="Proposals unavailable"
+        description={
+          proposalsQuery.error instanceof Error
+            ? proposalsQuery.error.message
+            : "Proposals could not be loaded."
+        }
+      />
+    );
+  }
+
   return (
     <div className="proposal-inspector">
-      <div className="filter-row">
-        <label htmlFor="proposal-status-filter">Status</label>
+      <div className="proposal-inspector__filter filter-row">
+        <label htmlFor="proposal-status-filter">Filter by status</label>
         <select
           id="proposal-status-filter"
+          className="training-schedule-input"
           value={statusFilter}
           onChange={(event) =>
             setStatusFilter(event.target.value as ProposalStatus | "all")
@@ -58,32 +77,28 @@ export function ProposalInspector() {
         >
           {statusFilters.map((status) => (
             <option key={status} value={status}>
-              {status}
+              {status === "all" ? "All statuses" : status.charAt(0).toUpperCase() + status.slice(1)}
             </option>
           ))}
         </select>
       </div>
 
-      {proposalsQuery.isLoading ? <p>Loading proposals…</p> : null}
-      {proposalsQuery.isError ? (
-        <p className="form-error" role="alert">
-          {proposalsQuery.error instanceof Error
-            ? proposalsQuery.error.message
-            : "Proposals could not be loaded."}
-        </p>
-      ) : null}
-
-      {!proposalsQuery.isLoading &&
-      !proposalsQuery.isError &&
-      filteredProposals.length === 0 ? (
-        <p>No proposals match this filter yet.</p>
-      ) : null}
-
-      <div className="proposal-grid">
-        {filteredProposals.map((proposal) => (
-          <ProposalCard key={proposal.id} proposal={proposal} />
-        ))}
-      </div>
+      {!proposalsQuery.isLoading && filteredProposals.length === 0 ? (
+        <EmptyState
+          title="No proposals"
+          description={
+            statusFilter === "all"
+              ? "No proposals have been created yet. Start a chat to generate AI coaching proposals."
+              : `No proposals with status "${statusFilter}" found.`
+          }
+        />
+      ) : (
+        <div className="proposal-grid">
+          {filteredProposals.map((proposal) => (
+            <ProposalCard key={proposal.id} proposal={proposal} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

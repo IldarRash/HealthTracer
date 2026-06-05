@@ -269,8 +269,8 @@ body {
 .auth-page {
   align-items: center;
   background:
-    radial-gradient(circle at 20% 12%, rgb(20 184 166 / 24%), transparent 28rem),
-    radial-gradient(circle at 82% 22%, rgb(45 212 191 / 14%), transparent 24rem),
+    radial-gradient(circle at 20% 12%, var(--color-coach-500) 0%, transparent 28rem),
+    radial-gradient(circle at 82% 22%, var(--color-coach-400) 0%, transparent 24rem),
     linear-gradient(135deg, #070707 0%, #111111 48%, #f7f7f5 48%, #f7f7f5 100%);
   color: var(--color-text-primary);
   display: grid;
@@ -366,7 +366,7 @@ body {
 
 .auth-clerk-input:focus {
   border-color: var(--color-coach-500);
-  box-shadow: 0 0 0 3px rgb(20 184 166 / 16%);
+  box-shadow: 0 0 0 3px var(--color-metric-green-dim);
 }
 
 .auth-clerk-primary {
@@ -388,7 +388,7 @@ body {
 @media (max-width: 900px) {
   .auth-page {
     background:
-      radial-gradient(circle at 50% 0%, rgb(20 184 166 / 22%), transparent 22rem),
+      radial-gradient(circle at 50% 0%, var(--color-coach-500) 0%, transparent 22rem),
       linear-gradient(180deg, #070707 0%, #111111 46%, #f7f7f5 46%, #f7f7f5 100%);
     grid-template-columns: 1fr;
   }
@@ -1112,7 +1112,7 @@ dd {
 }
 
 .app-shell__main--structured .dashboard-card--coach {
-  border-color: rgb(45 212 191 / 45%);
+  border-color: var(--color-metric-green-dim);
   box-shadow: var(--shadow-brand-soft);
 }
 
@@ -1241,7 +1241,7 @@ dd {
 }
 
 .dashboard-card--coach {
-  border-color: rgb(45 212 191 / 35%);
+  border-color: var(--color-metric-green-dim);
 }
 
 .longevity-dashboard .dashboard-card--coach .chat-prompt-chips {
@@ -1276,6 +1276,7 @@ dd {
   opacity: 0.6;
 }
 
+/* primary — dark ink on accent (accept-green for confirm actions) */
 .button-primary {
   background: var(--color-coach-600);
   color: var(--color-text-inverse);
@@ -1285,6 +1286,7 @@ dd {
   background: var(--color-coach-700);
 }
 
+/* secondary — bordered, theme-aware ghost with subtle bg */
 .button-secondary {
   background: var(--color-surface-muted);
   border-color: var(--color-border-strong);
@@ -1293,9 +1295,10 @@ dd {
 
 .button-secondary:hover:not(:disabled) {
   border-color: var(--color-coach-500);
-  color: var(--color-coach-400);
+  color: var(--color-text-primary);
 }
 
+/* ghost — fully transparent, text-only */
 .button-ghost {
   background: transparent;
   border-color: transparent;
@@ -1307,6 +1310,30 @@ dd {
   color: var(--color-text-primary);
 }
 
+/* soft — subtle filled, no border; dim metric-green tint */
+.button-soft {
+  background: var(--color-metric-green-dim);
+  border-color: transparent;
+  color: var(--color-metric-green);
+}
+
+.button-soft:hover:not(:disabled) {
+  background: rgba(25, 195, 125, 0.22);
+}
+
+/* quiet — muted, low-emphasis */
+.button-quiet {
+  background: var(--color-surface-inset);
+  border-color: var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+.button-quiet:hover:not(:disabled) {
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+}
+
+/* danger — red outline destructive */
 .button-danger {
   background: var(--color-status-error-bg);
   border-color: var(--color-status-error-border);
@@ -1315,6 +1342,7 @@ dd {
 
 .button-danger:hover:not(:disabled) {
   background: #fecaca;
+  border-color: var(--color-status-error-text);
 }
 
 .button-sm {
@@ -1327,6 +1355,18 @@ dd {
   font-size: var(--font-size-base);
   min-height: 2.75rem;
   padding: 0.65rem 1.25rem;
+}
+
+/* Dark-theme button-secondary overrides */
+[data-theme="dark"] .button-secondary {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .button-secondary:hover:not(:disabled) {
+  border-color: var(--color-coach-400);
+  color: var(--color-text-primary);
 }
 
 /* ==========================================================================
@@ -1391,6 +1431,32 @@ dd {
 .badge-session-skipped {
   background: var(--color-status-neutral-bg);
   color: var(--color-status-neutral-text);
+}
+
+/* Metric-tone chip variants — work in both themes via shared color tokens */
+.badge-green {
+  background: var(--color-metric-green-dim);
+  color: var(--color-metric-green);
+}
+
+.badge-amber {
+  background: var(--color-metric-amber-dim);
+  color: var(--color-metric-amber);
+}
+
+.badge-red {
+  background: var(--color-metric-red-dim);
+  color: var(--color-metric-red);
+}
+
+.badge-blue {
+  background: var(--color-metric-blue-dim);
+  color: var(--color-metric-blue);
+}
+
+.badge-indigo {
+  background: var(--color-metric-indigo-dim);
+  color: var(--color-metric-indigo);
 }
 
 /* ==========================================================================
@@ -1966,7 +2032,16 @@ dd {
    ========================================================================== */
 
 .proposal-inspector {
+  display: grid;
+  gap: var(--space-6);
   margin-top: var(--space-6);
+}
+
+.proposal-inspector__filter {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .proposal-grid {
@@ -1974,13 +2049,48 @@ dd {
   gap: var(--space-4);
 }
 
+@media (min-width: 900px) {
+  .proposal-grid {
+    grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  }
+}
+
+/* Standalone proposal card — white card, soft shadow, left domain accent */
 .proposal-card,
 .confirmation-card {
   background: var(--color-surface-card);
   border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-border-default);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card-light);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 6%), 0 8px 24px rgb(0 0 0 / 4%);
+  overflow: hidden;
   padding: var(--space-4);
+  transition: box-shadow 160ms ease;
+}
+
+.proposal-card:hover,
+.confirmation-card:hover {
+  box-shadow: 0 4px 16px rgb(0 0 0 / 9%), 0 12px 32px rgb(0 0 0 / 6%);
+}
+
+/* Proposal card domain accent — left border color by domain */
+.proposal-card.domain-workout,
+.proposal-card.domain-training {
+  border-left-color: var(--color-metric-blue);
+}
+
+.proposal-card.domain-nutrition,
+.proposal-card.domain-recipe {
+  border-left-color: var(--color-metric-green);
+}
+
+.proposal-card.domain-habit,
+.proposal-card.domain-goal {
+  border-left-color: var(--color-metric-indigo);
+}
+
+.proposal-card.domain-recovery {
+  border-left-color: var(--color-metric-amber);
 }
 
 .confirmation-card {
@@ -2066,6 +2176,7 @@ span.confirmation-card__meta {
 .goals {
   display: grid;
   gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2073,6 +2184,7 @@ span.confirmation-card__meta {
 
 .goals li {
   border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-metric-indigo);
   border-radius: var(--radius-md);
   display: flex;
   flex-wrap: wrap;
@@ -2089,6 +2201,15 @@ span.confirmation-card__meta {
 
 .goals span {
   color: var(--color-text-muted);
+}
+
+/* Goal card footer row — badge + priority hint */
+.goal-card__footer {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  width: 100%;
 }
 
 .weekly-review-pack {
@@ -2926,8 +3047,16 @@ span.confirmation-card__meta {
 .recipe-recommendation-card {
   background: var(--color-surface-card);
   border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-metric-green);
   border-radius: var(--radius-md);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 5%);
   padding: var(--space-3);
+  transition: box-shadow 160ms ease;
+}
+
+.recipe-card:hover,
+.recipe-recommendation-card:hover {
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
 }
 
 .recipe-card-header {
@@ -4799,6 +4928,17 @@ span.confirmation-card__meta {
    Documents workspace (Visual Designer)
    ========================================================================== */
 
+/* Privacy/consent boundary gets amber accent (privacy = cautionary) */
+.documents-workspace .privacy-boundary-note,
+.documents-workspace .consent-management-card .privacy-boundary-note {
+  background: var(--color-metric-amber-dim);
+  border-color: rgba(245, 165, 36, 0.32);
+}
+
+.documents-workspace .privacy-boundary-note__title {
+  color: #a16207;
+}
+
 .documents-workspace {
   margin-top: var(--space-6);
 }
@@ -4890,8 +5030,8 @@ span.confirmation-card__meta {
 }
 
 .documents-list-item.active {
-  border-color: var(--color-coach-400);
-  box-shadow: var(--shadow-brand-soft);
+  border-color: var(--color-metric-green);
+  box-shadow: 0 0 0 2px var(--color-metric-green-dim);
   background: var(--color-coach-50);
 }
 
@@ -5087,6 +5227,7 @@ span.confirmation-card__meta {
 }
 
 .form-field input[type="text"],
+.form-field input[type="search"],
 .form-field select,
 .form-field textarea {
   background: var(--color-surface-card);
@@ -5100,12 +5241,24 @@ span.confirmation-card__meta {
   width: 100%;
 }
 
+.form-field input[type="file"] {
+  background: var(--color-surface-inset);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
+  color: var(--color-text-secondary);
+  font: inherit;
+  padding: 0.55rem 0.75rem;
+  width: 100%;
+}
+
 .form-field textarea {
   min-height: 6rem;
   resize: vertical;
 }
 
 .form-field input[type="text"]:focus-visible,
+.form-field input[type="search"]:focus-visible,
 .form-field select:focus-visible,
 .form-field textarea:focus-visible {
   border-color: var(--color-border-focus);
