@@ -329,34 +329,37 @@ export const privacyStatusLabel: Record<PrivacyStatus, string> = {
   unavailable: "Unavailable",
 };
 
-/** Domain pill colors for inline proposal confirmation cards. */
+/** Domain pill colors for inline proposal confirmation cards.
+ * Tones map to metric color scale: workout→blue, nutrition→green,
+ * goal/habit→indigo, recovery→amber, profile→neutral.
+ */
 export const proposalDomainTone: Record<
   ProposalDomain,
   { bg: string; text: string; cssClass: string }
 > = {
   workout: {
-    bg: tokens.color.coach[100],
-    text: tokens.color.coach[700],
+    bg: tokens.color.metric.blueDim,
+    text: tokens.color.metric.blue,
     cssClass: "proposal-domain-pill--workout",
   },
   goal: {
-    bg: tokens.color.status.pending.bg,
-    text: tokens.color.status.pending.text,
+    bg: tokens.color.metric.indigoDim,
+    text: tokens.color.metric.indigo,
     cssClass: "proposal-domain-pill--goal",
   },
   nutrition: {
-    bg: tokens.color.status.success.bg,
-    text: tokens.color.status.success.text,
+    bg: tokens.color.metric.greenDim,
+    text: tokens.color.metric.green,
     cssClass: "proposal-domain-pill--nutrition",
   },
   recipe: {
-    bg: tokens.color.status.info.bg,
-    text: tokens.color.brand[800],
+    bg: tokens.color.metric.greenDim,
+    text: tokens.color.metric.green,
     cssClass: "proposal-domain-pill--recipe",
   },
   profile: {
-    bg: tokens.color.status.neutral.bg,
-    text: tokens.color.status.neutral.text,
+    bg: tokens.color.surface.contentMuted,
+    text: tokens.color.text.muted,
     cssClass: "proposal-domain-pill--profile",
   },
 };

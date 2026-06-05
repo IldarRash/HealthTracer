@@ -645,7 +645,7 @@ export function ChatWorkspace() {
                 </label>
                 <textarea
                   id="chat-message"
-                  className="form-textarea chat-composer-controls__input"
+                  className="chat-composer-controls__input"
                   rows={2}
                   value={draft}
                   placeholder="Message your coach…"
@@ -656,8 +656,9 @@ export function ChatWorkspace() {
                   type="submit"
                   className="button-coach chat-composer-controls__send"
                   disabled={sendDisabled || !primaryThreadId}
+                  aria-label="Send message"
                 >
-                  {sendMessageMutation.isPending ? "Sending…" : "Send"}
+                  {sendMessageMutation.isPending ? "…" : "→"}
                 </Button>
               </div>
               {sendMessageMutation.isError && !showRevisionSendRetry ? (
@@ -668,6 +669,9 @@ export function ChatWorkspace() {
                 </p>
               ) : null}
             </div>
+            <p className="chat-composer-disclaimer">
+              Your coach suggests — the decision is always yours. This is lifestyle support, not medical advice.
+            </p>
           </ChatComposer>
         </>
       ) : null}
