@@ -131,7 +131,7 @@ const sampleNutritionProposalChanges = {
 const sampleWorkoutProposalChanges = {
   title: "Strength base",
   summary: "Three-day split with compound lifts.",
-  days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+  days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
 };
 
 const sampleAdaptWorkoutFromProgressChanges = {
@@ -687,7 +687,7 @@ describe("web api helpers", () => {
               payload: {
                 title: "Strength base",
                 summary: "Three repeatable training days.",
-                days: [{ day: "Day 1", focus: "Strength", exercises: [] }],
+                days: [{ weekday: "monday", focus: "Strength", exercises: [] }],
                 notes: [],
               },
               createdAt: "2026-05-22T12:00:00.000Z",
@@ -1034,7 +1034,7 @@ describe("web api helpers", () => {
             plannedDate: "2026-05-23",
             title: "Strength day",
             status: "completed",
-            exercises: ["Squat"],
+            exercises: [{ name: "Squat" }],
             feedback: { notes: "Felt strong." },
             completedAt: "2026-05-23T12:00:00.000Z",
             createdAt: "2026-05-22T12:00:00.000Z",

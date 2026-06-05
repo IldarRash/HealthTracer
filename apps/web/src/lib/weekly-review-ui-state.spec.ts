@@ -141,7 +141,7 @@ describe("weekly review UI state", () => {
             plan: {
               title: "Lighter week",
               summary: "Adjusted volume based on weekly completion patterns.",
-              days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+              days: [{ weekday: "monday", focus: "Recovery", exercises: [{ name: "Walk" }] }],
             },
             sourceSummaryId: sampleProgress().summary.id,
             sourceTrendObservationIds: [],
@@ -284,7 +284,7 @@ describe("weekly review UI state", () => {
             plan: {
               title: "Lighter week",
               summary: "Adjusted volume.",
-              days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+              days: [{ weekday: "monday", focus: "Recovery", exercises: [{ name: "Walk" }] }],
             },
             sourceSummaryId: sampleProgress().summary.id,
             sourceTrendObservationIds: [],
