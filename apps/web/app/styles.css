@@ -6160,3 +6160,331 @@ span.confirmation-card__meta {
 .coaching-hierarchy__context dd {
   margin: 0;
 }
+
+/* ==========================================================================
+   Dark theme — daily surfaces (today, longevity, plans)
+   Scoped under [data-theme="dark"] so light routes are never affected.
+   These rules beat the .app-shell__main--structured light overrides because
+   [data-theme="dark"] adds one attribute to the specificity chain.
+   ========================================================================== */
+
+/* ── Content area shell ── */
+[data-theme="dark"] .app-shell__main--structured {
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .app-shell__main--structured .page-header__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .app-shell__main--structured .page-header__description {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .app-shell__main--structured .page-header__eyebrow,
+[data-theme="dark"] .app-shell__main--structured .eyebrow {
+  color: var(--color-metric-green);
+}
+
+/* ── Section navigation ── */
+[data-theme="dark"] .section-nav {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .section-nav__link {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .section-nav__link:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+/* ── Command center layout ── */
+[data-theme="dark"] .command-center {
+  background: transparent;
+}
+
+/* ── Priority card (today hero) ── */
+[data-theme="dark"] .action-priority-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .action-priority-card__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .action-priority-card__metric {
+  color: var(--color-text-primary);
+}
+
+/* ── Domain cards ── */
+[data-theme="dark"] .domain-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .domain-card__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .domain-card__summary {
+  color: var(--color-text-muted);
+}
+
+/* ── Disclosure panels ── */
+[data-theme="dark"] .disclosure {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .disclosure__summary {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .disclosure__summary:hover {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .disclosure__content {
+  border-top-color: var(--color-border-default);
+}
+
+/* ── Panels ── */
+[data-theme="dark"] .app-shell__main--structured .training-workspace .panel,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .panel {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .app-shell__main--structured .training-workspace .panel-prominent,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .panel-prominent {
+  border-color: var(--color-metric-green);
+  box-shadow: 0 0 0 1px rgba(25, 195, 125, 0.2), var(--shadow-card);
+}
+
+[data-theme="dark"] .app-shell__main--structured .training-workspace .panel-secondary,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .panel-secondary {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+/* ── Nested / revision cards ── */
+[data-theme="dark"] .app-shell__main--structured .training-workspace .nested-card,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .nested-card,
+[data-theme="dark"] .app-shell__main--structured .training-workspace .training-revision-card,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .training-revision-card {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .app-shell__main--structured .training-workspace .training-session-card,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .training-session-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+/* ── Canvas state messages in dark context ── */
+[data-theme="dark"] .state-message--canvas {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .state-message--canvas .state-message__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .state-message--canvas .state-message__description {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .state-message--canvas .state-message__spinner {
+  border-color: var(--color-border-default);
+  border-top-color: var(--color-metric-green);
+}
+
+/* ── Section/panel headings ── */
+[data-theme="dark"] .panel h2,
+[data-theme="dark"] .panel h3 {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .section-label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .muted-text {
+  color: var(--color-text-muted);
+}
+
+/* ── Training session cards (today item list) ── */
+[data-theme="dark"] .today-workspace .training-session-card--planned {
+  border-color: var(--color-metric-blue);
+  box-shadow: 0 1px 0 rgba(58, 141, 255, 0.12);
+}
+
+[data-theme="dark"] .today-workspace .training-session-card--completed {
+  background: var(--color-metric-green-dim);
+  border-color: rgba(25, 195, 125, 0.35);
+}
+
+[data-theme="dark"] .today-workspace .training-session-card--skipped {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  opacity: 0.72;
+}
+
+/* ── Status chips on dark canvas ── */
+[data-theme="dark"] .badge.badge-info {
+  background: rgba(58, 141, 255, 0.14);
+  border-color: transparent;
+  color: var(--color-metric-blue);
+}
+
+[data-theme="dark"] .badge.badge-session-completed {
+  background: var(--color-metric-green-dim);
+  border-color: transparent;
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .badge.badge-session-planned {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* ── Training feedback callout ── */
+[data-theme="dark"] .training-feedback-callout {
+  background: rgba(58, 141, 255, 0.1);
+  border-color: rgba(58, 141, 255, 0.28);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .training-feedback-label {
+  color: var(--color-metric-blue);
+}
+
+/* ── Forms in dark context ── */
+[data-theme="dark"] .form-error {
+  color: var(--color-metric-red);
+}
+
+[data-theme="dark"] .training-schedule-field label {
+  color: var(--color-text-secondary);
+}
+
+/* ── Today workspace — two-column layout on desktop ── */
+/* Left (~70%): plan + workout + nutrition + habits
+   Right (~30%): hero card, next action, check-ins, details */
+@media (min-width: 960px) {
+  .today-workspace .command-center__layout {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-areas:
+      "hero hero"
+      "next next"
+      "plan checkins"
+      "wide wide";
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  }
+
+  .today-workspace .today-hero {
+    grid-area: hero;
+  }
+
+  .today-workspace .today-next-action {
+    grid-area: next;
+  }
+
+  .today-workspace .today-plan-panel {
+    grid-area: plan;
+  }
+
+  .today-workspace .today-check-ins-panel {
+    grid-area: checkins;
+  }
+
+  .today-workspace .today-details-panel {
+    grid-area: wide;
+  }
+}
+
+/* ── Today dark surface — card accent borders ── */
+[data-theme="dark"] .today-workspace .today-check-ins-panel {
+  border-top: 2px solid var(--color-metric-amber);
+}
+
+[data-theme="dark"] .today-workspace .today-plan-panel {
+  border-top: 2px solid var(--color-metric-blue);
+}
+
+/* ── Progress chip in dark context ── */
+[data-theme="dark"] .today-progress-chip {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+}
+
+/* ── Form inputs on dark canvas ── */
+[data-theme="dark"] .app-shell__main--structured .training-schedule-input,
+[data-theme="dark"] .app-shell__main--structured .form-textarea,
+[data-theme="dark"] .app-shell__main--structured input[type="number"],
+[data-theme="dark"] .app-shell__main--structured input[type="date"] {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  color: var(--color-text-primary);
+  color-scheme: dark;
+}
+
+[data-theme="dark"] .app-shell__main--structured .training-schedule-input::placeholder,
+[data-theme="dark"] .app-shell__main--structured .form-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* ── Confirmation links on dark canvas ── */
+[data-theme="dark"] .confirmation-card__link {
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .confirmation-card__link:hover {
+  color: var(--color-coach-400);
+}
+
+/* ── Wellbeing scale inputs on dark ── */
+[data-theme="dark"] .wellbeing-scale-option {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .wellbeing-scale-option:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .wellbeing-scale-option--selected {
+  background: var(--color-metric-green-dim);
+  border-color: var(--color-metric-green);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .wellbeing-check-in-summary__line {
+  color: var(--color-text-primary);
+}
+
+/* ── Recovery focus panel on dark ── */
+[data-theme="dark"] .recovery-focus-message {
+  color: var(--color-text-primary);
+}
+
+/* ── Today check-in date picker dark ── */
+[data-theme="dark"] .today-workspace .today-date-picker {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  border-radius: var(--radius-md);
+}
