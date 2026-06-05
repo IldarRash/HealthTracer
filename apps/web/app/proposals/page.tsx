@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
-import { AppNav } from "../../src/components/app-nav";
+import { AppSidebar } from "../../src/components/app-sidebar";
 import { ProposalInspector } from "../../src/components/proposals/proposal-inspector";
 
 export default async function ProposalsPage() {
@@ -13,7 +13,7 @@ export default async function ProposalsPage() {
   return (
     <main className="shell shell-wide">
       <section className="card card-wide">
-        <AppNav />
+        <AppSidebar />
         <p className="eyebrow">Phase 3 proposal inspector</p>
         <h1>Proposal audit</h1>
         <p>

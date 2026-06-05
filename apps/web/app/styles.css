@@ -429,52 +429,193 @@ dd {
    ========================================================================== */
 
 .app-shell {
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
   display: flex;
-  flex-direction: column;
-  min-height: 100vh;
+  flex-direction: row;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .app-shell--chat {
   background: var(--color-surface-card);
 }
 
-.app-shell__header {
-  align-items: center;
-  background: rgb(10 10 10 / 94%);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--color-border-default);
+/* ── Left sidebar — 244px fixed column ── */
+.app-sidebar {
+  background: var(--color-surface-sidebar);
+  border-right: 1px solid var(--color-border-default);
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  justify-content: space-between;
-  max-width: 100%;
-  min-height: var(--layout-nav-height);
-  min-width: 0;
-  padding: var(--space-3) var(--space-4);
-  position: sticky;
-  top: 0;
-  z-index: 20;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 18px 14px 14px;
+  width: 244px;
 }
 
-.app-shell__brand {
+.app-sidebar__brand {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 2px 8px 18px;
+}
+
+.app-sidebar__brand-name {
   color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
+  font-size: 16.5px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.012em;
 }
 
-.app-shell__nav {
-  flex: 1 1 auto;
+.app-sidebar__nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-sidebar__nav-item {
+  align-items: center;
+  border-radius: 10px;
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: 14.5px;
+  font-weight: 500;
+  gap: 11px;
+  padding: 9px 11px;
+  text-decoration: none;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.app-sidebar__nav-item:hover {
+  background: var(--color-surface-sidebar-hover);
+  color: var(--color-text-primary);
+}
+
+.app-sidebar__nav-item--active {
+  background: var(--color-surface-sidebar-active);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.app-sidebar__nav-item:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.app-sidebar__divider {
+  background: var(--color-border-default);
+  height: 1px;
+  margin: 16px 8px;
+}
+
+.app-sidebar__eyebrow {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  margin: 0;
+  padding: 0 11px 8px;
+  text-transform: uppercase;
+}
+
+.app-sidebar__onboarding-hint {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--font-size-xs);
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+  padding: 0 11px;
+}
+
+.app-sidebar__spacer {
+  flex: 1;
+}
+
+/* Plan badge card */
+.app-sidebar__plan-badge {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: 12px;
+  margin-bottom: 10px;
+  padding: 11px 12px;
+}
+
+.app-sidebar__plan-badge-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.app-sidebar__plan-name {
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.app-sidebar__plan-chip {
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 9px;
+}
+
+.app-sidebar__plan-chip--pro {
+  background: var(--color-metric-green-dim);
+  color: var(--color-metric-green);
+}
+
+.app-sidebar__plan-chip--free {
+  background: var(--color-metric-amber-dim);
+  color: var(--color-metric-amber);
+}
+
+/* User block */
+.app-sidebar__user {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 6px;
+}
+
+.app-sidebar__user-avatar {
+  flex-shrink: 0;
+}
+
+.app-sidebar__user-info {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  flex: 1;
 }
 
+.app-sidebar__user-name {
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-sidebar__user-goal {
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Content area ── */
 .app-shell__main {
   flex: 1 1 auto;
-  margin: 0 auto;
-  max-width: var(--layout-shell-max);
   min-width: 0;
+  overflow: auto;
   padding: var(--space-6) var(--space-4);
-  width: 100%;
+  background: var(--color-surface-app);
 }
 
 .app-shell__main--chat {
@@ -731,11 +872,6 @@ dd {
 }
 
 @media (max-width: 640px) {
-  .app-shell__header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .app-nav,
   .app-nav--coach {
     align-items: stretch;

@@ -1,4 +1,5 @@
-export { AppShell, AppShellHeader, AppShellMain, PageContent, PageHeader } from "./app-shell";
+export { AppShell, AppShellMain, PageContent, PageHeader } from "./app-shell";
+export { Icon, Mark, ICONS, type IconName, type IconProps, type MarkProps } from "./icon";
 export { RouteWayfinding } from "./route-wayfinding";
 export { AttachmentPreviewThumb, AttachmentStatusBadge } from "./attachment-preview";
 export { Badge, badgeVariants, type BadgeProps } from "./badge";

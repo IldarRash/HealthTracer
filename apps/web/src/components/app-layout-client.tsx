@@ -6,10 +6,11 @@ import type { AppLayoutVariant } from "../lib/shell-ui-state";
 import {
   resolveAppShellMainVariant,
   resolveAppShellVariant,
+  resolveRouteTheme,
   shouldShowRouteWayfinding,
 } from "../lib/shell-ui-state";
-import { AppNav } from "./app-nav";
-import { AppShell, AppShellHeader, AppShellMain, RouteWayfinding } from "./ui";
+import { AppSidebar } from "./app-sidebar";
+import { AppShell, AppShellMain, RouteWayfinding } from "./ui";
 
 type AppLayoutClientProps = {
   children: ReactNode;
@@ -21,10 +22,11 @@ export function AppLayoutClient({ children, variant = "default" }: AppLayoutClie
   const shellVariant = resolveAppShellVariant(variant);
   const mainVariant = resolveAppShellMainVariant(variant);
   const showWayfinding = shouldShowRouteWayfinding(pathname);
+  const routeTheme = resolveRouteTheme(pathname);
 
   return (
-    <AppShell variant={shellVariant}>
-      <AppShellHeader brand="AI Health Coach" nav={<AppNav />} />
+    <AppShell variant={shellVariant} data-theme={routeTheme}>
+      <AppSidebar />
       <AppShellMain variant={mainVariant}>
         {showWayfinding ? <RouteWayfinding /> : null}
         {children}
