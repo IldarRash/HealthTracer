@@ -12,7 +12,6 @@ import type {
 } from "@health/types";
 import {
   createFallbackFinalDecision,
-  deriveActivityCalories,
   isWeeklyReviewChatMessage,
 } from "@health/types";
 import {
@@ -33,6 +32,7 @@ import {
   parseStubProposalRevisionContext,
 } from "./stub-proposal-revision.js";
 import {
+  buildStubLogWorkoutActivityProposal,
   stubProgressAdaptedWorkoutPlan,
   stubReducedLoadWorkoutPlan,
   stubRemoveExerciseWorkoutPlan,
@@ -231,66 +231,16 @@ export class StubCoachAiProvider implements CoachAiProvider {
     // Past-activity logging: checked BEFORE the generic workout/training branch so that
     // "I played volleyball for 90 minutes" goes to log_workout_activity, not create_workout_plan.
     if (isPastActivityLoggingMessage(normalized)) {
-      const STUB_LOG_RATE = 300;
-      const durationMinutes = parseDurationMinutesFromMessage(normalized);
-      const activityType = parseActivityTypeFromMessage(normalized);
-      const estimatedCalories = deriveActivityCalories(STUB_LOG_RATE, durationMinutes);
-      const performedAt = new Date().toISOString();
+      const stub = buildStubLogWorkoutActivityProposal(normalized, {
+        parseDuration: parseDurationMinutesFromMessage,
+        parseActivityType: parseActivityTypeFromMessage,
+      });
+      stub.proposal.proposedChanges.performedAt = new Date().toISOString();
 
       return stubCoachOutput({
         reply:
           "Got it — I logged that activity for you to review. Adjust the duration or confirm to save it.",
-        proposals: [
-          {
-            intent: "log_workout_activity",
-            targetDomain: "workout",
-            title: `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`,
-            reason: `Logged from your message as an ad-hoc activity (${durationMinutes} min).`,
-            proposedChanges: {
-              activityType,
-              title: `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`,
-              durationMinutes,
-              performedAt,
-              ratePerHour: STUB_LOG_RATE,
-              estimatedCalories,
-              displayContract: {
-                version: 1,
-                title: "Activity log",
-                fields: [
-                  {
-                    key: "ratePerHour",
-                    label: "Burn rate",
-                    kind: "readonly",
-                    unit: "kcal/hour",
-                    value: STUB_LOG_RATE,
-                    editable: false,
-                  },
-                  {
-                    key: "durationMinutes",
-                    label: "Duration",
-                    kind: "slider",
-                    unit: "min",
-                    value: durationMinutes,
-                    min: 1,
-                    max: 600,
-                    step: 5,
-                    editable: true,
-                  },
-                ],
-                derived: [
-                  {
-                    target: "totalCalories",
-                    label: "Estimated calories",
-                    unit: "kcal",
-                    op: "rate_per_hour",
-                    inputs: ["ratePerHour", "durationMinutes"],
-                    isPrimaryTotal: true,
-                  },
-                ],
-              },
-            },
-          },
-        ],
+        proposals: [stub.proposal],
       });
     }
 
@@ -642,70 +592,20 @@ export class StubCoachAiProvider implements CoachAiProvider {
       // Past-activity logging: emit log_workout_activity for "what I did" turns.
       // Checked before plan branches so activity reports don't become plan proposals.
       if (isPastActivityLoggingMessage(normalized)) {
-        const STUB_LOG_RATE = 300;
-        const durationMinutes = parseDurationMinutesFromMessage(normalized);
-        const activityType = parseActivityTypeFromMessage(normalized);
-        const estimatedCalories = deriveActivityCalories(STUB_LOG_RATE, durationMinutes);
-        const performedAt = new Date().toISOString();
+        const stub = buildStubLogWorkoutActivityProposal(normalized, {
+          parseDuration: parseDurationMinutesFromMessage,
+          parseActivityType: parseActivityTypeFromMessage,
+        });
+        stub.proposal.proposedChanges.performedAt = new Date().toISOString();
 
         return {
           kind: "domain_answer",
           domain: "workout",
-          summary: `Logged ${activityType} (${durationMinutes} min) as an ad-hoc session — review before saving.`,
-          candidateProposals: [
-            {
-              intent: "log_workout_activity",
-              targetDomain: "workout",
-              title: `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`,
-              reason: `Logged from your message as an ad-hoc activity (${durationMinutes} min).`,
-              proposedChanges: {
-                activityType,
-                title: `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`,
-                durationMinutes,
-                performedAt,
-                ratePerHour: STUB_LOG_RATE,
-                estimatedCalories,
-                displayContract: {
-                  version: 1,
-                  title: "Activity log",
-                  fields: [
-                    {
-                      key: "ratePerHour",
-                      label: "Burn rate",
-                      kind: "readonly",
-                      unit: "kcal/hour",
-                      value: STUB_LOG_RATE,
-                      editable: false,
-                    },
-                    {
-                      key: "durationMinutes",
-                      label: "Duration",
-                      kind: "slider",
-                      unit: "min",
-                      value: durationMinutes,
-                      min: 1,
-                      max: 600,
-                      step: 5,
-                      editable: true,
-                    },
-                  ],
-                  derived: [
-                    {
-                      target: "totalCalories",
-                      label: "Estimated calories",
-                      unit: "kcal",
-                      op: "rate_per_hour",
-                      inputs: ["ratePerHour", "durationMinutes"],
-                      isPrimaryTotal: true,
-                    },
-                  ],
-                },
-              },
-            },
-          ],
+          summary: `Logged ${stub.proposal.proposedChanges.activityType} (${stub.proposal.proposedChanges.durationMinutes} min) as an ad-hoc session — review before saving.`,
+          candidateProposals: [stub.proposal],
           domainSignals: ["activity_logged"],
-          workoutCalorieEstimate: estimatedCalories,
-          workoutCaloriePerHourRate: STUB_LOG_RATE,
+          workoutCalorieEstimate: stub.estimatedCalories,
+          workoutCaloriePerHourRate: stub.ratePerHour,
         };
       }
 

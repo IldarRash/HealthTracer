@@ -1,3 +1,142 @@
+import { deriveActivityCalories } from "@health/types";
+
+// ---------------------------------------------------------------------------
+// Stub log-activity proposal factory
+// ---------------------------------------------------------------------------
+
+/** The stub trusted calorie burn rate used for all log_workout_activity stubs. */
+export const STUB_LOG_ACTIVITY_RATE = 300;
+
+/**
+ * Shared result type returned by `buildStubLogWorkoutActivityProposal`.
+ * Each caller owns its own outer envelope (reply path vs domain_answer path).
+ * `performedAt` is intentionally excluded — callers compute it per-call so
+ * the timestamp reflects the actual invocation time.
+ */
+export interface StubLogActivityProposal {
+  /** The proposal object ready to place in proposals[] or candidateProposals[]. */
+  proposal: {
+    intent: "log_workout_activity";
+    targetDomain: "workout";
+    title: string;
+    reason: string;
+    proposedChanges: {
+      activityType: string;
+      title: string;
+      durationMinutes: number;
+      /** Caller injects performedAt after calling the factory. */
+      performedAt?: string;
+      ratePerHour: number;
+      estimatedCalories: number;
+      displayContract: {
+        version: number;
+        title: string;
+        fields: Array<{
+          key: string;
+          label: string;
+          kind: string;
+          unit: string;
+          value: number;
+          editable: boolean;
+          min?: number;
+          max?: number;
+          step?: number;
+        }>;
+        derived: Array<{
+          target: string;
+          label: string;
+          unit: string;
+          op: string;
+          inputs: string[];
+          isPrimaryTotal: boolean;
+        }>;
+      };
+    };
+  };
+  /** The trusted calorie rate — forwarded as workoutCaloriePerHourRate in domain_answer. */
+  ratePerHour: number;
+  /** Derived calorie estimate — forwarded as workoutCalorieEstimate in domain_answer. */
+  estimatedCalories: number;
+}
+
+/**
+ * Build the shared log_workout_activity proposal literal.
+ *
+ * Does NOT bake in `performedAt` — callers must set it on
+ * `result.proposal.proposedChanges.performedAt` after calling this factory,
+ * so the timestamp is always the actual call-time.
+ *
+ * Uses `deriveActivityCalories` (C9 helper) internally; no raw formula here.
+ */
+export function buildStubLogWorkoutActivityProposal(
+  normalized: string,
+  opts: {
+    parseDuration: (msg: string) => number;
+    parseActivityType: (msg: string) => string;
+  },
+): StubLogActivityProposal {
+  const ratePerHour = STUB_LOG_ACTIVITY_RATE;
+  const durationMinutes = opts.parseDuration(normalized);
+  const activityType = opts.parseActivityType(normalized);
+  const estimatedCalories = deriveActivityCalories(ratePerHour, durationMinutes);
+  const titleStr = `${activityType.charAt(0).toUpperCase() + activityType.slice(1)} session`;
+
+  return {
+    ratePerHour,
+    estimatedCalories,
+    proposal: {
+      intent: "log_workout_activity",
+      targetDomain: "workout",
+      title: titleStr,
+      reason: `Logged from your message as an ad-hoc activity (${durationMinutes} min).`,
+      proposedChanges: {
+        activityType,
+        title: titleStr,
+        durationMinutes,
+        ratePerHour,
+        estimatedCalories,
+        displayContract: {
+          version: 1,
+          title: "Activity log",
+          fields: [
+            {
+              key: "ratePerHour",
+              label: "Burn rate",
+              kind: "readonly",
+              unit: "kcal/hour",
+              value: ratePerHour,
+              editable: false,
+            },
+            {
+              key: "durationMinutes",
+              label: "Duration",
+              kind: "slider",
+              unit: "min",
+              value: durationMinutes,
+              min: 1,
+              max: 600,
+              step: 5,
+              editable: true,
+            },
+          ],
+          derived: [
+            {
+              target: "totalCalories",
+              label: "Estimated calories",
+              unit: "kcal",
+              op: "rate_per_hour",
+              inputs: ["ratePerHour", "durationMinutes"],
+              isPrimaryTotal: true,
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+
 /** Seed fixture exercise ids from packages/db/drizzle/seeds/exercises.sql */
 const STUB_EXERCISE_IDS = {
   gobletSquat: "b1000001-0000-4000-8000-000000000016",
