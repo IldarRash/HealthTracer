@@ -1,11 +1,7 @@
 import type {
   CoachAiProvider,
-  CoachAiLoopRequest,
-  CoachAiRequest,
 } from "@health/ai";
 import type {
-  AgentLoopOutputInput,
-  AiStructuredOutputInput,
   CompiledPromptTemplates,
   DomainLlmStepOutputInput,
   DomainLlmStepRequest,
@@ -15,8 +11,6 @@ import type {
   RouterDecisionRequest,
 } from "@health/types";
 import {
-  agentLoopOutputSchema,
-  aiStructuredOutputSchema,
   clampRouterDecisionOutput,
   createFallbackFinalDecision,
   createFallbackRouterDecision,
@@ -24,7 +18,6 @@ import {
   finalDecisionOutputSchema,
   getDefaultCompiledPromptTemplates,
   routerDecisionOutputSchema,
-  validateAgentLoopOutputShape,
   validateDomainLlmStepOutputShape,
   validateFinalDecisionOutputShape,
   validateRouterDecisionOutputShape,
@@ -67,37 +60,8 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     this.promptTemplates = options.promptTemplates ?? getDefaultCompiledPromptTemplates();
   }
 
-  async generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput> {
-    const systemPrompt = buildOpenAiIntentLoopPrompt(request, this.promptTemplates);
-    const payload = await this.requestJsonCompletion(
-      systemPrompt,
-      request.userMessage,
-      request.recentMessages,
-    );
-
-    return coerceOpenAiLoopOutput(payload);
-  }
-
-  async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput> {
-    const loopStep = await this.generateAgentLoopStep({
-      ...request,
-      iteration: 1,
-      maxIterations: 1,
-      priorToolResults: [],
-    });
-
-    if (loopStep.kind === "final_answer") {
-      return coerceOpenAiStructuredOutput({
-        reply: loopStep.reply,
-        proposals: loopStep.proposals ?? [],
-      });
-    }
-
-    throw new Error("OpenAI coach provider returned a tool request during single-pass generation.");
-  }
-
   // ---------------------------------------------------------------------------
-  // Parallel-domain pipeline methods — live via the fan-out path
+  // Fan-out pipeline methods — live via the fan-out path
   // (RouterLlm → parallel domain LLMs → DecisionMaker).
   // ---------------------------------------------------------------------------
 
@@ -338,89 +302,8 @@ function resolveImageDataUrisFromAttachmentContext(request: DomainLlmStepRequest
     .map((item) => item.imageDataUri as string);
 }
 
-function buildOpenAiIntentLoopPrompt(
-  request: CoachAiLoopRequest,
-  promptTemplates: CompiledPromptTemplates,
-): string {
-  const metadata = request.agentMetadata;
-  const intentDefinition = metadata?.intentDefinition;
-
-  return promptTemplates.renderCoachLoop({
-    iteration: String(request.iteration),
-    maxIterations: String(request.maxIterations),
-    selectedIntentLabel: intentDefinition
-      ? intentDefinition.id
-      : (metadata?.catalogIntentId ?? metadata?.intent ?? "general"),
-    intentInstructions: intentDefinition?.promptInstructions
-      ? intentDefinition.promptInstructions
-      : "Provide conservative wellness coaching.",
-    intentSafetyGuidance: intentDefinition?.safetyGuidance?.length
-      ? intentDefinition.safetyGuidance.join(" | ")
-      : "none",
-    allowedTools: metadata?.allowedTools?.length
-      ? metadata.allowedTools.join(", ")
-      : "getUserContextSlice",
-    allowedProposalIntents: metadata?.allowedProposalIntents?.length
-      ? metadata.allowedProposalIntents.join(", ")
-      : "none",
-    taskPurpose: metadata?.purpose ?? "general_chat",
-    taskIntent: metadata?.intent ?? "general",
-    expectedResponseMode:
-      metadata?.expectedResponseMode ?? "recommendation_with_optional_proposal",
-    safetyFlags: metadata?.safetyFlags?.length ? metadata.safetyFlags.join(", ") : "none",
-    missingContextNotes: metadata?.missingContextNotes?.length
-      ? metadata.missingContextNotes.join(" | ")
-      : "none",
-    priorToolResultsJson: request.priorToolResults.length
-      ? JSON.stringify(request.priorToolResults)
-      : "none",
-    safetyConstraints:
-      metadata?.safetyConstraints?.join("\n- ") ??
-      "Do not diagnose, prescribe, or claim to treat diseases.",
-    coachingContextJson: JSON.stringify(request.coachingContext),
-  });
-}
-
-function coerceOpenAiLoopOutput(value: unknown): AgentLoopOutputInput {
-  const shapeErrors = validateAgentLoopOutputShape(value);
-
-  if (shapeErrors.length > 0) {
-    throw new Error(
-      `OpenAI coach provider returned invalid loop output: ${shapeErrors.join(" ")}`,
-    );
-  }
-
-  return agentLoopOutputSchema.parse(value);
-}
-
-function coerceOpenAiStructuredOutput(value: unknown): AiStructuredOutputInput {
-  const validated = aiStructuredOutputSchema.safeParse(value);
-
-  if (validated.success) {
-    return validated.data;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    "reply" in value &&
-    typeof value.reply === "string" &&
-    value.reply.trim().length > 0 &&
-    value.reply.length <= 8000
-  ) {
-    return {
-      reply: value.reply,
-      proposals: [],
-    };
-  }
-
-  throw new Error(
-    `OpenAI coach provider returned invalid structured output: ${validated.error.message}`,
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Phase 2 prompt builders
+// Fan-out prompt builders
 // ---------------------------------------------------------------------------
 
 function buildOpenAiRouterDecisionPrompt(

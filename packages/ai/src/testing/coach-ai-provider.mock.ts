@@ -24,10 +24,6 @@ export function createCoachAiProviderMock(
     });
 
   return {
-    generateAgentLoopStep:
-      overrides.generateAgentLoopStep ?? notConfigured("generateAgentLoopStep"),
-    generateCoachResponse:
-      overrides.generateCoachResponse ?? notConfigured("generateCoachResponse"),
     generateRouterDecision:
       overrides.generateRouterDecision ?? notConfigured("generateRouterDecision"),
     generateDomainStep:

@@ -15,7 +15,6 @@ import { ContextExpansionPolicyService } from "../coaching-context/context-expan
 import { DecisionMakerExecutorService } from "./decision-maker-executor.service.js";
 import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
-import { ResponseModeExecutorService } from "./response-mode-executor.service.js";
 import { createAiPolicyTestStack } from "./test-ai-behavior-fixtures.js";
 import * as coachProviderFactory from "./coach-provider.factory.js";
 import {
@@ -62,15 +61,6 @@ function createStubDomainLlmExecutorService(
   } as unknown as AgentToolRegistryService;
 
   return new DomainLlmExecutorService(toolRegistry, makeStubChatAttachmentsService());
-}
-
-function createResponseModeExecutorService(
-  agentToolRegistryService: { executeTool: ReturnType<typeof vi.fn> },
-) {
-  return new ResponseModeExecutorService(
-    new ActionResolverService(),
-    agentToolRegistryService as never,
-  );
 }
 
 const SAFE_FALLBACK_REPLY =
@@ -208,16 +198,7 @@ function createOrchestratorWithCapturedProvider(
 ) {
   const defaultReply = options?.domainStepReply ?? DEFAULT_PROVIDER_REPLY;
 
-  const generateAgentLoopStep = vi.fn().mockResolvedValue({
-    kind: "final_answer",
-    reply: defaultReply,
-    proposals: [],
-  });
-  const generateCoachResponse = vi.fn().mockResolvedValue({
-    reply: defaultReply,
-    proposals: [],
-  });
-  // generateDomainStep is used by the fan-out path (router source="llm" turns).
+  // generateDomainStep is used by the fan-out path (all turn types in C6).
   // It returns a domain_answer whose summary matches the default loop reply so
   // tests that only check the output reply stay consistent.
   const generateDomainStep = vi.fn().mockResolvedValue({
@@ -254,10 +235,6 @@ function createOrchestratorWithCapturedProvider(
   const contextExpansionPolicyService = new ContextExpansionPolicyService();
   const domainToolExecute = vi.fn().mockResolvedValue({ tool: "getWeeklyProgressContext", ok: true, result: null });
   const domainLlmExecutorService = createStubDomainLlmExecutorService(domainToolExecute);
-  const responseModeExecutorService = new ResponseModeExecutorService(
-    actionResolverService,
-    agentToolRegistryService as never,
-  );
   const decisionMakerExecutorService = new DecisionMakerExecutorService();
   const actionVariantCatalogService = new ActionVariantCatalogService();
 
@@ -268,7 +245,6 @@ function createOrchestratorWithCapturedProvider(
     contextCompressionService,
     contextExpansionPolicyService,
     systemPlannerService,
-    responseModeExecutorService,
     aiBehaviorConfigService,
     routerDeps.messagePreprocessorService as never,
     routerDeps.routerLlmService as never,
@@ -279,13 +255,11 @@ function createOrchestratorWithCapturedProvider(
   );
 
   Object.assign(service, {
-    provider: { generateCoachResponse, generateAgentLoopStep, generateDomainStep, generateFinalDecision },
+    provider: { generateDomainStep, generateFinalDecision },
   });
 
   return {
     service,
-    generateCoachResponse,
-    generateAgentLoopStep,
     generateDomainStep,
     generateFinalDecision,
     coachingContextService,
@@ -645,9 +619,12 @@ describe("AgentOrchestratorService routing", () => {
     expect(result.output.proposals[0]?.intent).toBe("adapt_workout_plan");
   });
 
-  it("bypasses router for proposal revision turns and passes revision context", async () => {
+  it("bypasses router for proposal revision turns and passes revision context (fan-out path)", async () => {
+    // C6: revision turns now route through the fan-out path (generateDomainStep),
+    // not the legacy single-executor (generateAgentLoopStep). Router is still skipped.
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
-    const { service, generateAgentLoopStep, routerLlmService } = createOrchestratorWithCapturedProvider(contextPacket);
+    const { service, generateDomainStep, generateFinalDecision, routerLlmService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
 
     await service.orchestrateCoachTurn({
       auth: {
@@ -676,67 +653,42 @@ describe("AgentOrchestratorService routing", () => {
     });
 
     expect(routerLlmService.route).not.toHaveBeenCalled();
-    expect(generateAgentLoopStep).toHaveBeenCalled();
-    const providerRequest = generateAgentLoopStep.mock.calls[0]?.[0] as {
+    // C6: domain step (fan-out) is used, not the loop step.
+    expect(generateDomainStep).toHaveBeenCalled();
+    const domainRequest = generateDomainStep.mock.calls[0]?.[0] as {
       coachingContext: Record<string, unknown>;
     };
-    expect(providerRequest.coachingContext.proposalRevision).toMatchObject({
+    expect(domainRequest.coachingContext.proposalRevision).toMatchObject({
       supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
       modificationFeedback: "Keep one strength exercise.",
     });
+    // Decision-maker also runs (fan-out path, Stage 9).
+    expect(generateFinalDecision).toHaveBeenCalled();
   });
 
-  it("bypasses router for proposal explainer turns and passes proposal context", async () => {
+  it("bypasses router for proposal explainer turns and passes proposal context (fan-out path, read-only)", async () => {
+    // C6: explainer turns now route through the fan-out path (generateDomainStep).
+    // The domain LLM is read-only (allowedProposalIntents=[] for proposal_explainer).
+    // No proposals must surface on the output.
     const contextPacket = createSlicePacket("general_chat", "proposal_explainer");
-    const workoutProposal = {
-      intent: "adapt_workout_plan" as const,
-      targetDomain: "workout" as const,
-      title: "Should not surface",
-      reason: "Blocked on explainer turns.",
-      proposedChanges: {
-        title: "Strength base",
-        summary: "Lighter session today.",
-        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
-        notes: [],
-      },
-    };
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
-      reply: "I suggested this because your recovery signals were low.",
-      proposals: [workoutProposal],
+
+    const { service, generateDomainStep, generateFinalDecision, routerLlmService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    // Domain step returns no proposals (read-only); decision-maker does the same.
+    generateDomainStep.mockResolvedValue({
+      kind: "domain_answer",
+      domain: "health",
+      summary: "I suggested this because your recovery signals were low.",
+      candidateProposals: [],
+      domainSignals: [],
     });
-    const generateCoachResponse = vi.fn();
-
-    vi.spyOn(coachProviderFactory, "createCoachAiProvider").mockReturnValue({
-      generateAgentLoopStep,
-      generateCoachResponse,
-    } as never);
-
-    const coachingContextService = {
-      buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
-      toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
-        buildAgentPromptContextFromPacket(packet),
-      ),
-    };
-    const agentToolRegistryService = {
-      executeTool: vi.fn(),
-    };
-    const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
-    const routerDeps = createRouterTestDeps(vi.fn());
-    const service = new AgentOrchestratorService(
-      coachingContextService as never,
-      new ContextCompressionService(),
-      new ContextExpansionPolicyService(),
-      systemPlannerService,
-      createResponseModeExecutorService(agentToolRegistryService as never),
-      aiBehaviorConfigService,
-      routerDeps.messagePreprocessorService as never,
-      routerDeps.routerLlmService as never,
-      createStubDomainLlmExecutorService(),
-      new ActionResolverService(),
-      new DecisionMakerExecutorService(),
-      new ActionVariantCatalogService(),
-    );
+    generateFinalDecision.mockResolvedValue({
+      reply: "I suggested this because your recovery signals were low.",
+      selectedAction: null,
+      proposals: [],
+      consentRequired: false,
+    });
 
     const result = await service.orchestrateCoachTurn({
       auth: {
@@ -758,21 +710,18 @@ describe("AgentOrchestratorService routing", () => {
       },
     });
 
-    expect(routerDeps.routerLlmService.route).not.toHaveBeenCalled();
-    expect(generateAgentLoopStep).toHaveBeenCalled();
-    const providerRequest = generateAgentLoopStep.mock.calls[0]?.[0] as {
+    expect(routerLlmService.route).not.toHaveBeenCalled();
+    // C6: domain step (fan-out) runs instead of the legacy loop step.
+    expect(generateDomainStep).toHaveBeenCalled();
+    // Domain step receives proposalExplainer context.
+    const domainRequest = generateDomainStep.mock.calls[0]?.[0] as {
       coachingContext: Record<string, unknown>;
-      agentMetadata: {
-        catalogIntentId: string;
-        allowedProposalIntents: string[];
-      };
     };
-    expect(providerRequest.coachingContext.proposalExplainer).toMatchObject({
+    expect(domainRequest.coachingContext.proposalExplainer).toMatchObject({
       proposalId: "a1000001-0000-4000-8000-000000000001",
       title: "Lighten leg day",
     });
-    expect(providerRequest.agentMetadata.catalogIntentId).toBe("proposal_explainer");
-    expect(providerRequest.agentMetadata.allowedProposalIntents).toEqual([]);
+    // S3: no proposals on explainer turns.
     expect(result.output.proposals).toEqual([]);
     expect(result.agentMetadata.catalogIntentId).toBe("proposal_explainer");
     expect(result.agentMetadata.capabilityPresentation?.widgetDescriptors).toEqual([]);
@@ -1074,7 +1023,7 @@ describe("AgentOrchestratorService routing", () => {
         source: "fallback",
       }),
     );
-    const { service, generateAgentLoopStep, coachingContextService } =
+    const { service, generateDomainStep, coachingContextService } =
       createOrchestratorWithCapturedProvider(contextPacket, { routeImpl: route });
 
     const result = await service.orchestrateCoachTurn({
@@ -1099,7 +1048,8 @@ describe("AgentOrchestratorService routing", () => {
     });
 
     expect(route).toHaveBeenCalledTimes(1);
-    expect(generateAgentLoopStep).toHaveBeenCalledTimes(1);
+    // C6: fallback turns now go through the fan-out path (generateDomainStep), not the loop step.
+    expect(generateDomainStep).toHaveBeenCalledTimes(1);
     expect(coachingContextService.buildAgentContext).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -1223,25 +1173,23 @@ describe("AgentOrchestratorService agent loop", () => {
     expect(result.agentMetadata.safety.status).toBe("passed");
   });
 
-  it("rejects disallowed tool requests without executing tools and returns a safe fallback", async () => {
+  it("rejects disallowed tool requests without executing tools and returns a fallback (fan-out path)", async () => {
+    // C6: fallback source turns go through the fan-out path. The domain LLM executor
+    // enforces the per-domain allowlist; requesting getDocumentContext on the general
+    // capability causes the domain to degrade. No proposals may surface.
     const contextPacket = createSlicePacket("general_chat", "general");
-    // Use fallback source so the planner falls back to "general" capability,
-    // which does NOT allow getDocumentContext.
-    const { service, generateAgentLoopStep, agentToolRegistryService } =
+    const { service, generateDomainStep, domainToolExecute } =
       createOrchestratorWithCapturedProvider(contextPacket, {
         routeImpl: vi.fn().mockResolvedValue(
           createConfidentRouterResultForTests({ source: "fallback", confidence: 0.35 }),
         ),
       });
 
-    const executeTool = vi.fn();
-    Object.assign(agentToolRegistryService, { executeTool });
-
-    generateAgentLoopStep.mockResolvedValueOnce({
+    // Domain step requests a disallowed tool on first iteration.
+    generateDomainStep.mockResolvedValueOnce({
       kind: "tool_request",
       tool: "getDocumentContext",
       input: {},
-      rationale: "Attempt to read medical documents from a general turn.",
     });
 
     const result = await service.orchestrateCoachTurn({
@@ -1254,20 +1202,18 @@ describe("AgentOrchestratorService agent loop", () => {
       recentMessages: [],
     });
 
-    expect(generateAgentLoopStep).toHaveBeenCalledTimes(1);
-    expect(executeTool).not.toHaveBeenCalled();
-    expect(result.output.reply).toBe(SAFE_FALLBACK_REPLY);
+    // The domain LLM executor rejected the disallowed tool — executeTool not called.
+    expect(domainToolExecute).not.toHaveBeenCalled();
+    // The domain degraded to a fallback answer — no proposals.
     expect(result.output.proposals).toEqual([]);
+    // parseErrors must mention the disallowed tool.
     expect(result.parseErrors).toEqual(
       expect.arrayContaining([
-        expect.stringMatching(
-          /Requested tool "getDocumentContext" is not allowed for intent "general"/,
-        ),
+        expect.stringMatching(/getDocumentContext.*not in the per-domain allowlist|domains degraded/i),
       ]),
     );
-    expect(result.agentMetadata.safety.status).toBe("parse_failed");
+    // Safety status is parse_failed (all domains degraded or domain tool rejected).
     expect(result.agentMetadata.toolsInvoked).toEqual([]);
-    expect(result.agentMetadata.routing?.loopIterations).toBe(1);
   });
 });
 
@@ -1287,13 +1233,9 @@ describe("AgentOrchestratorService provider failures", () => {
     // to throw so both fail — safety floor must hold (no proposals, safe reply).
     Object.assign(service, {
       provider: {
-        generateAgentLoopStep: vi
-          .fn()
-          .mockRejectedValue(new Error("OpenAI coach provider request failed.")),
         generateDomainStep: vi
           .fn()
           .mockRejectedValue(new Error("OpenAI coach provider request failed.")),
-        generateCoachResponse: vi.fn(),
         generateFinalDecision: vi
           .fn()
           .mockRejectedValue(new Error("OpenAI coach provider request failed.")),
@@ -1333,13 +1275,9 @@ describe("AgentOrchestratorService provider failures", () => {
     // For the fan-out path, domain step and decision-maker both throw.
     Object.assign(service, {
       provider: {
-        generateAgentLoopStep: vi
-          .fn()
-          .mockRejectedValue(new Error("OpenAI coach provider request failed.")),
         generateDomainStep: vi
           .fn()
           .mockRejectedValue(new Error("OpenAI coach provider request failed.")),
-        generateCoachResponse: vi.fn(),
         generateFinalDecision: vi
           .fn()
           .mockRejectedValue(new Error("OpenAI coach provider request failed.")),
@@ -1394,12 +1332,7 @@ describe("AgentOrchestratorService compression review flow", () => {
       },
     });
 
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
-      reply: "Here is your monthly review summary.",
-      proposals: [],
-    });
-    // generateDomainStep is used by the fan-out path (router source="llm" turns).
+    // generateDomainStep is used by the fan-out path (all turn types in C6).
     const generateDomainStep = vi.fn().mockResolvedValue({
       kind: "domain_answer",
       domain: "workout",
@@ -1407,7 +1340,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       candidateProposals: [],
       domainSignals: [],
     });
-    const generateCoachResponse = vi.fn();
     const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "Here is your monthly review summary.",
       selectedAction: null,
@@ -1420,9 +1352,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
         buildAgentPromptContextFromPacket(packet),
       ),
-    };
-    const agentToolRegistryService = {
-      executeTool: vi.fn(),
     };
     const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
     const routerDeps = createRouterTestDeps(
@@ -1452,7 +1381,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       new ContextCompressionService(mockProvider),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService(agentToolRegistryService as never),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -1463,7 +1391,7 @@ describe("AgentOrchestratorService compression review flow", () => {
     );
 
     Object.assign(service, {
-      provider: { generateCoachResponse, generateAgentLoopStep, generateDomainStep, generateFinalDecision },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     await service.orchestrateCoachTurn({
@@ -1522,11 +1450,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       },
     });
 
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
-      reply: "Here is your monthly review summary.",
-      proposals: [],
-    });
     const generateDomainStep = vi.fn().mockResolvedValue({
       kind: "domain_answer",
       domain: "workout",
@@ -1534,7 +1457,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       candidateProposals: [],
       domainSignals: [],
     });
-    const generateCoachResponse = vi.fn();
     const generateFinalDecisionFallback = vi.fn().mockResolvedValue({
       reply: "Here is your monthly review summary.",
       selectedAction: null,
@@ -1547,9 +1469,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
         buildAgentPromptContextFromPacket(packet),
       ),
-    };
-    const agentToolRegistryService = {
-      executeTool: vi.fn(),
     };
     const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
     const failingProvider = {
@@ -1565,7 +1484,6 @@ describe("AgentOrchestratorService compression review flow", () => {
       new ContextCompressionService(failingProvider as never),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService(agentToolRegistryService as never),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -1576,7 +1494,7 @@ describe("AgentOrchestratorService compression review flow", () => {
     );
 
     Object.assign(service, {
-      provider: { generateCoachResponse, generateAgentLoopStep, generateDomainStep, generateFinalDecision: generateFinalDecisionFallback },
+      provider: { generateDomainStep, generateFinalDecision: generateFinalDecisionFallback },
     });
 
     await service.orchestrateCoachTurn({
@@ -1639,10 +1557,18 @@ describe("AgentOrchestratorService router integration", () => {
   it("runs router before planning for eligible turns and records bounded metadata", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const route = vi.fn().mockResolvedValue(createConfidentRouterResultForTests());
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateDomainStep = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Here is a wellness-focused response you can review.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "Here is a wellness-focused response you can review.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
 
     const coachingContextService = {
@@ -1658,7 +1584,6 @@ describe("AgentOrchestratorService router integration", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -1669,7 +1594,7 @@ describe("AgentOrchestratorService router integration", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     const result = await service.orchestrateCoachTurn({
@@ -1699,10 +1624,18 @@ describe("AgentOrchestratorService router integration", () => {
   it("skips router for proposal explainer turns", async () => {
     const contextPacket = createSlicePacket("general_chat", "proposal_explainer");
     const route = vi.fn();
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateDomainStep = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "health",
+      summary: "Here is a wellness-focused response you can review.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "Here is a wellness-focused response you can review.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -1717,7 +1650,6 @@ describe("AgentOrchestratorService router integration", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -1728,7 +1660,7 @@ describe("AgentOrchestratorService router integration", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     await service.orchestrateCoachTurn({
@@ -1757,10 +1689,18 @@ describe("AgentOrchestratorService router integration", () => {
   it("runs router for attachment turns (attachment hints included in request)", async () => {
     const contextPacket = createSlicePacket("nutrition_adaptation", "general");
     const route = vi.fn().mockResolvedValue(createConfidentRouterResultForTests({ domain: "nutrition" }));
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateDomainStep = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "nutrition",
+      summary: "Here is a wellness-focused response you can review.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "Here is a wellness-focused response you can review.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -1775,7 +1715,6 @@ describe("AgentOrchestratorService router integration", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -1786,7 +1725,7 @@ describe("AgentOrchestratorService router integration", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     await service.orchestrateCoachTurn({
@@ -1821,12 +1760,21 @@ describe("AgentOrchestratorService router integration", () => {
   });
 
   it("skips router for proposal revision turns", async () => {
+    // C6: router skipped (unchanged), but fan-out path (generateDomainStep) is used.
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const route = vi.fn();
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateDomainStep = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Here is a revised proposal draft for review.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "Here is a revised proposal draft for review.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -1841,7 +1789,6 @@ describe("AgentOrchestratorService router integration", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -1852,7 +1799,7 @@ describe("AgentOrchestratorService router integration", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     await service.orchestrateCoachTurn({
@@ -1882,7 +1829,8 @@ describe("AgentOrchestratorService router integration", () => {
     });
 
     expect(route).not.toHaveBeenCalled();
-    expect(generateAgentLoopStep).toHaveBeenCalled();
+    // C6: generateDomainStep (fan-out) is used for revision turns.
+    expect(generateDomainStep).toHaveBeenCalled();
   });
 
   it("invokes router before planning and skips coach llm for direct read plans", async () => {
@@ -1890,7 +1838,7 @@ describe("AgentOrchestratorService router integration", () => {
     const route = vi.fn().mockResolvedValue(
       createConfidentRouterResultForTests({ source: "fallback", confidence: 0.35 }),
     );
-    const generateAgentLoopStep = vi.fn();
+    const generateDomainStep = vi.fn();
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
       toAgentPromptContext: vi.fn((packet: AgentContextPacket) =>
@@ -1904,7 +1852,6 @@ describe("AgentOrchestratorService router integration", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -1915,7 +1862,7 @@ describe("AgentOrchestratorService router integration", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep },
     });
 
     const result = await service.orchestrateCoachTurn({
@@ -1929,7 +1876,8 @@ describe("AgentOrchestratorService router integration", () => {
     });
 
     expect(route).toHaveBeenCalled();
-    expect(generateAgentLoopStep).not.toHaveBeenCalled();
+    // Deterministic gate-miss: no domain LLM calls at all.
+    expect(generateDomainStep).not.toHaveBeenCalled();
     expect(result.agentMetadata.responseModeExecution).toMatchObject({
       executorMode: "deterministic_read",
       llmInvoked: false,
@@ -1939,14 +1887,23 @@ describe("AgentOrchestratorService router integration", () => {
   });
 
   it("falls back to general when router confidence is low (fallback source)", async () => {
+    // C6: fallback turns go through the fan-out path. Routing metadata is checked.
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const route = vi.fn().mockResolvedValue(
       createConfidentRouterResultForTests({ source: "fallback", confidence: 0.35 }),
     );
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateDomainStep = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "health",
+      summary: "Here is a wellness-focused response you can review.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "Here is a wellness-focused response you can review.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
 
     const coachingContextService = {
@@ -1962,7 +1919,6 @@ describe("AgentOrchestratorService router integration", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -1973,7 +1929,7 @@ describe("AgentOrchestratorService router integration", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     const result = await service.orchestrateCoachTurn({
@@ -1997,10 +1953,18 @@ describe("AgentOrchestratorService router integration", () => {
     const route = vi.fn().mockResolvedValue(
       createConfidentRouterResultForTests({ domain: "nutrition", confidence: 0.84 }),
     );
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateDomainStep = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "nutrition",
+      summary: "I reviewed your meal photo.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "I reviewed your meal photo.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -2015,7 +1979,6 @@ describe("AgentOrchestratorService router integration", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -2026,7 +1989,7 @@ describe("AgentOrchestratorService router integration", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     const result = await service.orchestrateCoachTurn({
@@ -2059,10 +2022,18 @@ describe("AgentOrchestratorService router integration", () => {
   it("uses router for normal text turns", async () => {
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const route = vi.fn().mockResolvedValue(createConfidentRouterResultForTests());
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateDomainStep = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Here is a wellness-focused response you can review.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "Here is a wellness-focused response you can review.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -2077,7 +2048,6 @@ describe("AgentOrchestratorService router integration", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -2088,7 +2058,7 @@ describe("AgentOrchestratorService router integration", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     const result = await service.orchestrateCoachTurn({
@@ -2136,12 +2106,22 @@ describe("AgentOrchestratorService response mode execution", () => {
     expect(result.agentMetadata.responseModeExecution?.executorMode).toBeTruthy();
   });
 
-  it("still invokes llm for proposal explainer turns routed before orchestrator", async () => {
+  it("still invokes llm for proposal explainer turns routed before orchestrator (fan-out path)", async () => {
+    // C6: explainer turns now go through the fan-out path (generateDomainStep).
+    // The LLM is still invoked (llmInvoked=true); no proposals surface (read-only allowlist).
     const contextPacket = createSlicePacket("general_chat", "proposal_explainer");
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateDomainStep = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "health",
+      summary: "This proposal adjusts your workout volume.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "This proposal adjusts your workout volume.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
     const coachingContextService = {
       buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
@@ -2156,7 +2136,6 @@ describe("AgentOrchestratorService response mode execution", () => {
       new ContextCompressionService(),
       new ContextExpansionPolicyService(),
       systemPlannerService,
-      createResponseModeExecutorService({ executeTool: vi.fn() }),
       aiBehaviorConfigService,
       routerDeps.messagePreprocessorService as never,
       routerDeps.routerLlmService as never,
@@ -2167,7 +2146,7 @@ describe("AgentOrchestratorService response mode execution", () => {
     );
 
     Object.assign(service, {
-      provider: { generateAgentLoopStep },
+      provider: { generateDomainStep, generateFinalDecision },
     });
 
     const result = await service.orchestrateCoachTurn({
@@ -2190,9 +2169,9 @@ describe("AgentOrchestratorService response mode execution", () => {
       }),
     });
 
-    expect(generateAgentLoopStep).toHaveBeenCalled();
+    // C6: domain step (fan-out) runs instead of generateAgentLoopStep.
+    expect(generateDomainStep).toHaveBeenCalled();
     expect(result.agentMetadata.responseModeExecution).toMatchObject({
-      executorMode: "single_llm",
       llmInvoked: true,
     });
     expect(result.output.proposals).toEqual([]);
@@ -2211,12 +2190,7 @@ describe("AgentOrchestratorService response mode execution", () => {
           : expectedExecutorMode === "deterministic_read"
             ? createSlicePacket("general_chat", "general")
             : createSlicePacket("workout_adaptation", "adjust_workout");
-      const generateAgentLoopStep = vi.fn().mockResolvedValue({
-        kind: "final_answer",
-        reply: "Here is a wellness-focused response you can review.",
-        proposals: [],
-      });
-      // generateDomainStep is used by the fan-out path (proposal_flow with llm router).
+      // generateDomainStep is used by the fan-out path (all turn types in C6).
       const generateDomainStep = vi.fn().mockResolvedValue({
         kind: "domain_answer",
         domain: "workout",
@@ -2243,7 +2217,6 @@ describe("AgentOrchestratorService response mode execution", () => {
         new ContextCompressionService(),
         new ContextExpansionPolicyService(),
         systemPlannerService,
-        createResponseModeExecutorService({ executeTool: vi.fn() }),
         aiBehaviorConfigService,
         routerDeps.messagePreprocessorService as never,
         routerDeps.routerLlmService as never,
@@ -2253,8 +2226,14 @@ describe("AgentOrchestratorService response mode execution", () => {
         new ActionVariantCatalogService(),
       );
 
+      const generateFinalDecision = vi.fn().mockResolvedValue({
+        reply: "Here is a wellness-focused response you can review.",
+        selectedAction: null,
+        proposals: [],
+        consentRequired: false,
+      });
       Object.assign(service, {
-        provider: { generateAgentLoopStep, generateDomainStep },
+        provider: { generateDomainStep, generateFinalDecision },
       });
 
       const result = await service.orchestrateCoachTurn({
@@ -2284,14 +2263,10 @@ describe("AgentOrchestratorService response mode execution", () => {
       expect(result.agentMetadata.responseModeExecution?.executorMode).toBe(expectedExecutorMode);
       expect(result.agentMetadata.responseModeExecution?.llmInvoked).toBe(expectsCoachLlm);
       if (expectsCoachLlm) {
-        // proposal_flow uses fan-out (generateDomainStep); single_llm and others use generateAgentLoopStep.
-        if (expectedExecutorMode === "proposal_flow") {
-          expect(generateDomainStep).toHaveBeenCalled();
-        } else {
-          expect(generateAgentLoopStep).toHaveBeenCalled();
-        }
+        // C6: ALL non-deterministic turns (proposal_flow, single_llm, etc.) use fan-out (generateDomainStep).
+        expect(generateDomainStep).toHaveBeenCalled();
       } else {
-        expect(generateAgentLoopStep).not.toHaveBeenCalled();
+        // Deterministic gate-miss: no domain LLM calls at all.
         expect(generateDomainStep).not.toHaveBeenCalled();
       }
     },
@@ -2381,8 +2356,6 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         generateFinalDecision,
       },
     });
@@ -2449,8 +2422,6 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         generateFinalDecision,
       },
     });
@@ -2490,8 +2461,6 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         // Decision-maker also throws to simulate a total failure scenario.
         generateFinalDecision: vi.fn().mockRejectedValue(new Error("Decision-maker also failed")),
       },
@@ -2557,8 +2526,6 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         generateFinalDecision,
       },
     });
@@ -2581,16 +2548,23 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
   // bypass the fan-out — RouterLlm must not run for those turns.
   // -------------------------------------------------------------------------
 
-  it("proposal-revision turns bypass the router and fan-out (single-executor path)", async () => {
-    // Proposal-revision always uses the single-executor path (ResponseModeExecutorService).
-    // The fan-out path (DomainLlmExecutorService) must not run.
+  it("proposal-revision turns bypass the router but go through the fan-out domain LLM", async () => {
+    // C6: proposal-revision now routes through runFanOutTurn (single-domain fan-out
+    // via the revision capability). The router is still skipped, but the domain LLM
+    // (generateDomainStep) runs instead of the legacy single-executor loop.
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const generateDomainStep = vi.fn().mockResolvedValue({
       kind: "domain_answer",
       domain: "workout",
-      summary: "Revised proposal.",
+      summary: "Revised proposal for review.",
       candidateProposals: [],
       domainSignals: [],
+    });
+    const generateFinalDecision = vi.fn().mockResolvedValue({
+      reply: "Revised proposal draft for review.",
+      selectedAction: null,
+      proposals: [],
+      consentRequired: false,
     });
 
     const { service, routerLlmService } = createOrchestratorWithCapturedProvider(contextPacket);
@@ -2598,16 +2572,11 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep: vi.fn().mockResolvedValue({
-          kind: "final_answer",
-          reply: "Revised proposal draft for review.",
-          proposals: [],
-        }),
-        generateCoachResponse: vi.fn(),
+        generateFinalDecision,
       },
     });
 
-    await service.orchestrateCoachTurn({
+    const result = await service.orchestrateCoachTurn({
       auth: { clerkUserId: "clerk-user", email: "test@example.com", displayName: "Test" },
       userMessage: "Please revise the proposal.",
       recentMessages: [],
@@ -2629,25 +2598,41 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
       },
     });
 
-    // Router must NOT run for proposal-revision turns.
+    // Router must NOT run for proposal-revision turns (S4/router bypass unchanged).
     expect(routerLlmService.route).not.toHaveBeenCalled();
-    // Domain step (fan-out path) must NOT run; single-executor path is used.
-    expect(generateDomainStep).not.toHaveBeenCalled();
+    // C6: domain step (fan-out path) MUST run (not the legacy single-executor loop).
+    expect(generateDomainStep).toHaveBeenCalledTimes(1);
+    // Domain step receives proposalRevision context forwarded from the orchestrator.
+    const domainRequest = generateDomainStep.mock.calls[0]?.[0] as {
+      coachingContext: Record<string, unknown>;
+    };
+    expect(domainRequest.coachingContext.proposalRevision).toMatchObject({
+      supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+      modificationFeedback: "Make it lighter.",
+    });
+    // R3: metadata includes unifiedTurnDecision.ran=false (router was skipped).
+    expect(result.agentMetadata.unifiedTurnDecision?.ran).toBe(false);
+    // responseModeExecution.llmInvoked=true (domain LLM ran).
+    expect(result.agentMetadata.responseModeExecution?.llmInvoked).toBe(true);
   });
 
-  it("proposal-explainer turns bypass the router and fan-out (single-executor path)", async () => {
+  it("proposal-explainer turns bypass the router but go through the fan-out domain LLM (read-only)", async () => {
+    // C6: proposal-explainer turns now route through runFanOutTurn (single-domain fan-out
+    // via the proposal_explainer capability). The router is still skipped, and the domain
+    // LLM (generateDomainStep) runs but is read-only — no proposals may be emitted.
     const contextPacket = createSlicePacket("general_chat", "proposal_explainer");
     const generateDomainStep = vi.fn().mockResolvedValue({
       kind: "domain_answer",
       domain: "health",
-      summary: "This should not be used on explainer turns.",
+      summary: "I suggested this because your recovery signals were low.",
       candidateProposals: [],
       domainSignals: [],
     });
-    const generateAgentLoopStep = vi.fn().mockResolvedValue({
-      kind: "final_answer",
+    const generateFinalDecision = vi.fn().mockResolvedValue({
       reply: "I suggested this because your recovery signals were low.",
+      selectedAction: null,
       proposals: [],
+      consentRequired: false,
     });
 
     const { service, routerLlmService } = createOrchestratorWithCapturedProvider(contextPacket);
@@ -2655,8 +2640,7 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep,
-        generateCoachResponse: vi.fn(),
+        generateFinalDecision,
       },
     });
 
@@ -2676,20 +2660,20 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
       },
     });
 
-    // Router and fan-out (domain step) must NOT run.
+    // Router must NOT run for proposal-explainer turns.
     expect(routerLlmService.route).not.toHaveBeenCalled();
-    expect(generateDomainStep).not.toHaveBeenCalled();
-    // Single-executor path (agentLoopStep) runs instead.
-    expect(generateAgentLoopStep).toHaveBeenCalled();
-    // Explainer returns no proposals.
+    // C6: domain step (fan-out path) runs (not the legacy single-executor loop).
+    expect(generateDomainStep).toHaveBeenCalledTimes(1);
+    // S3: explainer turns produce no proposals (empty allowedProposalIntents for the capability).
     expect(result.output.proposals).toHaveLength(0);
+    // R3: metadata — router was skipped so unifiedTurnDecision.ran=false.
+    expect(result.agentMetadata.unifiedTurnDecision?.ran).toBe(false);
   });
 
   it("direct-path turns bypass the fan-out domain LLMs", async () => {
     // 'What is today?' resolves to deterministic_read — no LLM runs.
     const contextPacket = createSlicePacket("general_chat", "general");
     const generateDomainStep = vi.fn();
-    const generateAgentLoopStep = vi.fn();
 
     const { service, routerLlmService } = createOrchestratorWithCapturedProvider(
       contextPacket,
@@ -2703,8 +2687,6 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep,
-        generateCoachResponse: vi.fn(),
       },
     });
 
@@ -2715,10 +2697,9 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     });
 
     // Router runs for direct-path turns (it's not a pre-gate bypass at the orchestrator level),
-    // but neither the domain LLMs nor the agent loop are invoked.
+    // but the domain LLMs are not invoked.
     expect(routerLlmService.route).toHaveBeenCalledTimes(1);
     expect(generateDomainStep).not.toHaveBeenCalled();
-    expect(generateAgentLoopStep).not.toHaveBeenCalled();
     // Direct-path returns a deterministic result.
     expect(result.agentMetadata.responseModeExecution?.delegatedToPreAiGate).toBe(true);
     expect(result.agentMetadata.responseModeExecution?.executorMode).toBe("deterministic_read");
@@ -2871,8 +2852,6 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         generateFinalDecision,
       },
     });
@@ -2947,8 +2926,6 @@ describe("AgentOrchestratorService fan-out reply safety floor", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         generateFinalDecision,
       },
     });
@@ -3024,8 +3001,6 @@ describe("AgentOrchestratorService fan-out reply safety floor", () => {
     Object.assign(service, {
       provider: {
         generateDomainStep,
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         generateFinalDecision,
       },
     });
@@ -3316,6 +3291,84 @@ describe("AgentOrchestratorService — workout calorie estimate threading (Phase
       expect(changes["estimatedSessionCalorieBurn"]).toBeUndefined();
       expect(changes["calorieEstimateProvenance"]).toBeUndefined();
     }
+  });
+
+  // R1 regression: proposal-revision turns now flow through resolveFinalDecisionOutput
+  // (via the fan-out path) which calls scrubAndStampWorkoutCalorieEstimate.
+  // The deleted resolveProposalOnlyOutput never stamped calorie estimates onto
+  // revision proposals — this test proves the fix is wired up correctly.
+  it("R1 — proposal-revision turn: workout calorie estimate is stamped with provenance=workout_llm when workout domain answer includes workoutCalorieEstimate", async () => {
+    const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
+
+    const revisionProposal = {
+      intent: "adapt_workout_plan",
+      targetDomain: "workout",
+      title: "Revised lighter session",
+      reason: "User asked to make the workout lighter.",
+      proposedChanges: {
+        title: "Recovery session",
+        summary: "Reduced load for today.",
+        days: [{ weekday: "tuesday" as const, focus: "Recovery", exercises: [{ name: "Yoga" }] }],
+        notes: [],
+      },
+    };
+
+    const { service, generateDomainStep, generateFinalDecision, routerLlmService } =
+      createOrchestratorWithCapturedProvider(contextPacket);
+
+    // Workout domain answer for the revision turn includes a calorie estimate and rate.
+    generateDomainStep.mockResolvedValue({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Here is the revised, lighter session.",
+      candidateProposals: [revisionProposal],
+      domainSignals: [],
+      workoutCalorieEstimate: 195,
+      workoutCaloriePerHourRate: 390,
+    });
+
+    // Decision-maker selects the revision proposal (without calorie fields —
+    // those are scrubbed + re-stamped exclusively from the workout domain answer).
+    generateFinalDecision.mockResolvedValue({
+      reply: "Here is your revised workout plan.",
+      selectedAction: "adapt_workout_plan",
+      proposals: [revisionProposal],
+      consentRequired: false,
+    });
+
+    const result = await service.orchestrateCoachTurn({
+      auth: { clerkUserId: "clerk-user", email: "test@example.com", displayName: "Test" },
+      userMessage: "Please revise the proposal to be lighter.",
+      recentMessages: [],
+      proposalRevision: {
+        supersededProposalId: "14a08176-64a7-4a2d-8a44-581807368394",
+        modificationFeedback: "Make it lighter.",
+        originalProposal: {
+          intent: "adapt_workout_plan",
+          targetDomain: "workout",
+          title: "Strength base",
+          reason: "Recovery signals.",
+          proposedChanges: {
+            title: "Strength base",
+            summary: "Original session.",
+            days: [{ weekday: "tuesday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
+            notes: [],
+          },
+        },
+      },
+    });
+
+    // Router is skipped for revision turns — but fan-out (generateDomainStep) still runs.
+    expect(routerLlmService.route).not.toHaveBeenCalled();
+    expect(generateDomainStep).toHaveBeenCalledTimes(1);
+
+    // The proposal must carry the stamped calorie estimate with workout_llm provenance.
+    expect(result.output.proposals).toHaveLength(1);
+    const proposalChanges = result.output.proposals[0]?.proposedChanges as Record<string, unknown>;
+    expect(proposalChanges["estimatedSessionCalorieBurn"]).toBe(195);
+    expect(proposalChanges["calorieEstimateProvenance"]).toBe("workout_llm");
+    // The trusted rate is also stamped (used for editable-card recompute on accept).
+    expect(proposalChanges["caloriePerHourRate"]).toBe(390);
   });
 });
 

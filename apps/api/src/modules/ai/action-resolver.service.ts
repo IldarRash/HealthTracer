@@ -1,6 +1,5 @@
 import type {
   AiStructuredOutput,
-  CatalogIntentId,
   CatalogProposalIntent,
   FinalDecisionOutput,
   WorkoutPlanProposalChanges,
@@ -16,19 +15,6 @@ import {
 import { Injectable } from "@nestjs/common";
 import { PLAIN_REPLY_ACTION_VARIANT_ID } from "./action-variant-catalog.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
-
-/** Direct mutation actions are never executed — the pipeline is proposal-only; these are ignored. */
-export type CoachDirectActionAttempt = {
-  type: string;
-  payload?: unknown;
-};
-
-export type ActionResolverResolveInput = {
-  output: AiStructuredOutput;
-  catalogIntentId: CatalogIntentId;
-  allowedProposalIntents: readonly CatalogProposalIntent[];
-  directActions?: readonly CoachDirectActionAttempt[];
-};
 
 export type ActionResolverFinalDecisionInput = {
   /**
@@ -153,18 +139,6 @@ export class ActionResolverService {
     };
   }
 
-  resolveProposalOnlyOutput(input: ActionResolverResolveInput): AiStructuredOutput {
-    // Pipeline is proposal-only: direct mutation actions are never executed; ignore any supplied directActions.
-    void input.directActions;
-
-    return {
-      reply: input.output.reply,
-      proposals: filterProposalsToAllowedIntents(
-        input.allowedProposalIntents,
-        input.output.proposals,
-      ),
-    };
-  }
 }
 
 // ---------------------------------------------------------------------------

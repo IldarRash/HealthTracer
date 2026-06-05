@@ -9,12 +9,5 @@ export {
   validateReplySafety,
 } from "./safety.js";
 export {
-  coerceAgentLoopFinalAnswer,
-  parseAgentLoopOutput,
-  type ParsedAgentLoopOutput,
-} from "./agent-loop-output.js";
-export {
   type CoachAiProvider,
-  type CoachAiLoopRequest,
-  type CoachAiRequest,
 } from "./coach-ai-provider.js";

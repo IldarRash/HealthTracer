@@ -96,8 +96,6 @@ function buildService(providerOverrides: Partial<{
           confidence: 0.8,
         }),
       ),
-    generateAgentLoopStep: vi.fn(),
-    generateCoachResponse: vi.fn(),
     generateDomainStep: vi.fn(),
     generateFinalDecision: vi.fn(),
   };

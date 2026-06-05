@@ -9,11 +9,12 @@ decision-maker LLM synthesizes their output into one reply plus typed proposals.
 > codebase locked and must not deviate from. The phased migration is complete: every
 > component described below exists in code. The multi-domain fan-out path
 > (RouterLlm → SystemPlanner `DomainFanoutPlan` → parallel `DomainLlmExecutorService`
-> → `DecisionMakerExecutorService` → `ActionResolverService`) is the live path for
-> eligible turns. The single bounded-loop `ResponseModeExecutorService` is retained
-> deliberately for the non-fan-out turns (proposal-revision, proposal-explainer,
-> low-confidence fallback, and deterministic gate-miss); see Stage 8 and "Retained
-> Single-Executor Path".
+> → `DecisionMakerExecutorService` → `ActionResolverService`) owns **all** turn types
+> — proposal-revision, proposal-explainer (with proposal), low-confidence fallback,
+> and the deterministic gate-miss (handled inline in
+> `AgentOrchestratorService.buildDeterministicGateMissResult`, zero LLM calls).
+> `ResponseModeExecutorService`, `resolveProposalOnlyOutput`, and the provider methods
+> `generateAgentLoopStep`/`generateCoachResponse` no longer exist.
 
 Attachments are **context** for this same pipeline — there is no separate attachment
 recognition/classification pipeline and no attachment proposal side channel. The old
@@ -43,9 +44,9 @@ flowchart TD
   validation --> persistence["ChatRepository message and proposal persistence"]
 ```
 
-LLM call budget per eligible turn: **1 router + N selected domain LLMs (N ≤ 3, run in
-parallel) + 1 decision-maker**. Direct-path, crisis, and proposal-explainer turns make
-zero domain/decision LLM calls.
+LLM call budget per eligible turn: **1 router (skipped for revision/explainer) + N
+selected domain LLMs (N ≤ 3, run in parallel) + 1 decision-maker**. Crisis turns make
+zero LLM calls. Deterministic gate-miss turns make zero LLM calls (handled inline).
 
 ## Stage 0: Chat Entry
 
@@ -235,23 +236,22 @@ Central orchestrator for the unified LLM pipeline.
 Responsibilities (`orchestrateCoachTurn`):
 
 - Run deterministic message normalization via `MessagePreprocessorService`.
-- Run `RouterLlmService` for eligible turns to select relevant domains.
+- Run `RouterLlmService` for eligible turns to select relevant domains (proposal-revision
+  and proposal-explainer turns skip the router).
 - Ask `SystemPlannerService` for the deterministic `DomainFanoutPlan`.
-- Decide fan-out vs. single-executor via `isFanOutTurn` (router ran, returned a
-  confident LLM result, and the plan is not a deterministic executor mode).
-- **Fan-out turns** (`runFanOutTurn`): build one bounded coaching-context packet per
-  selected domain through `CoachingContextService`, run the **selected domain LLMs in
-  parallel** through `DomainLlmExecutorService`, synthesize via
+- **All LLM turns** route through `runFanOutTurn`: build one bounded coaching-context
+  packet per selected domain through `CoachingContextService`, run the **selected domain
+  LLMs in parallel** through `DomainLlmExecutorService`, synthesize via
   `DecisionMakerExecutorService`, and resolve through `ActionResolverService`.
-- **Single-executor turns** (proposal-revision, explainer, low-confidence fallback,
-  deterministic gate-miss): delegate to `ResponseModeExecutorService` (see "Retained
-  Single-Executor Path").
+  Proposal-revision and proposal-explainer turns skip the router but still execute the
+  full fan-out path (router is not a prerequisite for `runFanOutTurn`).
+- **Deterministic gate-miss** turns (e.g. a deterministic executor mode that needs no
+  LLM) are handled inline by `buildDeterministicGateMissResult` — zero LLM calls.
 - Return structured AI output, parse errors, reply safety errors, the
-  `consentRequired` flag (fan-out only), and agent metadata.
+  `consentRequired` flag, and agent metadata.
 
 `RouterLlmService` is the only first-LLM routing stage for eligible turns. Proposal
-revision and proposal explainer turns are the explicit non-router exceptions and run
-through the single-executor path.
+revision and proposal explainer turns are the explicit non-router exceptions.
 
 ## Stage 4: Message Normalization
 
@@ -618,17 +618,18 @@ shared JSON-completion + shape-validation helpers.
 
 File: `packages/ai/src/coach-ai-provider.ts`
 
-Defines the `CoachAiProvider` interface and the `CoachAiRequest` / `CoachAiLoopRequest` types.
-The stub provider has been deleted (C2 removal program); tests use the shared mock
-from `@health/ai/testing` (`createCoachAiProviderMock`) and the real `OpenAiCoachProvider`
-is the mandatory production path.
+Defines the `CoachAiProvider` interface. The three fan-out methods are the complete
+provider surface:
 
-### Agent Loop Parsing
+- `generateRouterDecision` — the first-LLM domain selection
+- `generateDomainStep` — one domain loop step
+- `generateFinalDecision` — the decision-maker synthesis
 
-File: `packages/ai/src/agent-loop-output.ts`
-
-Parses and coerces provider loop output into either `tool_request` or a
-`domain_answer` / `final_answer`.
+`generateAgentLoopStep` and `generateCoachResponse` no longer exist (removed with
+`ResponseModeExecutorService` in C6). The stub provider has been deleted (C2 removal
+program); tests use the shared mock from `@health/ai/testing`
+(`createCoachAiProviderMock`) and the real `OpenAiCoachProvider` is the mandatory
+production path.
 
 ## Domain Config (per-domain YAML)
 
@@ -739,6 +740,17 @@ Schemas and defaults:
 
 The following files/exports were deleted and are no longer active runtime paths:
 
+- `ResponseModeExecutorService` (+ spec) and `ActionResolverService.resolveProposalOnlyOutput`
+  — the single bounded-loop executor path. All turn types (proposal-revision,
+  proposal-explainer, low-confidence fallback, deterministic gate-miss) now route
+  exclusively through `runFanOutTurn`. The deterministic gate-miss is handled inline
+  in `AgentOrchestratorService.buildDeterministicGateMissResult` (zero LLM calls).
+- `provider.generateAgentLoopStep` and `provider.generateCoachResponse` — the
+  provider methods that backed the single-executor path. The `CoachAiProvider` surface
+  is now `generateRouterDecision` / `generateDomainStep` / `generateFinalDecision` only.
+- `packages/ai/src/agent-loop-output.ts` (`parseAgentLoopOutput`,
+  `coerceAgentLoopFinalAnswer`, `ParsedAgentLoopOutput`) — loop output parsing helpers
+  used exclusively by the deleted single-executor path.
 - `UNIFIED_TURN_DECISION_ENABLED` feature flag.
 - `intent-router.ts`, `provider.generateIntentRoute`, the `llm_router` route fallback.
 - `TurnDecisionService` (+ spec), `provider.generateTurnDecision`, the
@@ -785,21 +797,3 @@ metadata can still be read safely:
 
 These compatibility shims are removable only behind a stated DB migration that backfills
 or drops the historical rows; do not delete them otherwise.
-
-## Retained Single-Executor Path (not legacy)
-
-The single bounded-loop `ResponseModeExecutorService`
-(`apps/api/src/modules/ai/response-mode-executor.service.ts`) is **deliberately
-retained** — it is not legacy and was not removed. The orchestrator (`isFanOutTurn`
-check) routes to it for every turn that is **not** a confident fan-out turn:
-
-- proposal-revision turns (router skipped),
-- proposal-explainer turns (router skipped),
-- low-confidence / fallback turns (router ran but did not clear the confidence gate),
-- deterministic gate-miss turns (a deterministic executor mode).
-
-This path runs one bounded agent loop via `provider.generateAgentLoopStep` /
-`provider.generateCoachResponse`, enforces the single capability's tool allowlist and
-reply safety, and resolves proposals through `ActionResolverService.resolveProposalOnlyOutput`.
-It never runs for confident multi-domain turns and shares the same proposal-only and
-safety floors as the fan-out path.

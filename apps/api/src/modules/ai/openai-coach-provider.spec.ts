@@ -107,10 +107,6 @@ describe("OpenAiCoachProvider", () => {
     vi.restoreAllMocks();
   });
 
-  // -------------------------------------------------------------------------
-  // Existing tests (preserved)
-  // -------------------------------------------------------------------------
-
   it("throws a clear error when the API key is missing", () => {
     expect(() => createOpenAiCoachProvider(undefined, "gpt-4o-mini")).toThrow(
       OpenAiCoachProviderMissingKeyError,
@@ -120,68 +116,8 @@ describe("OpenAiCoachProvider", () => {
     );
   });
 
-  it("keeps a valid reply and drops invalid proposals instead of failing the turn", async () => {
-    mockFetch({
-      kind: "final_answer",
-      reply: "Вот безопасный план питания как обычный ответ.",
-      proposals: [
-        {
-          intent: "made_up_nutrition_intent",
-          targetDomain: "nutrition",
-          title: "Invalid",
-          reason: "Invalid",
-          proposedChanges: {},
-        },
-      ],
-    });
-
-    const provider = createOpenAiCoachProvider("test-key", "gpt-4o-mini");
-    const output = await provider.generateCoachResponse({
-      userMessage: "подбери мне план питания",
-      recentMessages: [],
-      coachingContext: {},
-      agentMetadata: {
-        purpose: "nutrition_adaptation",
-        intent: "adjust_nutrition",
-        depth: "medium",
-        timeRange: "14d",
-        safetyConstraints: ["Do not diagnose."],
-      },
-    });
-
-    expect(output).toEqual({
-      reply: "Вот безопасный план питания как обычный ответ.",
-      proposals: [],
-    });
-  });
-
-  it("returns user-facing coaching text only from generateCoachResponse", async () => {
-    mockFetch({
-      kind: "final_answer",
-      reply: "I recommend a lighter recovery session you can review first.",
-      proposals: [],
-    });
-
-    const provider = createOpenAiCoachProvider("test-key", "gpt-4o-mini");
-    const output = await provider.generateCoachResponse({
-      userMessage: "Should I train today?",
-      recentMessages: [],
-      coachingContext: {},
-      agentMetadata: {
-        purpose: "workout_adaptation",
-        intent: "adjust_workout",
-        depth: "medium",
-        timeRange: "14d",
-        safetyConstraints: ["Do not diagnose."],
-      },
-    });
-
-    expect(output.reply).toContain("recovery session");
-    expect(output.proposals).toEqual([]);
-  });
-
   // -------------------------------------------------------------------------
-  // Phase 2: generateRouterDecision
+  // Fan-out pipeline: generateRouterDecision
   // -------------------------------------------------------------------------
 
   describe("generateRouterDecision", () => {

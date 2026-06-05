@@ -2,9 +2,8 @@
  * DomainLlmExecutorService
  *
  * Runs ONE domain LLM bounded loop. The orchestrator invokes the selected
- * domain executors concurrently (Promise.all). This service is split out of
- * ResponseModeExecutorService as part of Phase 4 of the parallel fan-out
- * architecture.
+ * domain executors concurrently (Promise.all). Fan-out owns all turn types;
+ * the legacy ResponseModeExecutorService was removed in C6.
  *
  * Failure isolation contract (MUST NOT be weakened):
  *  - Any throw, loop-exhaustion, reply-safety block, or per-domain timeout
@@ -246,8 +245,7 @@ export class DomainLlmExecutorService {
       const outputKind = (rawOutput as Record<string, unknown>)["kind"];
 
       if (outputKind === "tool_request") {
-        // Per-domain tool allowlist enforcement: reuse the pattern from
-        // ResponseModeExecutorService.executeToolIteration lines 345-355.
+        // Per-domain tool allowlist enforcement.
         const toolName = (rawOutput as Record<string, unknown>)["tool"] as AgentToolName | undefined;
 
         if (!toolName) {

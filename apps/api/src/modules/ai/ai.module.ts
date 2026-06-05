@@ -14,7 +14,6 @@ import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import { MessagePreprocessorService } from "./message-preprocessor.service.js";
 import { RouterLlmService } from "./router-llm.service.js";
 import { ProposalExplainerMatcherService } from "./proposal-explainer-matcher.service.js";
-import { ResponseModeExecutorService } from "./response-mode-executor.service.js";
 import { ResponseModePolicyService } from "./response-mode-policy.service.js";
 import { SystemPlannerService } from "./system-planner.service.js";
 
@@ -31,7 +30,6 @@ import { SystemPlannerService } from "./system-planner.service.js";
     MessagePreprocessorService,
     RouterLlmService,
     ProposalExplainerMatcherService,
-    ResponseModeExecutorService,
     ResponseModePolicyService,
     SystemPlannerService,
     AgentOrchestratorService,
@@ -50,7 +48,6 @@ import { SystemPlannerService } from "./system-planner.service.js";
     MessagePreprocessorService,
     RouterLlmService,
     ProposalExplainerMatcherService,
-    ResponseModeExecutorService,
     ResponseModePolicyService,
     SystemPlannerService,
   ],

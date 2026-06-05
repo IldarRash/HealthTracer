@@ -326,8 +326,6 @@ describe("DomainLlmExecutorService", () => {
   it("degrades gracefully when the provider throws an error (never rejects)", async () => {
     const provider: CoachAiProvider = {
       generateDomainStep: vi.fn().mockRejectedValue(new Error("OpenAI API rate limit")),
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -417,8 +415,6 @@ describe("DomainLlmExecutorService", () => {
         generateDomainStep: vi.fn().mockImplementation(
           () => new Promise<never>(() => undefined), // never resolves
         ),
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         generateRouterDecision: vi.fn(),
         generateFinalDecision: vi.fn(),
       } as unknown as CoachAiProvider;
@@ -451,8 +447,6 @@ describe("DomainLlmExecutorService", () => {
         generateDomainStep: vi.fn().mockImplementation(
           () => new Promise<never>(() => undefined),
         ),
-        generateAgentLoopStep: vi.fn(),
-        generateCoachResponse: vi.fn(),
         generateRouterDecision: vi.fn(),
         generateFinalDecision: vi.fn(),
       } as unknown as CoachAiProvider;
@@ -496,8 +490,6 @@ describe("DomainLlmExecutorService", () => {
   it("fallback result always has empty candidateProposals regardless of failure mode", async () => {
     const provider: CoachAiProvider = {
       generateDomainStep: vi.fn().mockRejectedValue(new Error("network error")),
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -540,8 +532,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -592,8 +582,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -644,8 +632,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -694,8 +680,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -752,8 +736,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -815,8 +797,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -876,8 +856,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -926,8 +904,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
-      generateAgentLoopStep: vi.fn(),
-      generateCoachResponse: vi.fn(),
       generateRouterDecision: vi.fn(),
       generateFinalDecision: vi.fn(),
     } as unknown as CoachAiProvider;
@@ -979,8 +955,6 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
         fn,
         provider: {
           generateDomainStep: fn,
-          generateAgentLoopStep: vi.fn(),
-          generateCoachResponse: vi.fn(),
           generateRouterDecision: vi.fn(),
           generateFinalDecision: vi.fn(),
         } as unknown as CoachAiProvider,
