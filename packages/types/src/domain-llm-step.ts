@@ -14,11 +14,11 @@ import { routerDomainSchema } from "./router-decision.js";
 // analyzes content directly (multimodal).
 //
 // Safety floors:
-//   - medical_document content is ONLY present when consentState === "granted".
+//   - Temporary, intentional relaxation: image content — including a medical-document
+//     photo — reaches the LLM with no pre-upload consent gate (see llm-pipeline.md).
 //   - Documents/sensitive health context are denied by default per packet budget
 //     floors in CoachingContextService; this schema does not relax them.
-//   - imageDataUri is ONLY set on the OpenAI path for vision-capable models;
-//     the stub path leaves it undefined.
+//   - imageDataUri is set only on the OpenAI vision path for vision-capable models.
 // ---------------------------------------------------------------------------
 
 export const domainAttachmentItemSchema = z.object({
@@ -29,22 +29,21 @@ export const domainAttachmentItemSchema = z.object({
   /** Full MIME type (e.g. "image/jpeg", "application/pdf"). */
   mimeType: z.string().min(1).max(120),
   /**
-   * Consent state at the time of this turn.
-   * medical_document content is ONLY present when this is "granted".
+   * Consent state at the time of this turn (carried for context only; there is no
+   * pre-LLM consent gate today — see the temporary relaxation in llm-pipeline.md).
    */
   // "needs_consent" is never produced at runtime; retained for historical DB-row reads only.
   consentState: z.enum(["granted", "needs_consent", "none"]),
   /**
    * Storage reference (local:// or cloud key).
-   * Null when content was purged due to missing consent.
+   * Null when content was purged by retention policy.
    */
   storageRef: z.string().min(1).max(512).nullable(),
   /**
    * Base64-encoded data URI for vision-capable LLM paths (OpenAI gpt-4o etc.).
-   * Set ONLY when:
-   *   a. The domain is nutrition or health AND the attachment is an image MIME.
-   *   b. For medical_document: consentState === "granted".
-   * Never set by the stub provider or on non-image MIMEs.
+   * Set only when the domain is nutrition or health AND the attachment is an image
+   * MIME (medical-document images included — no consent gate; temporary relaxation).
+   * Not set on non-image MIMEs.
    * Maximum size guard: truncated before reaching this field if oversized.
    */
   imageDataUri: z.string().min(1).optional(),
@@ -97,11 +96,12 @@ export const domainLlmStepRequestSchema = z.object({
   /**
    * Bounded attachment context for this domain's step.
    * Contains attachment refs + category + MIME + consent state, and for vision
-   * paths (OpenAI) the image data URI for food_photo / consented medical content.
+   * paths (OpenAI) the image data URI for food_photo / medical-document images.
    *
-   * Medical content is only present when consentState === "granted".
-   * Documents/sensitive health context are denied by the per-domain packet
-   * budget floors in CoachingContextService; this field cannot widen them.
+   * Image content (incl. medical-document photos) reaches the LLM with no consent
+   * gate today (temporary relaxation — see llm-pipeline.md). Documents/sensitive
+   * health context are still denied by the per-domain packet budget floors in
+   * CoachingContextService; this field cannot widen them.
    *
    * Optional — absent on turns with no attachments.
    */

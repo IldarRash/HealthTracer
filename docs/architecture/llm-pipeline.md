@@ -130,8 +130,10 @@ recognizes what it is.
 > are gone (see "Removed Legacy Paths"). Floors that still hold: the context-budget
 > `allowDocuments=false` floor (about DB `health_documents` slices, **not** the
 > uploaded image) stays, there is **no** auto-persist or parsing of `health_documents`
-> from an attachment, and legacy DB columns for category/recognition/status remain
-> readable but are not used for runtime branching.
+> from an attachment, and the legacy `recognition`/`categorySource` DB columns remain
+> readable but are not used for runtime branching. (`category` is still read to resolve
+> a retention policy — effectively constant since uploads are always `unclassified` —
+> and `status` is read for send eligibility; see "Removed Legacy Paths".)
 
 ### `ChatTurnAttachmentStageService`
 
@@ -527,8 +529,8 @@ Output shape (`packages/types/src/domain-llm-step.ts`) — union of
 `domain_answer = { domain, summary, candidateProposals[], domainSignals[],
 workoutCalorieEstimate?, workoutCaloriePerHourRate? }`. Only the **workout** domain may
 populate `workoutCalorieEstimate` or `workoutCaloriePerHourRate` — `domainLlmStepOutputSchema`'s
-`superRefine` (the discriminated union wrapping `domainAnswerSchema`,
-`packages/types/src/domain-llm-step.ts:178-200`) rejects both fields for any
+`superRefine` (the discriminated union wrapping `domainAnswerSchema` in
+`packages/types/src/domain-llm-step.ts`) rejects both fields for any
 other domain; this invariant is enforced at the provider boundary via
 `domainLlmStepOutputSchema.parse`. `workoutCaloriePerHourRate` is the
 **trusted kcal/hour burn rate** used downstream to recompute editable display-contract
