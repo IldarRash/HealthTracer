@@ -6455,6 +6455,157 @@ span.confirmation-card__meta {
   color: var(--color-coach-400);
 }
 
+/* ==========================================================================
+   Longevity — dark canvas overrides (Phase 3b)
+   Scoped to [data-theme="dark"] .longevity-dashboard to avoid bleeding into
+   other structured-canvas dark screens.
+   ========================================================================== */
+
+/* ── Dashboard cards on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .dashboard-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__value {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__hint {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__footer {
+  border-color: var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* ── Domain accent top-borders on longevity cards (Today/Workouts/Nutrition row) ──
+   The hero section is the first child; Today is 2nd, Workouts 3rd, Nutrition 4th. */
+[data-theme="dark"] .longevity-dashboard .dashboard-grid--profile > :nth-child(2) {
+  border-top: 2px solid var(--color-metric-amber);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-grid--profile > :nth-child(3) {
+  border-top: 2px solid var(--color-metric-blue);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-grid--profile > :nth-child(4) {
+  border-top: 2px solid var(--color-metric-green);
+}
+
+/* ── Coach card on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .dashboard-card--coach {
+  border-color: rgba(25, 195, 125, 0.3);
+  box-shadow: 0 0 0 1px rgba(25, 195, 125, 0.12), var(--shadow-card);
+}
+
+/* ── Signal list items on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .overview-signal-list li {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .longevity-dashboard .overview-signal-list span {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .longevity-dashboard .overview-signal-list strong {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .longevity-dashboard .overview-signal-list p {
+  color: var(--color-text-muted);
+}
+
+/* ── Deferred domains summary on dark canvas ── */
+[data-theme="dark"] .longevity-dashboard .overview-deferred-domains > summary {
+  color: var(--color-text-muted);
+}
+
+/* ── Sparse hints and read-only notices on dark canvas ── */
+[data-theme="dark"] .longevity-dashboard .overview-sparse-hint,
+[data-theme="dark"] .longevity-dashboard .overview-readonly-notice {
+  color: var(--color-text-muted);
+}
+
+/* ── Trend section titles on dark canvas ── */
+[data-theme="dark"] .longevity-dashboard .section-label {
+  color: var(--color-text-muted);
+}
+
+/* ── Prompt chips on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .chat-prompt-chips {
+  justify-content: flex-start;
+}
+
+[data-theme="dark"] .longevity-dashboard .chat-prompt-chip {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .longevity-dashboard .chat-prompt-chip:hover:not(:disabled) {
+  border-color: var(--color-metric-green);
+  color: var(--color-metric-green);
+}
+
+/* ── Wellbeing trend chart on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-row__label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-day__label {
+  color: var(--color-text-muted);
+}
+
+/* Mood fill → coach-green on dark */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-fill--mood {
+  background: var(--color-metric-green);
+}
+
+/* Stress fill → indigo on dark */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-fill--stress {
+  background: var(--color-metric-indigo);
+}
+
+/* Bar track for wellbeing chart → dimmed white on dark */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-bar {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Wellbeing trend meta on dark canvas ── */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-meta {
+  color: var(--color-text-muted);
+}
+
+/* ── Notice banner on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .notice-inline {
+  background: rgba(245, 165, 36, 0.1);
+  border-color: rgba(245, 165, 36, 0.28);
+  color: var(--color-text-secondary);
+}
+
+/* ── Coach button on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .button-coach {
+  background: var(--color-metric-green);
+  color: #04130c;
+}
+
+[data-theme="dark"] .longevity-dashboard .button-coach:hover:not(:disabled) {
+  background: var(--color-coach-400);
+  color: #04130c;
+}
+
 /* ── Wellbeing scale inputs on dark ── */
 [data-theme="dark"] .wellbeing-scale-option {
   background: var(--color-surface-muted);

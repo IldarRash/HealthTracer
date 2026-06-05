@@ -84,3 +84,4 @@ export {
   ProfileSummaryCard,
   type ContextHubSection,
 } from "./context-hub";
+export { Spark, TrendArrow, type SparkProps, type TrendArrowProps } from "./spark";
