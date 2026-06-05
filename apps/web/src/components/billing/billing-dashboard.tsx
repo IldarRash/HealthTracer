@@ -97,7 +97,7 @@ export function LimitReachedBanner({
           disabled={isPending}
           className="limit-reached-banner__cta"
         >
-          {isPending ? "Redirecting…" : "Open Pro · 7 days free"}
+          {isPending ? "Redirecting…" : "Open Pro"}
         </Button>
         {onDismiss ? (
           <Button variant="ghost" onClick={onDismiss}>
@@ -327,8 +327,9 @@ export function BillingDashboard() {
             <span className="pricing-card__popular-badge">Popular</span>
           </div>
           <div className="pricing-card__price-row">
-            <span className="pricing-card__price">$6.99</span>
-            <span className="pricing-card__price-period">/ month</span>
+            <span className="pricing-card__price-period pricing-card__price-period--note">
+              Pricing shown securely at checkout
+            </span>
           </div>
           <p className="pricing-card__tagline">When you want to go deeper</p>
 
@@ -367,7 +368,7 @@ export function BillingDashboard() {
                 onClick={() => checkoutMutation.mutate()}
                 className="pricing-card__action pricing-card__action--accept"
               >
-                {checkoutMutation.isPending ? "Redirecting…" : "Open Pro · 7 days free"}
+                {checkoutMutation.isPending ? "Redirecting…" : "Open Pro"}
               </Button>
             )}
           </div>
