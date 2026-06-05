@@ -6639,3 +6639,314 @@ span.confirmation-card__meta {
   border-color: var(--color-border-default);
   border-radius: var(--radius-md);
 }
+
+/* ==========================================================================
+   Plans — dark canvas overrides (Phase 3c)
+   Training, Nutrition, and Progress screens use [data-theme="dark"].
+   Scoped so light routes are never affected.
+   ========================================================================== */
+
+/* ── Plan-view workspace panels ── */
+[data-theme="dark"] .plan-view .panel,
+[data-theme="dark"] .plan-view__panel {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .plan-view .panel-prominent,
+[data-theme="dark"] .plan-view__panel.panel-prominent {
+  border-color: var(--color-metric-blue);
+  box-shadow: 0 0 0 1px rgba(58, 141, 255, 0.18), var(--shadow-card);
+}
+
+[data-theme="dark"] .plan-view .panel-secondary,
+[data-theme="dark"] .plan-view__panel.panel-secondary {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+/* Nutrition plan prominent panel — green accent */
+[data-theme="dark"] .nutrition-workspace .plan-view .panel-prominent,
+[data-theme="dark"] .nutrition-workspace .plan-view__panel.panel-prominent {
+  border-color: var(--color-metric-green);
+  box-shadow: 0 0 0 1px rgba(25, 195, 125, 0.18), var(--shadow-card);
+}
+
+/* ── Nested / revision cards inside plan-view ── */
+[data-theme="dark"] .plan-view .nested-card,
+[data-theme="dark"] .plan-view .training-revision-card {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .plan-view .training-revision-card.active {
+  background: var(--color-surface-card);
+  border-color: var(--color-metric-blue);
+  box-shadow: inset 0 0 0 1px rgba(58, 141, 255, 0.28);
+}
+
+/* ── Plan header ── */
+[data-theme="dark"] .plan-view__header {
+  border-bottom-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .plan-view__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .plan-view__summary {
+  color: var(--color-text-secondary);
+}
+
+/* ── Plan fact DL ── */
+[data-theme="dark"] .plan-view__fact dt {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .plan-view__fact dd {
+  color: var(--color-text-primary);
+}
+
+/* ── Panel title + intro ── */
+[data-theme="dark"] .plan-view__panel-title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .plan-view__panel-intro {
+  color: var(--color-text-muted);
+}
+
+/* ── Change-via-chat notice ── */
+[data-theme="dark"] .plan-view__change-notice {
+  background: rgba(58, 141, 255, 0.08);
+  border-color: rgba(58, 141, 255, 0.22);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .nutrition-workspace .plan-view__change-notice {
+  background: rgba(25, 195, 125, 0.08);
+  border-color: rgba(25, 195, 125, 0.22);
+}
+
+[data-theme="dark"] .plan-view__change-notice-copy {
+  color: var(--color-text-secondary);
+}
+
+/* ── Execution callout ── */
+[data-theme="dark"] .plan-view .training-execution-callout {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .plan-view .training-execution-callout h3 {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .plan-view .training-execution-callout .muted-text {
+  color: var(--color-text-muted);
+}
+
+/* ── Revision-history disclosure ── */
+[data-theme="dark"] .plan-view__revision-history-summary {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .plan-view__revision-history-summary:hover {
+  color: var(--color-text-secondary);
+}
+
+/* ── CTA links on dark plan canvas ── */
+[data-theme="dark"] .plan-view__cta--primary {
+  background: rgba(58, 141, 255, 0.12);
+  border-color: rgba(58, 141, 255, 0.32);
+  color: var(--color-metric-blue);
+}
+
+[data-theme="dark"] .plan-view__cta--primary:hover {
+  background: rgba(58, 141, 255, 0.18);
+  color: var(--color-metric-blue);
+}
+
+[data-theme="dark"] .nutrition-workspace .plan-view__cta--primary {
+  background: rgba(25, 195, 125, 0.12);
+  border-color: rgba(25, 195, 125, 0.32);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .nutrition-workspace .plan-view__cta--primary:hover {
+  background: rgba(25, 195, 125, 0.18);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .plan-view__cta--secondary {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .plan-view__cta--secondary:hover {
+  color: var(--color-text-secondary);
+}
+
+/* ── Training-day card items (plan-view detail cards) ── */
+[data-theme="dark"] .plan-view__detail-card {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .plan-view__detail-card--active {
+  border-color: var(--color-metric-blue);
+  box-shadow: inset 0 0 0 1px rgba(58, 141, 255, 0.28);
+}
+
+[data-theme="dark"] .plan-view__detail-header strong {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .plan-view__detail-header span {
+  color: var(--color-text-muted);
+}
+
+/* ── Training exercise list items ── */
+[data-theme="dark"] .training-exercise-list li {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .training-day-header span {
+  color: var(--color-text-muted);
+}
+
+/* ── Section headings inside plan panels ── */
+[data-theme="dark"] .training-notes h3 {
+  color: var(--color-text-primary);
+}
+
+/* ── Revision badge on dark plan canvas ── */
+[data-theme="dark"] .plan-view__revision-badge.badge-valid {
+  background: var(--color-metric-green-dim);
+  border: 1px solid rgba(25, 195, 125, 0.28);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .plan-view__revision-badge.badge-neutral {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* ── Week strip / trend strip on dark plan canvas ── */
+[data-theme="dark"] .plan-view__week-context .section-label {
+  color: var(--color-text-muted);
+}
+
+/* ── Training progress section separator ── */
+[data-theme="dark"] .training-progress-section {
+  border-top-color: var(--color-border-default);
+}
+
+/* ── Progress panel (cross-domain review) on dark canvas ── */
+[data-theme="dark"] .training-progress-panel .progress-summary-header h2 {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .training-progress-panel .section-label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__hint {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .goals li {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .training-progress-panel .goals strong {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .training-progress-panel .goals span {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .goals p {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .badge.badge-valid {
+  background: var(--color-metric-green-dim);
+  border: 1px solid rgba(25, 195, 125, 0.28);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .training-progress-panel .badge.badge-pending {
+  background: var(--color-metric-amber-dim);
+  border: 1px solid rgba(245, 165, 36, 0.28);
+  color: var(--color-metric-amber);
+}
+
+[data-theme="dark"] .training-progress-panel .badge.badge-neutral {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* Notice inline on dark progress panel */
+[data-theme="dark"] .training-progress-panel .notice-inline {
+  background: rgba(245, 165, 36, 0.08);
+  border-color: rgba(245, 165, 36, 0.22);
+  color: var(--color-text-secondary);
+}
+
+/* Tools disclosure on dark progress panel */
+[data-theme="dark"] .training-progress-tools-disclosure {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .training-progress-tools-disclosure .disclosure__summary {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-tools-disclosure .disclosure__content {
+  border-top-color: var(--color-border-default);
+}
+
+/* ── Route wayfinding on dark canvas ── */
+[data-theme="dark"] .route-wayfinding__list li {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .route-wayfinding__list li + li::before {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .route-wayfinding__link {
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .route-wayfinding__link:hover {
+  color: var(--color-coach-400);
+}
+
+[data-theme="dark"] .route-wayfinding__current {
+  color: var(--color-text-primary);
+}
+
+/* ── Page header on dark plan canvas ── */
+[data-theme="dark"] .plan-view ~ .training-progress-section .progress-summary-header {
+  border-bottom-color: var(--color-border-default);
+}
+
+/* ── Structured canvas light overrides that bleed into plan-view — neutralise ── */
+[data-theme="dark"] .app-shell__main--structured .plan-view .notice-inline {
+  background: rgba(58, 141, 255, 0.08);
+  border-color: rgba(58, 141, 255, 0.22);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .app-shell__main--structured .nutrition-workspace .plan-view .notice-inline {
+  background: rgba(25, 195, 125, 0.08);
+  border-color: rgba(25, 195, 125, 0.22);
+}

@@ -135,7 +135,7 @@ export function NutritionWorkspace() {
 
   if (!activeRevision || !payload) {
     return (
-      <PlanViewLayout>
+      <PlanViewLayout className="nutrition-workspace">
         <EmptyState
           title="No active nutrition plan yet"
           description="Accept a nutrition proposal in Chat to create your first plan revision."
@@ -160,7 +160,7 @@ export function NutritionWorkspace() {
   const adherenceFacts = buildNutritionPlanAdherenceFacts({ adherenceState, payload });
 
   return (
-    <PlanViewLayout>
+    <PlanViewLayout className="nutrition-workspace">
       <ChangeViaChatNotice />
 
       <PlanViewGrid>
