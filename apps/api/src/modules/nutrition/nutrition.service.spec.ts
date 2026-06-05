@@ -34,6 +34,14 @@ const usersService = {
     createdAt: "2026-05-22T12:00:00.000Z",
     updatedAt: "2026-05-22T12:00:00.000Z",
   }),
+  getUserById: async (_id: string) => ({
+    id: userId,
+    email: "user@example.com",
+    displayName: null,
+    timezone: "UTC",
+    createdAt: "2026-05-22T12:00:00.000Z",
+    updatedAt: "2026-05-22T12:00:00.000Z",
+  }),
 };
 
 function createRepositoryMock(overrides: Record<string, unknown> = {}) {
@@ -574,5 +582,56 @@ describe("NutritionService", () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(createCalled).toBe(false);
+  });
+
+  it("threads the user timezone into createIncident so near-midnight incidents land on the correct local day", async () => {
+    // 2026-05-26T23:30:00Z is May 26 UTC but already May 27 in Asia/Tokyo (UTC+9).
+    // The service must resolve the user's timezone and forward it to the repository.
+    let capturedTimezone: string | undefined;
+
+    const tokyoUsersService = {
+      ...usersService,
+      getUserById: async (_id: string) => ({
+        id: userId,
+        email: "user@example.com",
+        displayName: null,
+        timezone: "Asia/Tokyo",
+        createdAt: "2026-05-22T12:00:00.000Z",
+        updatedAt: "2026-05-22T12:00:00.000Z",
+      }),
+    };
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findIncidentBySourceProposalId: async () => null,
+        createIncident: async (
+          _userId: string,
+          _sourceProposalId: string,
+          _payload: unknown,
+          _db: unknown,
+          tz: string,
+        ) => {
+          capturedTimezone = tz;
+          return { id: "incident-tz-1" };
+        },
+      }) as never,
+      tokyoUsersService as never,
+    );
+
+    await service.applyNutritionIncidentProposal(
+      userId,
+      "14a08176-64a7-4a2d-8a44-581807368394",
+      {
+        incidentDateTime: "2026-05-26T23:30:00.000Z",
+        items: [{ name: "Ramen", calories: 500 }],
+        estimatedCalories: 500,
+        estimatedMacros: { proteinGrams: 20, carbsGrams: 60, fatGrams: 15 },
+        confidence: "medium",
+        provenance: { source: "text_estimate", providerId: "chat_trigger" },
+        imageRefs: [],
+      },
+    );
+
+    expect(capturedTimezone).toBe("Asia/Tokyo");
   });
 });
