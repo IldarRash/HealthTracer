@@ -1,6 +1,6 @@
 /**
- * Icon — single-stroke SVG icon component backed by the design kit path set.
- * Paths ported from docs/design/app/kit.jsx ICONS object.
+ * Icon — single-stroke SVG icon component.
+ * Single-stroke icon set for the app shell and screens.
  */
 
 export const ICONS = {

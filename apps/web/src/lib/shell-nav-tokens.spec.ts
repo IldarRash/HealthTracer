@@ -27,18 +27,14 @@ describe("shell and nav design tokens", () => {
     expect(stylesSource).toMatch(/\.app-shell__main--chat[\s\S]*padding:\s*0/);
   });
 
-  it("keeps keyboard focus styles on primary nav and wayfinding links", () => {
-    expect(stylesSource).toContain(".app-nav a:focus-visible");
-    expect(stylesSource).toContain(".app-nav__link:focus-visible");
+  it("keeps keyboard focus styles on sidebar nav and wayfinding links", () => {
+    expect(stylesSource).toContain(".app-sidebar__nav-item:focus-visible");
     expect(stylesSource).toContain(".route-wayfinding__link:focus-visible");
-    expect(stylesSource).toContain(".app-nav__link--featured");
-    expect(stylesSource).toContain('.app-nav__link[aria-current="page"]');
   });
 
   it("contains overflow containment for structured shell and secondary wayfinding", () => {
     expect(stylesSource).toMatch(/\.app-shell__main--structured[\s\S]*overflow-x:\s*clip/);
     expect(stylesSource).toMatch(/\.route-wayfinding[\s\S]*min-width:\s*0/);
     expect(stylesSource).toMatch(/\.route-wayfinding__link[\s\S]*overflow-wrap:\s*anywhere/);
-    expect(stylesSource).toMatch(/@media \(max-width: 640px\)[\s\S]*\.app-nav__links[\s\S]*min-width:\s*0/);
   });
 });

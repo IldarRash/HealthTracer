@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 import { RouteWayfindingTrail } from "./ui/route-wayfinding-trail.js";
 import {
   getNavLinkAriaCurrent,
-  getNavLinkClassNames,
   PRIMARY_NAV_LINKS,
   resolveSecondaryRouteWayfinding,
 } from "../lib/nav-ui-state.js";
@@ -90,24 +89,16 @@ describe("Modern Health OS shell render", () => {
     expect(resolveSecondaryRouteWayfinding(pathname)).toBeUndefined();
   });
 
-  it("applies featured treatment to Chat nav link class tokens", () => {
+  it("applies aria-current to Chat nav link when active", () => {
     const chat = PRIMARY_NAV_LINKS.find((link) => link.href === "/chat")!;
-    const classes = getNavLinkClassNames("/chat", chat);
-    expect(classes).toContain("app-nav__link--featured");
-    expect(classes).not.toContain("app-nav__link--active");
     expect(getNavLinkAriaCurrent("/chat", chat)).toBe("page");
   });
 
-  it("applies active class and aria-current to non-featured tabs", () => {
+  it("applies aria-current to non-featured tabs when active", () => {
     const longevity = PRIMARY_NAV_LINKS.find((link) => link.href === "/longevity")!;
     const chat = PRIMARY_NAV_LINKS.find((link) => link.href === "/chat")!;
 
-    const longevityClasses = getNavLinkClassNames("/longevity/insights", longevity);
-    expect(longevityClasses).toContain("app-nav__link--active");
     expect(getNavLinkAriaCurrent("/longevity/insights", longevity)).toBe("page");
-
-    const chatClasses = getNavLinkClassNames("/longevity/insights", chat);
-    expect(chatClasses).not.toContain("app-nav__link--active");
-    expect(chatClasses).toContain("app-nav__link--featured");
+    expect(getNavLinkAriaCurrent("/longevity/insights", chat)).toBeUndefined();
   });
 });

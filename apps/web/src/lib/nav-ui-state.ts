@@ -45,23 +45,6 @@ export function getNavLinkAriaCurrent(
   return isNavLinkActive(pathname, link) ? "page" : undefined;
 }
 
-/** Class tokens for a primary nav link at the current pathname. */
-export function getNavLinkClassNames(pathname: string, link: NavLink): readonly string[] {
-  const active = isNavLinkActive(pathname, link);
-  const isFeatured = link.featured === true;
-  const classes = ["app-nav__link"];
-
-  if (isFeatured) {
-    classes.push("app-nav__link--featured");
-  }
-
-  if (active && !isFeatured) {
-    classes.push("app-nav__link--active");
-  }
-
-  return classes;
-}
-
 export function isSecondaryRoute(pathname: string): boolean {
   return SECONDARY_ROUTE_LINKS.some((link) => isNavLinkActive(pathname, link));
 }
