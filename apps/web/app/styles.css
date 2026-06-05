@@ -2329,6 +2329,84 @@ span.confirmation-card__meta {
   }
 }
 
+/* ==========================================================================
+   Profile hub — two-column light layout (Phase 2b)
+   Left col: account + coaching-hierarchy + goals + personal-preferences
+   Right col: data-consent (devices) + documents + billing bridge
+   ========================================================================== */
+
+/* Two-column grid — kicks in at ≥900px */
+@media (min-width: 900px) {
+  .context-hub.profile-hub {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+    align-items: start;
+  }
+
+  /* Section nav spans both columns */
+  .profile-hub > .section-nav {
+    grid-column: 1 / -1;
+  }
+
+  /* Left column: account (ProfileSummaryCard), coaching-hierarchy, goals, personal-preferences */
+  .profile-hub > #account,
+  .profile-hub > #coaching-hierarchy,
+  .profile-hub > #goals,
+  .profile-hub > #personal-preferences {
+    grid-column: 1;
+  }
+
+  /* Right column: data-consent, documents, billing and longevity bridges */
+  .profile-hub > #data-consent,
+  .profile-hub > #documents,
+  .profile-hub > .profile-billing-bridge,
+  .profile-hub > .profile-longevity-bridge {
+    grid-column: 2;
+  }
+
+  /* Error notice spans both columns */
+  .profile-hub > .notice {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Card head row: icon circle + title + optional right slot — profile hub sections */
+.profile-hub .context-section-card__header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.profile-hub .context-section-card__header > div:first-child {
+  min-width: 0;
+}
+
+/* Documents section card — amber top-border accent */
+.profile-hub > #documents {
+  border-top: 2px solid var(--color-metric-amber);
+}
+
+.profile-hub > #documents .documents-workspace {
+  margin-top: 0;
+}
+
+/* Data-consent (devices) section — green accent top-border */
+.profile-hub > #data-consent {
+  border-top: 2px solid var(--color-metric-green);
+}
+
+/* Ensure section cards fill their column and don't have extra top margin */
+@media (min-width: 900px) {
+  .profile-hub .dashboard-section {
+    margin: 0;
+  }
+}
+
 .training-workspace {
   margin-top: var(--space-6);
   max-width: 100%;
