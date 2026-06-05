@@ -5372,118 +5372,217 @@ span.confirmation-card__meta {
   background: #c084fc;
 }
 
-/* Onboarding wizard */
-.onboarding-workspace {
-  display: grid;
-  gap: var(--space-6);
-  margin-inline: auto;
-  max-width: 42rem;
-  width: 100%;
+/* ==========================================================================
+   Onboarding — split panel layout (dark left + light right)
+   ========================================================================== */
+
+/* Full-bleed two-column container filling the structured main area.
+   The structured main has padding; we pull it back with negative margin. */
+.onboarding-layout {
+  display: flex;
+  /* Expand to fill parent including padding offsets */
+  margin: calc(-1 * var(--space-6)) calc(-1 * var(--space-4));
+  min-height: calc(100% + 2 * var(--space-6));
+  overflow: hidden;
+  width: calc(100% + 2 * var(--space-4));
 }
 
-.onboarding-workspace__header {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-5);
+/* ── Dark left panel ─────────────────────────────────────────────────────── */
+
+.onboarding-panel {
+  background: var(--color-surface-nav-dark);
+  color: var(--color-text-on-dark);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  padding: 40px 38px;
+  width: 320px;
 }
 
-.onboarding-workspace__header h1 {
+.onboarding-panel__brand {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.onboarding-panel__brand-name {
+  color: var(--color-text-on-dark);
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.onboarding-panel__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.onboarding-panel__headline {
+  color: var(--color-text-on-dark);
+  font-size: 1.875rem;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  line-height: 1.2;
+  margin: 0 0 var(--space-4);
+}
+
+.onboarding-panel__sub {
+  color: rgba(243, 245, 246, 0.55);
+  font-size: 0.9375rem;
+  line-height: 1.6;
   margin: 0;
 }
 
-.app-shell__main--structured .onboarding-workspace__header.dashboard-card--coach {
-  border-color: rgb(45 212 191 / 45%);
-  box-shadow: var(--shadow-brand-soft);
-}
-
-.onboarding-progress {
-  display: grid;
-  gap: var(--space-3);
+/* Step list */
+.onboarding-panel__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-@media (width >= 640px) {
-  .onboarding-progress {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-
-  .onboarding-progress__step {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    text-align: center;
-  }
-
-  .onboarding-progress__label {
-    font-size: var(--font-size-xs);
-  }
+.onboarding-panel__step {
+  align-items: center;
+  display: flex;
+  gap: 12px;
 }
 
-.onboarding-progress__step {
+.onboarding-panel__step-marker {
   align-items: center;
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: auto 1fr;
-}
-
-.onboarding-progress__marker {
-  align-items: center;
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border-default);
   border-radius: var(--radius-full);
-  color: var(--color-text-muted);
   display: inline-flex;
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  height: 2rem;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  height: 24px;
   justify-content: center;
-  width: 2rem;
+  width: 24px;
+  /* upcoming default */
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  color: rgba(243, 245, 246, 0.35);
 }
 
-.onboarding-progress__step--current .onboarding-progress__marker {
-  background: rgb(20 184 166 / 16%);
-  border-color: var(--color-coach-400);
-  color: var(--color-coach-400);
+.onboarding-panel__step--current .onboarding-panel__step-marker {
+  background: transparent;
+  border: 2px solid var(--color-metric-green);
+  color: var(--color-metric-green);
 }
 
-.onboarding-progress__step--complete .onboarding-progress__marker {
-  background: rgb(20 184 166 / 24%);
-  border-color: var(--color-coach-500);
-  color: var(--color-coach-500);
+.onboarding-panel__step--done .onboarding-panel__step-marker {
+  background: var(--color-metric-green);
+  border: none;
+  color: #04130c;
 }
 
-.onboarding-progress__label {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
+.onboarding-panel__step-label {
+  color: rgba(243, 245, 246, 0.35);
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
-.onboarding-progress__step--current .onboarding-progress__label {
-  color: var(--color-text-primary);
-  font-weight: 600;
+.onboarding-panel__step--current .onboarding-panel__step-label,
+.onboarding-panel__step--done .onboarding-panel__step-label {
+  color: var(--color-text-on-dark);
 }
 
-.onboarding-step-panel {
+.onboarding-panel__step--current .onboarding-panel__step-label {
+  font-weight: 700;
+}
+
+/* ── Light right content area ────────────────────────────────────────────── */
+
+.onboarding-content {
+  background: var(--color-surface-content-elevated);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.onboarding-content__body {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  padding: 40px 60px;
+}
+
+.onboarding-step {
   display: grid;
   gap: var(--space-4);
+  max-width: 34rem;
+  width: 100%;
 }
 
-.app-shell__main--structured .onboarding-step-panel.panel-prominent {
-  background: var(--color-surface-content-elevated);
-  border-color: var(--color-border-subtle);
-  box-shadow: var(--shadow-card-light);
+.onboarding-step__eyebrow {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-section-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
 }
 
-.onboarding-step-panel__intro {
+.onboarding-step__title {
+  color: var(--color-text-on-light);
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.onboarding-step__intro {
   color: var(--color-text-on-light-secondary);
   font-size: var(--font-size-sm);
   line-height: 1.5;
   margin: 0;
 }
 
+/* Form fields inside onboarding step */
 .onboarding-form {
   display: grid;
   gap: var(--space-4);
+}
+
+.onboarding-form .form-field {
+  color: var(--color-text-on-light);
+}
+
+.onboarding-form .form-help {
+  color: var(--color-text-on-light-secondary);
+}
+
+.onboarding-form .form-field input[type="text"],
+.onboarding-form .form-field input[type="number"],
+.onboarding-form .form-field input[type="date"],
+.onboarding-form .form-field select,
+.onboarding-form .form-field textarea {
+  background: var(--color-surface-content-elevated);
+  border: 1.5px solid var(--color-border-strong);
+  color: var(--color-text-on-light);
+}
+
+.onboarding-form .form-field input[type="text"]:hover,
+.onboarding-form .form-field input[type="number"]:hover,
+.onboarding-form .form-field input[type="date"]:hover,
+.onboarding-form .form-field select:hover,
+.onboarding-form .form-field textarea:hover {
+  border-color: var(--color-coach-400);
+}
+
+.onboarding-form .form-field input[type="text"]:focus-visible,
+.onboarding-form .form-field input[type="number"]:focus-visible,
+.onboarding-form .form-field input[type="date"]:focus-visible,
+.onboarding-form .form-field select:focus-visible,
+.onboarding-form .form-field textarea:focus-visible {
+  border-color: var(--color-coach-500);
+  box-shadow: var(--shadow-focus);
+  outline: none;
 }
 
 .onboarding-baseline-grid {
@@ -5497,6 +5596,7 @@ span.confirmation-card__meta {
   }
 }
 
+/* Goal presets grid */
 .onboarding-goal-presets {
   display: grid;
   gap: var(--space-3);
@@ -5514,9 +5614,9 @@ span.confirmation-card__meta {
 }
 
 .onboarding-goal-preset {
-  background: var(--color-surface-content-muted);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  background: var(--color-surface-content-elevated);
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 14px;
   color: inherit;
   cursor: pointer;
   display: grid;
@@ -5541,7 +5641,7 @@ span.confirmation-card__meta {
 }
 
 .onboarding-goal-preset--selected {
-  background: rgb(20 184 166 / 10%);
+  background: var(--color-coach-100);
   border-color: var(--color-coach-500);
   box-shadow: var(--shadow-brand-soft);
 }
@@ -5549,7 +5649,7 @@ span.confirmation-card__meta {
 .onboarding-goal-preset__label {
   color: var(--color-text-on-light);
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .onboarding-goal-preset__description {
@@ -5558,15 +5658,28 @@ span.confirmation-card__meta {
   line-height: 1.45;
 }
 
+/* Selected goal summary */
 .onboarding-goal-summary {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   display: grid;
   gap: var(--space-2);
   padding: var(--space-4);
 }
 
+.onboarding-goal-summary__label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-section-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
 .onboarding-goal-summary__title {
   color: var(--color-text-on-light);
-  font-size: var(--font-size-md);
+  font-size: 1rem;
   font-weight: 600;
   margin: 0;
 }
@@ -5577,11 +5690,47 @@ span.confirmation-card__meta {
   margin: 0;
 }
 
-.onboarding-actions {
-  flex-wrap: wrap;
-  justify-content: flex-end;
+/* ── Footer nav: Back / dots / Continue ─────────────────────────────────── */
+
+.onboarding-footer {
+  align-items: center;
+  border-top: 1px solid var(--color-border-default);
+  display: flex;
+  flex-shrink: 0;
+  justify-content: space-between;
+  padding: 16px 60px;
 }
 
+.onboarding-footer__back,
+.onboarding-footer__next {
+  min-width: 5rem;
+}
+
+.onboarding-footer__next {
+  text-align: right;
+}
+
+.onboarding-footer__dots {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.onboarding-footer__dot {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+  display: block;
+  height: 7px;
+  transition: width 0.2s ease, background 0.2s ease;
+  width: 7px;
+}
+
+.onboarding-footer__dot--active {
+  background: var(--color-text-on-light);
+  width: 22px;
+}
+
+/* Sidebar hint */
 .app-nav__onboarding-hint {
   align-items: center;
   color: var(--color-text-muted);
@@ -5601,115 +5750,378 @@ span.confirmation-card__meta {
   width: 1rem;
 }
 
-/* Light structured canvas: onboarding stepper readability */
-.app-shell__main--structured .onboarding-progress__label {
-  color: var(--color-text-on-light-secondary);
-}
-
-.app-shell__main--structured .onboarding-progress__step--current .onboarding-progress__label {
-  color: var(--color-text-on-light);
-  font-weight: 600;
-}
-
-.app-shell__main--structured .onboarding-progress__marker {
-  background: var(--color-surface-content-muted);
-  border-color: var(--color-border-subtle);
-  color: var(--color-text-on-light-secondary);
-}
-
-.app-shell__main--structured .onboarding-progress__step--current .onboarding-progress__marker {
-  background: var(--color-coach-100);
-  border-color: var(--color-coach-600);
-  color: var(--color-coach-700);
-}
-
-.app-shell__main--structured .onboarding-progress__step--complete .onboarding-progress__marker {
-  background: var(--color-coach-500);
-  border-color: var(--color-coach-500);
-  color: var(--color-surface-content-elevated);
-}
-
-/* Light structured canvas: onboarding form fields */
-.app-shell__main--structured .onboarding-step-panel .section-label,
-.app-shell__main--structured .onboarding-goal-summary .section-label {
-  color: var(--color-text-on-light-secondary);
-}
-
-.app-shell__main--structured .onboarding-step-panel h2 {
-  color: var(--color-text-on-light);
-}
-
-.app-shell__main--structured .onboarding-form .form-field {
-  color: var(--color-text-on-light);
-}
-
-.app-shell__main--structured .onboarding-form .form-help {
-  color: var(--color-text-on-light-secondary);
-}
-
-.app-shell__main--structured .onboarding-form .form-field input[type="text"],
-.app-shell__main--structured .onboarding-form .form-field input[type="number"],
-.app-shell__main--structured .onboarding-form .form-field input[type="date"],
-.app-shell__main--structured .onboarding-form .form-field select,
-.app-shell__main--structured .onboarding-form .form-field textarea {
-  background: var(--color-surface-content-elevated);
-  border: 1px solid var(--color-border-subtle);
-  color: var(--color-text-on-light);
-}
-
-.app-shell__main--structured .onboarding-form .form-field input[type="text"]:hover,
-.app-shell__main--structured .onboarding-form .form-field input[type="number"]:hover,
-.app-shell__main--structured .onboarding-form .form-field input[type="date"]:hover,
-.app-shell__main--structured .onboarding-form .form-field select:hover,
-.app-shell__main--structured .onboarding-form .form-field textarea:hover {
-  border-color: var(--color-coach-400);
-}
-
-.app-shell__main--structured .onboarding-form .form-field input[type="text"]:focus-visible,
-.app-shell__main--structured .onboarding-form .form-field input[type="number"]:focus-visible,
-.app-shell__main--structured .onboarding-form .form-field input[type="date"]:focus-visible,
-.app-shell__main--structured .onboarding-form .form-field select:focus-visible,
-.app-shell__main--structured .onboarding-form .form-field textarea:focus-visible {
-  border-color: var(--color-coach-500);
-  box-shadow: var(--shadow-focus);
-}
-
-/* Light structured canvas: selected preset goal summary */
-.app-shell__main--structured .onboarding-goal-summary.panel-secondary {
-  background: var(--color-surface-content-muted);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-}
-
-/* Compact horizontal mobile stepper (< 640px) */
-@media (max-width: 639px) {
-  .onboarding-progress {
-    align-items: center;
-    display: flex;
-    gap: var(--space-1);
-    justify-content: space-between;
-    margin-bottom: var(--space-2);
-  }
-
-  .onboarding-progress__step {
-    align-items: center;
-    display: flex;
-    flex: 1;
+/* Responsive — collapse panel on small screens */
+@media (max-width: 767px) {
+  .onboarding-layout {
     flex-direction: column;
-    gap: var(--space-1);
-    text-align: center;
   }
 
-  .onboarding-progress__label {
+  .onboarding-panel {
+    padding: 20px 24px;
+    width: 100%;
+  }
+
+  .onboarding-panel__body {
     display: none;
   }
 
-  .onboarding-progress__step--current .onboarding-progress__label {
-    display: block;
-    font-size: var(--font-size-xs);
-    margin-top: var(--space-1);
-    white-space: nowrap;
+  .onboarding-panel__steps {
+    flex-direction: row;
+    gap: var(--space-2);
+    overflow-x: auto;
   }
+
+  .onboarding-panel__step-label {
+    display: none;
+  }
+
+  .onboarding-content__body {
+    padding: 24px 24px;
+  }
+
+  .onboarding-footer {
+    padding: 14px 24px;
+  }
+}
+
+/* ==========================================================================
+   Billing / Pricing — free-vs-pro comparison + limit-reached banner
+   ========================================================================== */
+
+.pricing-screen {
+  display: grid;
+  gap: var(--space-8);
+  margin-inline: auto;
+  max-width: 52rem;
+  padding: var(--space-8) var(--space-6);
+  width: 100%;
+}
+
+.pricing-screen__header {
+  text-align: center;
+}
+
+.pricing-screen__eyebrow {
+  color: var(--color-coach-600);
+  font-size: var(--font-size-section-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 var(--space-3);
+  text-transform: uppercase;
+}
+
+.pricing-screen__title {
+  color: var(--color-text-on-light);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  margin: 0 0 var(--space-2);
+}
+
+.pricing-screen__sub {
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.pricing-screen__error {
+  text-align: center;
+}
+
+/* Two-column card row */
+.pricing-cards {
+  align-items: stretch;
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 639px) {
+  .pricing-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Shared card base */
+.pricing-card {
+  border-radius: 1rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 26px;
+}
+
+/* Free card */
+.pricing-card--free {
+  background: var(--color-surface-content-elevated);
+  border: 1px solid var(--color-border-default);
+  box-shadow: var(--shadow-card-light);
+}
+
+/* Pro card — intentionally dark even on light route */
+.pricing-card--pro {
+  background: var(--color-surface-nav-dark);
+  border: 1px solid var(--color-metric-green);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  color: var(--color-text-on-dark);
+  position: relative;
+}
+
+/* Header row */
+.pricing-card__head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.pricing-card__brand {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.pricing-card--free .pricing-card__plan-name {
+  color: var(--color-text-on-light);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.pricing-card--pro .pricing-card__plan-name {
+  color: var(--color-text-on-dark);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.pricing-card__current-badge {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+.pricing-card__popular-badge {
+  background: var(--color-metric-green-dim);
+  border-radius: var(--radius-full);
+  color: var(--color-metric-green);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+/* Price */
+.pricing-card__price-row {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.pricing-card--free .pricing-card__price {
+  color: var(--color-text-on-light);
+  font-size: 2.125rem;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+}
+
+.pricing-card--pro .pricing-card__price {
+  color: var(--color-text-on-dark);
+  font-size: 2.125rem;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+}
+
+.pricing-card--free .pricing-card__price-period {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.pricing-card--pro .pricing-card__price-period {
+  color: rgba(243, 245, 246, 0.55);
+  font-size: 0.875rem;
+}
+
+.pricing-card__tagline {
+  font-size: 0.8125rem;
+  margin: 0 0 var(--space-5);
+}
+
+.pricing-card--free .pricing-card__tagline {
+  color: var(--color-text-muted);
+}
+
+.pricing-card--pro .pricing-card__tagline {
+  color: rgba(243, 245, 246, 0.55);
+}
+
+/* Feature list */
+.pricing-card__features {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Footer actions */
+.pricing-card__footer {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.pricing-card__usage-hint {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0;
+  text-align: center;
+}
+
+.pricing-card--pro .pricing-card__usage-hint {
+  color: rgba(243, 245, 246, 0.45);
+}
+
+.pricing-card__action {
+  width: 100%;
+}
+
+/* Accept-style CTA on Pro card */
+.pricing-card__action--accept {
+  background: var(--color-metric-green) !important;
+  color: #04130c !important;
+}
+
+.pricing-card__action--accept:hover:not(:disabled) {
+  background: var(--color-coach-700) !important;
+}
+
+/* ── Pricing feature row ─────────────────────────────────────────────────── */
+
+.pricing-feature-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 11px;
+  padding: 9px 0;
+}
+
+.pricing-feature-row__icon {
+  align-items: center;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 19px;
+  justify-content: center;
+  margin-top: 1px;
+  width: 19px;
+}
+
+.pricing-feature-row__icon--free {
+  background: var(--color-surface-inset);
+}
+
+.pricing-feature-row__icon--pro {
+  background: var(--color-metric-green);
+}
+
+.pricing-feature-row__icon--off {
+  background: transparent;
+}
+
+.pricing-feature-row__label {
+  color: var(--color-text-secondary);
+  font-size: 0.84375rem;
+  line-height: 1.4;
+}
+
+.pricing-card--pro .pricing-feature-row__label {
+  color: rgba(207, 212, 215, 0.9);
+}
+
+.pricing-feature-row__label--off {
+  color: var(--color-text-muted);
+}
+
+.pricing-card--pro .pricing-feature-row__label--off {
+  color: rgba(243, 245, 246, 0.28);
+}
+
+/* ── Limit-reached banner (inline in chat) ──────────────────────────────── */
+
+.limit-reached-banner {
+  background: linear-gradient(180deg, #fbf8f3, #ffffff);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.limit-reached-banner__body {
+  padding: 18px 20px;
+}
+
+.limit-reached-banner__header {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.limit-reached-banner__icon-wrap {
+  align-items: center;
+  background: var(--color-metric-amber-dim);
+  border-radius: 9px;
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.limit-reached-banner__title {
+  color: var(--color-text-on-light);
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.limit-reached-banner__desc {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  margin: 0 0 var(--space-4);
+}
+
+.limit-reached-banner__chips {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.limit-reached-banner__chip {
+  align-items: center;
+  background: var(--color-surface-content-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: 11px;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  flex: 1;
+  font-size: 0.78125rem;
+  font-weight: 600;
+  gap: 7px;
+  padding: 10px 12px;
+}
+
+.limit-reached-banner__actions {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.6);
+  border-top: 1px solid var(--color-border-default);
+  display: flex;
+  gap: var(--space-2);
+  padding: 14px 20px;
+}
+
+.limit-reached-banner__cta {
+  flex: 1;
 }
 
 .coaching-hierarchy {
