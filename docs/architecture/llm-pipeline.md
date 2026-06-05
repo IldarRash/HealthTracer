@@ -23,6 +23,32 @@ intent router (`intent-router.ts`), `TurnDecisionService`, `MessageUnderstanding
 the attachment-family route bypass, and the attachment recognizers/classifiers have all
 been removed (see "Removed Legacy Paths").
 
+## Proposal Lifecycle At A Glance
+
+Before the stage-by-stage detail, the high-level rule: the AI layer **never mutates
+domain tables directly**. It produces typed proposals; backend services validate,
+persist, and apply them only after the user accepts. End to end:
+
+```mermaid
+flowchart TD
+  chat["Chat turn"] --> llm["LLM pipeline (router → domains → decision-maker)"]
+  llm --> actionResolver["ActionResolverService"]
+  actionResolver --> validation["ProposalValidationService"]
+  validation --> pending["Pending proposal (review card)"]
+  pending --> userDecision["User accept or reject"]
+  userDecision --> apply["ProposalApplyService"]
+  apply --> revision["Domain revision or ad_hoc log row"]
+```
+
+No proposal is applied during generation. A missing proposal card means the final API
+response had `proposals: []` for the assistant message (diagnose upstream — see
+[Diagnosis & Troubleshooting](#diagnosis--troubleshooting)). Beyond fan-out LLM output,
+proposals can also come from deterministic code-owned injectors (wellbeing check-in,
+recipe recommendations, weekly-review packing); all sources pass the same
+`ProposalValidationService` stack. On accept, workout/nutrition changes create new
+revisions — `log_workout_activity` is a LOG intent that creates an `ad_hoc`
+`workout_sessions` row, never a plan revision (see Stage 11).
+
 ## End-To-End Flow
 
 ```mermaid
@@ -94,6 +120,13 @@ shown to a user come from one of two sources:
 
 All proposals — LLM-sourced and code-injected — pass the same
 `ProposalValidationService` safety stack before persistence.
+
+When the UI shows assistant text but no proposal card, the API almost always returned
+`proposals: []`. Invalid proposals still persist and render as cards with disabled
+apply actions, so missing cards should be diagnosed upstream in the router, planner,
+domain LLM, decision-maker, action resolver, or reply-safety metadata. See
+[Diagnosis & Troubleshooting](#diagnosis--troubleshooting) for the focused
+"no proposal card" checklist.
 
 ### `ChatRepository`
 
@@ -289,6 +322,22 @@ Responsibilities (`orchestrateCoachTurn`):
 `RouterLlmService` is the only first-LLM routing stage for eligible turns. Proposal
 revision and proposal explainer turns are the explicit non-router exceptions.
 
+### Degradation and observability
+
+For missing proposal cards, inspect the assistant message metadata before assuming a UI
+problem:
+
+- `agent.catalogIntentId` / routing metadata show whether the route was `adjust_workout`
+  or a fallback such as `general`.
+- `parseErrors` includes domain fallback entries such as
+  `Fan-out: domains degraded to fallback: [workout]`.
+- `parseErrors` includes `Decision-maker degraded: ...` when final synthesis fell back.
+- `replySafetyErrors` and `agent.safety.status === "reply_blocked"` mean the
+  orchestrator replaced the reply and dropped proposals.
+- An otherwise clean turn with text but no cards usually means the decision-maker chose
+  `plain_reply` or `null`, and `ActionResolverService` correctly returned
+  `proposals: []`.
+
 ## Stage 4: Message Normalization
 
 ### `MessagePreprocessorService`
@@ -361,6 +410,13 @@ Safety behavior (three-step validation pipeline):
 
 Falls back to a safe general decision if any step fails.
 
+Multilingual routing is LLM-led. The router receives both original text and normalized
+text plus `detectedLanguage`, so Russian requests such as "сгенерируй тренировочный
+план" can route to `workout`. Deterministic signal coverage is not equivalent across
+languages: some preprocessor signals cover Cyrillic workout terms, while domain YAML
+signal examples remain mostly English. Short typo-heavy requests therefore depend more
+on router LLM confidence.
+
 ## Stage 6: SystemPlanner — Fan-out Planner
 
 ### `SystemPlannerService`
@@ -400,6 +456,13 @@ Planner output (`DomainFanoutPlan`):
 
 Selected domains are capped at **3** (code constant). The planner never widens
 tool/proposal allowlists beyond the catalog.
+
+Router confidence directly affects proposal availability. If the router result is not
+from the LLM, has confidence below `RULE_ROUTE_CONFIDENCE_THRESHOLD`, has no selected
+domains, or cannot map the selected domain to a capability, `SystemPlannerService`
+falls back to the configured fallback capability (currently `general`). The `general`
+capability does not allow workout proposal intents, so workout cards cannot be created
+from that route even if a later LLM writes workout-like text.
 
 ### `CapabilityRegistryService`
 
@@ -520,6 +583,11 @@ Per domain executor:
 - validate reply safety
 - emit a typed `domain_answer`
 
+The `domain_answer.candidateProposals[]` array is advisory. It is not persisted directly
+and does not render a card by itself. The decision-maker must copy the selected candidate
+into its final `proposals[]` output and select the matching action variant before
+`ActionResolverService` will keep it.
+
 Failure behavior: a domain that errors, exhausts its loop, or times out degrades
 to a **safe empty output** and never blocks the other domains or the turn. Per-domain
 timeouts bound latency.
@@ -577,6 +645,32 @@ The decision-maker emits **typed proposals only**; it never writes domain state 
 never fabricates a workout calorie estimate or the trusted `workoutCaloriePerHourRate`
 (those may only come from the workout domain LLM).
 
+`selectedAction` is part of the proposal contract, not only presentation metadata. For
+a proposal to survive, `selectedAction` must be a non-`plain_reply` action id from the
+catalog and must correspond to the proposal intent being persisted. If the decision-maker
+chooses `null` or `plain_reply`, the action resolver returns a text-only response even
+when the reply describes a full plan.
+
+Decision-maker degradation is observable through orchestrator `parseErrors` entries that
+start with `Decision-maker degraded:`. The fallback final decision always has
+`selectedAction: null` and `proposals: []`.
+
+### `ActionVariantCatalogService`
+
+File: `apps/api/src/modules/ai/action-variant-catalog.service.ts`
+
+Builds the bounded action catalog passed to the decision-maker:
+
+- `plain_reply` is always present and currently appears first.
+- Each selected domain contributes the union of its clamped
+  `allowedProposalIntents`, capped at `MAX_CATALOG_ENTRIES`.
+- The catalog is not authoritative by itself; `ActionResolverService` re-filters the
+  decision-maker output to the same selected-domain allowlist.
+
+This means a confident workout route must be present before workout proposal variants
+such as `create_workout_plan` and `adapt_workout_plan` can appear in the decision-maker
+catalog.
+
 ## Stage 10: Action Resolver
 
 ### `ActionResolverService`
@@ -603,6 +697,12 @@ and `log_workout_activity` proposal regardless of which specific workout intent 
 Non-workout proposals pass through without calorie scrubbing.
 
 It does **not** mutate domain state and does **not** persist proposals.
+
+`plain_reply` and `null` selected actions are structural no-op actions: they deliberately
+produce no proposals and set `consentRequired` to `false`. This is the most important
+debugging distinction for "text answer, no card" turns: a well-written workout plan in
+`reply` is not enough unless the decision-maker also selected a proposal action and
+returned proposals under an allowed intent.
 
 **Trusted calorie-rate stamping (`scrubAndStampWorkoutCalorieEstimate`).** For every
 workout-plan and `log_workout_activity` proposal, ActionResolver **always scrubs** the
@@ -715,6 +815,13 @@ for details.
 OpenAI prompt templates are keyed `router`, `domain_workout`, `domain_nutrition`,
 `domain_health`, and `decision`, rendered through `CompiledPromptTemplates` and the
 shared JSON-completion + shape-validation helpers.
+
+These prompt templates come from `packages/types/src/prompt-template-defaults.ts` unless
+`packages/ai-behavior/config/ai-behavior.json` supplies valid `promptTemplates`
+overrides for the same keys. Per-domain YAML `prompts[]` are loaded with domain config,
+but they are not directly injected into `OpenAiCoachProvider.generateDomainStep` today.
+Live fan-out prompt changes therefore belong in the prompt-template config/defaults, not
+only in `domains/*.yml`.
 
 ### Coach AI Provider Interface
 
@@ -837,6 +944,76 @@ Schemas and defaults:
 - `ChatService` validates every proposal before persistence.
 - The AI layer never writes directly to domain tables; accepted workout/nutrition
   changes create new revisions.
+
+## Diagnosis & Troubleshooting
+
+The most common support question is "the chat gave a helpful workout-plan reply but
+showed **no proposal card**." That almost always means the API response had
+`proposals: []`. Invalid proposals still persist and render as cards with disabled apply
+actions, so "no card" means the backend never produced or kept a proposal for that
+assistant message. The first runtime artifacts to inspect are
+`assistantMessage.metadata.agent` (incl. `agent.catalogIntentId` and router
+confidence/selected domains), `metadata.parseErrors`, `metadata.replySafetyErrors`, and
+proposal rows with `source_message_id = assistantMessage.id`.
+
+A workout-plan proposal passes through **two LLM handoffs** before persistence; a card
+appears only when the decision-maker copies a candidate into `proposals[]`, selects a
+matching non-`plain_reply` action, and the action resolver keeps it under the active
+allowlist:
+
+```mermaid
+flowchart TD
+  userTurn["User asks for plan"] --> router["RouterLlmService"]
+  router --> planner["SystemPlannerService"]
+  planner --> domain["DomainLlmExecutorService"]
+  domain --> candidates["domain_answer.candidateProposals (advisory)"]
+  candidates --> decision["DecisionMakerExecutorService"]
+  decision --> selected["selectedAction + proposals[]"]
+  selected --> resolver["ActionResolverService"]
+  resolver --> validation["ProposalValidationService"]
+  validation --> cards["Chat proposal cards"]
+```
+
+### Most likely failure points
+
+- **Decision-maker selected plain reply.** `plain_reply` is always first in the catalog;
+  if the decision-maker returns `selectedAction: null` or `"plain_reply"`, ActionResolver
+  returns `proposals: []` even when the reply describes a full plan. Signs:
+  `catalogIntentId` is `adjust_workout`, `parseErrors` empty, plan is in prose,
+  `proposals.length === 0`.
+- **Router fallback blocked workout intents.** SystemPlanner only trusts router output
+  that came from the LLM, has ≥1 selected domain, and meets
+  `RULE_ROUTE_CONFIDENCE_THRESHOLD`; otherwise it falls back to `general`, which does not
+  allow workout proposal intents — so `create_workout_plan` / `adapt_workout_plan` never
+  reach the catalog. Signs: `catalogIntentId` is `general`, router confidence below
+  threshold or empty selected domains.
+- **Workout domain degraded.** A failed/timed-out/invalid domain degrades to a safe empty
+  `domain_answer` with no candidates. Sign: `parseErrors` contains
+  `Fan-out: domains degraded to fallback: [workout]`.
+- **Decision-maker degraded.** If the final-decision provider throws or fails Zod,
+  `createFallbackFinalDecision()` returns `selectedAction: null` and no proposals. Sign:
+  `parseErrors` contains `Decision-maker degraded: ...` and the reply is the generic safe
+  fallback.
+- **Reply safety blocked everything.** If final reply safety fails, the orchestrator
+  swaps in a safe fallback and drops all proposals. Signs: `replySafetyErrors` non-empty,
+  `agent.safety.status === "reply_blocked"`.
+
+### Prompt & contract gaps (by design, but a frequent source of confusion)
+
+The pipeline supports workout proposals, but the LLM contracts still make a text-only
+outcome valid where the product may expect a card:
+
+- `adjust_workout` uses an **optional** proposal mode.
+- `plain_reply` is always available and prominent in the action catalog.
+- Live OpenAI fan-out prompts render through `promptTemplates` (`router`,
+  `domain_workout`, `domain_nutrition`, `domain_health`, `decision`) from
+  `packages/types/src/prompt-template-defaults.ts` or `ai-behavior.json` — **not** from
+  the per-domain `domains/*.yml` prompt bodies. Live prompt changes therefore belong in
+  the prompt-template config/defaults (see "Coach AI Provider Surface").
+- Multilingual turns add risk: short/typo-heavy non-English requests
+  (e.g. `впиши мне сего сразу в план`) may be understood semantically while deterministic
+  signals stay weak and prompts do not require the reply to match `detectedLanguage`
+  (see Stage 5).
 
 ## Removed Legacy Paths
 

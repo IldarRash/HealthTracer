@@ -11,7 +11,7 @@ Audit implemented UI, define screen-level visual direction, and produce a priori
 
 ## Inputs
 
-Feature brief; app-runner live URLs/screenshots when available; route/component paths; existing UI patterns in `apps/web`, `apps/mobile`, `packages/ui`; `docs/design/*`; design-system-agent output when primitives/tokens are involved.
+Feature brief; app-runner live URLs/screenshots when available; route/component paths; existing UI patterns in `apps/web`, `apps/mobile`, `packages/ui`; design-system-agent output when primitives/tokens are involved.
 
 ## Output
 

@@ -54,21 +54,27 @@ The active hierarchy is constrained: one active quarterly objective per user and
 
 Stores conversation history for continuity, but not as the authoritative state for plans or metrics.
 
-Chat messages can reference `ChatAttachment` records. Attachment content is processed through ownership, consent, expiry, provider-isolation, and typed extraction gates before it can supply context to TurnDecision and the agent loop.
+Chat messages can reference `ChatAttachment` records. Attachment content is processed
+through ownership, send eligibility, retention, and provider-isolation plumbing before it
+can supply image context to the unified LLM pipeline. There is no TurnDecision path,
+typed extraction gate, or attachment recognition side channel.
 
 ### ChatAttachment
 
-Represents a file or image attached to a chat message.
+Represents an image attached to a chat message.
 
 - user id
 - thread id and optional message id
-- category: unclassified, food photo, medical document, or workout/training attachment
+- category, currently created as `unclassified` for runtime uploads
 - MIME type, file size, and storage key
-- consent metadata when medical
-- recognition status and typed extraction envelope
+- passive legacy consent metadata, if present on historical rows
+- passive legacy recognition/category-source fields, readable but not used for runtime branching
 - retention policy and expiry
 
-Attachments are not authoritative workout, nutrition, or medical state. They can supply proposal evidence or document review context after validation.
+Attachments are not authoritative workout, nutrition, or medical state. They can supply
+context and evidence to selected multimodal LLM stages, but they do not create proposal
+candidates outside the unified proposal validation path and must not auto-create health
+document records.
 
 ### WorkoutPlan
 

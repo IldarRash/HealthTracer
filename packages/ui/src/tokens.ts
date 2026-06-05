@@ -3,8 +3,7 @@
  * Web maps these to CSS custom properties in apps/web/app/styles.css.
  * Mobile should mirror semantic names when NativeWind tokens are added.
  *
- * Visual direction: dark/high-contrast shell, coach teal accent, metric-forward
- * cards — see docs/design/chat-primary-web-visual-direction.md.
+ * Visual direction: dark/high-contrast shell, coach teal accent, metric-forward cards.
  */
 export const tokens = {
   color: {

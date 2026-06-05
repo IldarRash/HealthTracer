@@ -88,7 +88,7 @@ ChatService.sendMessage           apps/api/src/modules/chat/chat.service.ts
       → CoachingContext            coaching-context/* — one bounded AgentContextPacket per selected domain
       → Domain LLMs (parallel)     ai/domain-llm-executor.service.ts — only-selected: workout / nutrition / health
       → DecisionMaker  (final LLM) ai/decision-maker-executor.service.ts — synthesizes domain outputs
-          → CoachAiProvider        ai/openai-coach-provider.ts (stub in packages/ai for tests)
+          → CoachAiProvider        ai/openai-coach-provider.ts (tests use @health/ai/testing mocks)
           → AgentToolRegistry      read-only context tools only
       → ActionResolver             resolves typed proposal/action, filtered to the active capability allowlist
   → ProposalValidation + persist   proposals/proposal-validation.service.ts, chat/chat.repository.ts
@@ -107,9 +107,9 @@ Key invariants in this pipeline (preserve them in **code**, not config):
 
 AI/chat behavior is **files-first and repo-backed**, with no DB overlay:
 
-- `packages/ai-behavior/config/ai-behavior.json` — chat/LLM behavior (routing, direct-path patterns, prompts).
+- `packages/ai-behavior/config/ai-behavior.json` — chat/LLM behavior (routing, direct-path patterns, live fan-out prompt templates).
 - `packages/ai-behavior/config/attachments.json` — attachment consent, categories, retention, and plumbing stage order (no classification/recognition).
-- `packages/ai-behavior/config/domains/*.yml` — per-domain `intents[]/tools[]/signals[]/prompts[]` (workout, nutrition, medical, health), merged by one loader. YAML can only **narrow** the capability-catalog allowlists, never widen them.
+- `packages/ai-behavior/config/domains/*.yml` — per-domain `intents[]/tools[]/signals[]/prompts[]` (workout, nutrition, medical, health), merged by one loader. YAML can only **narrow** the capability-catalog allowlists, never widen them; YAML `prompts[]` are not directly injected into the live OpenAI fan-out domain prompts today.
 - Loaders in `packages/ai-behavior/src/*` (incl. `domain-config-loader.ts`); schemas/defaults in `packages/types/src/ai-behavior-config.ts`, `attachment-behavior-config.ts`, and `domain-config.ts`. Loading is **fail-closed**.
 
 When changing AI/chat or attachment behavior, **prefer editing repo config + adding focused tests over hardcoding in services.** Safety floors stay in code.
@@ -149,4 +149,4 @@ For larger features, the heavier multi-agent workflow is described in `AGENTS.md
 
 ## Useful docs
 
-`docs/architecture/llm-pipeline.md` (chat pipeline), `overview.md`, `domain-model.md`, `database.md`, `auth.md`, `ai-update-flow.md`, `ai-behavior-config.md`, `product-surface-architecture.md`; `docs/product/feature-roadmap.md`; `docs/deployment/railway.md`.
+`docs/architecture/llm-pipeline.md` (chat pipeline), `overview.md`, `domain-model.md`, `database.md`, `auth.md`, `ai-behavior-config.md`, `product-surface-architecture.md`; `docs/product/feature-roadmap.md`; `docs/deployment/railway.md`.

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Health Tracer — экраны</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; }
+  * { box-sizing: border-box; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="app/kit.jsx"></script>
+<script type="text/babel" src="app/shell.jsx"></script>
+<script type="text/babel" src="app/proposal.jsx"></script>
+<script type="text/babel" src="app/chat.jsx"></script>
+<script type="text/babel" src="app/today.jsx"></script>
+<script type="text/babel" src="app/longevity.jsx"></script>
+<script type="text/babel" src="app/plans.jsx"></script>
+<script type="text/babel" src="app/profile.jsx"></script>
+<script type="text/babel" src="app/onboarding.jsx"></script>
+<script type="text/babel" src="app/paywall.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const W = 1200, H = 820;
+
+function Canvas() {
+  return (
+    <DesignCanvas>
+      <DCSection id="chat" title="Чат" subtitle="Главный экран · светлый, как ChatGPT · все состояния">
+        <DCArtboard id="chat-empty" label="Пустой (первый запуск)" width={W} height={H}><ChatEmpty /></DCArtboard>
+        <DCArtboard id="chat-dialog" label="Диалог + предложение" width={W} height={H}><ChatDialog /></DCArtboard>
+        <DCArtboard id="chat-thinking" label="Коуч думает (loading)" width={W} height={H}><ChatThinking /></DCArtboard>
+        <DCArtboard id="chat-error" label="Ошибка" width={W} height={H}><ChatError /></DCArtboard>
+        <DCArtboard id="chat-crisis" label="Бережная поддержка" width={W} height={H}><ChatCrisis /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="proposal-states" title="Карточка-предложение · состояния"
+        subtitle="Коуч предлагает — человек решает. Принять / Изменить / Отклонить">
+        <DCArtboard id="p-proposed" label="Предложено" width={W} height={H}><PCardFrame state="proposed" /></DCArtboard>
+        <DCArtboard id="p-edit" label="Редактирование перед применением" width={W} height={H}><PCardFrame state="edit" /></DCArtboard>
+        <DCArtboard id="p-accepted" label="Принято" width={W} height={H}><PCardFrame state="accepted" /></DCArtboard>
+        <DCArtboard id="p-rejected" label="Отклонено" width={W} height={H}><PCardFrame state="rejected" /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="proposal-variants" title="Карточка-предложение · 3 направления"
+        subtitle="A — мягкая · B — акцентная · C — структурная (change-ticket)">
+        <DCArtboard id="v-a" label="A · Мягкая" width={W} height={H}><PCardFrame state="proposed" variant="A" /></DCArtboard>
+        <DCArtboard id="v-b" label="B · Акцентная" width={W} height={H}><PCardFrame state="proposed" variant="B" /></DCArtboard>
+        <DCArtboard id="v-c" label="C · Структурная" width={W} height={H}><PCardFrame state="proposed" variant="C" /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="today" title="Сегодня" subtitle="Тёмный, data-driven, как WHOOP · что делать сегодня">
+        <DCArtboard id="today-partial" label="Частично выполнено" width={W} height={H}><TodayScreen state="partial" /></DCArtboard>
+        <DCArtboard id="today-done" label="Всё выполнено" width={W} height={H}><TodayScreen state="done" /></DCArtboard>
+        <DCArtboard id="today-empty" label="Пусто (нет плана)" width={W} height={H}><TodayScreen state="empty" /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="longevity" title="Динамика" subtitle="Недельный обзор · консистентность и тренды без клинических скоров">
+        <DCArtboard id="long-week" label="Неделя" width={W} height={H}><LongevityScreen /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="plans" title="Планы · просмотр" subtitle="Тренировки и питание — только просмотр, меняются через чат">
+        <DCArtboard id="plan-training" label="Тренировки" width={W} height={H}><TrainingScreen /></DCArtboard>
+        <DCArtboard id="plan-nutrition" label="Питание" width={W} height={H}><NutritionScreen /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="profile" title="Профиль и онбординг" subtitle="Аккаунт, цели, документы с согласием, первый запуск">
+        <DCArtboard id="prof-main" label="Профиль" width={W} height={H}><ProfileScreen /></DCArtboard>
+        <DCArtboard id="onb-welcome" label="Онбординг · знакомство" width={W} height={H}><OnboardingScreen step="welcome" /></DCArtboard>
+        <DCArtboard id="onb-goal" label="Онбординг · выбор цели" width={W} height={H}><OnboardingScreen step="goal" /></DCArtboard>
+        <DCArtboard id="onb-done" label="Онбординг · цель создана" width={W} height={H}><OnboardingScreen step="done" /></DCArtboard>
+        <DCArtboard id="consent" label="Согласие на документы" width={W} height={H}><ConsentScreen /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="subscription" title="Подписка · Free и Pro" subtitle="Сравнение тарифов и мягкий апселл при исчерпании лимита">
+        <DCArtboard id="pricing" label="Сравнение Free / Pro" width={W} height={H}><PricingScreen /></DCArtboard>
+        <DCArtboard id="limit" label="Лимит исчерпан (апселл)" width={W} height={H}><LimitReachedScreen /></DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+// proposal shown isolated on a neutral chat-like surface
+function PCardFrame({ state, variant = 'A' }) {
+  return (
+    <div style={{ width: '100%', height: '100%', background: L.panel, display: 'flex',
+      alignItems: 'center', justifyContent: 'center', fontFamily: FONT, padding: 40 }}>
+      <div style={{ width: 560 }}>
+        <ProposalCard
+          variant={variant}
+          state={state}
+          domain="training"
+          title="Сдвинуть силовую с четверга на пятницу"
+          why="В четверг у вас встречи до позднего вечера, а восстановление за последние дни ниже обычного. В пятницу будет больше сил и времени."
+          changes={[
+            { from: { k: 'Четверг', v: 'Силовая · 45 мин' }, to: { k: 'Пятница', v: 'Силовая · 45 мин' } },
+            { from: { k: 'Четверг', v: '—' }, to: { k: 'Четверг', v: 'Лёгкая прогулка · 20 мин' } },
+          ]}
+        />
+      </div>
+    </div>
+  );
+}
+window.PCardFrame = PCardFrame;
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Canvas />);
+</script>
+</body>
+</html>

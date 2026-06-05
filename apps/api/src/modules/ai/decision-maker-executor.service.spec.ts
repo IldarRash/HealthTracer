@@ -399,4 +399,107 @@ describe("DecisionMakerExecutorService", () => {
       );
     });
   });
+
+  // -------------------------------------------------------------------------
+  // W4 — domain candidate + matching catalog action keeps the proposal
+  // -------------------------------------------------------------------------
+
+  describe("W4 — domain candidate + matching action keeps proposal; fallback yields selectedAction:null", () => {
+    it("returns the proposal when provider selects the matching action and copies the domain candidate", async () => {
+      // Simulates a workout domain output with a create_workout_plan candidate.
+      // The decision-maker selects create_workout_plan and copies the candidate into proposals[].
+      const workoutDomainAnswer = {
+        kind: "domain_answer" as const,
+        domain: "workout" as const,
+        summary: "Generating 3-day strength plan.",
+        candidateProposals: [
+          {
+            intent: "create_workout_plan",
+            targetDomain: "workout",
+            title: "3-Day Strength Plan",
+            reason: "User requested a strength plan.",
+            proposedChanges: {
+              title: "3-Day Strength Plan",
+              summary: "Full-body strength program.",
+              days: [
+                { weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] },
+              ],
+              notes: [],
+            },
+          },
+        ],
+        domainSignals: ["explicit_plan_request"],
+      };
+
+      const providerOutput: FinalDecisionOutputInput = {
+        reply: "Here is your 3-day strength plan!",
+        selectedAction: "create_workout_plan",
+        proposals: [
+          {
+            intent: "create_workout_plan",
+            targetDomain: "workout",
+            title: "3-Day Strength Plan",
+            reason: "User requested a strength plan.",
+            proposedChanges: {
+              title: "3-Day Strength Plan",
+              summary: "Full-body strength program.",
+              days: [
+                { weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] },
+              ],
+              notes: [],
+            },
+          },
+        ],
+        consentRequired: false,
+      };
+
+      const result = await service.execute(
+        makeInput(
+          {
+            domainOutputs: [workoutDomainAnswer],
+            actionVariantCatalog: [
+              { id: "plain_reply", label: "Plain reply", requiresConsent: false },
+              { id: "create_workout_plan", label: "Create workout plan", requiresConsent: false },
+            ],
+          },
+          providerOutput,
+        ),
+      );
+
+      expect(result.degraded).toBe(false);
+      expect(result.output.selectedAction).toBe("create_workout_plan");
+      expect(result.output.proposals).toHaveLength(1);
+      expect(result.output.proposals[0]?.intent).toBe("create_workout_plan");
+      expect(result.output.reply).toContain("strength plan");
+    });
+
+    it("degraded fallback always yields selectedAction:null and empty proposals", async () => {
+      // Verify that the safe fallback path (provider throws) yields the correct safe state.
+      const result = await service.execute(
+        makeInput({}, new Error("simulate decision-maker failure")),
+      );
+
+      expect(result.degraded).toBe(true);
+      expect(result.output.selectedAction).toBeNull();
+      expect(result.output.proposals).toHaveLength(0);
+      // Fallback reply must be non-empty safe coaching text
+      expect(result.output.reply.trim().length).toBeGreaterThan(0);
+    });
+
+    it("when provider picks plain_reply the proposals array is forwarded empty", async () => {
+      // Plain reply is the fallback — no proposal card should be returned.
+      const providerOutput: FinalDecisionOutputInput = {
+        reply: "Here is some general wellness advice.",
+        selectedAction: "plain_reply",
+        proposals: [],
+        consentRequired: false,
+      };
+
+      const result = await service.execute(makeInput({}, providerOutput));
+
+      expect(result.degraded).toBe(false);
+      expect(result.output.selectedAction).toBe("plain_reply");
+      expect(result.output.proposals).toHaveLength(0);
+    });
+  });
 });

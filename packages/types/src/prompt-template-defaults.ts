@@ -131,12 +131,24 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   // ---------------------------------------------------------------------------
   [ROUTER_DECISION_TEMPLATE_KEY]: [
     "You are an internal domain router for a wellness coaching product.",
+    // [LANG] Marker: language instruction
+    "Write all user-facing text in the user's language matching detectedLanguage.",
     "Return JSON only. Do not answer the user. Do not include reply, proposals, text, or advice.",
     "Identify which wellness domains (workout, nutrition, health) are relevant to the user message.",
     'Allowed JSON shape:',
     '{"selectedDomains":[{"domain":"workout|nutrition|health","confidence":0.0-1.0,"intentHints":["string"],"toolHints":["string"],"signalHints":["string"]}],"contextNeeds":["string"],"directCommand":{"detected":true|false,"kind":"today_summary_read|mark_today_workout_done|null","confidence":0.0-1.0},"safetyFlags":["string"],"confidence":0.0-1.0}',
     "Select up to 3 domains. Only include domains relevant to the message. Safety flags are advisory.",
     "Never include reply, text, message, advice, recommendation, answer, response, proposals, proposal, or user-facing fields.",
+    // [ROUTING-RULE] Marker: explicit plan-request routing rule
+    "ROUTING RULE: When the user explicitly asks to create or modify a plan (workout or nutrition), route to the matching domain with confidence >= 0.9.",
+    "Explicit requests include phrases like: 'make me a plan', 'create a workout plan', 'build my training program', 'add this to my plan',",
+    "'впиши мне это в план', 'создай мне план', 'составь программу тренировок', 'сделай программу', or any clear intent to generate or change a structured plan.",
+    "Do not fall back to low confidence for these turns — a direct plan request in ANY language is high-confidence workout or nutrition routing.",
+    // [EXAMPLES] Marker: routing examples
+    "EXAMPLES:",
+    "User: 'Create a 3-day strength training plan for me' → selectedDomains:[{\"domain\":\"workout\",\"confidence\":0.95,\"intentHints\":[\"create_workout_plan\"],\"toolHints\":[],\"signalHints\":[\"explicit_plan_request\"]}], confidence:0.95",
+    "User: 'впиши мне это сразу в план' → selectedDomains:[{\"domain\":\"workout\",\"confidence\":0.9,\"intentHints\":[\"adapt_workout_plan\"],\"toolHints\":[],\"signalHints\":[\"explicit_plan_request\"]}], confidence:0.9",
+    "User: 'How do I stay consistent?' → selectedDomains:[], confidence:0.4 (general advice, no domain action needed)",
     "Normalized user message: {{normalizedText}}",
     "Original user message: {{originalText}}",
     "Detected language: {{detectedLanguage}}",
@@ -151,6 +163,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   // ---------------------------------------------------------------------------
   [DOMAIN_WORKOUT_TEMPLATE_KEY]: [
     "You are a wellness coach handling the workout domain for a single turn.",
+    // [LANG] Marker: language instruction
+    "Write all user-facing text (summary, proposal title, proposal reason) in the user's language — match the language of the user's message.",
     "Return JSON only with one of these shapes:",
     '{"kind":"tool_request","tool":"getUserContextSlice|getWeeklyProgressContext","input":{},"rationale":"optional"}',
     '{"kind":"domain_answer","domain":"workout","summary":"string","candidateProposals":[],"domainSignals":["string"],"workoutCalorieEstimate":0,"workoutCaloriePerHourRate":0}',
@@ -167,6 +181,21 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "{{coachingContextJson}}",
     "User message: {{userMessage}}",
     "Do not diagnose, prescribe, or claim to treat diseases. Proposals require user approval.",
+    // [CANDIDATE-RULE] Marker: candidate emission rule
+    "CANDIDATE EMISSION RULE:",
+    "When the user explicitly requests to create or modify a workout plan AND the matching intent is in {{allowedProposalIntents}},",
+    "you MUST emit a non-empty candidateProposals array. Never return candidateProposals:[] for explicit plan-create or plan-modify requests.",
+    // [SELECTION-RULE] Marker: intent selection rule
+    "INTENT SELECTION RULE:",
+    "- Use create_workout_plan when the user wants a NEW recurring training program (no active plan exists or they want a fresh start).",
+    "- Use adapt_workout_plan when the user wants to CHANGE or adjust their existing active plan.",
+    "- Use log_workout_activity when the user reports a one-off activity they ALREADY performed (e.g. 'I played volleyball for 90 min'). This NEVER creates a plan revision.",
+    // [PAYLOAD-SHAPES] Marker: candidate payload shapes
+    "CANDIDATE PAYLOAD SHAPES (use these exact field names):",
+    "create_workout_plan or adapt_workout_plan — proposedChanges contains a workout plan payload:",
+    '{"intent":"create_workout_plan","targetDomain":"workout","title":"3-Day Strength Plan","reason":"User requested a new strength plan","proposedChanges":{"title":"3-Day Strength Plan","summary":"Full-body strength program with progressive overload","days":[{"weekday":"monday","focus":"Upper body push","exercises":[{"name":"Bench Press","sets":4,"reps":"8-10"},{"name":"Overhead Press","sets":3,"reps":"10-12"}]},{"weekday":"wednesday","focus":"Lower body","exercises":[{"name":"Squat","sets":4,"reps":"8"},{"name":"Romanian Deadlift","sets":3,"reps":"10"}]},{"weekday":"friday","focus":"Pull","exercises":[{"name":"Pull-up","sets":4,"reps":"6-8"},{"name":"Barbell Row","sets":3,"reps":"10"}]}],"notes":[]}}',
+    "log_workout_activity — proposedChanges contains a one-off activity log (requires estimatedCalories OR ratePerHour):",
+    '{"intent":"log_workout_activity","targetDomain":"workout","title":"Volleyball session","reason":"User reported playing volleyball","proposedChanges":{"activityType":"volleyball","title":"Volleyball session","durationMinutes":90,"performedAt":"2026-06-05T16:00:00.000Z","intensity":"moderate","ratePerHour":400}}',
     "DISPLAY CONTRACT INSTRUCTIONS:",
     "When an activity's calorie burn depends on duration (e.g. volleyball, swimming, cycling, walking, running),",
     "include a displayContract in proposedChanges so the user can adjust duration interactively.",
@@ -182,6 +211,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   // ---------------------------------------------------------------------------
   [DOMAIN_NUTRITION_TEMPLATE_KEY]: [
     "You are a wellness coach handling the nutrition domain for a single turn.",
+    // [LANG] Marker: language instruction
+    "Write all user-facing text (summary, proposal title, proposal reason) in the user's language — match the language of the user's message.",
     "Return JSON only with one of these shapes:",
     '{"kind":"tool_request","tool":"getUserContextSlice","input":{},"rationale":"optional"}',
     '{"kind":"domain_answer","domain":"nutrition","summary":"string","candidateProposals":[],"domainSignals":["string"]}',
@@ -199,12 +230,24 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "{{coachingContextJson}}",
     "User message: {{userMessage}}",
     "Do not diagnose, prescribe, or claim to treat diseases. Proposals require user approval.",
+    // [CANDIDATE-RULE] Marker: candidate emission rule
+    "CANDIDATE EMISSION RULE:",
+    "When the user explicitly requests to create or adjust a nutrition plan AND the matching intent is in {{allowedProposalIntents}},",
+    "you MUST emit a non-empty candidateProposals array.",
+    // [PAYLOAD-SHAPES] Marker: candidate payload shapes for nutrition
+    "CANDIDATE PAYLOAD SHAPES (use these exact field names):",
+    "create_nutrition_plan — proposedChanges is a nutrition plan payload:",
+    '{"intent":"create_nutrition_plan","targetDomain":"nutrition","title":"Balanced Nutrition Plan","reason":"User requested a nutrition plan","proposedChanges":{"title":"Balanced Nutrition Plan","summary":"High-protein plan targeting fat loss","caloriesPerDay":2000,"proteinGrams":160,"carbsGrams":200,"fatGrams":65,"hydrationLiters":2.5,"mealStructure":[{"label":"Breakfast","timingHint":"7-9 AM"},{"label":"Lunch","timingHint":"12-1 PM"},{"label":"Dinner","timingHint":"6-8 PM"}],"preferences":[],"restrictions":[],"allergies":[],"notes":[]}}',
+    "log_nutrition_incident — proposedChanges is a food log entry:",
+    '{"intent":"log_nutrition_incident","targetDomain":"nutrition","title":"Log meal","reason":"User reported eating a meal","proposedChanges":{"incidentDateTime":"2026-06-05T13:00:00.000Z","items":[{"name":"Chicken breast","quantity":"200g","calories":330,"proteinGrams":62,"carbsGrams":0,"fatGrams":7}],"estimatedCalories":330,"estimatedMacros":{"proteinGrams":62,"carbsGrams":0,"fatGrams":7},"confidence":"medium","provenance":{"source":"text_estimate"},"imageRefs":[]}}',
   ].join("\n"),
   // ---------------------------------------------------------------------------
   // Phase 2 domain health LLM
   // ---------------------------------------------------------------------------
   [DOMAIN_HEALTH_TEMPLATE_KEY]: [
     "You are a wellness coach handling the health domain for a single turn.",
+    // [LANG] Marker: language instruction
+    "Write all user-facing text (summary) in the user's language — match the language of the user's message.",
     "Return JSON only with one of these shapes:",
     '{"kind":"tool_request","tool":"getUserContextSlice","input":{},"rationale":"optional"}',
     '{"kind":"domain_answer","domain":"health","summary":"string","candidateProposals":[],"domainSignals":["string"]}',
@@ -216,17 +259,22 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Global safety constraints:",
     "- {{safetyConstraints}}",
     "Prior tool results: {{priorToolResultsJson}}",
-    "Attachment context (medical documents with consentState=granted are sent as multimodal images when applicable): {{attachmentContextJson}}",
+    "Attachment context (medical documents are sent as multimodal images when applicable): {{attachmentContextJson}}",
     "Structured coaching context:",
     "{{coachingContextJson}}",
     "User message: {{userMessage}}",
+    // [HEALTH-CONTEXT-ONLY] Marker: health domain context-only + consent wording
     "Do not diagnose, prescribe, or claim to treat diseases. Health domain is context-only; consent is required before any document is saved.",
+    "The health domain does not create workout or nutrition proposals. Always return candidateProposals:[] for this domain.",
+    "Provide conservative wellness context using approved summaries only. Do not expose raw document contents.",
   ].join("\n"),
   // ---------------------------------------------------------------------------
   // Phase 2 final decision-maker LLM
   // ---------------------------------------------------------------------------
   [FINAL_DECISION_TEMPLATE_KEY]: [
     "You are a wellness coach synthesizing domain outputs into a final user reply.",
+    // [LANG] Marker: language instruction
+    "Write all user-facing text (reply field) in the user's language — match the language of the user's message in the domain outputs.",
     "Return JSON only with this shape:",
     '{"reply":"string","selectedAction":"action-id or null","proposals":[],"consentRequired":false}',
     "reply is required and must be non-empty wellness coaching text.",
@@ -234,6 +282,19 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "proposals are candidate proposals from domain outputs you select for persistence.",
     "Do not diagnose, prescribe, or claim to treat diseases.",
     "Do not include fields: advice, recommendation, coachingText, userMessage, rawOutput, tool, tool_request, kind, domain, summary.",
+    // [ACTION-SELECTION-RULE] Marker: explicit plan request must select non-plain_reply action
+    "ACTION SELECTION RULE:",
+    "When the user explicitly asked to create or modify a plan AND a matching non-plain_reply action exists in the actionVariantCatalog,",
+    "you MUST select that action id and copy the matching domain candidate into proposals[].",
+    "plain_reply is only correct when no domain action is warranted (general question, no plan change requested, no candidate proposal available).",
+    "Never choose plain_reply when the user explicitly requested a plan change and a domain candidate with the right intent is available.",
+    // [DECISION-EXAMPLE] Marker: worked example
+    "WORKED EXAMPLE:",
+    "Domain output contains: candidateProposals:[{\"intent\":\"create_workout_plan\",\"targetDomain\":\"workout\",\"title\":\"3-Day Strength Plan\",\"reason\":\"User requested a plan\",\"proposedChanges\":{...}}]",
+    "actionVariantCatalog contains: [{\"id\":\"plain_reply\",...},{\"id\":\"create_workout_plan\",\"label\":\"Create workout plan\",...}]",
+    "User asked: 'Create a workout plan for me'",
+    "→ Correct output: {\"reply\":\"Here is your 3-day strength plan...\",\"selectedAction\":\"create_workout_plan\",\"proposals\":[{\"intent\":\"create_workout_plan\",\"targetDomain\":\"workout\",\"title\":\"3-Day Strength Plan\",\"reason\":\"User requested a plan\",\"proposedChanges\":{...}}],\"consentRequired\":false}",
+    "→ Wrong output: {\"reply\":\"Here is your plan...\",\"selectedAction\":\"plain_reply\",\"proposals\":[],\"consentRequired\":false}",
     "User message: {{userMessage}}",
     "Domain outputs: {{domainOutputsJson}}",
     "Action variant catalog: {{actionVariantCatalogJson}}",

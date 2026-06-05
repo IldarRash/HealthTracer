@@ -14,7 +14,7 @@ Review completed work for correctness, architecture fit, safety, tests, and docu
 - Correctness and architecture fit against `docs/architecture/*` and `.claude/rules/*`.
 - **Safety/privacy**: no diagnosis/treatment language; no logging of sensitive health data or document contents; consent gates intact; context safety floors not relaxed by config; AI never mutates domain tables directly.
 - **Revision safety**: workout/nutrition changes create revisions, never overwrite.
-- **AI pipeline invariants**: TurnDecision read-only & clamped, SystemPlanner owns final route/budget/allowlists, proposals validated before persistence (see `docs/architecture/llm-pipeline.md`).
+- **AI pipeline invariants**: RouterLlm is read-only and clamped, SystemPlanner owns final route/budget/allowlists, proposals are validated before persistence, and `plain_reply`/fallback routes do not create cards (see `docs/architecture/llm-pipeline.md`).
 - Test gaps — especially for revision and AI proposal behavior.
 - Refactors that left legacy/dead code behind.
 

@@ -506,6 +506,80 @@ describe("DomainLlmExecutorService", () => {
     expect(result.domainAnswer.candidateProposals).toHaveLength(0);
     expect(result.domainAnswer.summary).toBe(""); // empty string per createFallbackDomainAnswer
   });
+
+  // -------------------------------------------------------------------------
+  // W4 — create_workout_plan candidate survives validation (W2 regression guard)
+  // -------------------------------------------------------------------------
+
+  it("workout domain answer carrying a create_workout_plan candidate is not degraded and candidateProposalCount is 1", async () => {
+    // The W2 prompt improvements teach the domain LLM to emit a non-empty candidateProposals
+    // for explicit plan requests. This test verifies that a well-formed create_workout_plan
+    // candidate (matching the payload shape documented in W2) passes the executor's
+    // shape guard + Zod parse and surfaces as candidateProposalCount === 1.
+    const provider = makeProvider({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Generating a 3-day strength plan as requested.",
+      candidateProposals: [
+        {
+          intent: "create_workout_plan",
+          targetDomain: "workout",
+          title: "3-Day Strength Plan",
+          reason: "User requested a new strength training program.",
+          proposedChanges: {
+            title: "3-Day Strength Plan",
+            summary: "Full-body strength program with progressive overload.",
+            days: [
+              {
+                weekday: "monday",
+                focus: "Upper body push",
+                exercises: [
+                  { name: "Bench Press", sets: 4, reps: "8-10" },
+                ],
+              },
+              {
+                weekday: "wednesday",
+                focus: "Lower body",
+                exercises: [
+                  { name: "Squat", sets: 4, reps: "8" },
+                ],
+              },
+              {
+                weekday: "friday",
+                focus: "Pull",
+                exercises: [
+                  { name: "Pull-up", sets: 4, reps: "6-8" },
+                ],
+              },
+            ],
+            notes: [],
+          },
+        },
+      ],
+      domainSignals: ["explicit_plan_request"],
+      workoutCalorieEstimate: 350,
+      workoutCaloriePerHourRate: 280,
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket("workout_adaptation", "adjust_workout"),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({
+        userMessage: "Create a 3-day strength training plan for me",
+      }),
+      provider,
+    });
+
+    // Must not be degraded — the candidate payload is valid
+    expect(result.degraded).toBe(false);
+    expect(result.domainAnswer.domain).toBe("workout");
+    expect(result.domainAnswer.candidateProposals).toHaveLength(1);
+    expect(result.domainAnswer.candidateProposals[0]?.intent).toBe("create_workout_plan");
+    // workoutCalorieEstimate must flow through to the caller
+    expect(result.domainAnswer.workoutCalorieEstimate).toBe(350);
+    expect(result.loopIterations).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
