@@ -234,10 +234,10 @@ export class ChatTurnAttachmentStageService {
 function resolveConsentState(
   attachment: ChatAttachmentRecord,
 ): BoundedAttachmentMetadata["consentState"] {
-  if (attachment.status === "needs_consent") {
-    return "needs_consent";
-  }
-
+  // The legacy needs_consent status was produced by the removed pre-upload
+  // classification/consent gate (resolveProvisionalUploadDisposition). Uploads are
+  // now always created with status "queued"; no runtime path produces needs_consent.
+  // Legacy DB columns remain readable but are not used for runtime branching.
   if (attachment.consent != null) {
     return "granted";
   }

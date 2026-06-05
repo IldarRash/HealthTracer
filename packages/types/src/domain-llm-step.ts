@@ -32,6 +32,7 @@ export const domainAttachmentItemSchema = z.object({
    * Consent state at the time of this turn.
    * medical_document content is ONLY present when this is "granted".
    */
+  // "needs_consent" is never produced at runtime; retained for historical DB-row reads only.
   consentState: z.enum(["granted", "needs_consent", "none"]),
   /**
    * Storage reference (local:// or cloud key).

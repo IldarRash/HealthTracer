@@ -13,6 +13,8 @@ export type BoundedAttachmentMetadata = {
   refId: string;
   category: ChatAttachmentCategory;
   mimeType: string;
+  // "needs_consent" is never produced at runtime (resolveConsentState returns "granted"|"none");
+  // retained in the union for historical DB-row reads only.
   consentState: "granted" | "needs_consent" | "none";
   storageRef: string | null;
 };

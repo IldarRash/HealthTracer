@@ -45,6 +45,7 @@ export interface SystemPlannerAttachmentTurnContextItem {
   attachmentRefId: string;
   category: ChatAttachmentCategory;
   mimeType: string;
+  // "needs_consent" is never produced at runtime; retained for historical DB-row reads only.
   consentState: "granted" | "needs_consent" | "none";
   storageRef: string | null;
 }
@@ -73,8 +74,6 @@ export interface SystemPlannerTurnInput {
   }>;
   proposalRevision?: SystemPlannerProposalRevisionContext;
   attachmentTurn?: SystemPlannerAttachmentTurnContext;
-  /** @deprecated use routerResult instead; kept for backward compat during migration */
-  turnDecision?: never;
   routerResult?: RouterLlmResult;
 }
 

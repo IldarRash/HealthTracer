@@ -1,20 +1,13 @@
 import { z } from "zod";
 import {
-  attachmentRoutingConfigSchema,
-  type AttachmentRoutingConfig,
-} from "./ai-behavior-config.js";
-import {
   CHAT_FOOD_PHOTO_MIME_TYPES,
   CHAT_MEDICAL_DOCUMENT_MIME_TYPES,
-  CHAT_PROVISIONAL_UPLOAD_MIME_TYPES,
   CHAT_WORKOUT_ATTACHMENT_MIME_TYPES,
   MAX_CHAT_FOOD_PHOTO_BYTES,
-  MAX_CHAT_PROVISIONAL_ATTACHMENT_BYTES,
   MAX_CHAT_WORKOUT_ATTACHMENT_BYTES,
   chatAttachmentCategorySchema,
   chatAttachmentRetentionPolicySchema,
 } from "./chat-attachments.js";
-import { documentConsentScopeSchema } from "./documents.js";
 
 export const ATTACHMENT_BEHAVIOR_CONFIG_VERSION = 1 as const;
 
@@ -65,8 +58,6 @@ export type AttachmentCategoryEntry = z.infer<typeof attachmentCategoryEntrySche
 
 export const attachmentCategoriesConfigSchema = z.object({
   entries: z.array(attachmentCategoryEntrySchema).min(1).max(10),
-  provisionalUploadMimeTypes: z.array(z.string().min(1).max(120)).min(1).max(30),
-  maxProvisionalBytes: z.number().int().positive().max(50_000_000),
 });
 
 export type AttachmentCategoriesConfig = z.infer<typeof attachmentCategoriesConfigSchema>;
@@ -83,26 +74,6 @@ export const attachmentRetentionConfigSchema = z.object({
 
 export type AttachmentRetentionConfig = z.infer<typeof attachmentRetentionConfigSchema>;
 
-export const attachmentConsentConfigSchema = z.object({
-  requiredMedicalScopes: z.array(documentConsentScopeSchema).min(1).max(5),
-  requireDocumentType: z.boolean().default(true),
-  requireDocumentTitle: z.boolean().default(true),
-  consentVersionDefault: z.string().min(1).max(40).default("v1"),
-  uploadStorageScopeRequired: z.literal(true).default(true),
-});
-
-export type AttachmentConsentConfig = z.infer<typeof attachmentConsentConfigSchema>;
-
-export const attachmentOutcomeHintsConfigSchema = z.object({
-  medicalNeedsConsent: z.string().min(1).max(500),
-  medicalNeedsReview: z.string().min(1).max(500),
-  medicalContextOnly: z.string().min(1).max(500).optional(),
-  manualFallback: z.string().min(1).max(500),
-  lowConfidenceFoodPhoto: z.string().min(1).max(500),
-});
-
-export type AttachmentOutcomeHintsConfig = z.infer<typeof attachmentOutcomeHintsConfigSchema>;
-
 export const attachmentTurnStagesConfigSchema = z.object({
   order: z.array(attachmentTurnStageSchema).min(1).max(10),
 });
@@ -113,10 +84,7 @@ export const attachmentBehaviorConfigSchema = z.object({
   version: attachmentBehaviorConfigVersionSchema,
   safetyFloors: attachmentSafetyFloorsConfigSchema,
   categories: attachmentCategoriesConfigSchema,
-  routing: attachmentRoutingConfigSchema,
   retention: attachmentRetentionConfigSchema,
-  consent: attachmentConsentConfigSchema,
-  outcomeHints: attachmentOutcomeHintsConfigSchema,
   turnStages: attachmentTurnStagesConfigSchema,
 });
 
@@ -145,8 +113,8 @@ export function buildDefaultAttachmentBehaviorConfig(): AttachmentBehaviorConfig
       entries: [
         {
           category: "unclassified",
-          allowedMimeTypes: [...CHAT_PROVISIONAL_UPLOAD_MIME_TYPES],
-          maxBytes: MAX_CHAT_PROVISIONAL_ATTACHMENT_BYTES,
+          allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
+          maxBytes: 10_000_000,
           label: "Unclassified upload",
         },
         {
@@ -168,14 +136,6 @@ export function buildDefaultAttachmentBehaviorConfig(): AttachmentBehaviorConfig
           label: "Workout attachment",
         },
       ],
-      provisionalUploadMimeTypes: [...CHAT_PROVISIONAL_UPLOAD_MIME_TYPES],
-      maxProvisionalBytes: MAX_CHAT_PROVISIONAL_ATTACHMENT_BYTES,
-    },
-    routing: {
-      categoryPriority: ["medical_document", "workout_attachment", "food_photo"],
-      defaultCapabilityId: "attachment_food_photo",
-      confidence: 0.98,
-      routingMethod: "attachment_family",
     },
     retention: {
       byCategory: {
@@ -184,25 +144,6 @@ export function buildDefaultAttachmentBehaviorConfig(): AttachmentBehaviorConfig
         medical_document: "document_consent_rules",
         workout_attachment: "ephemeral_recognition",
       },
-    },
-    consent: {
-      requiredMedicalScopes: ["upload_storage"],
-      requireDocumentType: true,
-      requireDocumentTitle: true,
-      consentVersionDefault: "v1",
-      uploadStorageScopeRequired: true,
-    },
-    outcomeHints: {
-      medicalNeedsConsent:
-        "This attachment was identified as a wellness document after send. Grant consent below to store and process it. Nothing is saved until you confirm.",
-      medicalNeedsReview:
-        "This wellness document needs review before it can be used in coaching context.",
-      medicalContextOnly:
-        "This wellness document is available as chat attachment context only. It has not been saved or parsed as a health document.",
-      manualFallback:
-        "We could not confidently classify this attachment. Choose a category or try again with clearer context.",
-      lowConfidenceFoodPhoto:
-        "The meal photo was analyzed with low confidence. Review items before logging.",
     },
     turnStages: {
       order: [...DEFAULT_ATTACHMENT_TURN_STAGE_ORDER],
@@ -236,24 +177,11 @@ export function validateAttachmentBehaviorConfig(value: unknown): string[] {
 
 export function applyAttachmentBehaviorSafetyFloors(
   config: AttachmentBehaviorConfig,
-  defaults: AttachmentBehaviorConfig = buildDefaultAttachmentBehaviorConfig(),
 ): { config: AttachmentBehaviorConfig; warnings: string[] } {
   const warnings: string[] = [];
   const next: AttachmentBehaviorConfig = {
     ...config,
     safetyFloors: { ...DEFAULT_ATTACHMENT_SAFETY_FLOORS },
-    consent: {
-      ...config.consent,
-      uploadStorageScopeRequired: true,
-      requiredMedicalScopes: config.consent.requiredMedicalScopes.includes("upload_storage")
-        ? config.consent.requiredMedicalScopes
-        : (() => {
-            warnings.push(
-              "consent.requiredMedicalScopes: upload_storage scope cannot be removed; restoring default medical consent scopes.",
-            );
-            return [...defaults.consent.requiredMedicalScopes];
-          })(),
-    },
   };
 
   for (const [key, requiredValue] of Object.entries(DEFAULT_ATTACHMENT_SAFETY_FLOORS) as Array<
@@ -264,14 +192,6 @@ export function applyAttachmentBehaviorSafetyFloors(
         `safetyFloors.${key}: safety floor cannot be disabled via config; forced to ${String(requiredValue)}.`,
       );
     }
-  }
-
-  if (!config.consent.requiredMedicalScopes.includes("upload_storage")) {
-    // Warning already emitted above when restoring scopes.
-  } else if (config.consent.uploadStorageScopeRequired !== true) {
-    warnings.push(
-      "consent.uploadStorageScopeRequired: medical upload_storage requirement cannot be disabled via config; forced to true.",
-    );
   }
 
   return { config: next, warnings };
@@ -293,24 +213,11 @@ export function normalizeAttachmentBehaviorConfig(
       ...partial?.categories,
       entries: partial?.categories?.entries ?? defaults.categories.entries,
     },
-    routing: {
-      ...defaults.routing,
-      ...partial?.routing,
-      categoryPriority: partial?.routing?.categoryPriority ?? defaults.routing.categoryPriority,
-    },
     retention: {
       byCategory: {
         ...defaults.retention.byCategory,
         ...partial?.retention?.byCategory,
       },
-    },
-    consent: {
-      ...defaults.consent,
-      ...partial?.consent,
-    },
-    outcomeHints: {
-      ...defaults.outcomeHints,
-      ...partial?.outcomeHints,
     },
     turnStages: {
       order: partial?.turnStages?.order ?? defaults.turnStages.order,
@@ -340,7 +247,7 @@ export function resolveLoadedAttachmentBehaviorConfig(input: {
 
   if (parsed.success) {
     const normalized = normalizeAttachmentBehaviorConfig(parsed.data, defaults);
-    const { config, warnings } = applyAttachmentBehaviorSafetyFloors(normalized, defaults);
+    const { config, warnings } = applyAttachmentBehaviorSafetyFloors(normalized);
 
     return {
       config,
@@ -357,10 +264,3 @@ export function resolveLoadedAttachmentBehaviorConfig(input: {
     warnings: ["Invalid attachment behavior config; using built-in defaults."],
   };
 }
-
-export function resolveAttachmentRoutingFromBehavior(
-  config: AttachmentBehaviorConfig,
-): AttachmentRoutingConfig {
-  return config.routing;
-}
-

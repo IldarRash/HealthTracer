@@ -55,7 +55,6 @@ import {
   intersectDomainConfigWithCatalog,
   type DomainConfig,
 } from "./domain-config.js";
-import { resolveProvisionalUploadDisposition } from "./chat-attachment-upload-disposition.js";
 import { medicalDocumentPersistenceStatusSchema } from "./chat-attachments.js";
 
 describe("ai behavior safety invariants", () => {
@@ -866,85 +865,6 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
       );
       expect(() => medicalDocumentPersistenceStatusSchema.parse("saved_health_document")).toThrow();
       expect(() => medicalDocumentPersistenceStatusSchema.parse("auto_persisted")).toThrow();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // 5. Attachment context-only + consent gate: a user-declared medical
-  //    attachment without consent must be purged/blocked (shouldPersistContent=false,
-  //    status=needs_consent). Attachments never produce a recognition envelope.
-  // -------------------------------------------------------------------------
-
-  describe("attachment context-only + consent gate (no recognition envelope)", () => {
-    it("medical document without consent yields shouldPersistContent=false and needs_consent status", () => {
-      const disposition = resolveProvisionalUploadDisposition({
-        attachmentId: "a1000001-0000-4000-8000-000000000001",
-        classification: {
-          category: "medical_document",
-          confidence: "high",
-          rationale: "Medical document detected via user-declared type.",
-          suggestedAction: "request_medical_consent",
-          mealContextLabel: null,
-          classificationProviderId: "user_declared",
-          classificationMethod: "metadata_only",
-        },
-      });
-
-      expect(disposition.shouldPersistContent).toBe(false);
-      expect(disposition.status).toBe("needs_consent");
-      expect(disposition.category).toBe("medical_document");
-      expect(disposition.linkedImageRefId).toBeNull();
-    });
-
-    it("medical document without consent yields the MEDICAL_ATTACHMENT_CONSENT_REQUIRED_REASON", () => {
-      const disposition = resolveProvisionalUploadDisposition({
-        attachmentId: "a1000001-0000-4000-8000-000000000002",
-        classification: {
-          category: "medical_document",
-          confidence: "high",
-          rationale: "Lab report uploaded.",
-          suggestedAction: "request_medical_consent",
-          mealContextLabel: null,
-        },
-      });
-
-      expect(disposition.failureReason).toContain(
-        "Explicit consent is required before processing medical documents in chat.",
-      );
-    });
-
-    it("unclassified attachment without clear category yields needs_review (not persisted)", () => {
-      const disposition = resolveProvisionalUploadDisposition({
-        attachmentId: "a1000001-0000-4000-8000-000000000003",
-        classification: {
-          category: "unclassified",
-          confidence: "low",
-          rationale: "Ambiguous file.",
-          suggestedAction: "manual_fallback",
-          mealContextLabel: null,
-        },
-      });
-
-      expect(disposition.shouldPersistContent).toBe(false);
-      expect(disposition.status).toBe("needs_review");
-    });
-
-    it("food photo attachment is persisted (no consent required)", () => {
-      const disposition = resolveProvisionalUploadDisposition({
-        attachmentId: "a1000001-0000-4000-8000-000000000004",
-        classification: {
-          category: "food_photo",
-          confidence: "high",
-          rationale: "Meal photo.",
-          suggestedAction: "run_category_recognition",
-          mealContextLabel: "Lunch",
-          classificationProviderId: "openai",
-          classificationMethod: "vision",
-        },
-      });
-
-      expect(disposition.shouldPersistContent).toBe(true);
-      expect(disposition.status).toBe("queued");
     });
   });
 

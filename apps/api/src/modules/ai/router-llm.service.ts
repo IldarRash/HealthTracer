@@ -26,8 +26,6 @@ import { createCoachAiProvider } from "./coach-provider.factory.js";
 
 export interface RouterLlmServiceAttachmentHint {
   readonly category: string;
-  readonly mimeType?: string;
-  readonly consentState?: "granted" | "needs_consent" | "not_required";
 }
 
 export interface RouterLlmServiceInput {
@@ -135,13 +133,12 @@ export class RouterLlmService {
     const availableDomains = this.buildAvailableDomains();
 
     // Clamp and normalise attachment hints into the schema shape.
+    // The router receives attachment presence + category only — mimeType and
+    // consentState are never supplied by the orchestrator and are not part of
+    // the routing signal.
     const attachmentHints: RouterAttachmentHint[] = (input.attachmentHints ?? [])
       .slice(0, 5)
-      .map((hint) => ({
-        category: hint.category,
-        ...(hint.mimeType !== undefined ? { mimeType: hint.mimeType } : {}),
-        ...(hint.consentState !== undefined ? { consentState: hint.consentState } : {}),
-      }));
+      .map((hint) => ({ category: hint.category }));
 
     // Limit recent messages to a small window — the router needs context hints
     // only, not the full conversation history.

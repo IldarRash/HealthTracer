@@ -49,6 +49,7 @@ export interface AttachmentTurnContextItem {
   attachmentRefId: string;
   category: ChatAttachmentCategory;
   mimeType: string;
+  // "needs_consent" is never produced at runtime; retained for historical DB-row reads only.
   consentState: "granted" | "needs_consent" | "none";
   storageRef: string | null;
 }
@@ -234,10 +235,13 @@ export class AgentOrchestratorService {
     // Route selection
     //
     // S4: deterministic gate-miss (deterministic_read / deterministic_write) is
-    // handled INLINE with zero LLM calls. The real owner is the pre-AI direct-path
-    // gate (chat.service.ts); this is the safety-net for the case where a
-    // deterministic mode somehow reaches the orchestrator without the gate having
-    // handled it.
+    // handled INLINE by buildDeterministicGateMissResult — a rare safety-net for
+    // the case where a deterministic executor mode somehow reaches the orchestrator
+    // without the pre-AI gate having handled it. No ADDITIONAL LLM calls are made
+    // from this point; however, for eligible turns the router will already have run
+    // above (before SystemPlannerService produced the executorMode). The genuine
+    // zero-LLM path is the pre-AI gate in chat.service.ts (crisis, direct-path,
+    // quota), which returns before AiService is called.
     //
     // All other turns fan out through runFanOutTurn:
     //   - revision turns (router skipped; single-domain fan-out via the revision capability)
@@ -245,7 +249,7 @@ export class AgentOrchestratorService {
     //   - low-confidence / fallback turns (single-domain fan-out via "general" capability)
     //   - confident multi-domain turns (parallel fan-out; the primary case)
     //
-    // Pre-AI gates (crisis, no-proposal explainer, direct-path) never reach the
+    // Pre-AI gates (crisis, no-proposal explainer, direct-path, quota) never reach the
     // orchestrator, so they are never in scope here (S4 holds at chat.service.ts).
     // ---------------------------------------------------------------------------
     if (isDeterministicResponseModeExecutorMode(plan.executorMode)) {
@@ -274,7 +278,9 @@ export class AgentOrchestratorService {
 
   /**
    * Handles deterministic gate-miss turns (executorMode = deterministic_read |
-   * deterministic_write) INLINE, with zero LLM calls (S4).
+   * deterministic_write) INLINE — a safety-net for turns that reach the orchestrator
+   * without the pre-AI gate having handled them (S4). No additional LLM calls are
+   * made from this point; for eligible turns the router may already have run above.
    *
    * Returns a canned reply with responseModeExecution.delegatedToPreAiGate=true
    * and preAiGateDelegationMissed=true so downstream telemetry can flag the miss.
@@ -435,9 +441,10 @@ export class AgentOrchestratorService {
 
     // Resolve the decision-maker output through ActionResolver (Stage 10).
     // ActionResolver filters proposals to the union of the selected domains'
-    // allowedProposalIntents and handles the consent-gated medical-save action.
-    // When a workout calorie estimate or rate is present, it is stamped onto
-    // workout proposals with provenance 'workout_llm' (R1/S8).
+    // allowedProposalIntents. consentRequired is a forwarded LLM boolean — there
+    // is no consent-gated action variant currently in the catalog (medical-save is
+    // deferred). When a workout calorie estimate or rate is present, it is stamped
+    // onto workout proposals with provenance 'workout_llm' (R1/S8).
     const resolved = this.actionResolverService.resolveFinalDecisionOutput({
       finalDecision: decisionResult.output,
       selectedDomains,
@@ -451,11 +458,10 @@ export class AgentOrchestratorService {
     const replySafetyErrors = validateReplySafety(resolved.reply);
     const replyBlocked = replySafetyErrors.length > 0;
 
-    // Carry the consent-required flag from ActionResolver: when true, the
-    // decision-maker selected a consent-gated action (e.g. medical document save).
-    // Surface it to ChatService so the response can include the distinct consent
-    // prompt flag. Nothing is auto-persisted — the proposal flows through the
-    // normal proposal validation + accept path.
+    // Carry the consent-required flag from ActionResolver: this is the LLM boolean
+    // forwarded from the decision-maker output (consentRequired). No consent-gated
+    // action variant currently exists in the catalog — medical-save is deferred.
+    // Surface it to ChatService for the ChatTurnResponse flag; nothing is auto-persisted.
     const consentRequired = replyBlocked ? false : resolved.consentRequired;
 
     const finalOutput: AiStructuredOutput = replyBlocked
@@ -835,8 +841,8 @@ function buildDomainContextRequest(
  *
  * Source restriction: this function ONLY reads from the workout domain answer.
  * The decision-maker LLM and non-workout domains must never be the source of
- * the workout calorie estimate. The domainAnswerSchema superRefine guarantees
- * workoutCalorieEstimate is absent on non-workout answers at the Zod level.
+ * the workout calorie estimate. The domainLlmStepOutputSchema superRefine
+ * guarantees workoutCalorieEstimate is absent on non-workout answers at the Zod level.
  */
 function extractWorkoutCalorieEstimate(
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,
@@ -863,8 +869,8 @@ function extractWorkoutCalorieEstimate(
  *
  * Source restriction: this function ONLY reads from the workout domain answer.
  * The decision-maker LLM and non-workout domains must never be the source of
- * the workout calorie per hour rate. The domainAnswerSchema superRefine guarantees
- * workoutCaloriePerHourRate is absent on non-workout answers at the Zod level.
+ * the workout calorie per hour rate. The domainLlmStepOutputSchema superRefine
+ * guarantees workoutCaloriePerHourRate is absent on non-workout answers at the Zod level.
  */
 function extractWorkoutCaloriePerHourRate(
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,

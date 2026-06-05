@@ -23,8 +23,9 @@ export type ActionResolverFinalDecisionInput = {
   finalDecision: FinalDecisionOutput;
   /**
    * The selected domain fan-out entries whose union of allowedProposalIntents
-   * forms the active capability allowlist. Each domain's proposals are filtered
-   * to its own domain's allowlist.
+   * forms the active capability allowlist. Proposals are filtered to the UNION
+   * of all selected domains' allowedProposalIntents (built by
+   * buildUnionAllowedIntents), not per-domain.
    */
   selectedDomains: readonly DomainFanoutEntry[];
   /**

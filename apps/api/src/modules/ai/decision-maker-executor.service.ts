@@ -19,10 +19,12 @@
  *     Any validation failure degrades to createFallbackFinalDecision. The
  *     fallback is ALWAYS a safe coaching reply — never an error thrown to the user.
  *
- *  4. The decision-maker MUST NOT fabricate a workout calorie estimate.
- *     workoutCalorieEstimate is sourced exclusively from the workout domain LLM's
- *     domain_answer and lives in the domain outputs passed in — this service does
- *     not copy or forward it; that is Phase 6 work for ActionResolver.
+ *  4. The decision-maker MUST NOT fabricate a workout calorie estimate or rate.
+ *     `workoutCalorieEstimate` and `workoutCaloriePerHourRate` are sourced exclusively
+ *     from the workout domain LLM's `domain_answer`. `AgentOrchestratorService` extracts
+ *     them from the fan-out results and passes them to `ActionResolverService`, which
+ *     scrubs any calorie fields from this service's output and re-stamps the trusted
+ *     values with provenance `workout_llm`. This service does not copy or forward them.
  *
  *  5. There is currently no consent-gated action variant in the catalog.
  *     The `consentRequired` field is an LLM-set boolean forwarded by the decision-maker;

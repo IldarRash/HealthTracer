@@ -1357,9 +1357,7 @@ export * from "./nutrition-incidents.js";
 export * from "./recipes.js";
 export * from "./chat-action-proposals.js";
 export * from "./chat-attachments.js";
-export * from "./chat-attachment-classification.js";
 export * from "./chat-attachment-category-source.js";
-export * from "./chat-attachment-upload-disposition.js";
 export * from "./recovery.js";
 export {
   buildCoachingHierarchySummary,
@@ -1962,8 +1960,6 @@ export {
   attachmentBehaviorConfigVersionSchema,
   attachmentCategoriesConfigSchema,
   attachmentCategoryEntrySchema,
-  attachmentConsentConfigSchema,
-  attachmentOutcomeHintsConfigSchema,
   attachmentRetentionConfigSchema,
   attachmentSafetyFloorsConfigSchema,
   attachmentTurnStageSchema,
@@ -1971,7 +1967,6 @@ export {
   buildDefaultAttachmentBehaviorConfig,
   formatAttachmentBehaviorConfigValidationErrors,
   normalizeAttachmentBehaviorConfig,
-  resolveAttachmentRoutingFromBehavior,
   resolveLoadedAttachmentBehaviorConfig,
   safeParseAttachmentBehaviorConfig,
   validateAttachmentBehaviorConfig,
@@ -1982,8 +1977,6 @@ export {
   type AttachmentBehaviorConfigVersion,
   type AttachmentCategoriesConfig,
   type AttachmentCategoryEntry,
-  type AttachmentConsentConfig,
-  type AttachmentOutcomeHintsConfig,
   type AttachmentRetentionConfig,
   type AttachmentSafetyFloorsConfig,
   type AttachmentTurnStage,

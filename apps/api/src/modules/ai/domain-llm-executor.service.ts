@@ -405,7 +405,7 @@ export class DomainLlmExecutorService {
           return item;
         }
 
-        // storageRef is null when content was purged (no consent for medical).
+        // storageRef may be null if content was purged by retention policy.
         if (!item.storageRef) {
           return item;
         }

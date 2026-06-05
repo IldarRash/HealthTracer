@@ -92,8 +92,9 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     // is called; here we check if any item carries a data URI and route to the
     // vision endpoint. If no data URIs are present, falls back to text-only.
     //
-    // Safety floor: medical_document items only reach here with consentState === "granted"
-    // (enforced in buildDomainAttachmentContext in domain-llm-executor.service.ts).
+    // Note: there is no pre-upload consent gate for images. Image content
+    // (including a photo of a medical document) reaches the LLM directly;
+    // the pre-upload medical consent gate was removed per the locked architecture.
     const imageDataUris = resolveImageDataUrisFromAttachmentContext(request);
 
     const payload =
@@ -189,16 +190,16 @@ export class OpenAiCoachProvider implements CoachAiProvider {
 
   /**
    * Multimodal completion — sends the user message alongside one or more image
-   * data URIs. Used by generateDomainStep when a food_photo or consented medical
-   * image is present in the domain attachment context.
+   * data URIs. Used by generateDomainStep when an image attachment is present
+   * in the domain attachment context.
    *
    * The user message content is an array combining the text part and one image_url
    * part per data URI. Only image/* MIME types are sent as vision content;
    * non-image MIMEs (e.g. application/pdf) are excluded (they cannot be rendered
    * by the vision endpoint).
    *
-   * Safety: the imageDataUris are already filtered by the caller so only
-   * consented medical content and food photos are included.
+   * Note: images reach the LLM without a pre-upload consent gate. The
+   * imageDataUris are filtered by the caller to image/* MIMEs and size limits only.
    */
   private async requestMultimodalJsonCompletion(
     systemPrompt: string,
@@ -275,12 +276,11 @@ export class OpenAiCoachProvider implements CoachAiProvider {
  * Returns an array of data URIs ready for the OpenAI vision endpoint. Only
  * image/* MIME types are included — PDFs and other non-image MIMEs cannot be
  * sent to the vision endpoint. Items without an imageDataUri are skipped
- * (e.g. when the storage ref was null after consent purge).
+ * (e.g. when storageRef was null or the image exceeded the size cap).
  *
- * Safety floors (already enforced by buildDomainAttachmentContext):
- *  - medical_document items only present when consentState === "granted".
- *  - imageDataUri is set by DomainLlmExecutorService.buildAttachmentContextWithImages
- *    only when the domain is nutrition/health AND the attachment is an image MIME.
+ * Note: imageDataUri is set by DomainLlmExecutorService.buildAttachmentContextWithImages
+ * only when the domain is nutrition/health AND the attachment is an image MIME.
+ * There is no consent filter — all images reach the LLM regardless of category.
  */
 function resolveImageDataUrisFromAttachmentContext(request: DomainLlmStepRequest): string[] {
   const items = request.attachmentContext?.items;

@@ -159,13 +159,13 @@ describe("RouterLlmService", () => {
       expect(domains).not.toContain("medical");
     });
 
-    it("passes attachment hints through", () => {
+    it("passes attachment hints through (category only — mimeType/consentState not routed)", () => {
       const service = buildService();
       const preprocessorResult = makePreprocessorResult({ hasAttachments: true });
 
       const request = service.buildRequest({
         preprocessorResult,
-        attachmentHints: [{ category: "food_photo", mimeType: "image/jpeg", consentState: "not_required" }],
+        attachmentHints: [{ category: "food_photo" }],
       });
 
       expect(request.attachmentHints).toHaveLength(1);

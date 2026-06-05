@@ -78,9 +78,9 @@ export const chatFoodPhotoMimeTypeSchema = z.enum(CHAT_FOOD_PHOTO_MIME_TYPES);
 export const chatWorkoutAttachmentMimeTypeSchema = z.enum(CHAT_WORKOUT_ATTACHMENT_MIME_TYPES);
 
 /**
- * Re-exported for chat-attachment-classification.ts which uses it for
- * the classification confidence field. Not part of the removed recognition
- * envelope family (B3 removal kept this alias since it is still consumed).
+ * Alias kept for backward-compat reads of historical chat_attachment rows that may
+ * reference a confidence band. chat-attachment-classification.ts was removed in round-5
+ * (no live consumer remained after service-layer removal).
  */
 export const recognitionConfidenceBandSchema = nutritionConfidenceBandSchema;
 

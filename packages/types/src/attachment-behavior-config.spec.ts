@@ -6,9 +6,7 @@ import {
   resolveLoadedAttachmentBehaviorConfig,
   safeParseAttachmentBehaviorConfig,
   validateAttachmentBehaviorConfig,
-  type AttachmentBehaviorConfig,
 } from "./attachment-behavior-config.js";
-import { buildDefaultAiBehaviorConfig } from "./ai-behavior-config.js";
 
 describe("attachment behavior config", () => {
   it("builds defaults that validate", () => {
@@ -21,13 +19,6 @@ describe("attachment behavior config", () => {
       "link_to_message",
       "apply_upload_disposition",
     ]);
-  });
-
-  it("keeps default attachment routing parity for legacy ai-behavior schema only", () => {
-    const attachmentDefaults = buildDefaultAttachmentBehaviorConfig();
-    const aiBehaviorDefaults = buildDefaultAiBehaviorConfig();
-
-    expect(attachmentDefaults.routing).toEqual(aiBehaviorDefaults.attachmentRouting);
   });
 
   it("rejects invalid config shapes", () => {
@@ -64,15 +55,19 @@ describe("attachment behavior config", () => {
     expect(loaded.warnings).toContain("Invalid attachment behavior config; using built-in defaults.");
   });
 
-  it("normalizes partial config onto defaults", () => {
+  it("normalizes partial retention config onto defaults", () => {
     const normalized = normalizeAttachmentBehaviorConfig({
-      outcomeHints: {
-        ...buildDefaultAttachmentBehaviorConfig().outcomeHints,
-        manualFallback: "Custom fallback copy.",
+      retention: {
+        byCategory: {
+          unclassified: "ephemeral_recognition",
+          food_photo: "ephemeral_recognition",
+          medical_document: "ephemeral_recognition",
+          workout_attachment: "ephemeral_recognition",
+        },
       },
     });
 
-    expect(normalized.outcomeHints.manualFallback).toBe("Custom fallback copy.");
+    expect(normalized.retention.byCategory.medical_document).toBe("ephemeral_recognition");
     expect(normalized.safetyFloors.requireMedicalConsent).toBe(true);
   });
 
@@ -87,23 +82,15 @@ describe("attachment behavior config", () => {
           requireOwnershipChecks: false,
           suppressMedicalPlanProposals: false,
         },
-        consent: {
-          ...defaults.consent,
-          requiredMedicalScopes: ["parse_ocr"],
-          uploadStorageScopeRequired: false,
-        },
-      } as unknown as AttachmentBehaviorConfig;
+      };
 
-      const { config, warnings } = applyAttachmentBehaviorSafetyFloors(malicious, defaults);
+      const { config, warnings } = applyAttachmentBehaviorSafetyFloors(malicious);
 
       expect(config.safetyFloors.requireMedicalConsent).toBe(true);
       expect(config.safetyFloors.enforceProviderIsolation).toBe(true);
       expect(config.safetyFloors.requireOwnershipChecks).toBe(true);
       expect(config.safetyFloors.suppressMedicalPlanProposals).toBe(true);
-      expect(config.consent.requiredMedicalScopes).toContain("upload_storage");
-      expect(config.consent.uploadStorageScopeRequired).toBe(true);
       expect(warnings.some((warning) => warning.includes("safetyFloors"))).toBe(true);
-      expect(warnings.some((warning) => warning.includes("upload_storage"))).toBe(true);
     });
 
     it("applies safety floors during loaded file normalization", () => {
