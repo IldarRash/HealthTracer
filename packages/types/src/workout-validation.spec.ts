@@ -91,11 +91,13 @@ describe("getWorkoutPlanDomainErrors", () => {
     ).toEqual([]);
   });
 
-  it("accepts legacy stored payloads with string exercises", () => {
+  it("accepts stored payloads with legacy object exercises (B5/B6 removal — day field and string arm gone)", () => {
+    // B5 removal: `day` free-text field deleted — weekday required.
+    // B6 removal: string exercise arm deleted — object form required.
     const legacy = workoutPlanPayloadSchema.parse({
       title: "Strength base",
       summary: "Legacy revision payload.",
-      days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+      days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
       notes: [],
     });
 
@@ -123,25 +125,26 @@ describe("getWorkoutPlanDomainErrors", () => {
     expect(errors).toContain("workout: Weekday assignments must be unique across plan days.");
   });
 
-  it("rejects structured proposals missing weekday mapping", () => {
-    const errors = getWorkoutPlanDomainErrors(
-      {
-        ...validStructuredPayload,
-        days: [{ day: "Day 1", focus: "Strength", exercises: [catalogExercise] }],
-      },
-      { requireStructuredPlan: true },
-    );
-
-    expect(errors).toContain(
-      "workout: Structured workout plans must assign a weekday (monday-sunday) to every day.",
-    );
+  it("weekday is now required by schema — missing weekday fails parse (B5 removal)", () => {
+    // B5 removal: free-text `day` field deleted; workoutPlanDaySchema now requires `weekday`.
+    // A day without `weekday` will fail Zod parse before getWorkoutPlanDomainErrors is reached.
+    expect(() =>
+      workoutPlanPayloadSchema.parse({
+        title: "Plan",
+        summary: "Test.",
+        days: [{ focus: "Strength", exercises: [catalogExercise] }],
+        notes: [],
+      }),
+    ).toThrow();
   });
 
-  it("rejects structured proposals with legacy string exercises", () => {
+  it("rejects structured proposals with legacy object exercises without exerciseId (B6 removal — string arm gone)", () => {
+    // B6 removal: string exercises no longer accepted; legacy object form still checked for
+    // exerciseId/pendingExerciseRef when requireStructuredPlan=true.
     const errors = getWorkoutPlanDomainErrors(
       {
         ...validStructuredPayload,
-        days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
       },
       { requireStructuredPlan: true },
     );
@@ -205,28 +208,31 @@ describe("workoutPlanPayloadSchema boundaries", () => {
     ).toThrow();
   });
 
-  it("requires either weekday or legacy day label", () => {
+  it("requires weekday (B5 removal — free-text day label gone)", () => {
+    // B5 removal: weekday is now required; any day without it must fail parse.
     expect(() =>
       workoutPlanPayloadSchema.parse({
         title: "Invalid day",
-        summary: "Missing day label.",
-        days: [{ focus: "Strength", exercises: ["Squat"] }],
+        summary: "Missing weekday.",
+        days: [{ focus: "Strength", exercises: [{ name: "Squat" }] }],
       }),
     ).toThrow();
   });
 });
 
 describe("normalizeWorkoutPlanPayload", () => {
-  it("upgrades legacy string exercises to structured snapshots", () => {
+  it("upgrades legacy object exercises to structured snapshots (B5/B6 removal)", () => {
+    // B5 removal: day field gone — weekday required.
+    // B6 removal: string exercises gone — object form required.
     const normalized = normalizeWorkoutPlanPayload(
       workoutPlanPayloadSchema.parse({
         title: "Strength base",
         summary: "Legacy payload.",
         days: [
           {
-            day: "Monday",
+            weekday: "monday",
             focus: "Lower body",
-            exercises: ["Squat", { name: "RDL", sets: 3, reps: "8" }],
+            exercises: [{ name: "Squat" }, { name: "RDL", sets: 3, reps: "8" }],
           },
         ],
         notes: [],
@@ -523,7 +529,7 @@ describe("workoutPlanPayloadSchema — estimatedSessionCalorieBurn + calorieEsti
     const payload = workoutPlanPayloadSchema.parse({
       title: "Base plan",
       summary: "No calorie fields.",
-      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+      days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
       notes: [],
     });
     expect(payload.estimatedSessionCalorieBurn).toBeUndefined();
@@ -534,7 +540,7 @@ describe("workoutPlanPayloadSchema — estimatedSessionCalorieBurn + calorieEsti
     const payload = workoutPlanPayloadSchema.parse({
       title: "Base plan",
       summary: "With calorie estimate.",
-      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+      days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
       notes: [],
       estimatedSessionCalorieBurn: 350,
       calorieEstimateProvenance: "workout_llm",
@@ -547,7 +553,7 @@ describe("workoutPlanPayloadSchema — estimatedSessionCalorieBurn + calorieEsti
     const payload = workoutPlanPayloadSchema.parse({
       title: "User plan",
       summary: "User entered calories.",
-      days: [{ weekday: "tuesday", focus: "Cardio", exercises: ["Run"] }],
+      days: [{ weekday: "tuesday", focus: "Cardio", exercises: [{ name: "Run" }] }],
       notes: [],
       estimatedSessionCalorieBurn: 500,
       calorieEstimateProvenance: "user_manual",
@@ -560,7 +566,7 @@ describe("workoutPlanPayloadSchema — estimatedSessionCalorieBurn + calorieEsti
       workoutPlanPayloadSchema.parse({
         title: "Extreme",
         summary: "Way too many calories.",
-        days: [{ weekday: "monday", focus: "Ultra", exercises: ["Run"] }],
+        days: [{ weekday: "monday", focus: "Ultra", exercises: [{ name: "Run" }] }],
         notes: [],
         estimatedSessionCalorieBurn: 20001,
         calorieEstimateProvenance: "workout_llm",
@@ -573,7 +579,7 @@ describe("workoutPlanPayloadSchema — estimatedSessionCalorieBurn + calorieEsti
       workoutPlanPayloadSchema.parse({
         title: "Negative",
         summary: "Negative is invalid.",
-        days: [{ weekday: "monday", focus: "Rest", exercises: ["Stretch"] }],
+        days: [{ weekday: "monday", focus: "Rest", exercises: [{ name: "Stretch" }] }],
         notes: [],
         estimatedSessionCalorieBurn: -10,
         calorieEstimateProvenance: "workout_llm",
@@ -586,7 +592,7 @@ describe("workoutPlanPayloadSchema — estimatedSessionCalorieBurn + calorieEsti
       workoutPlanPayloadSchema.parse({
         title: "Unknown",
         summary: "Bad provenance.",
-        days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
         estimatedSessionCalorieBurn: 300,
         calorieEstimateProvenance: "some_llm",
@@ -599,7 +605,7 @@ describe("getWorkoutProposalDomainErrors — calorie field validation", () => {
   const baseChanges = workoutPlanProposalChangesSchema.parse({
     title: "Three day plan",
     summary: "Weekly training.",
-    days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+    days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
     notes: [],
   });
 
@@ -726,7 +732,7 @@ describe("workoutSessionExerciseExecutionSchema — userCompletionTimeMinutes (u
     const rawInput: Record<string, unknown> = {
       title: "Plan",
       summary: "Summary.",
-      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+      days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
       notes: [],
       userCompletionTimeMinutes: 45,
     };

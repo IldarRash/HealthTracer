@@ -17,7 +17,8 @@ const WORKOUT_PROPOSAL = {
   proposedChanges: {
     title: "Strength base",
     summary: "Lighter session today.",
-    days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+    // B5/B6: weekday required, object exercises only.
+    days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
     notes: [],
   },
 };
@@ -331,7 +332,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
     proposedChanges: {
       title: "Strength base",
       summary: "Lighter session today.",
-      days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+      days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
       notes: [],
     },
   };
@@ -407,7 +408,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
       proposedChanges: {
         title: "New strength base",
         summary: "Fresh three day plan.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
       },
     };
@@ -432,7 +433,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
     const originalChanges = {
       title: "Strength base",
       summary: "Lighter session today.",
-      days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+      days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
       notes: [],
     };
     const proposal = {
@@ -505,7 +506,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         plan: {
           title: "Adapted plan",
           summary: "Reduced load based on progress.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
         },
         sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
@@ -550,7 +551,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         plan: {
           title: "Adapted plan",
           summary: "Reduced load.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
         },
         sourceTrendObservationIds: [],
@@ -593,7 +594,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
       proposedChanges: {
         title: "Strength base",
         summary: "Lighter session.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
         estimatedSessionCalorieBurn: 9999,         // Injected by decision-maker — must be stripped
         calorieEstimateProvenance: "workout_llm",  // Injected by decision-maker — must be stripped
@@ -628,7 +629,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         plan: {
           title: "Adapted plan",
           summary: "Lighter.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
           estimatedSessionCalorieBurn: 8888,        // Injected — must be stripped
           calorieEstimateProvenance: "workout_llm", // Injected — must be stripped
@@ -667,7 +668,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
       proposedChanges: {
         title: "Strength base",
         summary: "Session.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
         estimatedSessionCalorieBurn: 5555,         // Wrong fabricated value
         calorieEstimateProvenance: "workout_llm",
@@ -722,7 +723,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
     proposedChanges: {
       title: "Strength base",
       summary: "Lighter session.",
-      days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+      days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
       notes: [],
     },
   };
@@ -759,7 +760,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
       proposedChanges: {
         title: "Strength base",
         summary: "Session.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
         caloriePerHourRate: 450, // Valid-range fabricated value — must be scrubbed when no trusted rate
       } as Record<string, unknown>,
@@ -791,7 +792,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
         plan: {
           title: "Adapted plan",
           summary: "Reduced load.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
         },
         sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
@@ -834,7 +835,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
         plan: {
           title: "Adapted plan",
           summary: "Lighter.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
           caloriePerHourRate: 350, // Valid-range fabricated value — must be scrubbed when no trusted rate
         },

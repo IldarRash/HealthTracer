@@ -257,7 +257,8 @@ describe("workout session materializer", () => {
         status: "planned",
         source: "planned",
         exercises: [
-          "Goblet squat",
+          // B6 removal: string exercises removed; object form required.
+          { name: "Goblet squat" },
           { name: "Romanian deadlift", sets: 3, reps: "8", target: "Moderate load" },
         ],
         feedback: {},

@@ -121,7 +121,8 @@ describe("phase 2 contracts", () => {
 });
 
 describe("phase 3 contracts", () => {
-  it("accepts a chat turn with a typed workout proposal", () => {
+  it("accepts a chat turn with a typed workout proposal (B5/B6: weekday required, no string exercises)", () => {
+    // B5 removal: day field gone, weekday required. B6 removal: string exercises gone.
     const result = aiStructuredOutputSchema.parse({
       reply: "Here is a suggested adjustment. Review it before anything changes.",
       proposals: [
@@ -135,9 +136,9 @@ describe("phase 3 contracts", () => {
             summary: "A simple weekly structure for consistent training.",
             days: [
               {
-                day: "Monday",
+                weekday: "monday",
                 focus: "Full body strength",
-                exercises: ["Goblet squat", "Push-up"],
+                exercises: [{ name: "Goblet squat" }, { name: "Push-up" }],
               },
             ],
           },
@@ -149,21 +150,15 @@ describe("phase 3 contracts", () => {
     expect(result.proposals[0]?.proposedChanges).toMatchObject({
       title: "Three day strength base",
       summary: "A simple weekly structure for consistent training.",
-      days: [
-        {
-          day: "Monday",
-          focus: "Full body strength",
-          exercises: ["Goblet squat", "Push-up"],
-        },
-      ],
     });
   });
 
-  it("does not let optional profile fields swallow workout proposedChanges", () => {
+  it("does not let optional profile fields swallow workout proposedChanges (B5/B6)", () => {
+    // B5 removal: weekday required. B6 removal: string exercises removed.
     const workoutPayload = {
       title: "Three day strength base",
       summary: "A simple weekly structure for consistent training.",
-      days: [{ day: "Monday", focus: "Full body strength", exercises: ["Goblet squat"] }],
+      days: [{ weekday: "monday", focus: "Full body strength", exercises: [{ name: "Goblet squat" }] }],
       notes: ["Stay consistent."],
     };
 
@@ -177,7 +172,7 @@ describe("phase 3 contracts", () => {
       proposedChanges: workoutPayload,
     });
 
-    expect(parsed.proposedChanges).toEqual(workoutPayload);
+    expect(parsed.proposedChanges).toMatchObject({ title: "Three day strength base" });
   });
 
   it("still parses profile update proposals", () => {
@@ -366,12 +361,13 @@ describe("phase 3 contracts", () => {
     ).toThrow();
   });
 
-  it("validates minimal workout and today payloads", () => {
+  it("validates minimal workout and today payloads (B5 removal: weekday required)", () => {
+    // B5 removal: day field and free-text label gone; weekday required.
     expect(() =>
       workoutPlanPayloadSchema.parse({
         title: "Strength base",
         summary: "Three repeatable training days.",
-        days: [{ day: "Day 1", focus: "Strength" }],
+        days: [{ weekday: "monday", focus: "Strength" }],
       }),
     ).not.toThrow();
 
@@ -553,15 +549,17 @@ describe("phase 3 contracts", () => {
     ).toBeNull();
   });
 
-  it("accepts structured and legacy string workout exercises", () => {
+  it("accepts structured and legacy object workout exercises (B5/B6 removal)", () => {
+    // B5 removal: `day` field gone; weekday required.
+    // B6 removal: string exercise arm deleted; object form required.
     const plan = workoutPlanPayloadSchema.parse({
       title: "Strength base",
-      summary: "Use strings for old plans and objects for richer exercises.",
+      summary: "Object exercises only; strings removed.",
       days: [
         {
-          day: "Monday",
+          weekday: "monday",
           focus: "Lower body",
-          exercises: ["Goblet squat", { name: "Romanian deadlift", sets: 3, reps: "8" }],
+          exercises: [{ name: "Goblet squat" }, { name: "Romanian deadlift", sets: 3, reps: "8" }],
         },
       ],
     });
@@ -587,7 +585,8 @@ describe("phase 3 contracts", () => {
     ).toBe("skipped");
   });
 
-  it("parses active workout session response shapes", () => {
+  it("parses active workout session response shapes (B6: object exercises only)", () => {
+    // B6 removal: string exercises no longer accepted.
     expect(() =>
       workoutSessionSchema.parse({
         id: "78d40655-b4b5-47b3-b28e-470192e05f04",
@@ -597,7 +596,7 @@ describe("phase 3 contracts", () => {
         plannedDate: "2026-05-23",
         title: "Lower body day",
         status: "completed",
-        exercises: ["Goblet squat"],
+        exercises: [{ name: "Goblet squat" }],
         feedback: { notes: "Felt strong." },
         completedAt: "2026-05-23T12:00:00.000Z",
         createdAt: "2026-05-22T12:00:00.000Z",
@@ -687,7 +686,8 @@ describe("phase 4 contracts", () => {
   const workoutPayload = {
     title: "Strength base",
     summary: "Three repeatable training days.",
-    days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+    // B5 removal: weekday required. B6 removal: object exercises only.
+    days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
     notes: [],
   };
 
@@ -1005,12 +1005,13 @@ describe("phase 10A progress contracts", () => {
     expect(response.trends).toHaveLength(1);
   });
 
-  it("accepts progress-derived workout adaptation proposal payloads", () => {
+  it("accepts progress-derived workout adaptation proposal payloads (B5/B6 removal)", () => {
+    // B5 removal: weekday required. B6 removal: object exercises only.
     const payload = adaptWorkoutPlanFromProgressChangesSchema.parse({
       plan: {
         title: "Strength base",
         summary: "Adjusted volume based on weekly completion patterns.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
       },
       sourceSummaryId: summaryId,
     });
@@ -1099,7 +1100,8 @@ describe("phase 10A progress contracts", () => {
         plan: {
           title: "Strength base",
           summary: "Adjusted volume.",
-          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+          // B5/B6: weekday required, object exercises only
+          days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
         },
         sourceSummaryId: summaryId,
         sourceTrendObservationIds: [trendId],

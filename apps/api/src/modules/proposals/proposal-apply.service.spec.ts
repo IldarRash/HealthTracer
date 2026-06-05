@@ -14,7 +14,7 @@ const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
 const workoutPayload = {
   title: "Strength base",
   summary: "Three repeatable training days.",
-  days: [{ day: "Day 1", focus: "Strength", exercises: [] }],
+  days: [{ weekday: "monday" as const, focus: "Strength", exercises: [] }],
 };
 
 const baseProposal = {

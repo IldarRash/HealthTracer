@@ -78,7 +78,7 @@ function buildMockAttachmentTurnStageResult(input: {
       attachmentRefId: attachment.id,
       category: attachment.category ?? "unclassified",
       status: attachment.status ?? "ready",
-      recognition: attachment.recognition ?? null,
+      // recognition field removed (B3 removal, C4 cluster)
     })),
   };
 }
@@ -327,7 +327,7 @@ describe("ChatService", () => {
         proposedChanges: {
           title: "Strength base",
           summary: "Lighter session today.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
         },
       },
@@ -966,7 +966,7 @@ describe("ChatService", () => {
                 linkedImageRefId: null,
                 retentionPolicy: "standard",
                 expiresAt: null,
-                recognition: null,
+                // recognition field removed (B3 removal, C4 cluster)
               })),
             }),
         },
@@ -1093,7 +1093,7 @@ describe("ChatService", () => {
             proposedChanges: {
               title: "Weekly plan",
               summary: "Build consistency with a simple weekly structure.",
-              days: [{ focus: "Strength", exercises: ["Squat"] }],
+              days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
               notes: [],
             },
           },
@@ -1410,7 +1410,7 @@ describe("ChatService", () => {
         plan: {
           title: "Lighter week",
           summary: "Adjusted volume based on weekly completion patterns.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         },
         sourceSummaryId: summaryId,
         sourceTrendObservationIds: [trendId],
@@ -2078,32 +2078,7 @@ describe("ChatService", () => {
         linkedDocumentId: null,
         linkedImageRefId: attachmentId,
         consent: null,
-        recognition: {
-          category: "food_photo" as const,
-          attachmentRefId: attachmentId,
-          analysis: {
-            candidates: [
-              {
-                items: [{ name: "Salad", calories: 320 }],
-                estimatedCalories: 320,
-                estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
-                confidence: "medium" as const,
-                provenance: {
-                  source: "dev_stub",
-                  providerId: "dev_food_photo",
-                  analysisId: "b1000001-0000-4000-8000-000000000002",
-                },
-              },
-            ],
-            lowConfidenceNotice: null,
-          },
-          provenance: {
-            source: "dev_stub",
-            providerId: "dev_food_photo",
-            recognitionId: "b1000001-0000-4000-8000-000000000002",
-            confidence: "medium" as const,
-          },
-        },
+        // recognition field removed (B3 removal, C4 cluster)
         failureReason: null,
         retentionPolicy: "ephemeral_recognition" as const,
         expiresAt: null,
@@ -2339,32 +2314,7 @@ describe("ChatService", () => {
         linkedDocumentId: null,
         linkedImageRefId: attachmentId,
         consent: null,
-        recognition: {
-          category: "food_photo" as const,
-          attachmentRefId: attachmentId,
-          analysis: {
-            candidates: [
-              {
-                items: [{ name: "Salad", calories: 320 }],
-                estimatedCalories: 320,
-                estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
-                confidence: "medium" as const,
-                provenance: {
-                  source: "dev_stub",
-                  providerId: "dev_food_photo",
-                  analysisId: "b1000001-0000-4000-8000-000000000002",
-                },
-              },
-            ],
-            lowConfidenceNotice: null,
-          },
-          provenance: {
-            source: "dev_stub",
-            providerId: "dev_food_photo",
-            recognitionId: "b1000001-0000-4000-8000-000000000002",
-            confidence: "medium" as const,
-          },
-        },
+        // recognition field removed (B3 removal, C4 cluster)
         failureReason: null,
         retentionPolicy: "ephemeral_recognition" as const,
         expiresAt: null,
@@ -2490,17 +2440,7 @@ describe("ChatService", () => {
         linkedDocumentId: null,
         linkedImageRefId: attachmentId,
         consent: null,
-        recognition: {
-          category: "food_photo" as const,
-          attachmentRefId: attachmentId,
-          analysis: { candidates: [], lowConfidenceNotice: null },
-          provenance: {
-            source: "dev_stub",
-            providerId: "dev_food_photo",
-            recognitionId: "b1000001-0000-4000-8000-000000000002",
-            confidence: "medium" as const,
-          },
-        },
+        // recognition field removed (B3 removal, C4 cluster)
         failureReason: null,
         retentionPolicy: "ephemeral_recognition" as const,
         expiresAt: null,
@@ -2788,7 +2728,7 @@ describe("ChatService", () => {
                   id: attachmentId,
                   category: "food_photo",
                   status: "ready",
-                  recognition: null,
+                  // recognition field removed (B3 removal, C4 cluster)
                 },
               ],
             });
@@ -2823,7 +2763,7 @@ describe("ChatService", () => {
         linkedDocumentId: null,
         linkedImageRefId: attachmentId,
         consent: null,
-        recognition: null,
+        // recognition field removed (B3 removal, C4 cluster)
         failureReason: null,
         retentionPolicy: "ephemeral_recognition" as const,
         expiresAt: null,

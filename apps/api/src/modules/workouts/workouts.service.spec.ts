@@ -115,7 +115,7 @@ describe("WorkoutsService", () => {
           plannedDate: "2026-05-23",
           title: "Strength day",
           status: "planned",
-          exercises: ["Squat"],
+          exercises: [{ name: "Squat" }],
           feedback: {},
           completedAt: null,
           createdAt: new Date("2026-05-22T12:00:00.000Z"),
@@ -130,7 +130,7 @@ describe("WorkoutsService", () => {
       workoutPlanRevisionId: "880099c6-3b5f-4383-8246-97b72bf61818",
       plannedDate: "2026-05-23",
       title: "Strength day",
-      exercises: ["Squat"],
+      exercises: [{ name: "Squat" }],
     });
 
     expect(session.userId).toBe(userId);
@@ -367,7 +367,7 @@ describe("WorkoutsService", () => {
       plannedDate: "2026-05-23",
       title: "Strength day",
       status: "planned",
-      exercises: ["Squat"],
+      exercises: [{ name: "Squat" }],
       feedback: {},
       completedAt: null,
       createdAt: new Date("2026-05-22T12:00:00.000Z"),
@@ -829,7 +829,8 @@ describe("WorkoutsService", () => {
         {
           title: "Strength base",
           summary: "Legacy string day.",
-          days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+          // B6 removal: string exercises gone; legacy object form also fails requireStructuredPlan.
+          days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
           notes: [],
         },
         "Attempted free-form apply.",

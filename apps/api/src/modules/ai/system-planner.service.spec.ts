@@ -586,7 +586,7 @@ describe("SystemPlannerService", () => {
           proposedChanges: {
             title: "Strength base",
             summary: "Lighter session today.",
-            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+            days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
             notes: [],
           },
         },
@@ -678,7 +678,7 @@ describe("SystemPlannerService", () => {
             proposedChanges: {
               title: "Strength base",
               summary: "Lighter session today.",
-              days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+              days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
               notes: [],
             },
           },

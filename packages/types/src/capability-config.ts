@@ -112,8 +112,12 @@ export type RouterSerializedCapabilityConfig = {
   examples: readonly string[];
 };
 
-function resolveDefaultRoutingMethodForKind(kind: CapabilityKind): AgentRoutingMethod {
-  return kind === "attachment_family" ? "attachment_family" : "llm_router";
+// B7 removal: "attachment_family" and "llm_router" enum values deleted from agentRoutingMethodSchema.
+// The attachment_family capability KIND is kept (intent-catalog.ts:277-320) — only the
+// agent-context routing ENUM values were in B7 scope.
+// Attachment capabilities now map to "unified_turn_decision" as their routing metadata default.
+function resolveDefaultRoutingMethodForKind(_kind: CapabilityKind): AgentRoutingMethod {
+  return "unified_turn_decision";
 }
 
 function resolveResponseMetadataForCatalogEntry(

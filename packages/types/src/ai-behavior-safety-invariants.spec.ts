@@ -442,7 +442,7 @@ describe("calorie provenance floor — Phase 6 safety regression", () => {
       const payload = workoutPlanPayloadSchema.parse({
         title: "Base plan",
         summary: "No calorie estimate.",
-        days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
       });
       expect(payload.estimatedSessionCalorieBurn).toBeUndefined();
@@ -455,7 +455,7 @@ describe("calorie provenance floor — Phase 6 safety regression", () => {
       const parsed = workoutPlanPayloadSchema.parse({
         title: "Plan",
         summary: "Summary.",
-        days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
         decision_maker_estimate: 999, // fabricated key — must be stripped
       });
@@ -467,7 +467,7 @@ describe("calorie provenance floor — Phase 6 safety regression", () => {
         workoutPlanPayloadSchema.parse({
           title: "Plan",
           summary: "Over ceiling.",
-          days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+          days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
           notes: [],
           estimatedSessionCalorieBurn: 20001,
           calorieEstimateProvenance: "workout_llm",
@@ -480,7 +480,7 @@ describe("calorie provenance floor — Phase 6 safety regression", () => {
         workoutPlanPayloadSchema.parse({
           title: "Plan",
           summary: "Negative.",
-          days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+          days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
           notes: [],
           estimatedSessionCalorieBurn: -1,
           calorieEstimateProvenance: "workout_llm",
@@ -493,7 +493,8 @@ describe("calorie provenance floor — Phase 6 safety regression", () => {
     const baseChanges = workoutPlanProposalChangesSchema.parse({
       title: "Plan",
       summary: "Weekly.",
-      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+      // B6 removal: string exercises removed.
+      days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
       notes: [],
     });
 

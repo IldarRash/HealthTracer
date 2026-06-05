@@ -656,7 +656,7 @@ describe("ProposalsService", () => {
       proposedChanges: {
         title: "Strength base",
         summary: "Three repeatable training days.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
       },
     };
 
@@ -793,7 +793,7 @@ describe("ProposalsService", () => {
       proposedChanges: {
         title: "Strength base",
         summary: "Reduced volume for recovery.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
       },
     };
 
@@ -927,7 +927,7 @@ describe("ProposalsService", () => {
       proposedChanges: {
         title: "Strength base",
         summary: "Three repeatable training days.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
       },
     };
 
@@ -1051,7 +1051,7 @@ describe("ProposalsService", () => {
         plan: {
           title: "Strength base",
           summary: "Reduced volume based on weekly completion patterns.",
-          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+          days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         },
         sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
         sourceTrendObservationIds: ["24b19287-75b8-4a3e-9c10-691908479405"],
@@ -1673,7 +1673,7 @@ describe("ProposalsService decideProposal — display-contract recompute seam", 
     return {
       title: "Strength base",
       summary: "Three day plan.",
-      days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+      days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
       ...overrides,
     };
   }
@@ -2058,7 +2058,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
       proposedChanges: {
         title: "Strength plan",
         summary: "One day.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         caloriePerHourRate: 300,
         estimatedSessionCalorieBurn: 300,
         calorieEstimateProvenance: "workout_llm",
@@ -2088,7 +2088,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
       proposedChanges: {
         title: "Strength plan",
         summary: "One day.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         caloriePerHourRate: 4999, // tampered but within schema max(5000)
         estimatedSessionCalorieBurn: 9000,
         calorieEstimateProvenance: "workout_llm",
@@ -2113,7 +2113,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
       proposedChanges: {
         title: "Adapt plan",
         summary: "Recovery week.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         caloriePerHourRate: 280,
         estimatedSessionCalorieBurn: 280,
         calorieEstimateProvenance: "workout_llm",
@@ -2143,7 +2143,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
       proposedChanges: {
         title: "Adapt plan",
         summary: "Recovery week.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         caloriePerHourRate: 490,                     // tampered rate (within max 5000)
         estimatedSessionCalorieBurn: 15000,           // tampered burn
         calorieEstimateProvenance: "user_manual",     // tampered provenance
@@ -2170,7 +2170,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
         plan: {
           title: "Reduced load plan",
           summary: "Lighter week.",
-          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+          days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
           caloriePerHourRate: 250,
           estimatedSessionCalorieBurn: 250,
           calorieEstimateProvenance: "workout_llm",
@@ -2206,7 +2206,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
         plan: {
           title: "Reduced load plan",
           summary: "Lighter week.",
-          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+          days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
           caloriePerHourRate: 4500,           // tampered (within schema max 5000)
           estimatedSessionCalorieBurn: 15000, // tampered
           calorieEstimateProvenance: "user_manual", // tampered
@@ -2393,7 +2393,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
       proposedChanges: {
         title: "Strength plan",
         summary: "One day.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         caloriePerHourRate: 300,
         estimatedSessionCalorieBurn: 300,
         calorieEstimateProvenance: "workout_llm" as const,
@@ -2423,7 +2423,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
       proposedChanges: {
         title: "Strength plan",
         summary: "One day.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         caloriePerHourRate: 4999,                 // tampered (within schema max 5000)
         estimatedSessionCalorieBurn: 19999,        // inflated (within schema max 20000)
         calorieEstimateProvenance: "workout_llm",  // fabricated
@@ -2481,7 +2481,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
         plan: {
           title: "Reduced load plan",
           summary: "Lighter week.",
-          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+          days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
           caloriePerHourRate: 250,
           estimatedSessionCalorieBurn: 250,
           calorieEstimateProvenance: "workout_llm" as const,
@@ -2518,7 +2518,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
         plan: {
           title: "Reduced load plan",
           summary: "Lighter week.",
-          days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+          days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
           caloriePerHourRate: 4500,            // tampered (within schema max 5000)
           estimatedSessionCalorieBurn: 19000,  // inflated (within schema max 20000)
           calorieEstimateProvenance: "workout_llm",  // fabricated
@@ -2658,7 +2658,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
       proposedChanges: {
         title: "Strength plan",
         summary: "One day.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         caloriePerHourRate: 300,
         estimatedSessionCalorieBurn: 300,
         calorieEstimateProvenance: "workout_llm" as const,
@@ -2689,7 +2689,7 @@ describe("ProposalsService decideProposal — calorie-field pinning (FIX 1 + FIX
       proposedChanges: {
         title: "Strength plan",
         summary: "One day.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         caloriePerHourRate: 4999,                 // tampered — must be replaced
         estimatedSessionCalorieBurn: 19999,        // inflated — must be replaced with recomputed
         calorieEstimateProvenance: "workout_llm",

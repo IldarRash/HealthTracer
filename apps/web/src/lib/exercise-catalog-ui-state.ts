@@ -89,7 +89,8 @@ function parseOptionalText(value: string, maxLength: number): string | null | un
 export function resolvePlanExerciseCatalogMetadata(
   exercise: WorkoutPlanExerciseEntry,
 ): ExerciseCatalogMetadata | null {
-  if (typeof exercise === "string" || !isStructuredWorkoutPlanExercise(exercise)) {
+  // B6 removal: typeof exercise === "string" check deleted; string arm no longer in the union.
+  if (!isStructuredWorkoutPlanExercise(exercise)) {
     return null;
   }
 

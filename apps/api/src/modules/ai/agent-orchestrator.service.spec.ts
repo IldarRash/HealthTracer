@@ -532,7 +532,7 @@ describe("AgentOrchestratorService routing", () => {
       proposedChanges: {
         title: "Strength base",
         summary: "Lighter session today.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -605,7 +605,7 @@ describe("AgentOrchestratorService routing", () => {
       proposedChanges: {
         title: "Strength base",
         summary: "Lighter session today.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -669,7 +669,7 @@ describe("AgentOrchestratorService routing", () => {
           proposedChanges: {
             title: "Strength base",
             summary: "Lighter session today.",
-            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+            days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
             notes: [],
           },
         },
@@ -697,7 +697,7 @@ describe("AgentOrchestratorService routing", () => {
       proposedChanges: {
         title: "Strength base",
         summary: "Lighter session today.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -1861,7 +1861,7 @@ describe("AgentOrchestratorService router integration", () => {
           proposedChanges: {
             title: "Strength base",
             summary: "Lighter session today.",
-            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+            days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
             notes: [],
           },
         },
@@ -2323,7 +2323,7 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
             proposedChanges: {
               title: "Recovery day",
               summary: "Light day.",
-              days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+              days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
               notes: [],
             },
           },
@@ -2347,7 +2347,7 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
       proposedChanges: {
         title: "Recovery day",
         summary: "Light day.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -2509,7 +2509,7 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
       proposedChanges: {
         title: "Recovery day",
         summary: "Light.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -2609,7 +2609,7 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
           proposedChanges: {
             title: "Strength base",
             summary: "Lighter session today.",
-            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+            days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
             notes: [],
           },
         },
@@ -2808,7 +2808,7 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
             proposedChanges: {
               title: "Recovery",
               summary: "Easy day.",
-              days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+              days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
               notes: [],
             },
           },
@@ -2843,7 +2843,7 @@ describe("AgentOrchestratorService Phase 4c fan-out", () => {
       proposedChanges: {
         title: "Recovery",
         summary: "Easy day.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -2905,7 +2905,7 @@ describe("AgentOrchestratorService fan-out reply safety floor", () => {
       proposedChanges: {
         title: "Recovery day",
         summary: "Light day.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -3085,7 +3085,7 @@ describe("AgentOrchestratorService — workout calorie estimate threading (Phase
       proposedChanges: {
         title: "Recovery session",
         summary: "Reduced load for the week.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -3134,7 +3134,7 @@ describe("AgentOrchestratorService — workout calorie estimate threading (Phase
       proposedChanges: {
         title: "Recovery session",
         summary: "Reduced load.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -3184,7 +3184,7 @@ describe("AgentOrchestratorService — workout calorie estimate threading (Phase
       proposedChanges: {
         title: "Recovery session",
         summary: "Reduced load.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
       },
     };
@@ -3258,7 +3258,7 @@ describe("AgentOrchestratorService — workout calorie estimate threading (Phase
       proposedChanges: {
         title: "Base plan",
         summary: "Weekly training.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
       },
     };

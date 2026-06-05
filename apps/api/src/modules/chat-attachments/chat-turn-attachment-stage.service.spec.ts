@@ -308,8 +308,8 @@ describe("ChatTurnAttachmentStageService (plumbing-only, context-first)", () => 
     expect(finalStatus).not.toBe("failed");
     expect(finalStatus).not.toBe("unsupported");
 
-    // recognition field must remain null (no recognition stage ran).
-    expect(result?.outcomes[0]?.recognition).toBeNull();
+    // recognition field is no longer part of the outcome type (B3 removal, C4 cluster).
+    expect((result?.outcomes[0] as Record<string, unknown> | undefined)?.["recognition"]).toBeUndefined();
 
     // update was called for link_to_message (messageId/threadId) and optionally
     // apply_upload_disposition (retentionPolicy), but never for a "classify" or

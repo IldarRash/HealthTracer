@@ -96,18 +96,15 @@ describe("capability config", () => {
     expect(explainer.compositionMetadata).toEqual(DEFAULT_CAPABILITY_COMPOSITION_METADATA);
   });
 
-  it("keeps legacy catalog defaultRoutingMethod metadata for compatibility", () => {
+  it("resolves defaultRoutingMethod to unified_turn_decision for all capability kinds (B7 removal)", () => {
+    // B7 removal: "llm_router" and "attachment_family" deleted from agentRoutingMethodSchema.
+    // All capabilities now report "unified_turn_decision" as their routing metadata default.
+    // The attachment_family capability KIND is kept (intent-catalog.ts) — only the enum value changed.
     const general = getCapabilityConfig("general");
     const foodPhoto = getCapabilityConfig("attachment_food_photo");
 
-    expect(general.responseMetadata).toEqual({
-      defaultRoutingMethod: "llm_router",
-      expectedResponseMode: "advice_only",
-    });
-    expect(foodPhoto.responseMetadata).toEqual({
-      defaultRoutingMethod: "attachment_family",
-      expectedResponseMode: "recommendation_with_optional_proposal",
-    });
+    expect(general.responseMetadata?.defaultRoutingMethod).toBe("unified_turn_decision");
+    expect(foodPhoto.responseMetadata?.defaultRoutingMethod).toBe("unified_turn_decision");
   });
 
   it("returns deterministic validation errors for invalid config", () => {

@@ -23,7 +23,8 @@ describe("workout mappers", () => {
     expect(plan.status).toBe("active");
   });
 
-  it("parses revision payloads and session exercise unions from stored JSON", () => {
+  it("parses revision payloads and session exercise unions from stored JSON (B5/B6 removal)", () => {
+    // B5 removal: weekday required. B6 removal: string exercises removed; object form required.
     const revision = toWorkoutPlanRevision({
       id: "880099c6-3b5f-4383-8246-97b72bf61818",
       workoutPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
@@ -35,9 +36,9 @@ describe("workout mappers", () => {
         summary: "Mixed exercise formats.",
         days: [
           {
-            day: "Monday",
+            weekday: "monday",
             focus: "Lower body",
-            exercises: ["Squat", { name: "RDL", sets: 3, reps: "8" }],
+            exercises: [{ name: "Squat" }, { name: "RDL", sets: 3, reps: "8" }],
           },
         ],
         notes: [],

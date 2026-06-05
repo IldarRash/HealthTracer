@@ -226,7 +226,7 @@ export class ChatTurnAttachmentStageService {
       attachmentRefId: attachment.id,
       category: attachment.category,
       status: attachment.status,
-      recognition: attachment.recognition,
+      // recognition field removed (B3 removal, C4 cluster)
     }));
   }
 }

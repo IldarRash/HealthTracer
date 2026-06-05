@@ -82,9 +82,7 @@ export function formatExerciseLabel(
     | WorkoutPlanExerciseEntry
     | WorkoutSessionExerciseEntry,
 ): string {
-  if (typeof exercise === "string") {
-    return exercise;
-  }
+  // B6 removal: typeof exercise === "string" branch deleted; string arm no longer in the union.
 
   if ("prescription" in exercise && isStructuredWorkoutSessionExercise(exercise)) {
     return formatExercisePrescriptionLabel(exercise.prescription);
@@ -279,23 +277,24 @@ export function isValidPlannedDate(value: string): boolean {
 }
 
 export function getWorkoutPlanDayLabel(
-  day: Pick<WorkoutPlanDay, "day" | "weekday">,
+  // B5 removal: `day` field deleted — weekday is now required.
+  day: Pick<WorkoutPlanDay, "weekday">,
 ): string {
-  return day.day ?? (day.weekday ? WEEKDAY_LABELS[day.weekday] : "Training day");
+  return WEEKDAY_LABELS[day.weekday];
 }
 
 export function getWorkoutPlanDayKey(
-  day: Pick<WorkoutPlanDay, "day" | "weekday" | "focus">,
+  day: Pick<WorkoutPlanDay, "weekday" | "focus">,
   index?: number,
 ): string {
-  const identity = day.weekday ?? day.day ?? "training-day";
+  const identity = day.weekday;
   const suffix = index == null ? "" : `-${index}`;
 
   return `${identity}-${day.focus}${suffix}`;
 }
 
 export function buildSessionTitleFromDay(
-  day: Pick<WorkoutPlanDay, "day" | "weekday" | "focus">,
+  day: Pick<WorkoutPlanDay, "weekday" | "focus">,
 ): string {
   return `${getWorkoutPlanDayLabel(day)} · ${day.focus}`;
 }
@@ -303,7 +302,8 @@ export function buildSessionTitleFromDay(
 export function toWorkoutSessionExercisePayload(
   exercise: WorkoutPlanExerciseEntry,
 ): WorkoutExercisePayload {
-  if (typeof exercise === "string" || !isStructuredWorkoutPlanExercise(exercise)) {
+  // B6 removal: typeof exercise === "string" branch deleted; only object forms remain.
+  if (!isStructuredWorkoutPlanExercise(exercise)) {
     return exercise;
   }
 

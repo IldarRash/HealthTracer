@@ -346,7 +346,7 @@ export {
   getWorkoutPlanDomainErrors,
   getWorkoutProposalDomainErrors,
   getResolvedWorkoutPlanCatalogErrors,
-  inferWeekdayFromDayLabel,
+  // inferWeekdayFromDayLabel deleted (B5 removal, C4 cluster)
   isLegacyWorkoutPlanExerciseObject,
   isStructuredWorkoutPlanExercise,
   isStructuredWorkoutSessionExercise,

@@ -187,15 +187,16 @@ describe("ProposalValidationService", () => {
     expect(result.errors).toEqual([]);
   });
 
-  it("rejects legacy workout proposals without weekday mapping", () => {
+  it("rejects workout proposals with missing weekday (B5 removal — schema enforces weekday)", () => {
+    // B5 removal: weekday is now required by workoutPlanDaySchema; missing weekday fails parse
+    // and the proposal validation service catches the invalid schema.
     const result = service.validateStoredProposal("create_workout_plan", {
       title: "Strength base",
       summary: "Three repeatable training days.",
-      days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+      days: [{ focus: "Strength", exercises: [{ name: "Squat" }] }],
     });
 
     expect(result.valid).toBe(false);
-    expect(result.errors.some((error) => error.includes("weekday"))).toBe(true);
   });
 
   it("rejects workout proposals with unsupported medical wording", () => {
@@ -208,10 +209,11 @@ describe("ProposalValidationService", () => {
     expect(result.errors.some((error) => error.includes("medical wording"))).toBe(true);
   });
 
-  it("rejects workout proposals with free-form string exercises", () => {
+  it("rejects workout proposals with legacy object exercises (no snapshot/exerciseId) (B6 removal)", () => {
+    // B6 removal: string arm deleted; legacy object {name} form fails the requireStructuredPlan check.
     const result = service.validateStoredProposal("adapt_workout_plan", {
       ...workoutPlan,
-      days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+      days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
     });
 
     expect(result.valid).toBe(false);

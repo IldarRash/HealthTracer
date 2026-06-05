@@ -31,7 +31,7 @@ describe("chat attachment classification contracts", () => {
       isChatAttachmentPendingMessageFirstSend({
         category: "unclassified",
         status: "queued",
-        recognition: null,
+        // recognition field removed (B3 removal, C4 cluster)
       }),
     ).toBe(true);
   });

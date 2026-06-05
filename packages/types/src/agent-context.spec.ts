@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentContextPacketSchema,
+  agentRoutingMethodSchema,
   agentToolCallRequestSchema,
   agentToolCallResultSchema,
   agentTurnCapabilityPresentationSchema,
@@ -75,8 +76,8 @@ describe("agent context contracts", () => {
     expect(packet.intent).toBe("ask_about_today");
   });
 
-  describe("historical persisted metadata compatibility", () => {
-    it("accepts deprecated llm_router routing metadata on stored agent turns", () => {
+  describe("routing method schema — surviving values only (B7 removal)", () => {
+    it("accepts unified_turn_decision routing metadata on agent turns", () => {
       const metadata = agentTurnMetadataSchema.parse({
         provider: "openai",
         intent: "general",
@@ -88,8 +89,9 @@ describe("agent context contracts", () => {
         },
         routing: {
           confidence: 0.42,
-          routingMethod: "llm_router",
+          routingMethod: "unified_turn_decision",
           llmRouterInvoked: true,
+          unifiedTurnDecisionInvoked: true,
           safetyFlags: ["fatigue"],
           expectedResponseMode: "advice_only",
           contextSliceCount: 1,
@@ -97,6 +99,21 @@ describe("agent context contracts", () => {
       });
 
       expect(metadata.toolsInvoked).toEqual([]);
+    });
+
+    it("rejects deprecated llm_router routing method (B7 removal)", () => {
+      const result = agentRoutingMethodSchema.safeParse("llm_router");
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects deprecated message_understanding routing method (B7 removal)", () => {
+      const result = agentRoutingMethodSchema.safeParse("message_understanding");
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects deprecated attachment_family routing method (B7 removal)", () => {
+      const result = agentRoutingMethodSchema.safeParse("attachment_family");
+      expect(result.success).toBe(false);
     });
   });
 

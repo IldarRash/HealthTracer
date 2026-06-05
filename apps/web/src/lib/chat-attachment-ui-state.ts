@@ -281,10 +281,10 @@ export function isChatAttachmentSendEligible(
     return true;
   }
 
+  // B3 removal: recognition field removed from ChatAttachmentRecord.
   return isChatAttachmentPendingMessageFirstSend({
     category: record.category,
     status: record.status,
-    recognition: record.recognition,
   });
 }
 
@@ -390,12 +390,10 @@ export function resolveAttachmentOutcomeFallbackCopy(
   }
 
   if (outcome.category === "workout_attachment") {
-    const manualNotice = outcome.recognition?.category === "workout_attachment"
-      ? outcome.recognition.manualFallbackNotice
-      : null;
-
-    if (outcome.status === "low_confidence" || manualNotice) {
-      return manualNotice ?? WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY;
+    // B3 removal: recognition field removed from ChatAttachmentOutcome.
+    // manualFallbackNotice was part of the deleted workoutAttachmentRecognitionEnvelopeSchema.
+    if (outcome.status === "low_confidence") {
+      return WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY;
     }
   }
 
