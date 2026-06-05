@@ -1,5 +1,26 @@
 import { isSecondaryRoute } from "./nav-ui-state";
 
+/** Per-route theme: DARK for data/metric screens, LIGHT for everything else. */
+export type RouteTheme = "light" | "dark";
+
+const DARK_ROUTE_PREFIXES = [
+  "/today",
+  "/longevity",
+  "/training",
+  "/nutrition",
+  "/progress",
+  "/metrics",
+] as const;
+
+export function resolveRouteTheme(pathname: string): RouteTheme {
+  for (const prefix of DARK_ROUTE_PREFIXES) {
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
+      return "dark";
+    }
+  }
+  return "light";
+}
+
 /** Page-level layout intent. `dashboard` resolves to the same structured canvas as `default`. */
 export type AppLayoutVariant = "default" | "chat" | "dashboard";
 

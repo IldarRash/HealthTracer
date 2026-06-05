@@ -15,22 +15,6 @@ export function AppShell({ variant = "default", className, ...props }: AppShellP
   );
 }
 
-type AppShellHeaderProps = HTMLAttributes<HTMLElement> & {
-  brand?: ReactNode;
-  nav?: ReactNode;
-  actions?: ReactNode;
-};
-
-export function AppShellHeader({ brand, nav, actions, className, ...props }: AppShellHeaderProps) {
-  return (
-    <header className={cn("app-shell__header", className)} {...props}>
-      {brand ? <div className="app-shell__brand">{brand}</div> : null}
-      {nav ? <div className="app-shell__nav">{nav}</div> : null}
-      {actions ? <div className="app-shell__actions">{actions}</div> : null}
-    </header>
-  );
-}
-
 type AppShellMainProps = HTMLAttributes<HTMLElement> & {
   variant?: AppShellMainVariant;
 };

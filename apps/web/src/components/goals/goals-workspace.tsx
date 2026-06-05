@@ -63,12 +63,13 @@ export function GoalsWorkspace() {
   return (
     <ul className="goals goals-list">
       {goals.map((goal) => (
-        <li key={goal.id} className="dashboard-card">
+        <li key={goal.id} className="dashboard-card goal-card">
           <p className="dashboard-card__label">{goalTypeLabel(goal.type)}</p>
           <h3 className="dashboard-card__title">{goal.title}</h3>
-          <p className="dashboard-card__hint">
-            {goalStatusLabel(goal.status)} · {goal.priority} priority
-          </p>
+          <div className="goal-card__footer">
+            <span className="badge badge-green">{goalStatusLabel(goal.status)}</span>
+            <span className="dashboard-card__hint">{goal.priority} priority</span>
+          </div>
         </li>
       ))}
     </ul>

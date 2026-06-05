@@ -4,6 +4,7 @@ import {
   getAppShellMainClassNames,
   resolveAppShellMainVariant,
   resolveAppShellVariant,
+  resolveRouteTheme,
   shouldShowRouteWayfinding,
 } from "./shell-ui-state.js";
 
@@ -49,5 +50,34 @@ describe("shell UI state", () => {
   it("maps dashboard layout pages to structured non-chat canvas", () => {
     expect(resolveAppShellVariant("dashboard")).toBe("default");
     expect(resolveAppShellMainVariant("dashboard")).toBe("structured");
+  });
+
+  describe("resolveRouteTheme", () => {
+    it("returns dark for data and metric routes", () => {
+      expect(resolveRouteTheme("/today")).toBe("dark");
+      expect(resolveRouteTheme("/today/session")).toBe("dark");
+      expect(resolveRouteTheme("/longevity")).toBe("dark");
+      expect(resolveRouteTheme("/longevity/insights")).toBe("dark");
+      expect(resolveRouteTheme("/training")).toBe("dark");
+      expect(resolveRouteTheme("/training/session-1")).toBe("dark");
+      expect(resolveRouteTheme("/nutrition")).toBe("dark");
+      expect(resolveRouteTheme("/nutrition/plan")).toBe("dark");
+      expect(resolveRouteTheme("/progress")).toBe("dark");
+      expect(resolveRouteTheme("/metrics")).toBe("dark");
+      expect(resolveRouteTheme("/metrics/overview")).toBe("dark");
+    });
+
+    it("returns light for chat, profile, onboarding, billing, and root", () => {
+      expect(resolveRouteTheme("/chat")).toBe("light");
+      expect(resolveRouteTheme("/chat/thread-1")).toBe("light");
+      expect(resolveRouteTheme("/profile")).toBe("light");
+      expect(resolveRouteTheme("/goals")).toBe("light");
+      expect(resolveRouteTheme("/documents")).toBe("light");
+      expect(resolveRouteTheme("/recipes")).toBe("light");
+      expect(resolveRouteTheme("/proposals")).toBe("light");
+      expect(resolveRouteTheme("/onboarding")).toBe("light");
+      expect(resolveRouteTheme("/billing")).toBe("light");
+      expect(resolveRouteTheme("/")).toBe("light");
+    });
   });
 });

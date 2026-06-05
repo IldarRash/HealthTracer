@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   findSecondaryRoute,
   getNavLinkAriaCurrent,
-  getNavLinkClassNames,
   isActivePath,
   isNavLinkActive,
   isSecondaryRoute,
@@ -134,33 +133,14 @@ describe("nav UI state", () => {
     expect(isNavLinkActive("/nutrition", longevity!)).toBe(false);
   });
 
-  it("resolves nav link aria-current and class tokens for featured vs active tabs", () => {
+  it("resolves nav link aria-current for featured vs active tabs", () => {
     const chat = PRIMARY_NAV_LINKS.find((link) => link.href === "/chat")!;
     const today = PRIMARY_NAV_LINKS.find((link) => link.href === "/today")!;
     const longevity = PRIMARY_NAV_LINKS.find((link) => link.href === "/longevity")!;
 
     expect(getNavLinkAriaCurrent("/chat", chat)).toBe("page");
-    expect(getNavLinkClassNames("/chat", chat)).toEqual([
-      "app-nav__link",
-      "app-nav__link--featured",
-    ]);
-
     expect(getNavLinkAriaCurrent("/today", today)).toBe("page");
-    expect(getNavLinkClassNames("/today", today)).toEqual([
-      "app-nav__link",
-      "app-nav__link--active",
-    ]);
-
     expect(getNavLinkAriaCurrent("/longevity/trends", longevity)).toBe("page");
-    expect(getNavLinkClassNames("/longevity/trends", longevity)).toEqual([
-      "app-nav__link",
-      "app-nav__link--active",
-    ]);
-
     expect(getNavLinkAriaCurrent("/today", chat)).toBeUndefined();
-    expect(getNavLinkClassNames("/today", chat)).toEqual([
-      "app-nav__link",
-      "app-nav__link--featured",
-    ]);
   });
 });

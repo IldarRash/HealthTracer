@@ -11,14 +11,14 @@ import {
 } from "./tokens.js";
 
 describe("coach accent tokens", () => {
-  it("uses teal coach primary aligned with visual direction", () => {
-    expect(tokens.color.coach[600]).toBe("#0d9488");
-    expect(tokens.color.coach[700]).toBe("#0f766e");
-    expect(tokens.color.coach[100]).toBe("#ccfbf1");
+  it("uses green coach primary aligned with visual direction", () => {
+    expect(tokens.color.coach[600]).toBe("#19c37d");
+    expect(tokens.color.coach[700]).toBe("#15a76b");
+    expect(tokens.color.coach[100]).toBe("rgba(25,195,125,0.16)");
   });
 
   it("maps focus ring to coach accent for accessibility", () => {
-    expect(tokens.focus.color).toBe(tokens.color.coach[400]);
+    expect(tokens.focus.color).toBe(tokens.color.coach[500]);
     expect(tokens.focus.width).toBe("2px");
     expect(tokens.focus.offset).toBe("2px");
   });
@@ -26,14 +26,14 @@ describe("coach accent tokens", () => {
 
 describe("shell and surface tokens", () => {
   it("defines dark nav shell surfaces", () => {
-    expect(tokens.color.surface.nav).toBe("#121212");
+    expect(tokens.color.surface.nav).toBe("#0e1113");
     expect(tokens.color.surface.navHover).toBe("#1e1e1e");
     expect(tokens.color.surface.navActive).toBe("#262626");
-    expect(tokens.color.surface.heroDark).toBe("#1a1a1a");
+    expect(tokens.color.surface.heroDark).toBe("#131618");
   });
 
   it("reserves light content tokens for structured screens", () => {
-    expect(tokens.color.surface.content).toBe("#f7f7f5");
+    expect(tokens.color.surface.content).toBe("#f9f9f8");
     expect(tokens.color.surface.contentElevated).toBe("#ffffff");
   });
 
@@ -70,8 +70,8 @@ describe("status and proposal tokens", () => {
   });
 
   it("assigns distinct domain pill tones without clinical language", () => {
-    expect(proposalDomainTone.workout.text).toBe(tokens.color.coach[700]);
-    expect(proposalDomainTone.nutrition.text).toBe(tokens.color.status.success.text);
+    expect(proposalDomainTone.workout.text).toBe(tokens.color.metric.blue);
+    expect(proposalDomainTone.nutrition.text).toBe(tokens.color.metric.green);
     expect(Object.values(proposalDomainLabel)).not.toContain("targetDomain");
   });
 
@@ -94,7 +94,7 @@ describe("css variable mapping", () => {
   it("exposes chat bubble and metadata vars for transcript polish", () => {
     expect(cssVar.chatBubbleAssistantBg).toBe("--color-chat-bubble-assistant-bg");
     expect(cssVar.chatMetadataCrisisBorder).toBe("--color-chat-metadata-crisis-border");
-    expect(tokens.chat.bubble.user.bg).toBe("#f0fdfa");
+    expect(tokens.chat.bubble.user.bg).toBe("#f0fbf6");
     expect(tokens.chat.metadata.crisis.border).toBe("#fca5a5");
   });
 });

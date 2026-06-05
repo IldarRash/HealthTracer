@@ -33,30 +33,70 @@ import {
   type OnboardingGoalPresetKey,
   type OnboardingWizardStep,
 } from "../../lib/onboarding-ui-state";
-import { Button, EmptyState, ErrorState, LoadingState } from "../ui";
+import { Button, EmptyState, ErrorState, Icon, LoadingState, Mark } from "../ui";
 
-function StepProgress({ step }: { step: OnboardingWizardStep }) {
+// ── Left panel: dark branding + step progress ──────────────────────────────
+
+function OnboardingPanel({ step }: { step: OnboardingWizardStep }) {
   const currentIndex = onboardingStepIndex(step);
 
   return (
-    <ol className="onboarding-progress" aria-label="Onboarding progress">
-      {ONBOARDING_WIZARD_STEPS.map((wizardStep, index) => {
-        const status =
-          index < currentIndex ? "complete" : index === currentIndex ? "current" : "upcoming";
+    <aside className="onboarding-panel" aria-label="Setup progress">
+      <div className="onboarding-panel__brand">
+        <Mark size={26} />
+        <span className="onboarding-panel__brand-name">Health Tracer</span>
+      </div>
 
-        return (
-          <li
-            key={wizardStep}
-            className={`onboarding-progress__step onboarding-progress__step--${status}`}
-          >
-            <span className="onboarding-progress__marker" aria-hidden="true">
-              {index + 1}
-            </span>
-            <span className="onboarding-progress__label">{onboardingStepLabel(wizardStep)}</span>
-          </li>
-        );
-      })}
-    </ol>
+      <div className="onboarding-panel__body">
+        <p className="onboarding-panel__headline">
+          One coach instead of ten apps.
+        </p>
+        <p className="onboarding-panel__sub">
+          A few questions and I&apos;ll build your first plan. We&apos;ll adjust it together — I
+          suggest, you decide.
+        </p>
+      </div>
+
+      <ol className="onboarding-panel__steps" aria-label="Step progress">
+        {ONBOARDING_WIZARD_STEPS.map((wizardStep, index) => {
+          const isDone = index < currentIndex;
+          const isCurrent = index === currentIndex;
+          return (
+            <li
+              key={wizardStep}
+              className={[
+                "onboarding-panel__step",
+                isDone ? "onboarding-panel__step--done" : "",
+                isCurrent ? "onboarding-panel__step--current" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <span className="onboarding-panel__step-marker" aria-hidden="true">
+                {isDone ? (
+                  <Icon name="checkSm" size={13} stroke="#04130c" sw={2.6} />
+                ) : (
+                  index + 1
+                )}
+              </span>
+              <span className="onboarding-panel__step-label">
+                {onboardingStepLabel(wizardStep)}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
+  );
+}
+
+// ── Step content ───────────────────────────────────────────────────────────
+
+function StepEyebrow({ step }: { step: OnboardingWizardStep }) {
+  return (
+    <p className="onboarding-step__eyebrow" aria-hidden="true">
+      Step {onboardingStepIndex(step) + 1} of {ONBOARDING_WIZARD_STEPS.length}
+    </p>
   );
 }
 
@@ -211,314 +251,347 @@ export function OnboardingWorkspace() {
   }
 
   const isFinalStep = getNextOnboardingStep(draft.step) == null;
+  const currentIndex = onboardingStepIndex(draft.step);
   const showCustomQuarterlyFields =
     draft.goalPresetKey === "custom" || draft.goalPresetKey === "";
 
   return (
-    <div className="onboarding-workspace">
-      <header className="onboarding-workspace__header dashboard-card dashboard-card--coach">
-        <p className="section-label">First-run setup</p>
-        <h1>Set up your coaching foundation</h1>
-        <p className="dashboard-card__hint">
-          A short guided setup so your coach starts from saved context—not chat memory.
-        </p>
-      </header>
+    <div className="onboarding-layout">
+      <OnboardingPanel step={draft.step} />
 
-      <StepProgress step={draft.step} />
+      {/* Right: scrollable content area */}
+      <div className="onboarding-content">
+        {/* Step form area */}
+        <div className="onboarding-content__body">
+          <div className="onboarding-step">
+            <StepEyebrow step={draft.step} />
+            <h2 className="onboarding-step__title">{onboardingStepLabel(draft.step)}</h2>
 
-      <section className="panel panel-prominent onboarding-step-panel">
-        <p className="section-label">Step {onboardingStepIndex(draft.step) + 1}</p>
-        <h2>{onboardingStepLabel(draft.step)}</h2>
-
-        {draft.step === "account" ? (
-          <div className="onboarding-form">
-            <label className="form-field">
-              <span>Display name</span>
-              <input
-                type="text"
-                value={draft.displayName}
-                maxLength={120}
-                autoComplete="nickname"
-                onChange={(event) => updateDraft({ displayName: event.target.value })}
-              />
-              <span className="form-help">How your coach should address you.</span>
-            </label>
-
-            <label className="form-field">
-              <span>Timezone</span>
-              <select
-                value={draft.timezone}
-                onChange={(event) => updateDraft({ timezone: event.target.value })}
-              >
-                {[...new Set([draft.timezone, ...COMMON_TIMEZONES])].map((timezone) => (
-                  <option key={timezone} value={timezone}>
-                    {timezone}
-                  </option>
-                ))}
-              </select>
-              <span className="form-help">Used for Today, weekly focus, and scheduling.</span>
-            </label>
-          </div>
-        ) : null}
-
-        {draft.step === "profile" ? (
-          <div className="onboarding-form">
-            <p className="onboarding-step-panel__intro">
-              These baseline details help your coach personalize workouts, nutrition guidance, and
-              progress tracking.
-            </p>
-
-            <label className="form-field">
-              <span>Date of birth</span>
-              <input
-                type="date"
-                value={draft.birthDate}
-                autoComplete="bday"
-                onChange={(event) => updateDraft({ birthDate: event.target.value })}
-              />
-              <span className="form-help">Used for age-aware coaching—not for medical assessment.</span>
-            </label>
-
-            <div className="onboarding-baseline-grid">
-              <label className="form-field">
-                <span>Height (cm)</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={50}
-                  max={260}
-                  step={1}
-                  value={draft.heightCm}
-                  onChange={(event) => updateDraft({ heightCm: event.target.value })}
-                />
-                <span className="form-help">Enter height in centimeters.</span>
-              </label>
-
-              <label className="form-field">
-                <span>Weight (kg)</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={20}
-                  max={500}
-                  step={0.1}
-                  value={draft.baselineWeightKg}
-                  onChange={(event) => updateDraft({ baselineWeightKg: event.target.value })}
-                />
-                <span className="form-help">Your current weight in kilograms.</span>
-              </label>
-            </div>
-
-            <label className="form-field">
-              <span>Activity level</span>
-              <select
-                value={draft.activityLevel}
-                onChange={(event) =>
-                  updateDraft({
-                    activityLevel: event.target.value as OnboardingDraft["activityLevel"],
-                  })
-                }
-              >
-                <option value="">Prefer not to say yet</option>
-                <option value="sedentary">{activityLevelLabel("sedentary")}</option>
-                <option value="lightly_active">{activityLevelLabel("lightly_active")}</option>
-                <option value="moderately_active">
-                  {activityLevelLabel("moderately_active")}
-                </option>
-                <option value="very_active">{activityLevelLabel("very_active")}</option>
-                <option value="athlete">{activityLevelLabel("athlete")}</option>
-              </select>
-            </label>
-
-            <label className="form-field">
-              <span>Training experience</span>
-              <select
-                value={draft.trainingExperience}
-                onChange={(event) =>
-                  updateDraft({
-                    trainingExperience: event.target.value as OnboardingDraft["trainingExperience"],
-                  })
-                }
-              >
-                <option value="">Prefer not to say yet</option>
-                <option value="beginner">{trainingExperienceLabel("beginner")}</option>
-                <option value="intermediate">{trainingExperienceLabel("intermediate")}</option>
-                <option value="advanced">{trainingExperienceLabel("advanced")}</option>
-              </select>
-            </label>
-          </div>
-        ) : null}
-
-        {draft.step === "direction" ? (
-          <div className="onboarding-form">
-            <label className="form-field">
-              <span>Longevity direction</span>
-              <textarea
-                value={draft.longevityStatement}
-                maxLength={500}
-                rows={4}
-                onChange={(event) => updateDraft({ longevityStatement: event.target.value })}
-              />
-              <span className="form-help">
-                A wellness-focused north star—for example staying strong, mobile, and energized
-                over the long term.
-              </span>
-            </label>
-
-            <label className="form-field">
-              <span>Tags (optional)</span>
-              <input
-                type="text"
-                value={draft.longevityTags}
-                onChange={(event) => updateDraft({ longevityTags: event.target.value })}
-              />
-              <span className="form-help">Comma-separated themes like strength, sleep, consistency.</span>
-            </label>
-          </div>
-        ) : null}
-
-        {draft.step === "quarterly" ? (
-          <div className="onboarding-form">
-            <div className="onboarding-goal-presets">
-              <p className="onboarding-step-panel__intro">
-                Pick a coaching starting point for this quarter, or define your own.
-              </p>
-              <div className="onboarding-goal-presets__grid" role="list">
-                {ONBOARDING_GOAL_PRESETS.map((preset) => {
-                  const isSelected = draft.goalPresetKey === preset.key;
-
-                  return (
-                    <button
-                      key={preset.key}
-                      type="button"
-                      role="listitem"
-                      className={`onboarding-goal-preset${isSelected ? " onboarding-goal-preset--selected" : ""}`}
-                      aria-pressed={isSelected}
-                      onClick={() => handlePresetSelect(preset.key)}
-                    >
-                      <span className="onboarding-goal-preset__label">{preset.label}</span>
-                      <span className="onboarding-goal-preset__description">{preset.description}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {showCustomQuarterlyFields ? (
-              <>
+            {draft.step === "account" ? (
+              <div className="onboarding-form">
                 <label className="form-field">
-                  <span>Objective type</span>
+                  <span>Display name</span>
+                  <input
+                    type="text"
+                    value={draft.displayName}
+                    maxLength={120}
+                    autoComplete="nickname"
+                    onChange={(event) => updateDraft({ displayName: event.target.value })}
+                  />
+                  <span className="form-help">How your coach should address you.</span>
+                </label>
+
+                <label className="form-field">
+                  <span>Timezone</span>
                   <select
-                    value={draft.quarterlyType}
+                    value={draft.timezone}
+                    onChange={(event) => updateDraft({ timezone: event.target.value })}
+                  >
+                    {[...new Set([draft.timezone, ...COMMON_TIMEZONES])].map((timezone) => (
+                      <option key={timezone} value={timezone}>
+                        {timezone}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="form-help">Used for Today, weekly focus, and scheduling.</span>
+                </label>
+              </div>
+            ) : null}
+
+            {draft.step === "profile" ? (
+              <div className="onboarding-form">
+                <p className="onboarding-step__intro">
+                  These baseline details help your coach personalize workouts, nutrition guidance,
+                  and progress tracking.
+                </p>
+
+                <label className="form-field">
+                  <span>Date of birth</span>
+                  <input
+                    type="date"
+                    value={draft.birthDate}
+                    autoComplete="bday"
+                    onChange={(event) => updateDraft({ birthDate: event.target.value })}
+                  />
+                  <span className="form-help">
+                    Used for age-aware coaching — not for medical assessment.
+                  </span>
+                </label>
+
+                <div className="onboarding-baseline-grid">
+                  <label className="form-field">
+                    <span>Height (cm)</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={50}
+                      max={260}
+                      step={1}
+                      value={draft.heightCm}
+                      onChange={(event) => updateDraft({ heightCm: event.target.value })}
+                    />
+                    <span className="form-help">Enter height in centimeters.</span>
+                  </label>
+
+                  <label className="form-field">
+                    <span>Weight (kg)</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={20}
+                      max={500}
+                      step={0.1}
+                      value={draft.baselineWeightKg}
+                      onChange={(event) => updateDraft({ baselineWeightKg: event.target.value })}
+                    />
+                    <span className="form-help">Your current weight in kilograms.</span>
+                  </label>
+                </div>
+
+                <label className="form-field">
+                  <span>Activity level</span>
+                  <select
+                    value={draft.activityLevel}
                     onChange={(event) =>
                       updateDraft({
-                        quarterlyType: event.target.value as OnboardingDraft["quarterlyType"],
-                        goalPresetKey: "custom",
+                        activityLevel: event.target.value as OnboardingDraft["activityLevel"],
                       })
                     }
                   >
-                    <option value="general_wellness">
-                      {quarterlyGoalTypeLabel("general_wellness")}
+                    <option value="">Prefer not to say yet</option>
+                    <option value="sedentary">{activityLevelLabel("sedentary")}</option>
+                    <option value="lightly_active">{activityLevelLabel("lightly_active")}</option>
+                    <option value="moderately_active">
+                      {activityLevelLabel("moderately_active")}
                     </option>
-                    <option value="fat_loss">{quarterlyGoalTypeLabel("fat_loss")}</option>
-                    <option value="muscle_gain">{quarterlyGoalTypeLabel("muscle_gain")}</option>
-                    <option value="maintenance">{quarterlyGoalTypeLabel("maintenance")}</option>
-                    <option value="endurance">{quarterlyGoalTypeLabel("endurance")}</option>
+                    <option value="very_active">{activityLevelLabel("very_active")}</option>
+                    <option value="athlete">{activityLevelLabel("athlete")}</option>
                   </select>
                 </label>
 
                 <label className="form-field">
-                  <span>Quarterly objective</span>
-                  <input
-                    type="text"
-                    value={draft.quarterlyTitle}
-                    maxLength={160}
+                  <span>Training experience</span>
+                  <select
+                    value={draft.trainingExperience}
                     onChange={(event) =>
                       updateDraft({
-                        quarterlyTitle: event.target.value,
-                        goalPresetKey: "custom",
+                        trainingExperience:
+                          event.target.value as OnboardingDraft["trainingExperience"],
                       })
                     }
+                  >
+                    <option value="">Prefer not to say yet</option>
+                    <option value="beginner">{trainingExperienceLabel("beginner")}</option>
+                    <option value="intermediate">{trainingExperienceLabel("intermediate")}</option>
+                    <option value="advanced">{trainingExperienceLabel("advanced")}</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
+            {draft.step === "direction" ? (
+              <div className="onboarding-form">
+                <label className="form-field">
+                  <span>Longevity direction</span>
+                  <textarea
+                    value={draft.longevityStatement}
+                    maxLength={500}
+                    rows={4}
+                    onChange={(event) => updateDraft({ longevityStatement: event.target.value })}
                   />
                   <span className="form-help">
-                    One measurable 90-day outcome, such as completing regular workouts or building a
-                    hydration habit.
+                    A wellness-focused north star — for example staying strong, mobile, and
+                    energized over the long term.
                   </span>
                 </label>
-              </>
-            ) : (
-              <div className="onboarding-goal-summary panel-secondary">
-                <p className="section-label">Selected objective</p>
-                <p className="onboarding-goal-summary__title">{draft.quarterlyTitle}</p>
-                <p className="onboarding-goal-summary__meta">
-                  {quarterlyGoalTypeLabel(draft.quarterlyType)} · You can refine this later in Chat
-                </p>
-                <Button
-                  variant="ghost"
-                  onClick={() => handlePresetSelect("custom")}
-                >
-                  Customize instead
-                </Button>
+
+                <label className="form-field">
+                  <span>Tags (optional)</span>
+                  <input
+                    type="text"
+                    value={draft.longevityTags}
+                    onChange={(event) => updateDraft({ longevityTags: event.target.value })}
+                  />
+                  <span className="form-help">
+                    Comma-separated themes like strength, sleep, consistency.
+                  </span>
+                </label>
               </div>
+            ) : null}
+
+            {draft.step === "quarterly" ? (
+              <div className="onboarding-form">
+                <div className="onboarding-goal-presets">
+                  <p className="onboarding-step__intro">
+                    Pick a coaching starting point for this quarter, or define your own.
+                  </p>
+                  <div className="onboarding-goal-presets__grid" role="list">
+                    {ONBOARDING_GOAL_PRESETS.map((preset) => {
+                      const isSelected = draft.goalPresetKey === preset.key;
+
+                      return (
+                        <button
+                          key={preset.key}
+                          type="button"
+                          role="listitem"
+                          className={`onboarding-goal-preset${isSelected ? " onboarding-goal-preset--selected" : ""}`}
+                          aria-pressed={isSelected}
+                          onClick={() => handlePresetSelect(preset.key)}
+                        >
+                          <span className="onboarding-goal-preset__label">{preset.label}</span>
+                          <span className="onboarding-goal-preset__description">
+                            {preset.description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {showCustomQuarterlyFields ? (
+                  <>
+                    <label className="form-field">
+                      <span>Objective type</span>
+                      <select
+                        value={draft.quarterlyType}
+                        onChange={(event) =>
+                          updateDraft({
+                            quarterlyType: event.target.value as OnboardingDraft["quarterlyType"],
+                            goalPresetKey: "custom",
+                          })
+                        }
+                      >
+                        <option value="general_wellness">
+                          {quarterlyGoalTypeLabel("general_wellness")}
+                        </option>
+                        <option value="fat_loss">{quarterlyGoalTypeLabel("fat_loss")}</option>
+                        <option value="muscle_gain">
+                          {quarterlyGoalTypeLabel("muscle_gain")}
+                        </option>
+                        <option value="maintenance">
+                          {quarterlyGoalTypeLabel("maintenance")}
+                        </option>
+                        <option value="endurance">{quarterlyGoalTypeLabel("endurance")}</option>
+                      </select>
+                    </label>
+
+                    <label className="form-field">
+                      <span>Quarterly objective</span>
+                      <input
+                        type="text"
+                        value={draft.quarterlyTitle}
+                        maxLength={160}
+                        onChange={(event) =>
+                          updateDraft({
+                            quarterlyTitle: event.target.value,
+                            goalPresetKey: "custom",
+                          })
+                        }
+                      />
+                      <span className="form-help">
+                        One measurable 90-day outcome, such as completing regular workouts or
+                        building a hydration habit.
+                      </span>
+                    </label>
+                  </>
+                ) : (
+                  <div className="onboarding-goal-summary">
+                    <p className="onboarding-goal-summary__label">Selected objective</p>
+                    <p className="onboarding-goal-summary__title">{draft.quarterlyTitle}</p>
+                    <p className="onboarding-goal-summary__meta">
+                      {quarterlyGoalTypeLabel(draft.quarterlyType)} · You can refine this later in
+                      Chat
+                    </p>
+                    <Button variant="ghost" onClick={() => handlePresetSelect("custom")}>
+                      Customize instead
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {draft.step === "preferences" ? (
+              <div className="onboarding-form">
+                <label className="form-field">
+                  <span>Preferences (optional)</span>
+                  <input
+                    type="text"
+                    value={draft.preferences}
+                    onChange={(event) => updateDraft({ preferences: event.target.value })}
+                  />
+                  <span className="form-help">Comma-separated coaching preferences.</span>
+                </label>
+
+                <label className="form-field">
+                  <span>Constraints (optional)</span>
+                  <input
+                    type="text"
+                    value={draft.constraints}
+                    onChange={(event) => updateDraft({ constraints: event.target.value })}
+                  />
+                  <span className="form-help">
+                    Equipment limits, schedule boundaries, or movements to avoid.
+                  </span>
+                </label>
+              </div>
+            ) : null}
+
+            {stepErrors.length > 0 ? (
+              <div className="form-error" role="alert">
+                {stepErrors.join(" ")}
+              </div>
+            ) : null}
+
+            {submitMutation.isError ? (
+              <div className="form-error" role="alert">
+                {submitMutation.error instanceof Error
+                  ? submitMutation.error.message
+                  : "Onboarding could not be completed."}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Footer: back/next + progress dots */}
+        <footer className="onboarding-footer">
+          <div className="onboarding-footer__back">
+            {getPreviousOnboardingStep(draft.step) ? (
+              <Button
+                variant="ghost"
+                onClick={handleBack}
+                disabled={submitMutation.isPending}
+              >
+                Back
+              </Button>
+            ) : (
+              <span />
             )}
           </div>
-        ) : null}
 
-        {draft.step === "preferences" ? (
-          <div className="onboarding-form">
-            <label className="form-field">
-              <span>Preferences (optional)</span>
-              <input
-                type="text"
-                value={draft.preferences}
-                onChange={(event) => updateDraft({ preferences: event.target.value })}
+          <div className="onboarding-footer__dots" aria-hidden="true">
+            {ONBOARDING_WIZARD_STEPS.map((_, i) => (
+              <span
+                key={i}
+                className={`onboarding-footer__dot${i === currentIndex ? " onboarding-footer__dot--active" : ""}`}
               />
-              <span className="form-help">Comma-separated coaching preferences.</span>
-            </label>
-
-            <label className="form-field">
-              <span>Constraints (optional)</span>
-              <input
-                type="text"
-                value={draft.constraints}
-                onChange={(event) => updateDraft({ constraints: event.target.value })}
-              />
-              <span className="form-help">
-                Equipment limits, schedule boundaries, or movements to avoid.
-              </span>
-            </label>
+            ))}
           </div>
-        ) : null}
 
-        {stepErrors.length > 0 ? (
-          <div className="form-error" role="alert">
-            {stepErrors.join(" ")}
-          </div>
-        ) : null}
-
-        {submitMutation.isError ? (
-          <div className="form-error" role="alert">
-            {submitMutation.error instanceof Error
-              ? submitMutation.error.message
-              : "Onboarding could not be completed."}
-          </div>
-        ) : null}
-
-        <div className="action-row onboarding-actions">
-          {getPreviousOnboardingStep(draft.step) ? (
-            <Button variant="secondary" onClick={handleBack} disabled={submitMutation.isPending}>
-              Back
+          <div className="onboarding-footer__next">
+            <Button
+              variant={isFinalStep ? "primary" : "primary"}
+              onClick={handleNext}
+              disabled={submitMutation.isPending}
+            >
+              {submitMutation.isPending
+                ? "Saving…"
+                : isFinalStep
+                  ? "Finish setup"
+                  : "Continue"}
             </Button>
-          ) : null}
-          <Button variant="primary" onClick={handleNext} disabled={submitMutation.isPending}>
-            {submitMutation.isPending
-              ? "Saving…"
-              : isFinalStep
-                ? "Finish onboarding"
-                : "Continue"}
-          </Button>
-        </div>
-      </section>
+          </div>
+        </footer>
+      </div>
     </div>
   );
 }

@@ -39,7 +39,7 @@ function RecipeCatalogCard({
         </div>
         <div className="recipe-card-badges">
           {recipe.mealTypes.map((mealType) => (
-            <span key={mealType} className="badge badge-info">
+            <span key={mealType} className="badge badge-green">
               {formatMealTypeLabel(mealType)}
             </span>
           ))}
@@ -84,12 +84,12 @@ function RecipeCatalogCard({
       {recipe.restrictionTags.length > 0 || recipe.allergenTags.length > 0 ? (
         <div className="recipe-tag-row">
           {recipe.restrictionTags.map((tag) => (
-            <span key={`restriction-${tag}`} className="badge badge-pending">
+            <span key={`restriction-${tag}`} className="badge badge-amber">
               {tag}
             </span>
           ))}
           {recipe.allergenTags.map((tag) => (
-            <span key={`allergen-${tag}`} className="badge badge-invalid">
+            <span key={`allergen-${tag}`} className="badge badge-red">
               Contains {tag}
             </span>
           ))}

@@ -1,8 +1,14 @@
 /* ==========================================================================
    Design tokens
+   Two worlds: LIGHT (chat / profile / onboarding / billing) and DARK (today /
+   longevity / plans). Shared vars stay in :root; surface/text/border/shadow
+   vars are scoped by :root,[data-theme="light"] (default) and [data-theme="dark"].
+   Phase 1 wires data-theme per route; until then the light defaults apply globally.
    ========================================================================== */
 
+/* ── Shared tokens (constant across both themes) ── */
 :root {
+  /* Brand blue scale (legacy) */
   --color-brand-50: #eff6ff;
   --color-brand-100: #dbeafe;
   --color-brand-200: #bfdbfe;
@@ -14,23 +20,35 @@
   --color-brand-800: #1e3a8a;
   --color-brand-900: #172554;
 
-  --color-surface-app: #0a0a0a;
-  --color-surface-card: #141414;
-  --color-surface-muted: #1c1c1c;
-  --color-surface-inset: #111111;
-  --color-surface-elevated: #1a1a1a;
+  /* Wellness coach accent — green palette (replaces old teal) */
+  --color-coach-50: #f0fbf6;
+  --color-coach-100: rgba(25, 195, 125, 0.16);
+  --color-coach-400: #3ddc94;
+  --color-coach-500: #19c37d;
+  --color-coach-600: #19c37d;
+  --color-coach-700: #15a76b;
 
-  --color-text-primary: #f5f5f3;
-  --color-text-secondary: #c8c8c4;
-  --color-text-muted: #9a9a96;
-  --color-text-inverse: #0a0a0a;
+  /* Semantic accent aliases (point at coach) */
+  --color-accent-primary: var(--color-coach-600);
+  --color-accent-primary-hover: var(--color-coach-700);
+  --color-accent-primary-subtle: var(--color-coach-100);
+  --color-accent-coach: var(--color-coach-600);
+  --color-accent-coach-hover: var(--color-coach-700);
+  --color-accent-coach-subtle: var(--color-coach-100);
 
-  --color-border-default: #2a2a2a;
-  --color-border-strong: #3a3a3a;
-  --color-border-subtle: #e5e5e0;
-  --color-border-strong-light: #d4d4ce;
-  --color-border-focus: var(--color-coach-400);
+  /* Metric scale — shared by both worlds */
+  --color-metric-green: #19c37d;
+  --color-metric-green-dim: rgba(25, 195, 125, 0.16);
+  --color-metric-amber: #f5a524;
+  --color-metric-amber-dim: rgba(245, 165, 36, 0.16);
+  --color-metric-red: #f0506a;
+  --color-metric-red-dim: rgba(240, 80, 106, 0.16);
+  --color-metric-blue: #3a8dff;
+  --color-metric-blue-dim: rgba(58, 141, 255, 0.16);
+  --color-metric-indigo: #7b7bff;
+  --color-metric-indigo-dim: rgba(123, 123, 255, 0.16);
 
+  /* Status alert chips — light-bg, shared by both themes */
   --color-status-pending-bg: #fef3c7;
   --color-status-pending-text: #d97706;
   --color-status-pending-border: #fcd34d;
@@ -47,10 +65,22 @@
   --color-status-neutral-text: #334155;
   --color-status-neutral-border: #cbd5e1;
 
+  /* Notice chip */
   --color-notice-bg: #fff7ed;
   --color-notice-border: #fed7aa;
   --color-notice-text: #9a3412;
 
+  /* Absolute-value tokens (theme-independent) */
+  --color-surface-hero-dark: #131618;
+  --color-surface-content: #f9f9f8;
+  --color-surface-content-elevated: #ffffff;
+  --color-surface-content-muted: #f3f3f1;
+  --color-text-on-dark: #f3f5f6;
+  --color-text-on-light: #0e0e0d;
+  --color-text-on-light-secondary: #3b3b38;
+  --color-surface-nav-dark: #0e1113;
+
+  /* Spacing */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -61,22 +91,16 @@
   --space-10: 2.5rem;
   --space-12: 3rem;
 
+  /* Radii */
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
   --radius-lg: 1rem;
   --radius-xl: 1.5rem;
   --radius-full: 9999px;
 
-  --shadow-card: 0 1px 3px rgb(0 0 0 / 35%), 0 8px 24px rgb(0 0 0 / 25%);
-  --shadow-card-light: 0 1px 2px rgb(0 0 0 / 4%), 0 4px 16px rgb(0 0 0 / 6%);
-  --shadow-elevated: 0 24px 60px rgb(0 0 0 / 45%);
-  --shadow-composer: 0 -4px 24px rgb(0 0 0 / 8%);
-  --shadow-focus: 0 0 0 3px rgb(45 212 191 / 28%);
-  --shadow-brand-soft: 0 8px 24px rgb(20 184 166 / 18%);
-
-  --font-sans:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  /* Typography */
+  --font-sans: "Helvetica Neue", Helvetica, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "Roboto Mono", Menlo, monospace;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
   --font-size-base: 1rem;
@@ -88,83 +112,150 @@
   --font-size-section-label: 0.6875rem;
   --font-size-metric-hero: clamp(2.5rem, 4vw, 3rem);
 
+  /* Layout */
   --layout-shell-max: 80rem;
   --layout-content-max: 72rem;
   --layout-chat-max: 48rem;
   --layout-nav-height: 3.5rem;
   --touch-target-min: 2.75rem;
 
-  /* Wellness coach accent — prefer over brand blue for primary coaching actions */
-  --color-coach-50: #f0fdfa;
-  --color-coach-100: #ccfbf1;
-  --color-coach-400: #2dd4bf;
-  --color-coach-500: #14b8a6;
-  --color-coach-600: #0d9488;
-  --color-coach-700: #0f766e;
+  /* Focus */
+  --color-border-focus: var(--color-coach-500);
+  --focus-outline: 2px solid var(--color-border-focus);
+  --focus-outline-offset: 2px;
 
-  --color-surface-sidebar: #121212;
-  --color-surface-sidebar-hover: #1e1e1e;
-  --color-surface-sidebar-active: #262626;
-  --color-surface-hero-dark: #1a1a1a;
-  --color-surface-content: #f7f7f5;
-  --color-surface-content-elevated: #ffffff;
-  --color-surface-content-muted: #f0f0ed;
-  --color-text-sidebar: #ececea;
-  --color-text-sidebar-muted: #9a9a96;
-  --color-text-on-dark: #f5f5f3;
-  --color-text-on-light: #0f0f0f;
-  --color-text-on-light-secondary: #5c5c58;
-
-  /* Semantic aliases — design direction ↔ implementation */
-  --color-surface-nav-dark: var(--color-surface-sidebar);
-  --color-accent-primary: var(--color-coach-600);
-  --color-accent-primary-hover: var(--color-coach-700);
-  --color-accent-primary-subtle: var(--color-coach-100);
-  --color-accent-coach: var(--color-coach-600);
-  --color-accent-coach-hover: var(--color-coach-700);
-  --color-accent-coach-subtle: var(--color-coach-100);
-
-  /* Chat transcript surfaces */
-  --color-chat-bubble-user-bg: #f0fdfa;
-  --color-chat-bubble-user-border: rgb(45 212 191 / 35%);
-  --color-chat-bubble-user-text: var(--color-coach-700);
-  --color-chat-bubble-assistant-bg: var(--color-surface-elevated);
-  --color-chat-bubble-assistant-border: var(--color-border-strong);
-  --color-chat-bubble-coach-accent: var(--color-coach-400);
+  /* Chat surfaces that reference absolute values */
   --color-chat-bubble-crisis-border: var(--color-status-error-border);
-  --color-chat-metadata-neutral-bg: var(--color-surface-inset);
-  --color-chat-metadata-neutral-border: var(--color-border-default);
   --color-chat-metadata-notice-bg: var(--color-notice-bg);
   --color-chat-metadata-notice-border: var(--color-notice-border);
   --color-chat-metadata-notice-text: var(--color-notice-text);
   --color-chat-metadata-crisis-bg: var(--color-status-error-bg);
   --color-chat-metadata-crisis-border: var(--color-status-error-border);
   --color-chat-metadata-crisis-text: var(--color-status-error-text);
-
-  /* Dark immersive chat — readable success, notice, and bubble contrast */
-  --color-chat-success-bg: rgb(45 212 191 / 10%);
-  --color-chat-success-border: rgb(45 212 191 / 32%);
-  --color-chat-success-text: var(--color-coach-400);
-  --color-chat-notice-bg: rgb(251 146 60 / 10%);
-  --color-chat-notice-border: rgb(251 146 60 / 28%);
-  --color-chat-notice-text: #fdba74;
-  --color-chat-user-immersive-bg: #1a2220;
-  --color-chat-user-immersive-border: rgb(45 212 191 / 38%);
-  --color-chat-coach-immersive-bg: #161616;
-  --color-chat-transcript-fade: var(--color-surface-card);
   --color-chat-crisis-bg: rgb(248 113 113 / 14%);
   --color-chat-crisis-border: rgb(252 165 165 / 42%);
   --color-chat-crisis-text: #fecaca;
   --color-chat-crisis-title: #fee2e2;
   --color-chat-crisis-link: #fda4af;
   --color-chat-crisis-link-hover: #fecdd3;
+  --color-chat-notice-bg: rgb(251 146 60 / 10%);
+  --color-chat-notice-border: rgb(251 146 60 / 28%);
+  --color-chat-notice-text: #fdba74;
 
-  --focus-outline: 2px solid var(--color-border-focus);
-  --focus-outline-offset: 2px;
-
-  color: var(--color-text-primary);
-  background: var(--color-surface-app);
   font-family: var(--font-sans);
+}
+
+/* ── Light theme (default) — chat, profile, onboarding, billing ── */
+:root,
+[data-theme="light"] {
+  --color-surface-app: #ffffff;
+  --color-surface-card: #ffffff;
+  --color-surface-muted: #f3f3f1;
+  --color-surface-inset: #f9f9f8;
+  --color-surface-elevated: #ffffff;
+
+  --color-text-primary: #0e0e0d;
+  --color-text-secondary: #3b3b38;
+  --color-text-muted: #76766f;
+  --color-text-inverse: #ffffff;
+
+  --color-border-default: #ececea;
+  --color-border-strong: #e2e2df;
+  --color-border-subtle: #ececea;
+  --color-border-strong-light: #e2e2df;
+
+  --color-surface-sidebar: #f9f9f8;
+  --color-surface-sidebar-hover: #ececea;
+  --color-surface-sidebar-active: #e2e2df;
+  --color-text-sidebar: #0e0e0d;
+  --color-text-sidebar-muted: #76766f;
+
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 8%), 0 4px 16px rgb(0 0 0 / 6%);
+  --shadow-card-light: 0 1px 3px rgb(0 0 0 / 8%), 0 4px 16px rgb(0 0 0 / 6%);
+  --shadow-elevated: 0 12px 40px rgb(0 0 0 / 10%);
+  --shadow-composer: 0 2px 14px rgb(0 0 0 / 4%);
+  --shadow-focus: 0 0 0 3px rgb(25 195 125 / 28%);
+  --shadow-brand-soft: 0 8px 24px rgb(25 195 125 / 18%);
+
+  /* Chat surfaces — light world */
+  --color-chat-bubble-user-bg: #f4f4f2;
+  --color-chat-bubble-user-border: #e2e2df;
+  --color-chat-bubble-user-text: #0e0e0d;
+  --color-chat-bubble-user-radius: 18px 18px 4px 18px;
+  --color-chat-bubble-assistant-bg: transparent;
+  --color-chat-bubble-assistant-border: transparent;
+  --color-chat-bubble-coach-accent: transparent;
+  --color-chat-metadata-neutral-bg: #f9f9f8;
+  --color-chat-metadata-neutral-border: #ececea;
+  --color-chat-success-bg: rgba(25, 195, 125, 0.12);
+  --color-chat-success-border: rgba(25, 195, 125, 0.32);
+  --color-chat-success-text: #0c6b45;
+  --color-chat-user-immersive-bg: #f4f4f2;
+  --color-chat-user-immersive-border: #e2e2df;
+  --color-chat-coach-immersive-bg: transparent;
+  --color-chat-transcript-fade: #ffffff;
+  /* Crisis — light-world warm card */
+  --color-chat-crisis-bg: #fbf7f1;
+  --color-chat-crisis-border: #e2e2df;
+  --color-chat-crisis-text: #3b3b38;
+  --color-chat-crisis-title: #0e0e0d;
+  --color-chat-crisis-link: #15a76b;
+  --color-chat-crisis-link-hover: #0e7e52;
+
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
+}
+
+/* ── Dark theme — today, longevity, plans ── */
+[data-theme="dark"] {
+  --color-surface-app: #0b0d0e;
+  --color-surface-card: #131618;
+  --color-surface-muted: #1a1e21;
+  --color-surface-inset: #131618;
+  --color-surface-elevated: #20262a;
+
+  --color-text-primary: #f3f5f6;
+  --color-text-secondary: #cfd4d7;
+  --color-text-muted: #878d92;
+  --color-text-inverse: #0b0d0e;
+
+  --color-border-default: rgba(255, 255, 255, 0.075);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
+  --color-border-subtle: #ececea;
+  --color-border-strong-light: #e2e2df;
+
+  --color-surface-sidebar: #0e1113;
+  --color-surface-sidebar-hover: #1e1e1e;
+  --color-surface-sidebar-active: #262626;
+  --color-text-sidebar: #f3f5f6;
+  --color-text-sidebar-muted: #878d92;
+
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 35%), 0 8px 24px rgb(0 0 0 / 25%);
+  --shadow-card-light: 0 1px 3px rgb(0 0 0 / 35%), 0 8px 24px rgb(0 0 0 / 25%);
+  --shadow-elevated: 0 24px 60px rgb(0 0 0 / 45%);
+  --shadow-composer: 0 -4px 24px rgb(0 0 0 / 8%);
+  --shadow-focus: 0 0 0 3px rgb(25 195 125 / 28%);
+  --shadow-brand-soft: 0 8px 24px rgb(25 195 125 / 18%);
+
+  /* Chat surfaces — dark world */
+  --color-chat-bubble-user-bg: rgba(25, 195, 125, 0.10);
+  --color-chat-bubble-user-border: rgba(25, 195, 125, 0.35);
+  --color-chat-bubble-user-text: var(--color-coach-400);
+  --color-chat-bubble-assistant-bg: #20262a;
+  --color-chat-bubble-assistant-border: rgba(255, 255, 255, 0.075);
+  --color-chat-bubble-coach-accent: var(--color-coach-400);
+  --color-chat-metadata-neutral-bg: #131618;
+  --color-chat-metadata-neutral-border: rgba(255, 255, 255, 0.075);
+  --color-chat-success-bg: rgba(25, 195, 125, 0.10);
+  --color-chat-success-border: rgba(25, 195, 125, 0.32);
+  --color-chat-success-text: var(--color-coach-400);
+  --color-chat-user-immersive-bg: #0f1a14;
+  --color-chat-user-immersive-border: rgba(25, 195, 125, 0.38);
+  --color-chat-coach-immersive-bg: #131618;
+  --color-chat-transcript-fade: #131618;
+
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
 }
 
 /* ==========================================================================
@@ -178,8 +269,8 @@ body {
 .auth-page {
   align-items: center;
   background:
-    radial-gradient(circle at 20% 12%, rgb(20 184 166 / 24%), transparent 28rem),
-    radial-gradient(circle at 82% 22%, rgb(45 212 191 / 14%), transparent 24rem),
+    radial-gradient(circle at 20% 12%, var(--color-coach-500) 0%, transparent 28rem),
+    radial-gradient(circle at 82% 22%, var(--color-coach-400) 0%, transparent 24rem),
     linear-gradient(135deg, #070707 0%, #111111 48%, #f7f7f5 48%, #f7f7f5 100%);
   color: var(--color-text-primary);
   display: grid;
@@ -275,7 +366,7 @@ body {
 
 .auth-clerk-input:focus {
   border-color: var(--color-coach-500);
-  box-shadow: 0 0 0 3px rgb(20 184 166 / 16%);
+  box-shadow: 0 0 0 3px var(--color-metric-green-dim);
 }
 
 .auth-clerk-primary {
@@ -297,7 +388,7 @@ body {
 @media (max-width: 900px) {
   .auth-page {
     background:
-      radial-gradient(circle at 50% 0%, rgb(20 184 166 / 22%), transparent 22rem),
+      radial-gradient(circle at 50% 0%, var(--color-coach-500) 0%, transparent 22rem),
       linear-gradient(180deg, #070707 0%, #111111 46%, #f7f7f5 46%, #f7f7f5 100%);
     grid-template-columns: 1fr;
   }
@@ -346,52 +437,193 @@ dd {
    ========================================================================== */
 
 .app-shell {
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
   display: flex;
-  flex-direction: column;
-  min-height: 100vh;
+  flex-direction: row;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .app-shell--chat {
   background: var(--color-surface-card);
 }
 
-.app-shell__header {
-  align-items: center;
-  background: rgb(10 10 10 / 94%);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--color-border-default);
+/* ── Left sidebar — 244px fixed column ── */
+.app-sidebar {
+  background: var(--color-surface-sidebar);
+  border-right: 1px solid var(--color-border-default);
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  justify-content: space-between;
-  max-width: 100%;
-  min-height: var(--layout-nav-height);
-  min-width: 0;
-  padding: var(--space-3) var(--space-4);
-  position: sticky;
-  top: 0;
-  z-index: 20;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 18px 14px 14px;
+  width: 244px;
 }
 
-.app-shell__brand {
+.app-sidebar__brand {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 2px 8px 18px;
+}
+
+.app-sidebar__brand-name {
   color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
+  font-size: 16.5px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.012em;
 }
 
-.app-shell__nav {
-  flex: 1 1 auto;
+.app-sidebar__nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-sidebar__nav-item {
+  align-items: center;
+  border-radius: 10px;
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: 14.5px;
+  font-weight: 500;
+  gap: 11px;
+  padding: 9px 11px;
+  text-decoration: none;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.app-sidebar__nav-item:hover {
+  background: var(--color-surface-sidebar-hover);
+  color: var(--color-text-primary);
+}
+
+.app-sidebar__nav-item--active {
+  background: var(--color-surface-sidebar-active);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.app-sidebar__nav-item:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.app-sidebar__divider {
+  background: var(--color-border-default);
+  height: 1px;
+  margin: 16px 8px;
+}
+
+.app-sidebar__eyebrow {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  margin: 0;
+  padding: 0 11px 8px;
+  text-transform: uppercase;
+}
+
+.app-sidebar__onboarding-hint {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--font-size-xs);
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+  padding: 0 11px;
+}
+
+.app-sidebar__spacer {
+  flex: 1;
+}
+
+/* Plan badge card */
+.app-sidebar__plan-badge {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: 12px;
+  margin-bottom: 10px;
+  padding: 11px 12px;
+}
+
+.app-sidebar__plan-badge-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.app-sidebar__plan-name {
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.app-sidebar__plan-chip {
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 9px;
+}
+
+.app-sidebar__plan-chip--pro {
+  background: var(--color-metric-green-dim);
+  color: var(--color-metric-green);
+}
+
+.app-sidebar__plan-chip--free {
+  background: var(--color-metric-amber-dim);
+  color: var(--color-metric-amber);
+}
+
+/* User block */
+.app-sidebar__user {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 6px;
+}
+
+.app-sidebar__user-avatar {
+  flex-shrink: 0;
+}
+
+.app-sidebar__user-info {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  flex: 1;
 }
 
+.app-sidebar__user-name {
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-sidebar__user-goal {
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Content area ── */
 .app-shell__main {
   flex: 1 1 auto;
-  margin: 0 auto;
-  max-width: var(--layout-shell-max);
   min-width: 0;
+  overflow: auto;
   padding: var(--space-6) var(--space-4);
-  width: 100%;
+  background: var(--color-surface-app);
 }
 
 .app-shell__main--chat {
@@ -550,146 +782,6 @@ dd {
 
 .shell-wide {
   align-items: flex-start;
-}
-
-/* ==========================================================================
-   Navigation
-   ========================================================================== */
-
-.app-nav {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-content: space-between;
-  width: 100%;
-}
-
-.app-nav__links {
-  display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.app-nav--coach {
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-full);
-  padding: var(--space-1);
-}
-
-.app-nav__account {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  margin-left: var(--space-1);
-  padding-left: var(--space-2);
-  border-left: 1px solid var(--color-border-default);
-}
-
-.app-nav a,
-.app-nav__link {
-  align-items: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-full);
-  color: var(--color-text-secondary);
-  display: inline-flex;
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  min-height: 2.25rem;
-  padding: 0.45rem 0.95rem;
-  text-decoration: none;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.app-nav a:hover,
-.app-nav__link:hover {
-  background: var(--color-surface-card);
-  border-color: var(--color-border-strong);
-  color: var(--color-text-primary);
-}
-
-.app-nav a[aria-current="page"],
-.app-nav__link[aria-current="page"],
-.app-nav__link--active {
-  background: var(--color-surface-elevated);
-  border-color: var(--color-coach-500);
-  box-shadow: var(--shadow-focus);
-  color: var(--color-coach-400);
-}
-
-.app-nav__link--featured {
-  background: linear-gradient(135deg, var(--color-coach-500) 0%, var(--color-coach-600) 100%);
-  border-color: var(--color-coach-500);
-  box-shadow: var(--shadow-brand-soft);
-  color: var(--color-text-inverse);
-  font-size: var(--font-size-base);
-  font-weight: 700;
-  min-height: 2.5rem;
-  padding: 0.55rem 1.15rem;
-}
-
-.app-nav__link--featured:hover {
-  background: linear-gradient(135deg, var(--color-coach-400) 0%, var(--color-coach-600) 100%);
-  border-color: var(--color-coach-400);
-  color: var(--color-text-inverse);
-}
-
-.app-nav__link--featured[aria-current="page"] {
-  background: linear-gradient(135deg, var(--color-coach-400) 0%, var(--color-coach-700) 100%);
-  box-shadow: var(--shadow-brand-soft);
-  color: var(--color-text-inverse);
-}
-
-@media (max-width: 640px) {
-  .app-shell__header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .app-nav,
-  .app-nav--coach {
-    align-items: stretch;
-    border-radius: var(--radius-lg);
-    flex-direction: column;
-    justify-content: flex-start;
-    width: 100%;
-  }
-
-  .app-nav__links {
-    flex-wrap: nowrap;
-    max-width: 100%;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-    width: 100%;
-  }
-
-  .app-nav__account {
-    border-left: none;
-    border-top: 1px solid var(--color-border-default);
-    justify-content: flex-end;
-    margin-left: 0;
-    padding: var(--space-2) var(--space-1) 0;
-  }
-
-  .app-nav__links::-webkit-scrollbar,
-  .app-nav--coach::-webkit-scrollbar {
-    display: none;
-  }
-
-  .app-nav a,
-  .app-nav__link {
-    flex: 0 0 auto;
-    min-height: var(--touch-target-min);
-    min-width: var(--touch-target-min);
-  }
 }
 
 /* ==========================================================================
@@ -885,7 +977,7 @@ dd {
 }
 
 .app-shell__main--structured .dashboard-card--coach {
-  border-color: rgb(45 212 191 / 45%);
+  border-color: var(--color-metric-green-dim);
   box-shadow: var(--shadow-brand-soft);
 }
 
@@ -1014,7 +1106,7 @@ dd {
 }
 
 .dashboard-card--coach {
-  border-color: rgb(45 212 191 / 35%);
+  border-color: var(--color-metric-green-dim);
 }
 
 .longevity-dashboard .dashboard-card--coach .chat-prompt-chips {
@@ -1049,6 +1141,7 @@ dd {
   opacity: 0.6;
 }
 
+/* primary — dark ink on accent (accept-green for confirm actions) */
 .button-primary {
   background: var(--color-coach-600);
   color: var(--color-text-inverse);
@@ -1058,6 +1151,7 @@ dd {
   background: var(--color-coach-700);
 }
 
+/* secondary — bordered, theme-aware ghost with subtle bg */
 .button-secondary {
   background: var(--color-surface-muted);
   border-color: var(--color-border-strong);
@@ -1066,9 +1160,10 @@ dd {
 
 .button-secondary:hover:not(:disabled) {
   border-color: var(--color-coach-500);
-  color: var(--color-coach-400);
+  color: var(--color-text-primary);
 }
 
+/* ghost — fully transparent, text-only */
 .button-ghost {
   background: transparent;
   border-color: transparent;
@@ -1080,6 +1175,30 @@ dd {
   color: var(--color-text-primary);
 }
 
+/* soft — subtle filled, no border; dim metric-green tint */
+.button-soft {
+  background: var(--color-metric-green-dim);
+  border-color: transparent;
+  color: var(--color-metric-green);
+}
+
+.button-soft:hover:not(:disabled) {
+  background: rgba(25, 195, 125, 0.22);
+}
+
+/* quiet — muted, low-emphasis */
+.button-quiet {
+  background: var(--color-surface-inset);
+  border-color: var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+.button-quiet:hover:not(:disabled) {
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+}
+
+/* danger — red outline destructive */
 .button-danger {
   background: var(--color-status-error-bg);
   border-color: var(--color-status-error-border);
@@ -1088,6 +1207,7 @@ dd {
 
 .button-danger:hover:not(:disabled) {
   background: #fecaca;
+  border-color: var(--color-status-error-text);
 }
 
 .button-sm {
@@ -1100,6 +1220,18 @@ dd {
   font-size: var(--font-size-base);
   min-height: 2.75rem;
   padding: 0.65rem 1.25rem;
+}
+
+/* Dark-theme button-secondary overrides */
+[data-theme="dark"] .button-secondary {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .button-secondary:hover:not(:disabled) {
+  border-color: var(--color-coach-400);
+  color: var(--color-text-primary);
 }
 
 /* ==========================================================================
@@ -1164,6 +1296,32 @@ dd {
 .badge-session-skipped {
   background: var(--color-status-neutral-bg);
   color: var(--color-status-neutral-text);
+}
+
+/* Metric-tone chip variants — work in both themes via shared color tokens */
+.badge-green {
+  background: var(--color-metric-green-dim);
+  color: var(--color-metric-green);
+}
+
+.badge-amber {
+  background: var(--color-metric-amber-dim);
+  color: var(--color-metric-amber);
+}
+
+.badge-red {
+  background: var(--color-metric-red-dim);
+  color: var(--color-metric-red);
+}
+
+.badge-blue {
+  background: var(--color-metric-blue-dim);
+  color: var(--color-metric-blue);
+}
+
+.badge-indigo {
+  background: var(--color-metric-indigo-dim);
+  color: var(--color-metric-indigo);
 }
 
 /* ==========================================================================
@@ -1343,8 +1501,6 @@ dd {
   outline: none;
 }
 
-.app-nav a:focus-visible,
-.app-nav__link:focus-visible,
 .button:focus-visible,
 .thread-button:focus-visible {
   outline: var(--focus-outline);
@@ -1561,27 +1717,32 @@ dd {
   border-color: var(--color-chat-bubble-user-border);
   color: var(--color-chat-bubble-user-text);
   margin-left: auto;
-  max-width: min(100%, 42rem);
+  max-width: min(100%, 28.75rem);
 }
 
 .chat-bubble--assistant,
 .message-assistant {
   background: var(--color-chat-bubble-assistant-bg);
   border-color: var(--color-chat-bubble-assistant-border);
+  border-width: 0;
   color: var(--color-text-primary);
   margin-right: auto;
-  max-width: min(100%, 42rem);
+  max-width: min(100%, 100%);
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .chat-bubble--coach {
-  box-shadow: inset 3px 0 0 var(--color-chat-bubble-coach-accent);
+  /* Light world: no left accent border; coach messages are float left with avatar */
+  box-shadow: none;
 }
 
 .chat-bubble--crisis {
   border-color: var(--color-chat-bubble-crisis-border);
-  box-shadow:
-    inset 3px 0 0 var(--color-status-error-text),
-    0 0 0 1px rgb(252 165 165 / 20%);
+  border-width: 0;
+  box-shadow: none;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .chat-bubble__meta,
@@ -1603,17 +1764,28 @@ dd {
 }
 
 .chat-bubble__content .message-proposals {
-  border-top: 1px solid var(--color-border-default);
   display: grid;
   gap: var(--space-3);
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
+  margin-top: var(--space-4);
 }
 
-.chat-bubble__content .proposal-card {
-  background: transparent;
-  border-color: var(--color-border-default);
-  box-shadow: none;
+.chat-single .message-proposals {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.chat-bubble__content .proposal-card,
+.message-proposals .proposal-card,
+.message-proposals .confirmation-card {
+  background: #ffffff;
+  border-color: var(--color-border-strong);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 6%);
+}
+
+.message-proposals .confirmation-card.status-pending,
+.message-proposals .confirmation-card.status-proposed {
+  box-shadow: 0 4px 20px rgb(0 0 0 / 6%);
 }
 
 .chat-bubble__content .proposal-card.status-accepted,
@@ -1723,7 +1895,16 @@ dd {
    ========================================================================== */
 
 .proposal-inspector {
+  display: grid;
+  gap: var(--space-6);
   margin-top: var(--space-6);
+}
+
+.proposal-inspector__filter {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .proposal-grid {
@@ -1731,17 +1912,52 @@ dd {
   gap: var(--space-4);
 }
 
+@media (min-width: 900px) {
+  .proposal-grid {
+    grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  }
+}
+
+/* Standalone proposal card — white card, soft shadow, left domain accent */
 .proposal-card,
 .confirmation-card {
   background: var(--color-surface-card);
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  border-left: 3px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 6%), 0 8px 24px rgb(0 0 0 / 4%);
+  overflow: hidden;
   padding: var(--space-4);
+  transition: box-shadow 160ms ease;
+}
+
+.proposal-card:hover,
+.confirmation-card:hover {
+  box-shadow: 0 4px 16px rgb(0 0 0 / 9%), 0 12px 32px rgb(0 0 0 / 6%);
+}
+
+/* Proposal card domain accent — left border color by domain */
+.proposal-card.domain-workout,
+.proposal-card.domain-training {
+  border-left-color: var(--color-metric-blue);
+}
+
+.proposal-card.domain-nutrition,
+.proposal-card.domain-recipe {
+  border-left-color: var(--color-metric-green);
+}
+
+.proposal-card.domain-habit,
+.proposal-card.domain-goal {
+  border-left-color: var(--color-metric-indigo);
+}
+
+.proposal-card.domain-recovery {
+  border-left-color: var(--color-metric-amber);
 }
 
 .confirmation-card {
-  border-left: 4px solid var(--color-coach-400);
+  border-left: 3px solid var(--color-coach-500);
 }
 
 .proposal-header,
@@ -1823,6 +2039,7 @@ span.confirmation-card__meta {
 .goals {
   display: grid;
   gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1830,6 +2047,7 @@ span.confirmation-card__meta {
 
 .goals li {
   border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-metric-indigo);
   border-radius: var(--radius-md);
   display: flex;
   flex-wrap: wrap;
@@ -1846,6 +2064,15 @@ span.confirmation-card__meta {
 
 .goals span {
   color: var(--color-text-muted);
+}
+
+/* Goal card footer row — badge + priority hint */
+.goal-card__footer {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  width: 100%;
 }
 
 .weekly-review-pack {
@@ -2083,6 +2310,84 @@ span.confirmation-card__meta {
 
   .profile-documents .documents-layout {
     gap: var(--space-3);
+  }
+}
+
+/* ==========================================================================
+   Profile hub — two-column light layout (Phase 2b)
+   Left col: account + coaching-hierarchy + goals + personal-preferences
+   Right col: data-consent (devices) + documents + billing bridge
+   ========================================================================== */
+
+/* Two-column grid — kicks in at ≥900px */
+@media (min-width: 900px) {
+  .context-hub.profile-hub {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+    align-items: start;
+  }
+
+  /* Section nav spans both columns */
+  .profile-hub > .section-nav {
+    grid-column: 1 / -1;
+  }
+
+  /* Left column: account (ProfileSummaryCard), coaching-hierarchy, goals, personal-preferences */
+  .profile-hub > #account,
+  .profile-hub > #coaching-hierarchy,
+  .profile-hub > #goals,
+  .profile-hub > #personal-preferences {
+    grid-column: 1;
+  }
+
+  /* Right column: data-consent, documents, billing and longevity bridges */
+  .profile-hub > #data-consent,
+  .profile-hub > #documents,
+  .profile-hub > .profile-billing-bridge,
+  .profile-hub > .profile-longevity-bridge {
+    grid-column: 2;
+  }
+
+  /* Error notice spans both columns */
+  .profile-hub > .notice {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Card head row: icon circle + title + optional right slot — profile hub sections */
+.profile-hub .context-section-card__header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.profile-hub .context-section-card__header > div:first-child {
+  min-width: 0;
+}
+
+/* Documents section card — amber top-border accent */
+.profile-hub > #documents {
+  border-top: 2px solid var(--color-metric-amber);
+}
+
+.profile-hub > #documents .documents-workspace {
+  margin-top: 0;
+}
+
+/* Data-consent (devices) section — green accent top-border */
+.profile-hub > #data-consent {
+  border-top: 2px solid var(--color-metric-green);
+}
+
+/* Ensure section cards fill their column and don't have extra top margin */
+@media (min-width: 900px) {
+  .profile-hub .dashboard-section {
+    margin: 0;
   }
 }
 
@@ -2605,8 +2910,16 @@ span.confirmation-card__meta {
 .recipe-recommendation-card {
   background: var(--color-surface-card);
   border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-metric-green);
   border-radius: var(--radius-md);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 5%);
   padding: var(--space-3);
+  transition: box-shadow 160ms ease;
+}
+
+.recipe-card:hover,
+.recipe-recommendation-card:hover {
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
 }
 
 .recipe-card-header {
@@ -3336,10 +3649,46 @@ span.confirmation-card__meta {
   min-height: calc(100dvh - var(--layout-nav-height));
 }
 
+/* Chat header row — 56px, coach status + context chip */
+.chat-single .chat-header {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-default);
+  display: flex;
+  flex-shrink: 0;
+  height: 3.5rem;
+  justify-content: space-between;
+  padding: 0 var(--space-6);
+}
+
+.chat-single .chat-header__coach-label {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.chat-single .chat-header__coach-name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.chat-single .chat-header__online-dot {
+  background: var(--color-metric-green);
+  border-radius: 50%;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
+.chat-single .chat-header__status {
+  color: var(--color-text-muted);
+  font-size: 0.78125rem;
+}
+
 .chat-single .chat-transcript,
 .chat-single .message-list {
   flex: 1 1 auto;
-  gap: var(--space-4);
+  gap: var(--space-6);
   margin: 0 auto;
   mask-image: linear-gradient(
     to bottom,
@@ -3348,8 +3697,8 @@ span.confirmation-card__meta {
     transparent 100%
   );
   max-height: none;
-  max-width: var(--layout-chat-max);
-  padding: var(--space-6) var(--space-4) var(--space-5);
+  max-width: 45rem;
+  padding: var(--space-7, 1.75rem) 1.75rem var(--space-5);
   width: 100%;
   -webkit-mask-image: linear-gradient(
     to bottom,
@@ -3376,7 +3725,7 @@ span.confirmation-card__meta {
   box-shadow: var(--shadow-composer);
   margin: 0;
   max-width: none;
-  padding: var(--space-4);
+  padding: var(--space-4) var(--space-4) var(--space-5);
 }
 
 .chat-single .chat-composer-inner,
@@ -3384,31 +3733,95 @@ span.confirmation-card__meta {
   display: grid;
   gap: var(--space-3);
   margin: 0 auto;
-  max-width: var(--layout-chat-max);
+  max-width: 45rem;
   width: 100%;
 }
 
-.chat-single .chat-composer textarea {
-  background: var(--color-surface-inset);
-  border-color: var(--color-border-default);
-  border-radius: var(--radius-lg);
+/* Rounded pill-style composer row */
+.chat-single .chat-composer-controls {
+  align-items: flex-end;
+  background: #ffffff;
+  border: 1px solid var(--color-border-default);
+  border-radius: 1.625rem;
+  box-shadow: 0 2px 14px rgb(0 0 0 / 4%);
+  display: flex;
+  gap: 0;
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.chat-single .chat-composer-controls:focus-within {
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.chat-single .chat-composer textarea,
+.chat-single .chat-composer-controls__input {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  flex: 1 1 auto;
   font-size: var(--font-size-chat);
   line-height: 1.55;
   max-height: 8rem;
-  min-height: 3rem;
-  padding: var(--space-3) var(--space-4);
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+  min-height: 2.5rem;
+  min-width: 0;
+  outline: none;
+  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+  resize: none;
 }
 
-.chat-single .chat-composer textarea::placeholder {
+.chat-single .chat-composer textarea::placeholder,
+.chat-single .chat-composer-controls__input::placeholder {
   color: var(--color-text-muted);
 }
 
-.chat-single .chat-composer textarea:focus-visible {
-  background: var(--color-surface-card);
-  border-color: var(--color-border-focus);
+.chat-single .chat-composer textarea:focus-visible,
+.chat-single .chat-composer-controls__input:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  /* Focus ring handled at the parent .chat-composer-controls level */
+  outline: none;
+}
+
+/* Send button — circular */
+.chat-single .chat-composer-controls__send {
+  align-items: center;
+  background: var(--color-text-primary);
+  border: none;
+  border-radius: 50%;
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 2.375rem;
+  justify-content: center;
+  margin-bottom: 0;
+  padding: 0;
+  transition: background 160ms ease, opacity 160ms ease;
+  width: 2.375rem;
+}
+
+.chat-single .chat-composer-controls__send:disabled {
+  background: var(--color-border-strong);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.chat-single .chat-composer-controls__send:hover:not(:disabled) {
+  background: var(--color-coach-600);
+}
+
+/* Disclaimer footer */
+.chat-single .chat-composer-disclaimer {
+  color: var(--color-text-muted);
+  font-size: 0.71875rem;
+  margin: var(--space-2) auto 0;
+  max-width: 45rem;
+  opacity: 0.8;
+  text-align: center;
 }
 
 .chat-composer-controls {
@@ -3719,56 +4132,99 @@ span.confirmation-card__meta {
   margin-top: 0;
 }
 
-/* Dark immersive route: user/coach bubbles and notices tuned for contrast */
+/* Light chat route: user/coach bubbles and notices for light world */
 .chat-single .chat-bubble--user {
   background: var(--color-chat-user-immersive-bg);
   border-color: var(--color-chat-user-immersive-border);
-  box-shadow: inset -3px 0 0 var(--color-coach-400);
+  border-radius: 18px 18px 4px 18px;
+  box-shadow: none;
   color: var(--color-text-primary);
 }
 
 .chat-single .chat-bubble--coach {
   background: var(--color-chat-coach-immersive-bg);
-  border-color: var(--color-border-strong);
+  border: none;
+  box-shadow: none;
 }
 
 .chat-single .chat-bubble--assistant .chat-bubble__meta {
   color: var(--color-text-muted);
+  padding-left: 0;
+}
+
+.chat-single .chat-bubble--assistant {
+  padding: var(--space-1) 0 var(--space-2);
 }
 
 .chat-single .chat-bubble__content {
   line-height: 1.65;
 }
 
-.chat-single .chat-weekly-review-summary.chat-metadata-panel--notice {
-  background: var(--color-chat-notice-bg);
-  border-color: var(--color-chat-notice-border);
-  color: var(--color-chat-notice-text);
+/* Coach message row: avatar + content column */
+.chat-single .chat-bubble--assistant,
+.chat-single .chat-bubble--coach,
+.chat-single .chat-bubble--crisis {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-4);
+  padding: 0;
 }
 
+.chat-single .chat-bubble__avatar {
+  background: #0e0e0d;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 1.875rem;
+  margin-top: var(--space-1);
+  width: 1.875rem;
+}
+
+.chat-single .chat-bubble__avatar-mark {
+  color: var(--color-metric-green);
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.chat-single .chat-bubble__coach-column {
+  flex: 1;
+  min-width: 0;
+  padding-top: var(--space-1);
+}
+
+.chat-single .chat-weekly-review-summary.chat-metadata-panel--notice {
+  background: var(--color-chat-metadata-notice-bg);
+  border-color: var(--color-chat-metadata-notice-border);
+  color: var(--color-chat-metadata-notice-text);
+}
+
+/* Crisis card — light world warm card */
 .chat-single .chat-bubble--crisis {
   border-color: var(--color-chat-crisis-border);
-  box-shadow:
-    inset 3px 0 0 var(--color-chat-crisis-text),
-    0 0 0 1px rgb(252 165 165 / 16%);
+  border-style: none;
+  box-shadow: none;
 }
 
 .chat-single .wellbeing-crisis-panel.chat-metadata-panel--crisis {
   background: var(--color-chat-crisis-bg);
-  border-color: var(--color-chat-crisis-border);
-  border-width: 2px;
-  box-shadow: 0 0 0 1px rgb(252 165 165 / 12%);
+  border: 1px solid var(--color-chat-crisis-border);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
   color: var(--color-chat-crisis-text);
 }
 
 .chat-single .wellbeing-crisis-panel.chat-metadata-panel--crisis .chat-metadata-panel__title {
-  color: var(--color-chat-crisis-title);
+  color: var(--color-text-primary);
   font-weight: 700;
 }
 
 .chat-single .wellbeing-crisis-panel.chat-metadata-panel--crisis .confirmation-card__link {
   color: var(--color-chat-crisis-link);
-  font-weight: 700;
+  font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 0.15em;
 }
@@ -3782,7 +4238,7 @@ span.confirmation-card__meta {
 }
 
 .chat-single .chat-weekly-review-summary .section-label {
-  color: var(--color-coach-400);
+  color: var(--color-coach-700);
 }
 
 .chat-weekly-review-summary__details {
@@ -3820,17 +4276,40 @@ span.confirmation-card__meta {
 .chat-single .confirmation-card__success {
   background: var(--color-chat-success-bg);
   border: 1px solid var(--color-chat-success-border);
+  border-radius: var(--radius-sm);
   color: var(--color-chat-success-text);
+  font-weight: 600;
 }
 
 .chat-single .confirmation-card--inline.status-accepted,
 .chat-single .confirmation-card--inline.status-valid {
-  border-left-color: var(--color-coach-400);
+  border-left-color: var(--color-coach-500);
 }
 
 .chat-single .chat-thinking {
+  align-items: center;
   color: var(--color-text-muted);
+  display: flex;
   font-size: var(--font-size-sm);
+  gap: var(--space-3);
+}
+
+/* Thinking: 3 dots shimmer */
+.chat-single .chat-thinking .chat-thinking__dots {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.chat-single .chat-thinking .chat-thinking__dot {
+  background: var(--color-text-muted);
+  border-radius: 50%;
+  height: 7px;
+  opacity: 0.4;
+  width: 7px;
+}
+
+.chat-single .chat-thinking .chat-thinking__dot--mid {
+  opacity: 1;
 }
 
 .chat-empty-state {
@@ -3888,7 +4367,12 @@ span.confirmation-card__meta {
 }
 
 .chat-single .chat-prompt-chip {
-  background: var(--color-surface-inset);
+  background: #ffffff;
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+  font-size: 0.84375rem;
+  font-weight: 500;
+  padding: 0.625rem 1rem;
 }
 
 /* Inline proposal confirmation refinements */
@@ -3928,29 +4412,35 @@ span.confirmation-card__meta {
   text-transform: uppercase;
 }
 
+/* Domain pill colors mapped to metric color scale */
 .proposal-domain-pill--workout {
-  background: var(--color-coach-100);
-  color: var(--color-coach-700);
+  background: var(--color-metric-blue-dim);
+  color: var(--color-metric-blue);
 }
 
 .proposal-domain-pill--goal {
-  background: var(--color-status-pending-bg);
-  color: var(--color-status-pending-text);
+  background: var(--color-metric-indigo-dim);
+  color: var(--color-metric-indigo);
 }
 
 .proposal-domain-pill--nutrition {
-  background: var(--color-status-success-bg);
-  color: var(--color-status-success-text);
+  background: var(--color-metric-green-dim);
+  color: var(--color-metric-green);
 }
 
 .proposal-domain-pill--recipe {
-  background: var(--color-status-info-bg);
-  color: var(--color-brand-800);
+  background: var(--color-metric-green-dim);
+  color: var(--color-metric-green);
 }
 
 .proposal-domain-pill--profile {
-  background: var(--color-status-neutral-bg);
-  color: var(--color-status-neutral-text);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+}
+
+.proposal-domain-pill--general {
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
 }
 
 .confirmation-card__success {
@@ -4273,8 +4763,6 @@ span.confirmation-card__meta {
     border-top-color: var(--color-coach-500);
   }
 
-  .app-nav a,
-  .app-nav__link,
   .button,
   .chat-prompt-chip,
   .chat-bubble,
@@ -4300,6 +4788,17 @@ span.confirmation-card__meta {
 /* ==========================================================================
    Documents workspace (Visual Designer)
    ========================================================================== */
+
+/* Privacy/consent boundary gets amber accent (privacy = cautionary) */
+.documents-workspace .privacy-boundary-note,
+.documents-workspace .consent-management-card .privacy-boundary-note {
+  background: var(--color-metric-amber-dim);
+  border-color: rgba(245, 165, 36, 0.32);
+}
+
+.documents-workspace .privacy-boundary-note__title {
+  color: #a16207;
+}
 
 .documents-workspace {
   margin-top: var(--space-6);
@@ -4392,8 +4891,8 @@ span.confirmation-card__meta {
 }
 
 .documents-list-item.active {
-  border-color: var(--color-coach-400);
-  box-shadow: var(--shadow-brand-soft);
+  border-color: var(--color-metric-green);
+  box-shadow: 0 0 0 2px var(--color-metric-green-dim);
   background: var(--color-coach-50);
 }
 
@@ -4589,6 +5088,7 @@ span.confirmation-card__meta {
 }
 
 .form-field input[type="text"],
+.form-field input[type="search"],
 .form-field select,
 .form-field textarea {
   background: var(--color-surface-card);
@@ -4602,12 +5102,24 @@ span.confirmation-card__meta {
   width: 100%;
 }
 
+.form-field input[type="file"] {
+  background: var(--color-surface-inset);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
+  color: var(--color-text-secondary);
+  font: inherit;
+  padding: 0.55rem 0.75rem;
+  width: 100%;
+}
+
 .form-field textarea {
   min-height: 6rem;
   resize: vertical;
 }
 
 .form-field input[type="text"]:focus-visible,
+.form-field input[type="search"]:focus-visible,
 .form-field select:focus-visible,
 .form-field textarea:focus-visible {
   border-color: var(--color-border-focus);
@@ -4874,118 +5386,217 @@ span.confirmation-card__meta {
   background: #c084fc;
 }
 
-/* Onboarding wizard */
-.onboarding-workspace {
-  display: grid;
-  gap: var(--space-6);
-  margin-inline: auto;
-  max-width: 42rem;
-  width: 100%;
+/* ==========================================================================
+   Onboarding — split panel layout (dark left + light right)
+   ========================================================================== */
+
+/* Full-bleed two-column container filling the structured main area.
+   The structured main has padding; we pull it back with negative margin. */
+.onboarding-layout {
+  display: flex;
+  /* Expand to fill parent including padding offsets */
+  margin: calc(-1 * var(--space-6)) calc(-1 * var(--space-4));
+  min-height: calc(100% + 2 * var(--space-6));
+  overflow: hidden;
+  width: calc(100% + 2 * var(--space-4));
 }
 
-.onboarding-workspace__header {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-5);
+/* ── Dark left panel ─────────────────────────────────────────────────────── */
+
+.onboarding-panel {
+  background: var(--color-surface-nav-dark);
+  color: var(--color-text-on-dark);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  padding: 40px 38px;
+  width: 320px;
 }
 
-.onboarding-workspace__header h1 {
+.onboarding-panel__brand {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.onboarding-panel__brand-name {
+  color: var(--color-text-on-dark);
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.onboarding-panel__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.onboarding-panel__headline {
+  color: var(--color-text-on-dark);
+  font-size: 1.875rem;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  line-height: 1.2;
+  margin: 0 0 var(--space-4);
+}
+
+.onboarding-panel__sub {
+  color: rgba(243, 245, 246, 0.55);
+  font-size: 0.9375rem;
+  line-height: 1.6;
   margin: 0;
 }
 
-.app-shell__main--structured .onboarding-workspace__header.dashboard-card--coach {
-  border-color: rgb(45 212 191 / 45%);
-  box-shadow: var(--shadow-brand-soft);
-}
-
-.onboarding-progress {
-  display: grid;
-  gap: var(--space-3);
+/* Step list */
+.onboarding-panel__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-@media (width >= 640px) {
-  .onboarding-progress {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-
-  .onboarding-progress__step {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    text-align: center;
-  }
-
-  .onboarding-progress__label {
-    font-size: var(--font-size-xs);
-  }
+.onboarding-panel__step {
+  align-items: center;
+  display: flex;
+  gap: 12px;
 }
 
-.onboarding-progress__step {
+.onboarding-panel__step-marker {
   align-items: center;
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: auto 1fr;
-}
-
-.onboarding-progress__marker {
-  align-items: center;
-  background: var(--color-surface-muted);
-  border: 1px solid var(--color-border-default);
   border-radius: var(--radius-full);
-  color: var(--color-text-muted);
   display: inline-flex;
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  height: 2rem;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  height: 24px;
   justify-content: center;
-  width: 2rem;
+  width: 24px;
+  /* upcoming default */
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  color: rgba(243, 245, 246, 0.35);
 }
 
-.onboarding-progress__step--current .onboarding-progress__marker {
-  background: rgb(20 184 166 / 16%);
-  border-color: var(--color-coach-400);
-  color: var(--color-coach-400);
+.onboarding-panel__step--current .onboarding-panel__step-marker {
+  background: transparent;
+  border: 2px solid var(--color-metric-green);
+  color: var(--color-metric-green);
 }
 
-.onboarding-progress__step--complete .onboarding-progress__marker {
-  background: rgb(20 184 166 / 24%);
-  border-color: var(--color-coach-500);
-  color: var(--color-coach-500);
+.onboarding-panel__step--done .onboarding-panel__step-marker {
+  background: var(--color-metric-green);
+  border: none;
+  color: #04130c;
 }
 
-.onboarding-progress__label {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
+.onboarding-panel__step-label {
+  color: rgba(243, 245, 246, 0.35);
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
-.onboarding-progress__step--current .onboarding-progress__label {
-  color: var(--color-text-primary);
-  font-weight: 600;
+.onboarding-panel__step--current .onboarding-panel__step-label,
+.onboarding-panel__step--done .onboarding-panel__step-label {
+  color: var(--color-text-on-dark);
 }
 
-.onboarding-step-panel {
+.onboarding-panel__step--current .onboarding-panel__step-label {
+  font-weight: 700;
+}
+
+/* ── Light right content area ────────────────────────────────────────────── */
+
+.onboarding-content {
+  background: var(--color-surface-content-elevated);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.onboarding-content__body {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  padding: 40px 60px;
+}
+
+.onboarding-step {
   display: grid;
   gap: var(--space-4);
+  max-width: 34rem;
+  width: 100%;
 }
 
-.app-shell__main--structured .onboarding-step-panel.panel-prominent {
-  background: var(--color-surface-content-elevated);
-  border-color: var(--color-border-subtle);
-  box-shadow: var(--shadow-card-light);
+.onboarding-step__eyebrow {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-section-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
 }
 
-.onboarding-step-panel__intro {
+.onboarding-step__title {
+  color: var(--color-text-on-light);
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.onboarding-step__intro {
   color: var(--color-text-on-light-secondary);
   font-size: var(--font-size-sm);
   line-height: 1.5;
   margin: 0;
 }
 
+/* Form fields inside onboarding step */
 .onboarding-form {
   display: grid;
   gap: var(--space-4);
+}
+
+.onboarding-form .form-field {
+  color: var(--color-text-on-light);
+}
+
+.onboarding-form .form-help {
+  color: var(--color-text-on-light-secondary);
+}
+
+.onboarding-form .form-field input[type="text"],
+.onboarding-form .form-field input[type="number"],
+.onboarding-form .form-field input[type="date"],
+.onboarding-form .form-field select,
+.onboarding-form .form-field textarea {
+  background: var(--color-surface-content-elevated);
+  border: 1.5px solid var(--color-border-strong);
+  color: var(--color-text-on-light);
+}
+
+.onboarding-form .form-field input[type="text"]:hover,
+.onboarding-form .form-field input[type="number"]:hover,
+.onboarding-form .form-field input[type="date"]:hover,
+.onboarding-form .form-field select:hover,
+.onboarding-form .form-field textarea:hover {
+  border-color: var(--color-coach-400);
+}
+
+.onboarding-form .form-field input[type="text"]:focus-visible,
+.onboarding-form .form-field input[type="number"]:focus-visible,
+.onboarding-form .form-field input[type="date"]:focus-visible,
+.onboarding-form .form-field select:focus-visible,
+.onboarding-form .form-field textarea:focus-visible {
+  border-color: var(--color-coach-500);
+  box-shadow: var(--shadow-focus);
+  outline: none;
 }
 
 .onboarding-baseline-grid {
@@ -4999,6 +5610,7 @@ span.confirmation-card__meta {
   }
 }
 
+/* Goal presets grid */
 .onboarding-goal-presets {
   display: grid;
   gap: var(--space-3);
@@ -5016,9 +5628,9 @@ span.confirmation-card__meta {
 }
 
 .onboarding-goal-preset {
-  background: var(--color-surface-content-muted);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
+  background: var(--color-surface-content-elevated);
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 14px;
   color: inherit;
   cursor: pointer;
   display: grid;
@@ -5043,7 +5655,7 @@ span.confirmation-card__meta {
 }
 
 .onboarding-goal-preset--selected {
-  background: rgb(20 184 166 / 10%);
+  background: var(--color-coach-100);
   border-color: var(--color-coach-500);
   box-shadow: var(--shadow-brand-soft);
 }
@@ -5051,7 +5663,7 @@ span.confirmation-card__meta {
 .onboarding-goal-preset__label {
   color: var(--color-text-on-light);
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .onboarding-goal-preset__description {
@@ -5060,15 +5672,28 @@ span.confirmation-card__meta {
   line-height: 1.45;
 }
 
+/* Selected goal summary */
 .onboarding-goal-summary {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   display: grid;
   gap: var(--space-2);
   padding: var(--space-4);
 }
 
+.onboarding-goal-summary__label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-section-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
 .onboarding-goal-summary__title {
   color: var(--color-text-on-light);
-  font-size: var(--font-size-md);
+  font-size: 1rem;
   font-weight: 600;
   margin: 0;
 }
@@ -5079,139 +5704,418 @@ span.confirmation-card__meta {
   margin: 0;
 }
 
-.onboarding-actions {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
+/* ── Footer nav: Back / dots / Continue ─────────────────────────────────── */
 
-.app-nav__onboarding-hint {
+.onboarding-footer {
   align-items: center;
-  color: var(--color-text-muted);
-  display: inline-flex;
-  flex: 1 1 auto;
-  font-size: var(--font-size-sm);
-  gap: var(--space-2);
-  margin: 0;
-  min-width: 0;
-  padding: 0.45rem 0.95rem;
-}
-
-.app-nav__lock-icon {
+  border-top: 1px solid var(--color-border-default);
+  display: flex;
   flex-shrink: 0;
-  height: 1rem;
-  opacity: 0.6;
-  width: 1rem;
+  justify-content: space-between;
+  padding: 16px 60px;
 }
 
-/* Light structured canvas: onboarding stepper readability */
-.app-shell__main--structured .onboarding-progress__label {
-  color: var(--color-text-on-light-secondary);
+.onboarding-footer__back,
+.onboarding-footer__next {
+  min-width: 5rem;
 }
 
-.app-shell__main--structured .onboarding-progress__step--current .onboarding-progress__label {
-  color: var(--color-text-on-light);
-  font-weight: 600;
+.onboarding-footer__next {
+  text-align: right;
 }
 
-.app-shell__main--structured .onboarding-progress__marker {
-  background: var(--color-surface-content-muted);
-  border-color: var(--color-border-subtle);
-  color: var(--color-text-on-light-secondary);
+.onboarding-footer__dots {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
 }
 
-.app-shell__main--structured .onboarding-progress__step--current .onboarding-progress__marker {
-  background: var(--color-coach-100);
-  border-color: var(--color-coach-600);
-  color: var(--color-coach-700);
+.onboarding-footer__dot {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+  display: block;
+  height: 7px;
+  transition: width 0.2s ease, background 0.2s ease;
+  width: 7px;
 }
 
-.app-shell__main--structured .onboarding-progress__step--complete .onboarding-progress__marker {
-  background: var(--color-coach-500);
-  border-color: var(--color-coach-500);
-  color: var(--color-surface-content-elevated);
+.onboarding-footer__dot--active {
+  background: var(--color-text-on-light);
+  width: 22px;
 }
 
-/* Light structured canvas: onboarding form fields */
-.app-shell__main--structured .onboarding-step-panel .section-label,
-.app-shell__main--structured .onboarding-goal-summary .section-label {
-  color: var(--color-text-on-light-secondary);
-}
-
-.app-shell__main--structured .onboarding-step-panel h2 {
-  color: var(--color-text-on-light);
-}
-
-.app-shell__main--structured .onboarding-form .form-field {
-  color: var(--color-text-on-light);
-}
-
-.app-shell__main--structured .onboarding-form .form-help {
-  color: var(--color-text-on-light-secondary);
-}
-
-.app-shell__main--structured .onboarding-form .form-field input[type="text"],
-.app-shell__main--structured .onboarding-form .form-field input[type="number"],
-.app-shell__main--structured .onboarding-form .form-field input[type="date"],
-.app-shell__main--structured .onboarding-form .form-field select,
-.app-shell__main--structured .onboarding-form .form-field textarea {
-  background: var(--color-surface-content-elevated);
-  border: 1px solid var(--color-border-subtle);
-  color: var(--color-text-on-light);
-}
-
-.app-shell__main--structured .onboarding-form .form-field input[type="text"]:hover,
-.app-shell__main--structured .onboarding-form .form-field input[type="number"]:hover,
-.app-shell__main--structured .onboarding-form .form-field input[type="date"]:hover,
-.app-shell__main--structured .onboarding-form .form-field select:hover,
-.app-shell__main--structured .onboarding-form .form-field textarea:hover {
-  border-color: var(--color-coach-400);
-}
-
-.app-shell__main--structured .onboarding-form .form-field input[type="text"]:focus-visible,
-.app-shell__main--structured .onboarding-form .form-field input[type="number"]:focus-visible,
-.app-shell__main--structured .onboarding-form .form-field input[type="date"]:focus-visible,
-.app-shell__main--structured .onboarding-form .form-field select:focus-visible,
-.app-shell__main--structured .onboarding-form .form-field textarea:focus-visible {
-  border-color: var(--color-coach-500);
-  box-shadow: var(--shadow-focus);
-}
-
-/* Light structured canvas: selected preset goal summary */
-.app-shell__main--structured .onboarding-goal-summary.panel-secondary {
-  background: var(--color-surface-content-muted);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-}
-
-/* Compact horizontal mobile stepper (< 640px) */
-@media (max-width: 639px) {
-  .onboarding-progress {
-    align-items: center;
-    display: flex;
-    gap: var(--space-1);
-    justify-content: space-between;
-    margin-bottom: var(--space-2);
-  }
-
-  .onboarding-progress__step {
-    align-items: center;
-    display: flex;
-    flex: 1;
+/* Responsive — collapse panel on small screens */
+@media (max-width: 767px) {
+  .onboarding-layout {
     flex-direction: column;
-    gap: var(--space-1);
-    text-align: center;
   }
 
-  .onboarding-progress__label {
+  .onboarding-panel {
+    padding: 20px 24px;
+    width: 100%;
+  }
+
+  .onboarding-panel__body {
     display: none;
   }
 
-  .onboarding-progress__step--current .onboarding-progress__label {
-    display: block;
-    font-size: var(--font-size-xs);
-    margin-top: var(--space-1);
-    white-space: nowrap;
+  .onboarding-panel__steps {
+    flex-direction: row;
+    gap: var(--space-2);
+    overflow-x: auto;
   }
+
+  .onboarding-panel__step-label {
+    display: none;
+  }
+
+  .onboarding-content__body {
+    padding: 24px 24px;
+  }
+
+  .onboarding-footer {
+    padding: 14px 24px;
+  }
+}
+
+/* ==========================================================================
+   Billing / Pricing — free-vs-pro comparison + limit-reached banner
+   ========================================================================== */
+
+.pricing-screen {
+  display: grid;
+  gap: var(--space-8);
+  margin-inline: auto;
+  max-width: 52rem;
+  padding: var(--space-8) var(--space-6);
+  width: 100%;
+}
+
+.pricing-screen__header {
+  text-align: center;
+}
+
+.pricing-screen__eyebrow {
+  color: var(--color-coach-600);
+  font-size: var(--font-size-section-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 var(--space-3);
+  text-transform: uppercase;
+}
+
+.pricing-screen__title {
+  color: var(--color-text-on-light);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  margin: 0 0 var(--space-2);
+}
+
+.pricing-screen__sub {
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.pricing-screen__error {
+  text-align: center;
+}
+
+/* Two-column card row */
+.pricing-cards {
+  align-items: stretch;
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 639px) {
+  .pricing-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Shared card base */
+.pricing-card {
+  border-radius: 1rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 26px;
+}
+
+/* Free card */
+.pricing-card--free {
+  background: var(--color-surface-content-elevated);
+  border: 1px solid var(--color-border-default);
+  box-shadow: var(--shadow-card-light);
+}
+
+/* Pro card — intentionally dark even on light route */
+.pricing-card--pro {
+  background: var(--color-surface-nav-dark);
+  border: 1px solid var(--color-metric-green);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  color: var(--color-text-on-dark);
+  position: relative;
+}
+
+/* Header row */
+.pricing-card__head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.pricing-card__brand {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.pricing-card--free .pricing-card__plan-name {
+  color: var(--color-text-on-light);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.pricing-card--pro .pricing-card__plan-name {
+  color: var(--color-text-on-dark);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.pricing-card__current-badge {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+.pricing-card__popular-badge {
+  background: var(--color-metric-green-dim);
+  border-radius: var(--radius-full);
+  color: var(--color-metric-green);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+/* Price */
+.pricing-card__price-row {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.pricing-card--free .pricing-card__price {
+  color: var(--color-text-on-light);
+  font-size: 2.125rem;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+}
+
+.pricing-card--pro .pricing-card__price {
+  color: var(--color-text-on-dark);
+  font-size: 2.125rem;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+}
+
+.pricing-card--free .pricing-card__price-period {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.pricing-card--pro .pricing-card__price-period {
+  color: rgba(243, 245, 246, 0.55);
+  font-size: 0.875rem;
+}
+
+.pricing-card__tagline {
+  font-size: 0.8125rem;
+  margin: 0 0 var(--space-5);
+}
+
+.pricing-card--free .pricing-card__tagline {
+  color: var(--color-text-muted);
+}
+
+.pricing-card--pro .pricing-card__tagline {
+  color: rgba(243, 245, 246, 0.55);
+}
+
+/* Feature list */
+.pricing-card__features {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Footer actions */
+.pricing-card__footer {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.pricing-card__usage-hint {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0;
+  text-align: center;
+}
+
+.pricing-card--pro .pricing-card__usage-hint {
+  color: rgba(243, 245, 246, 0.45);
+}
+
+.pricing-card__action {
+  width: 100%;
+}
+
+/* Accept-style CTA on Pro card */
+.pricing-card__action--accept {
+  background: var(--color-metric-green) !important;
+  color: #04130c !important;
+}
+
+.pricing-card__action--accept:hover:not(:disabled) {
+  background: var(--color-coach-700) !important;
+}
+
+/* ── Pricing feature row ─────────────────────────────────────────────────── */
+
+.pricing-feature-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 11px;
+  padding: 9px 0;
+}
+
+.pricing-feature-row__icon {
+  align-items: center;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 19px;
+  justify-content: center;
+  margin-top: 1px;
+  width: 19px;
+}
+
+.pricing-feature-row__icon--free {
+  background: var(--color-surface-inset);
+}
+
+.pricing-feature-row__icon--pro {
+  background: var(--color-metric-green);
+}
+
+.pricing-feature-row__icon--off {
+  background: transparent;
+}
+
+.pricing-feature-row__label {
+  color: var(--color-text-secondary);
+  font-size: 0.84375rem;
+  line-height: 1.4;
+}
+
+.pricing-card--pro .pricing-feature-row__label {
+  color: rgba(207, 212, 215, 0.9);
+}
+
+.pricing-feature-row__label--off {
+  color: var(--color-text-muted);
+}
+
+.pricing-card--pro .pricing-feature-row__label--off {
+  color: rgba(243, 245, 246, 0.28);
+}
+
+/* ── Limit-reached banner (inline in chat) ──────────────────────────────── */
+
+.limit-reached-banner {
+  background: linear-gradient(180deg, #fbf8f3, #ffffff);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.limit-reached-banner__body {
+  padding: 18px 20px;
+}
+
+.limit-reached-banner__header {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.limit-reached-banner__icon-wrap {
+  align-items: center;
+  background: var(--color-metric-amber-dim);
+  border-radius: 9px;
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.limit-reached-banner__title {
+  color: var(--color-text-on-light);
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.limit-reached-banner__desc {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  margin: 0 0 var(--space-4);
+}
+
+.limit-reached-banner__chips {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.limit-reached-banner__chip {
+  align-items: center;
+  background: var(--color-surface-content-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: 11px;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  flex: 1;
+  font-size: 0.78125rem;
+  font-weight: 600;
+  gap: 7px;
+  padding: 10px 12px;
+}
+
+.limit-reached-banner__actions {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.6);
+  border-top: 1px solid var(--color-border-default);
+  display: flex;
+  gap: var(--space-2);
+  padding: 14px 20px;
+}
+
+.limit-reached-banner__cta {
+  flex: 1;
 }
 
 .coaching-hierarchy {
@@ -5249,4 +6153,794 @@ span.confirmation-card__meta {
 
 .coaching-hierarchy__context dd {
   margin: 0;
+}
+
+/* ==========================================================================
+   Dark theme — daily surfaces (today, longevity, plans)
+   Scoped under [data-theme="dark"] so light routes are never affected.
+   These rules beat the .app-shell__main--structured light overrides because
+   [data-theme="dark"] adds one attribute to the specificity chain.
+   ========================================================================== */
+
+/* ── Content area shell ── */
+[data-theme="dark"] .app-shell__main--structured {
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .app-shell__main--structured .page-header__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .app-shell__main--structured .page-header__description {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .app-shell__main--structured .page-header__eyebrow,
+[data-theme="dark"] .app-shell__main--structured .eyebrow {
+  color: var(--color-metric-green);
+}
+
+/* ── Section navigation ── */
+[data-theme="dark"] .section-nav {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .section-nav__link {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .section-nav__link:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+/* ── Command center layout ── */
+[data-theme="dark"] .command-center {
+  background: transparent;
+}
+
+/* ── Priority card (today hero) ── */
+[data-theme="dark"] .action-priority-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .action-priority-card__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .action-priority-card__metric {
+  color: var(--color-text-primary);
+}
+
+/* ── Domain cards ── */
+[data-theme="dark"] .domain-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .domain-card__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .domain-card__summary {
+  color: var(--color-text-muted);
+}
+
+/* ── Disclosure panels ── */
+[data-theme="dark"] .disclosure {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .disclosure__summary {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .disclosure__summary:hover {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .disclosure__content {
+  border-top-color: var(--color-border-default);
+}
+
+/* ── Panels ── */
+[data-theme="dark"] .app-shell__main--structured .training-workspace .panel,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .panel {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .app-shell__main--structured .training-workspace .panel-prominent,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .panel-prominent {
+  border-color: var(--color-metric-green);
+  box-shadow: 0 0 0 1px rgba(25, 195, 125, 0.2), var(--shadow-card);
+}
+
+[data-theme="dark"] .app-shell__main--structured .training-workspace .panel-secondary,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .panel-secondary {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+/* ── Nested / revision cards ── */
+[data-theme="dark"] .app-shell__main--structured .training-workspace .nested-card,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .nested-card,
+[data-theme="dark"] .app-shell__main--structured .training-workspace .training-revision-card,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .training-revision-card {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .app-shell__main--structured .training-workspace .training-session-card,
+[data-theme="dark"] .app-shell__main--structured .today-workspace .training-session-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+/* ── Canvas state messages in dark context ── */
+[data-theme="dark"] .state-message--canvas {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .state-message--canvas .state-message__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .state-message--canvas .state-message__description {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .state-message--canvas .state-message__spinner {
+  border-color: var(--color-border-default);
+  border-top-color: var(--color-metric-green);
+}
+
+/* ── Section/panel headings ── */
+[data-theme="dark"] .panel h2,
+[data-theme="dark"] .panel h3 {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .section-label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .muted-text {
+  color: var(--color-text-muted);
+}
+
+/* ── Training session cards (today item list) ── */
+[data-theme="dark"] .today-workspace .training-session-card--planned {
+  border-color: var(--color-metric-blue);
+  box-shadow: 0 1px 0 rgba(58, 141, 255, 0.12);
+}
+
+[data-theme="dark"] .today-workspace .training-session-card--completed {
+  background: var(--color-metric-green-dim);
+  border-color: rgba(25, 195, 125, 0.35);
+}
+
+[data-theme="dark"] .today-workspace .training-session-card--skipped {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  opacity: 0.72;
+}
+
+/* ── Status chips on dark canvas ── */
+[data-theme="dark"] .badge.badge-info {
+  background: rgba(58, 141, 255, 0.14);
+  border-color: transparent;
+  color: var(--color-metric-blue);
+}
+
+[data-theme="dark"] .badge.badge-session-completed {
+  background: var(--color-metric-green-dim);
+  border-color: transparent;
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .badge.badge-session-planned {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* ── Training feedback callout ── */
+[data-theme="dark"] .training-feedback-callout {
+  background: rgba(58, 141, 255, 0.1);
+  border-color: rgba(58, 141, 255, 0.28);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .training-feedback-label {
+  color: var(--color-metric-blue);
+}
+
+/* ── Forms in dark context ── */
+[data-theme="dark"] .form-error {
+  color: var(--color-metric-red);
+}
+
+[data-theme="dark"] .training-schedule-field label {
+  color: var(--color-text-secondary);
+}
+
+/* ── Today workspace — two-column layout on desktop ── */
+/* Left (~70%): plan + workout + nutrition + habits
+   Right (~30%): hero card, next action, check-ins, details */
+@media (min-width: 960px) {
+  .today-workspace .command-center__layout {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-areas:
+      "hero hero"
+      "next next"
+      "plan checkins"
+      "wide wide";
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  }
+
+  .today-workspace .today-hero {
+    grid-area: hero;
+  }
+
+  .today-workspace .today-next-action {
+    grid-area: next;
+  }
+
+  .today-workspace .today-plan-panel {
+    grid-area: plan;
+  }
+
+  .today-workspace .today-check-ins-panel {
+    grid-area: checkins;
+  }
+
+  .today-workspace .today-details-panel {
+    grid-area: wide;
+  }
+}
+
+/* ── Today dark surface — card accent borders ── */
+[data-theme="dark"] .today-workspace .today-check-ins-panel {
+  border-top: 2px solid var(--color-metric-amber);
+}
+
+[data-theme="dark"] .today-workspace .today-plan-panel {
+  border-top: 2px solid var(--color-metric-blue);
+}
+
+/* ── Progress chip in dark context ── */
+[data-theme="dark"] .today-progress-chip {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+}
+
+/* ── Form inputs on dark canvas ── */
+[data-theme="dark"] .app-shell__main--structured .training-schedule-input,
+[data-theme="dark"] .app-shell__main--structured .form-textarea,
+[data-theme="dark"] .app-shell__main--structured input[type="number"],
+[data-theme="dark"] .app-shell__main--structured input[type="date"] {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  color: var(--color-text-primary);
+  color-scheme: dark;
+}
+
+[data-theme="dark"] .app-shell__main--structured .training-schedule-input::placeholder,
+[data-theme="dark"] .app-shell__main--structured .form-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* ── Confirmation links on dark canvas ── */
+[data-theme="dark"] .confirmation-card__link {
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .confirmation-card__link:hover {
+  color: var(--color-coach-400);
+}
+
+/* ==========================================================================
+   Longevity — dark canvas overrides (Phase 3b)
+   Scoped to [data-theme="dark"] .longevity-dashboard to avoid bleeding into
+   other structured-canvas dark screens.
+   ========================================================================== */
+
+/* ── Dashboard cards on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .dashboard-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__value {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__hint {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-card__footer {
+  border-color: var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* ── Domain accent top-borders on longevity cards (Today/Workouts/Nutrition row) ──
+   The hero section is the first child; Today is 2nd, Workouts 3rd, Nutrition 4th. */
+[data-theme="dark"] .longevity-dashboard .dashboard-grid--profile > :nth-child(2) {
+  border-top: 2px solid var(--color-metric-amber);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-grid--profile > :nth-child(3) {
+  border-top: 2px solid var(--color-metric-blue);
+}
+
+[data-theme="dark"] .longevity-dashboard .dashboard-grid--profile > :nth-child(4) {
+  border-top: 2px solid var(--color-metric-green);
+}
+
+/* ── Coach card on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .dashboard-card--coach {
+  border-color: rgba(25, 195, 125, 0.3);
+  box-shadow: 0 0 0 1px rgba(25, 195, 125, 0.12), var(--shadow-card);
+}
+
+/* ── Signal list items on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .overview-signal-list li {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .longevity-dashboard .overview-signal-list span {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .longevity-dashboard .overview-signal-list strong {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .longevity-dashboard .overview-signal-list p {
+  color: var(--color-text-muted);
+}
+
+/* ── Deferred domains summary on dark canvas ── */
+[data-theme="dark"] .longevity-dashboard .overview-deferred-domains > summary {
+  color: var(--color-text-muted);
+}
+
+/* ── Sparse hints and read-only notices on dark canvas ── */
+[data-theme="dark"] .longevity-dashboard .overview-sparse-hint,
+[data-theme="dark"] .longevity-dashboard .overview-readonly-notice {
+  color: var(--color-text-muted);
+}
+
+/* ── Trend section titles on dark canvas ── */
+[data-theme="dark"] .longevity-dashboard .section-label {
+  color: var(--color-text-muted);
+}
+
+/* ── Prompt chips on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .chat-prompt-chips {
+  justify-content: flex-start;
+}
+
+[data-theme="dark"] .longevity-dashboard .chat-prompt-chip {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .longevity-dashboard .chat-prompt-chip:hover:not(:disabled) {
+  border-color: var(--color-metric-green);
+  color: var(--color-metric-green);
+}
+
+/* ── Wellbeing trend chart on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-row__label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-day__label {
+  color: var(--color-text-muted);
+}
+
+/* Mood fill → coach-green on dark */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-fill--mood {
+  background: var(--color-metric-green);
+}
+
+/* Stress fill → indigo on dark */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-fill--stress {
+  background: var(--color-metric-indigo);
+}
+
+/* Bar track for wellbeing chart → dimmed white on dark */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-bar {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Wellbeing trend meta on dark canvas ── */
+[data-theme="dark"] .longevity-dashboard .wellbeing-trend-meta {
+  color: var(--color-text-muted);
+}
+
+/* ── Notice banner on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .notice-inline {
+  background: rgba(245, 165, 36, 0.1);
+  border-color: rgba(245, 165, 36, 0.28);
+  color: var(--color-text-secondary);
+}
+
+/* ── Coach button on dark longevity canvas ── */
+[data-theme="dark"] .longevity-dashboard .button-coach {
+  background: var(--color-metric-green);
+  color: #04130c;
+}
+
+[data-theme="dark"] .longevity-dashboard .button-coach:hover:not(:disabled) {
+  background: var(--color-coach-400);
+  color: #04130c;
+}
+
+/* ── Wellbeing scale inputs on dark ── */
+[data-theme="dark"] .wellbeing-scale-option {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .wellbeing-scale-option:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .wellbeing-scale-option--selected {
+  background: var(--color-metric-green-dim);
+  border-color: var(--color-metric-green);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .wellbeing-check-in-summary__line {
+  color: var(--color-text-primary);
+}
+
+/* ── Recovery focus panel on dark ── */
+[data-theme="dark"] .recovery-focus-message {
+  color: var(--color-text-primary);
+}
+
+/* ── Today check-in date picker dark ── */
+[data-theme="dark"] .today-workspace .today-date-picker {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  border-radius: var(--radius-md);
+}
+
+/* ==========================================================================
+   Plans — dark canvas overrides (Phase 3c)
+   Training, Nutrition, and Progress screens use [data-theme="dark"].
+   Scoped so light routes are never affected.
+   ========================================================================== */
+
+/* ── Plan-view workspace panels ── */
+[data-theme="dark"] .plan-view .panel,
+[data-theme="dark"] .plan-view__panel {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .plan-view .panel-prominent,
+[data-theme="dark"] .plan-view__panel.panel-prominent {
+  border-color: var(--color-metric-blue);
+  box-shadow: 0 0 0 1px rgba(58, 141, 255, 0.18), var(--shadow-card);
+}
+
+[data-theme="dark"] .plan-view .panel-secondary,
+[data-theme="dark"] .plan-view__panel.panel-secondary {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+/* Nutrition plan prominent panel — green accent */
+[data-theme="dark"] .nutrition-workspace .plan-view .panel-prominent,
+[data-theme="dark"] .nutrition-workspace .plan-view__panel.panel-prominent {
+  border-color: var(--color-metric-green);
+  box-shadow: 0 0 0 1px rgba(25, 195, 125, 0.18), var(--shadow-card);
+}
+
+/* ── Nested / revision cards inside plan-view ── */
+[data-theme="dark"] .plan-view .nested-card,
+[data-theme="dark"] .plan-view .training-revision-card {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .plan-view .training-revision-card.active {
+  background: var(--color-surface-card);
+  border-color: var(--color-metric-blue);
+  box-shadow: inset 0 0 0 1px rgba(58, 141, 255, 0.28);
+}
+
+/* ── Plan header ── */
+[data-theme="dark"] .plan-view__header {
+  border-bottom-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .plan-view__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .plan-view__summary {
+  color: var(--color-text-secondary);
+}
+
+/* ── Plan fact DL ── */
+[data-theme="dark"] .plan-view__fact dt {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .plan-view__fact dd {
+  color: var(--color-text-primary);
+}
+
+/* ── Panel title + intro ── */
+[data-theme="dark"] .plan-view__panel-title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .plan-view__panel-intro {
+  color: var(--color-text-muted);
+}
+
+/* ── Change-via-chat notice ── */
+[data-theme="dark"] .plan-view__change-notice {
+  background: rgba(58, 141, 255, 0.08);
+  border-color: rgba(58, 141, 255, 0.22);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .nutrition-workspace .plan-view__change-notice {
+  background: rgba(25, 195, 125, 0.08);
+  border-color: rgba(25, 195, 125, 0.22);
+}
+
+[data-theme="dark"] .plan-view__change-notice-copy {
+  color: var(--color-text-secondary);
+}
+
+/* ── Execution callout ── */
+[data-theme="dark"] .plan-view .training-execution-callout {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .plan-view .training-execution-callout h3 {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .plan-view .training-execution-callout .muted-text {
+  color: var(--color-text-muted);
+}
+
+/* ── Revision-history disclosure ── */
+[data-theme="dark"] .plan-view__revision-history-summary {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .plan-view__revision-history-summary:hover {
+  color: var(--color-text-secondary);
+}
+
+/* ── CTA links on dark plan canvas ── */
+[data-theme="dark"] .plan-view__cta--primary {
+  background: rgba(58, 141, 255, 0.12);
+  border-color: rgba(58, 141, 255, 0.32);
+  color: var(--color-metric-blue);
+}
+
+[data-theme="dark"] .plan-view__cta--primary:hover {
+  background: rgba(58, 141, 255, 0.18);
+  color: var(--color-metric-blue);
+}
+
+[data-theme="dark"] .nutrition-workspace .plan-view__cta--primary {
+  background: rgba(25, 195, 125, 0.12);
+  border-color: rgba(25, 195, 125, 0.32);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .nutrition-workspace .plan-view__cta--primary:hover {
+  background: rgba(25, 195, 125, 0.18);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .plan-view__cta--secondary {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .plan-view__cta--secondary:hover {
+  color: var(--color-text-secondary);
+}
+
+/* ── Training-day card items (plan-view detail cards) ── */
+[data-theme="dark"] .plan-view__detail-card {
+  background: var(--color-surface-muted);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .plan-view__detail-card--active {
+  border-color: var(--color-metric-blue);
+  box-shadow: inset 0 0 0 1px rgba(58, 141, 255, 0.28);
+}
+
+[data-theme="dark"] .plan-view__detail-header strong {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .plan-view__detail-header span {
+  color: var(--color-text-muted);
+}
+
+/* ── Training exercise list items ── */
+[data-theme="dark"] .training-exercise-list li {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .training-day-header span {
+  color: var(--color-text-muted);
+}
+
+/* ── Section headings inside plan panels ── */
+[data-theme="dark"] .training-notes h3 {
+  color: var(--color-text-primary);
+}
+
+/* ── Revision badge on dark plan canvas ── */
+[data-theme="dark"] .plan-view__revision-badge.badge-valid {
+  background: var(--color-metric-green-dim);
+  border: 1px solid rgba(25, 195, 125, 0.28);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .plan-view__revision-badge.badge-neutral {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* ── Week strip / trend strip on dark plan canvas ── */
+[data-theme="dark"] .plan-view__week-context .section-label {
+  color: var(--color-text-muted);
+}
+
+/* ── Training progress section separator ── */
+[data-theme="dark"] .training-progress-section {
+  border-top-color: var(--color-border-default);
+}
+
+/* ── Progress panel (cross-domain review) on dark canvas ── */
+[data-theme="dark"] .training-progress-panel .progress-summary-header h2 {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .training-progress-panel .section-label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__hint {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .goals li {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .training-progress-panel .goals strong {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .training-progress-panel .goals span {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .goals p {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .badge.badge-valid {
+  background: var(--color-metric-green-dim);
+  border: 1px solid rgba(25, 195, 125, 0.28);
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .training-progress-panel .badge.badge-pending {
+  background: var(--color-metric-amber-dim);
+  border: 1px solid rgba(245, 165, 36, 0.28);
+  color: var(--color-metric-amber);
+}
+
+[data-theme="dark"] .training-progress-panel .badge.badge-neutral {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* Notice inline on dark progress panel */
+[data-theme="dark"] .training-progress-panel .notice-inline {
+  background: rgba(245, 165, 36, 0.08);
+  border-color: rgba(245, 165, 36, 0.22);
+  color: var(--color-text-secondary);
+}
+
+/* Tools disclosure on dark progress panel */
+[data-theme="dark"] .training-progress-tools-disclosure {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+}
+
+[data-theme="dark"] .training-progress-tools-disclosure .disclosure__summary {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-tools-disclosure .disclosure__content {
+  border-top-color: var(--color-border-default);
+}
+
+/* ── Route wayfinding on dark canvas ── */
+[data-theme="dark"] .route-wayfinding__list li {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .route-wayfinding__list li + li::before {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .route-wayfinding__link {
+  color: var(--color-metric-green);
+}
+
+[data-theme="dark"] .route-wayfinding__link:hover {
+  color: var(--color-coach-400);
+}
+
+[data-theme="dark"] .route-wayfinding__current {
+  color: var(--color-text-primary);
+}
+
+/* ── Page header on dark plan canvas ── */
+[data-theme="dark"] .plan-view ~ .training-progress-section .progress-summary-header {
+  border-bottom-color: var(--color-border-default);
+}
+
+/* ── Structured canvas light overrides that bleed into plan-view — neutralise ── */
+[data-theme="dark"] .app-shell__main--structured .plan-view .notice-inline {
+  background: rgba(58, 141, 255, 0.08);
+  border-color: rgba(58, 141, 255, 0.22);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .app-shell__main--structured .nutrition-workspace .plan-view .notice-inline {
+  background: rgba(25, 195, 125, 0.08);
+  border-color: rgba(25, 195, 125, 0.22);
 }

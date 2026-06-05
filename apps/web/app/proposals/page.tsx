@@ -1,7 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
-import { AppNav } from "../../src/components/app-nav";
+import { AppLayout } from "../../src/components/app-layout";
 import { ProposalInspector } from "../../src/components/proposals/proposal-inspector";
+import { PageContent, PageHeader } from "../../src/components/ui";
 
 export default async function ProposalsPage() {
   const { isAuthenticated } = await auth();
@@ -11,17 +12,15 @@ export default async function ProposalsPage() {
   }
 
   return (
-    <main className="shell shell-wide">
-      <section className="card card-wide">
-        <AppNav />
-        <p className="eyebrow">Phase 3 proposal inspector</p>
-        <h1>Proposal audit</h1>
-        <p>
-          Inspect proposal status, validation results, proposed changes, and applied
-          structured state references.
-        </p>
+    <AppLayout>
+      <PageContent>
+        <PageHeader
+          eyebrow="Coach proposals"
+          title="Proposal audit"
+          description="Review AI-generated proposals, inspect validation results, and accept or decline changes."
+        />
         <ProposalInspector />
-      </section>
-    </main>
+      </PageContent>
+    </AppLayout>
   );
 }

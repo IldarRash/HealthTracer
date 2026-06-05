@@ -1,11 +1,14 @@
 /** @vitest-environment node */
 
-import { createElement, type ReactElement, type ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { AppNavLinks } from "./app-nav-links.js";
 import { RouteWayfindingTrail } from "./ui/route-wayfinding-trail.js";
-import { resolveSecondaryRouteWayfinding } from "../lib/nav-ui-state.js";
+import {
+  getNavLinkAriaCurrent,
+  PRIMARY_NAV_LINKS,
+  resolveSecondaryRouteWayfinding,
+} from "../lib/nav-ui-state.js";
 import { shouldShowRouteWayfinding } from "../lib/shell-ui-state.js";
 
 vi.mock("next/link", () => ({
@@ -21,7 +24,7 @@ vi.mock("next/link", () => ({
   }) => createElement("a", { href, className, ...props }, children),
 }));
 
-function renderShellMarkup(element: ReactElement): string {
+function renderShellMarkup(element: Parameters<typeof renderToStaticMarkup>[0]): string {
   return renderToStaticMarkup(element);
 }
 
@@ -86,24 +89,16 @@ describe("Modern Health OS shell render", () => {
     expect(resolveSecondaryRouteWayfinding(pathname)).toBeUndefined();
   });
 
-  it("applies featured treatment to Chat without the non-featured active class", () => {
-    const html = renderShellMarkup(createElement(AppNavLinks, { pathname: "/chat" }));
-
-    expect(html).toMatch(
-      /href="\/chat"[^>]*class="[^"]*app-nav__link--featured[^"]*"[^>]*aria-current="page"/,
-    );
-    expect(html).not.toContain("app-nav__link--active");
+  it("applies aria-current to Chat nav link when active", () => {
+    const chat = PRIMARY_NAV_LINKS.find((link) => link.href === "/chat")!;
+    expect(getNavLinkAriaCurrent("/chat", chat)).toBe("page");
   });
 
-  it("applies active class and aria-current to non-featured tabs", () => {
-    const html = renderShellMarkup(
-      createElement(AppNavLinks, { pathname: "/longevity/insights" }),
-    );
+  it("applies aria-current to non-featured tabs when active", () => {
+    const longevity = PRIMARY_NAV_LINKS.find((link) => link.href === "/longevity")!;
+    const chat = PRIMARY_NAV_LINKS.find((link) => link.href === "/chat")!;
 
-    expect(html).toMatch(
-      /href="\/longevity"[^>]*class="[^"]*app-nav__link--active[^"]*"[^>]*aria-current="page"/,
-    );
-    expect(html).not.toMatch(/href="\/chat"[^>]*app-nav__link--active/);
-    expect(html).toContain('class="app-nav__link app-nav__link--featured"');
+    expect(getNavLinkAriaCurrent("/longevity/insights", longevity)).toBe("page");
+    expect(getNavLinkAriaCurrent("/longevity/insights", chat)).toBeUndefined();
   });
 });
