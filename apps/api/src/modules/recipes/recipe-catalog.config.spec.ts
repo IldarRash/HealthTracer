@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveRecipeCatalogProviderMode } from "./recipe-catalog.config.js";
+import { SeededOnlyRecipeCatalogProvider, resolveRecipeCatalogProviderMode } from "./recipe-catalog.config.js";
+import { SEEDED_ONLY_PROVIDER, THEMEALDB_PROVIDER } from "./recipe-catalog-provider.js";
 
 describe("recipe catalog provider configuration", () => {
   const original = process.env.RECIPE_CATALOG_PROVIDER;
@@ -22,5 +23,22 @@ describe("recipe catalog provider configuration", () => {
     process.env.RECIPE_CATALOG_PROVIDER = "seeded_only";
 
     expect(resolveRecipeCatalogProviderMode()).toBe("seeded_only");
+  });
+});
+
+describe("SeededOnlyRecipeCatalogProvider", () => {
+  it("uses its own distinct providerName instead of the TheMealDB label", () => {
+    const provider = new SeededOnlyRecipeCatalogProvider();
+
+    expect(provider.providerName).toBe(SEEDED_ONLY_PROVIDER);
+    expect(provider.providerName).not.toBe(THEMEALDB_PROVIDER);
+  });
+
+  it("returns an empty catalog", async () => {
+    const provider = new SeededOnlyRecipeCatalogProvider();
+
+    const drafts = await provider.fetchByGenericCategories(["breakfast"]);
+
+    expect(drafts).toEqual([]);
   });
 });

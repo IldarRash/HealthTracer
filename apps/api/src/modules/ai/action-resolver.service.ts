@@ -1,6 +1,5 @@
 import type {
   AiStructuredOutput,
-  CatalogIntentId,
   CatalogProposalIntent,
   FinalDecisionOutput,
   WorkoutPlanProposalChanges,
@@ -17,19 +16,6 @@ import { Injectable } from "@nestjs/common";
 import { PLAIN_REPLY_ACTION_VARIANT_ID } from "./action-variant-catalog.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
 
-/** Reserved for future coach payloads; Phase 2 never executes these. */
-export type CoachDirectActionAttempt = {
-  type: string;
-  payload?: unknown;
-};
-
-export type ActionResolverResolveInput = {
-  output: AiStructuredOutput;
-  catalogIntentId: CatalogIntentId;
-  allowedProposalIntents: readonly CatalogProposalIntent[];
-  directActions?: readonly CoachDirectActionAttempt[];
-};
-
 export type ActionResolverFinalDecisionInput = {
   /**
    * The validated output from DecisionMakerExecutorService.
@@ -37,8 +23,9 @@ export type ActionResolverFinalDecisionInput = {
   finalDecision: FinalDecisionOutput;
   /**
    * The selected domain fan-out entries whose union of allowedProposalIntents
-   * forms the active capability allowlist. Each domain's proposals are filtered
-   * to its own domain's allowlist.
+   * forms the active capability allowlist. Proposals are filtered to the UNION
+   * of all selected domains' allowedProposalIntents (built by
+   * buildUnionAllowedIntents), not per-domain.
    */
   selectedDomains: readonly DomainFanoutEntry[];
   /**
@@ -153,18 +140,6 @@ export class ActionResolverService {
     };
   }
 
-  resolveProposalOnlyOutput(input: ActionResolverResolveInput): AiStructuredOutput {
-    // Phase 2: direct mutation actions are deferred; any supplied directActions are ignored.
-    void input.directActions;
-
-    return {
-      reply: input.output.reply,
-      proposals: filterProposalsToAllowedIntents(
-        input.allowedProposalIntents,
-        input.output.proposals,
-      ),
-    };
-  }
 }
 
 // ---------------------------------------------------------------------------

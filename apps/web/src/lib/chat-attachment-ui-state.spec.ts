@@ -49,7 +49,7 @@ function createReadyRecord(
     linkedDocumentId: null,
     linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
     consent: null,
-    recognition: null,
+    // recognition field removed (B3 removal, C4 cluster)
     failureReason: null,
     retentionPolicy: "ephemeral_recognition",
     expiresAt: null,
@@ -135,7 +135,7 @@ describe("chat attachment UI state", () => {
       record: createReadyRecord({
         category: "unclassified",
         status: "queued",
-        recognition: null,
+        // recognition field removed (B3 removal, C4 cluster)
       }),
       phase: "uploaded" as const,
     };
@@ -178,7 +178,7 @@ describe("chat attachment UI state", () => {
       attachmentRefId: "a1000001-0000-4000-8000-000000000001",
       category: "food_photo",
       status: "low_confidence",
-      recognition: null,
+      // recognition field removed (B3 removal, C4 cluster)
     };
 
     const fallback = resolveAttachmentOutcomeFallbackCopy(foodOutcome);

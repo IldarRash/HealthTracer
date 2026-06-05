@@ -38,25 +38,7 @@ export type WorkoutWeekday = z.infer<typeof workoutWeekdaySchema>;
 
 export const WORKOUT_WEEKDAYS = workoutWeekdaySchema.options;
 
-const WEEKDAY_LABEL_TO_ENUM: Record<string, WorkoutWeekday> = {
-  monday: "monday",
-  mon: "monday",
-  tuesday: "tuesday",
-  tue: "tuesday",
-  tues: "tuesday",
-  wednesday: "wednesday",
-  wed: "wednesday",
-  thursday: "thursday",
-  thu: "thursday",
-  thur: "thursday",
-  thurs: "thursday",
-  friday: "friday",
-  fri: "friday",
-  saturday: "saturday",
-  sat: "saturday",
-  sunday: "sunday",
-  sun: "sunday",
-};
+// WEEKDAY_LABEL_TO_ENUM deleted along with inferWeekdayFromDayLabel (B5 removal, C4 cluster).
 
 const UNSAFE_WORKOUT_MEDICAL_PATTERNS = [
   /\bdiagnos(e|is|ed|ing)\b/i,
@@ -83,10 +65,8 @@ export const workoutExerciseSchema = z.object({
 
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 
-export const workoutExercisePayloadSchema = z.union([
-  z.string().min(1).max(160),
-  workoutExerciseSchema,
-]);
+// B6 removal: string arm deleted. Only the structured object form is accepted.
+export const workoutExercisePayloadSchema = workoutExerciseSchema;
 
 export type WorkoutExercisePayload = z.infer<typeof workoutExercisePayloadSchema>;
 
@@ -139,25 +119,24 @@ export const workoutPlanExerciseSchema = z.object({
 
 export type WorkoutPlanExercise = z.infer<typeof workoutPlanExerciseSchema>;
 
+// B6 removal: string arm deleted. Legacy object (workoutExerciseSchema) and structured
+// catalog-backed (workoutPlanExerciseSchema) forms remain.
+// KEEP: isLegacyWorkoutPlanExerciseObject handles the legacy OBJECT form — only the STRING
+// arm was in B6 scope.
 export const workoutPlanExerciseEntrySchema = z.union([
-  z.string().min(1).max(160),
   workoutExerciseSchema,
   workoutPlanExerciseSchema,
 ]);
 
 export type WorkoutPlanExerciseEntry = z.infer<typeof workoutPlanExerciseEntrySchema>;
 
-export const workoutPlanDaySchema = z
-  .object({
-    weekday: workoutWeekdaySchema.optional(),
-    /** Legacy free-text day label retained for older revisions. */
-    day: z.string().min(1).max(80).optional(),
-    focus: z.string().min(1).max(160),
-    exercises: z.array(workoutPlanExerciseEntrySchema).max(20).default([]),
-  })
-  .refine((day) => day.weekday != null || day.day != null, {
-    message: "Either weekday or day label is required.",
-  });
+// B5 removal: free-text `day` field and the `day`-as-fallback `.refine` deleted.
+// `weekday` is now required. Pre-launch disposable DB — no backfill needed.
+export const workoutPlanDaySchema = z.object({
+  weekday: workoutWeekdaySchema,
+  focus: z.string().min(1).max(160),
+  exercises: z.array(workoutPlanExerciseEntrySchema).max(20).default([]),
+});
 
 export type WorkoutPlanDay = z.infer<typeof workoutPlanDaySchema>;
 
@@ -623,9 +602,8 @@ export interface WorkoutPlanDomainValidationOptions {
   requireStructuredPlan?: boolean;
 }
 
-export function inferWeekdayFromDayLabel(label: string): WorkoutWeekday | undefined {
-  return WEEKDAY_LABEL_TO_ENUM[label.trim().toLowerCase()];
-}
+// inferWeekdayFromDayLabel deleted (B5 removal, C4 cluster) — free-text day label no longer
+// accepted by workoutPlanDaySchema; weekday is now required.
 
 export function isStructuredWorkoutPlanExercise(
   entry: WorkoutPlanExerciseEntry,
@@ -642,16 +620,13 @@ export function isLegacyWorkoutPlanExerciseObject(
 export function normalizeWorkoutPlanExerciseEntry(
   entry: WorkoutPlanExerciseEntry,
 ): WorkoutPlanExercise {
-  if (typeof entry === "string") {
-    return {
-      snapshot: { name: entry },
-    };
-  }
-
+  // B6 removal: typeof entry === "string" branch deleted.
   if (isStructuredWorkoutPlanExercise(entry)) {
     return entry;
   }
 
+  // Legacy object form (WorkoutExercise with name/target/sets/reps/notes).
+  // KEEP: isLegacyWorkoutPlanExerciseObject — only the string arm was in B6 scope.
   return {
     snapshot: { name: entry.name },
     sets: entry.sets ?? null,
@@ -662,11 +637,9 @@ export function normalizeWorkoutPlanExerciseEntry(
 }
 
 export function normalizeWorkoutPlanDay(day: WorkoutPlanDay): WorkoutPlanDay {
-  const weekday = day.weekday ?? (day.day ? inferWeekdayFromDayLabel(day.day) : undefined);
-
+  // B5 removal: free-text `day` fallback deleted; weekday is required and already set.
   return {
     ...day,
-    weekday,
     exercises: day.exercises.map(normalizeWorkoutPlanExerciseEntry),
   };
 }
@@ -679,20 +652,14 @@ export function normalizeWorkoutPlanPayload(payload: WorkoutPlanPayload): Workou
 }
 
 function collectWorkoutPlanText(payload: WorkoutPlanPayload): string[] {
+  // B5 removal: day.day branch deleted (free-text label gone).
+  // B6 removal: typeof entry === "string" branch deleted.
   const texts = [payload.title, payload.summary, ...payload.notes];
 
   for (const day of payload.days) {
     texts.push(day.focus);
-    if (day.day) {
-      texts.push(day.day);
-    }
 
     for (const entry of day.exercises) {
-      if (typeof entry === "string") {
-        texts.push(entry);
-        continue;
-      }
-
       if (isStructuredWorkoutPlanExercise(entry)) {
         texts.push(entry.snapshot.name);
         if (entry.recommendedLoadGuidance) {
@@ -707,6 +674,7 @@ function collectWorkoutPlanText(payload: WorkoutPlanPayload): string[] {
         continue;
       }
 
+      // Legacy object form (WorkoutExercise with name/target/sets/reps/notes).
       texts.push(entry.name);
       if (entry.target) {
         texts.push(entry.target);
@@ -771,43 +739,25 @@ export function getWorkoutPlanDomainErrors(
     errors.push("workout: At least one plan day must include exercises.");
   }
 
+  // B5 removal: unresolvedLegacyLabels path and day.day fallback deleted.
+  // B6 removal: typeof entry === "string" check deleted.
   const resolvedWeekdays: WorkoutWeekday[] = [];
-  const unresolvedLegacyLabels: string[] = [];
 
   for (const day of payload.days) {
-    const weekday =
-      day.weekday ?? (day.day ? inferWeekdayFromDayLabel(day.day) : undefined);
-
-    if (weekday) {
-      resolvedWeekdays.push(weekday);
-    } else if (day.day) {
-      unresolvedLegacyLabels.push(day.day.trim().toLowerCase());
-    }
+    resolvedWeekdays.push(day.weekday);
   }
 
   if (new Set(resolvedWeekdays).size !== resolvedWeekdays.length) {
     errors.push("workout: Weekday assignments must be unique across plan days.");
   }
 
-  if (new Set(unresolvedLegacyLabels).size !== unresolvedLegacyLabels.length) {
-    errors.push("workout: Legacy day labels must be unique when weekday is absent.");
-  }
-
   if (requireStructuredPlan) {
-    const missingWeekday = payload.days.some((day) => {
-      const weekday = day.weekday ?? (day.day ? inferWeekdayFromDayLabel(day.day) : undefined);
-      return weekday == null;
-    });
-
-    if (missingWeekday) {
-      errors.push(
-        "workout: Structured workout plans must assign a weekday (monday-sunday) to every day.",
-      );
-    }
+    // weekday is now required on workoutPlanDaySchema — no need to re-check for missing.
 
     payload.days.forEach((day, dayIndex) => {
       day.exercises.forEach((entry, exerciseIndex) => {
-        if (typeof entry === "string" || isLegacyWorkoutPlanExerciseObject(entry)) {
+        // KEEP: isLegacyWorkoutPlanExerciseObject — legacy OBJECT form still checked here.
+        if (isLegacyWorkoutPlanExerciseObject(entry)) {
           errors.push(
             `workout: days[${dayIndex}].exercises[${exerciseIndex}] must use structured catalog-backed exercises for new proposals.`,
           );
@@ -1464,16 +1414,14 @@ export function normalizeWorkoutSessionExerciseEntry(
     return entry;
   }
 
-  const planEntry: WorkoutPlanExerciseEntry =
-    typeof entry === "string"
-      ? entry
-      : {
-          name: entry.name,
-          target: entry.target ?? null,
-          sets: entry.sets ?? null,
-          reps: entry.reps ?? null,
-          notes: entry.notes ?? null,
-        };
+  // B6 removal: typeof entry === "string" branch deleted.
+  const planEntry: WorkoutPlanExerciseEntry = {
+    name: entry.name,
+    target: entry.target ?? null,
+    sets: entry.sets ?? null,
+    reps: entry.reps ?? null,
+    notes: entry.notes ?? null,
+  };
 
   const normalized = normalizeWorkoutPlanExerciseEntry(planEntry);
 

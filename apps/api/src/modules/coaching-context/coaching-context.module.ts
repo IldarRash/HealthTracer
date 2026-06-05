@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { env } from "../../env.js";
 import { AiBehaviorModule } from "../ai/ai-behavior.module.js";
 import { DocumentsModule } from "../documents/documents.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
@@ -13,14 +14,10 @@ import { UsersModule } from "../users/users.module.js";
 import { WorkoutsModule } from "../workouts/workouts.module.js";
 import { CoachingContextService } from "./coaching-context.service.js";
 import { ContextBudgetPolicyService } from "./context-budget-policy.service.js";
-import { createContextCompressionProvider } from "./context-compression.factory.js";
 import { ContextCompressionService } from "./context-compression.service.js";
-import {
-  CONTEXT_COMPRESSION_FALLBACK_PROVIDER,
-  CONTEXT_COMPRESSION_PROVIDER,
-} from "./context-compression.tokens.js";
+import { CONTEXT_COMPRESSION_PROVIDER } from "./context-compression.tokens.js";
 import { ContextExpansionPolicyService } from "./context-expansion-policy.service.js";
-import { StubContextCompressionProvider } from "./stub-context-compression.provider.js";
+import { OpenAiContextCompressionProvider } from "./openai-context-compression.provider.js";
 
 @Module({
   imports: [
@@ -39,14 +36,20 @@ import { StubContextCompressionProvider } from "./stub-context-compression.provi
   ],
   providers: [
     ContextBudgetPolicyService,
-    StubContextCompressionProvider,
     {
       provide: CONTEXT_COMPRESSION_PROVIDER,
-      useFactory: () => createContextCompressionProvider(),
-    },
-    {
-      provide: CONTEXT_COMPRESSION_FALLBACK_PROVIDER,
-      useExisting: StubContextCompressionProvider,
+      useFactory: () => {
+        if (env.AI_COACH_PROVIDER === "openai" && env.OPENAI_API_KEY) {
+          return new OpenAiContextCompressionProvider({
+            apiKey: env.OPENAI_API_KEY,
+            model: env.OPENAI_MODEL,
+          });
+        }
+
+        // No provider available (missing key); ContextCompressionService degrades to
+        // summary:null via @Optional() injection (S2).
+        return undefined;
+      },
     },
     ContextCompressionService,
     ContextExpansionPolicyService,

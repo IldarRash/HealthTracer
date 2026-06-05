@@ -57,7 +57,8 @@ const sessionExercise = (
 describe("exercise catalog UI state", () => {
   it("resolves catalog metadata from plan and session exercises", () => {
     expect(resolvePlanExerciseCatalogMetadata(catalogExercise)?.source).toBe("catalog");
-    expect(resolvePlanExerciseCatalogMetadata("Goblet squat")).toBeNull();
+    // B6 removal: string exercise form removed; legacy object form still returns null (no catalog).
+    expect(resolvePlanExerciseCatalogMetadata({ name: "Goblet squat" })).toBeNull();
     expect(
       resolvePlanExerciseCatalogMetadata({
         snapshot: { name: "Legacy press" },

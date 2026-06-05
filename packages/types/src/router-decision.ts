@@ -51,12 +51,11 @@ export type RouterDirectCommand = z.infer<typeof routerDirectCommandSchema>;
 // RouterDecisionRequest
 // ---------------------------------------------------------------------------
 
+// The router receives attachment presence + category only.
+// mimeType and consentState are not routing signals and are never supplied
+// to the router by the orchestrator.
 export const routerAttachmentHintSchema = z.object({
   category: z.string().min(1).max(80),
-  mimeType: z.string().min(1).max(120).optional(),
-  consentState: z
-    .enum(["granted", "needs_consent", "not_required"])
-    .optional(),
 });
 
 export type RouterAttachmentHint = z.infer<typeof routerAttachmentHintSchema>;

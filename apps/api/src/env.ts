@@ -16,7 +16,7 @@ export const apiEnvSchema = z.object({
   CLERK_JWKS_URL: z.string().url().optional(),
   DOCUMENT_STORAGE_PATH: z.string().min(1).default(".data/documents"),
   CHAT_ATTACHMENT_STORAGE_PATH: z.string().min(1).default(".data/chat-attachments"),
-  AI_COACH_PROVIDER: z.enum(["stub", "openai"]).default("stub"),
+  AI_COACH_PROVIDER: z.literal("openai").default("openai"),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
   CORS_ORIGINS: z.string().min(1).optional(),

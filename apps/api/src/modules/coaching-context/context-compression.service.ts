@@ -12,13 +12,8 @@ import {
 } from "@health/types";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { ContextPlanReviewSignals } from "./context-budget-policy.service.js";
-import { createContextCompressionProvider } from "./context-compression.factory.js";
 import type { ContextCompressionProvider } from "./context-compression.provider.js";
-import {
-  CONTEXT_COMPRESSION_FALLBACK_PROVIDER,
-  CONTEXT_COMPRESSION_PROVIDER,
-} from "./context-compression.tokens.js";
-import { StubContextCompressionProvider } from "./stub-context-compression.provider.js";
+import { CONTEXT_COMPRESSION_PROVIDER } from "./context-compression.tokens.js";
 
 export interface CompressForTurnInput {
   packet: AgentContextPacket;
@@ -36,24 +31,25 @@ export interface CompressForTurnResult {
 
 @Injectable()
 export class ContextCompressionService {
-  private readonly provider: ContextCompressionProvider;
-  private readonly fallbackProvider: ContextCompressionProvider;
+  private readonly provider: ContextCompressionProvider | undefined;
 
   constructor(
     @Optional()
     @Inject(CONTEXT_COMPRESSION_PROVIDER)
     provider?: ContextCompressionProvider,
-    @Optional()
-    @Inject(CONTEXT_COMPRESSION_FALLBACK_PROVIDER)
-    fallbackProvider?: ContextCompressionProvider,
   ) {
-    this.provider = provider ?? createContextCompressionProvider();
-    this.fallbackProvider = fallbackProvider ?? new StubContextCompressionProvider();
+    this.provider = provider;
   }
 
   async compressForTurn(input: CompressForTurnInput): Promise<CompressForTurnResult> {
     if (!input.budget.requiresCompression) {
       return { summary: null, notes: [] };
+    }
+
+    // S2: when no provider is configured (e.g. test env without an API key),
+    // degrade gracefully to null rather than throwing.
+    if (!this.provider) {
+      return { summary: null, notes: ["No compression provider configured; skipping compression."] };
     }
 
     const request = buildContextCompressionRequest(input);
@@ -72,34 +68,12 @@ export class ContextCompressionService {
         return { summary: parsed.data, notes };
       }
 
-      notes.push("Compression provider returned invalid output; using deterministic fallback.");
+      notes.push("Compression provider returned invalid output; skipping compression.");
     } catch {
-      notes.push("Compression provider failed; using deterministic fallback.");
+      notes.push("Compression provider failed; skipping compression.");
     }
 
-    return this.applyFallbackCompression(input, request, notes);
-  }
-
-  private async applyFallbackCompression(
-    input: CompressForTurnInput,
-    request: ContextCompressionRequest,
-    notes: string[],
-  ): Promise<CompressForTurnResult> {
-    try {
-      const raw = await this.fallbackProvider.compress({
-        packet: input.packet,
-        request,
-        budget: input.budget,
-      });
-      const parsed = safeParseContextCompressionSummary(raw);
-
-      if (parsed.success) {
-        return { summary: parsed.data, notes };
-      }
-    } catch {
-      // Fall through to null summary.
-    }
-
+    // S2: single-provider failure degrades to null — no second LLM call.
     return {
       summary: null,
       notes: [...notes, "Unable to produce typed compression summary."],

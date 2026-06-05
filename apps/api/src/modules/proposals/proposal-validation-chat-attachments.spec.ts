@@ -79,7 +79,7 @@ describe("ProposalValidationService chat attachment refs", () => {
       {
         title: "Imported plan",
         summary: "Draft",
-        days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
         attachmentRefId: "a1000001-0000-4000-8000-000000000001",
       },
     );
@@ -107,7 +107,7 @@ describe("ProposalValidationService chat attachment refs", () => {
       {
         title: "Imported plan",
         summary: "Draft",
-        days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
         attachmentRefId: "a1000001-0000-4000-8000-000000000001",
       },
     );
@@ -168,7 +168,7 @@ describe("ProposalValidationService chat attachment refs", () => {
         plan: {
           title: "Imported plan",
           summary: "Draft",
-          days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+          days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
         },
         sourceTrendObservationIds: [],
         attachmentRefId: "c1000008-0000-4000-8000-000000000008",

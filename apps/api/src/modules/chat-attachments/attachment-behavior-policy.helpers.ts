@@ -11,9 +11,3 @@ export function resolveAttachmentRetentionPolicyFromBehavior(
   return behavior.retention.byCategory[category];
 }
 
-export function interpolateAttachmentTemplate(
-  template: string,
-  values: Record<string, string>,
-): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => values[key] ?? "");
-}

@@ -57,10 +57,11 @@ Role templates live in `.claude/agents`.
 1. Inspect relevant architecture and product docs before changing code.
 2. Use `.cursor/references/best-practices.md` for external reference inspiration (reference material still lives under `.cursor/references`).
 3. Make the smallest vertical change that satisfies the task.
-4. Keep business logic out of UI components and controllers.
-5. Add or update focused tests for domain logic, schemas, UI states, and AI output handling.
-6. Run the narrowest useful validation command before summarizing.
-7. For Railway deployments, if a pushed change includes Drizzle migrations under `packages/db/drizzle`, do not consider deployment complete until the migration has been applied manually through Railway CLI, for example:
+4. When the change supersedes existing code, **delete the old object/logic in the same change** — pre-launch with no live users or persisted production data, the default is removal, not compatibility shims. See `.claude/rules/refactor-cleanup.md`.
+5. Keep business logic out of UI components and controllers.
+6. Add or update focused tests for domain logic, schemas, UI states, and AI output handling.
+7. Run the narrowest useful validation command before summarizing.
+8. For Railway deployments, if a pushed change includes Drizzle migrations under `packages/db/drizzle`, do not consider deployment complete until the migration has been applied manually through Railway CLI, for example:
    `railway.cmd run --service health-api powershell -NoProfile -Command '$env:DATABASE_URL=$env:MIGRATION_DATABASE_URL; pnpm --dir packages/db db:migrate'`.
    Keep API runtime `DATABASE_URL` pointed at Railway private networking; use the public migration URL only for the explicit migration command.
 
@@ -125,4 +126,4 @@ and must be read before changing the AI/chat subsystem.
 - Context budgets deny documents and sensitive health context by default, re-applied to every per-domain packet; config cannot enable those contexts because code-level safety floors remain authoritative.
 - Preserve chat safety invariants in code when changing orchestration: schemas, fail-closed config loading, safety floors, proposal validation, permissions, consent, no raw documents, no direct LLM mutation, executor guards, crisis boundaries, and provider isolation.
 - Runtime verification for the unified AI pipeline: AppModule/API startup OK, config sources are `file`, health/ready pass, and authenticated chat E2E requires a Clerk bearer token.
-- Medical attachments are consent-gated at upload by the user-declared category/document-type + MIME (no classifier); content is context-only and a save is a consent-gated proposal — never an auto-persisted `health_document`. Legacy `saved_health_document` JSON still parses via `parseStoredChatAttachmentRecognition` and is sanitized before API responses.
+- Medical attachments are consent-gated at upload by the user-declared category/document-type + MIME (no classifier); content is context-only and a save is a consent-gated proposal — never an auto-persisted `health_document`.

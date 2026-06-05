@@ -3,7 +3,6 @@ import type {
   ChatAttachmentCategory,
   ChatAttachmentCategorySource,
   ChatAttachmentConsent,
-  ChatAttachmentRecognitionEnvelope,
   ChatAttachmentRetentionPolicy,
   ChatAttachmentStatus,
 } from "@health/types";
@@ -26,7 +25,8 @@ export type CreateChatAttachmentRowInput = {
   linkedDocumentId?: string | null;
   linkedImageRefId?: string | null;
   consent?: ChatAttachmentConsent | null;
-  recognition?: ChatAttachmentRecognitionEnvelope | null;
+  // recognition field removed (B3 removal, C4 cluster); DB column stays writable for
+  // historical row compat but new code never writes it.
   failureReason?: string | null;
   retentionPolicy: ChatAttachmentRetentionPolicy;
   expiresAt?: Date | null;
@@ -53,7 +53,6 @@ export class ChatAttachmentsRepository {
         linkedDocumentId: input.linkedDocumentId ?? null,
         linkedImageRefId: input.linkedImageRefId ?? null,
         consent: input.consent ?? null,
-        recognition: input.recognition ?? null,
         failureReason: input.failureReason ?? null,
         retentionPolicy: input.retentionPolicy,
         expiresAt: input.expiresAt ?? null,
@@ -119,7 +118,7 @@ export class ChatAttachmentsRepository {
       linkedDocumentId: string | null;
       linkedImageRefId: string | null;
       consent: ChatAttachmentConsent | null;
-      recognition: ChatAttachmentRecognitionEnvelope | null;
+      // recognition removed from patch (B3 removal, C4 cluster)
       failureReason: string | null;
       retentionPolicy: ChatAttachmentRetentionPolicy;
       expiresAt: Date | null;

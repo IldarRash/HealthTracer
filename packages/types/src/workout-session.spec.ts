@@ -22,8 +22,8 @@ describe("workout session execution helpers", () => {
         title: "Strength base",
         summary: "Three training days.",
         days: [
-          { weekday: "monday", focus: "Lower body", exercises: ["Squat"] },
-          { weekday: "wednesday", focus: "Upper body", exercises: ["Push-up"] },
+          { weekday: "monday", focus: "Lower body", exercises: [{ name: "Squat" }] },
+          { weekday: "wednesday", focus: "Upper body", exercises: [{ name: "Push-up" }] },
         ],
         notes: [],
       },
@@ -116,10 +116,11 @@ describe("workout session execution helpers", () => {
     expect(progress.completionPercent).toBe(67);
   });
 
-  it("normalizes legacy string and object session exercises with stable ids", () => {
+  it("normalizes legacy object session exercises with stable ids", () => {
+    // B6 removal: string exercises removed; object form still supported.
     const sessionId = "78d40655-b4b5-47b3-b28e-470192e05f04";
     const normalized = normalizeWorkoutSessionExercises(sessionId, [
-      "Goblet squat",
+      { name: "Goblet squat" },
       { name: "Romanian deadlift", sets: 3, reps: "8" },
     ]);
 

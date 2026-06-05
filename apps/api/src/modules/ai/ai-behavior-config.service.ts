@@ -11,7 +11,6 @@ import type {
   AttachmentBehaviorConfig,
   AttachmentBehaviorConfigLoadResult,
   AttachmentBehaviorConfigLoadSource,
-  AttachmentRoutingConfig,
   CompiledPromptTemplates,
   ContextBudgetsBehaviorConfig,
   DeterministicProposalTriggersConfig,
@@ -138,10 +137,6 @@ export class AiBehaviorConfigService {
 
   getContextBudgets(): ContextBudgetsBehaviorConfig {
     return this.loadResult.config.contextBudgets;
-  }
-
-  getAttachmentRouting(): AttachmentRoutingConfig {
-    return this.attachmentLoadResult.config.routing;
   }
 
   getAttachmentBehavior(): AttachmentBehaviorConfig {

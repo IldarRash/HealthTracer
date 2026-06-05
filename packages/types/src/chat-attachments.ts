@@ -6,10 +6,8 @@ import {
   type DocumentConsentScope,
 } from "./documents.js";
 import {
-  foodPhotoAnalysisResultSchema,
   nutritionConfidenceBandSchema,
 } from "./nutrition-incidents.js";
-import { workoutExerciseSchema } from "./workouts.js";
 
 export const chatAttachmentCategorySchema = z.enum([
   "unclassified",
@@ -79,20 +77,14 @@ export const MAX_CHAT_WORKOUT_ATTACHMENT_BYTES = 10_000_000;
 export const chatFoodPhotoMimeTypeSchema = z.enum(CHAT_FOOD_PHOTO_MIME_TYPES);
 export const chatWorkoutAttachmentMimeTypeSchema = z.enum(CHAT_WORKOUT_ATTACHMENT_MIME_TYPES);
 
+/**
+ * Alias kept for backward-compat reads of historical chat_attachment rows that may
+ * reference a confidence band. chat-attachment-classification.ts was removed in round-5
+ * (no live consumer remained after service-layer removal).
+ */
 export const recognitionConfidenceBandSchema = nutritionConfidenceBandSchema;
 
 export type RecognitionConfidenceBand = z.infer<typeof recognitionConfidenceBandSchema>;
-
-export const recognitionProvenanceSchema = z
-  .object({
-    source: z.string().min(1).max(80),
-    providerId: z.string().min(1).max(80),
-    recognitionId: z.string().uuid(),
-    confidence: recognitionConfidenceBandSchema.optional(),
-  })
-  .strict();
-
-export type RecognitionProvenance = z.infer<typeof recognitionProvenanceSchema>;
 
 export const chatAttachmentRefSchema = z
   .object({
@@ -119,102 +111,15 @@ export const chatAttachmentConsentSchema = z
 
 export type ChatAttachmentConsent = z.infer<typeof chatAttachmentConsentSchema>;
 
-export const foodPhotoRecognitionEnvelopeSchema = z
-  .object({
-    category: z.literal("food_photo"),
-    attachmentRefId: z.string().uuid(),
-    analysis: foodPhotoAnalysisResultSchema,
-    provenance: recognitionProvenanceSchema,
-  })
-  .strict();
-
-export type FoodPhotoRecognitionEnvelope = z.infer<typeof foodPhotoRecognitionEnvelopeSchema>;
-
-export const ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID =
-  "00000000-0000-4000-8000-000000000000";
-
+/**
+ * Persistence status literal kept for the safety-invariant spec.
+ * Only "attachment_context_only" is a valid new-write value — the legacy
+ * "saved_health_document" was removed with the recognition envelope family (B3).
+ */
 export const medicalDocumentPersistenceStatusSchema = z.literal("attachment_context_only");
 
 export type MedicalDocumentPersistenceStatus = z.infer<
   typeof medicalDocumentPersistenceStatusSchema
->;
-
-/** Legacy persisted rows only; new writes use attachment_context_only. */
-export const legacyMedicalDocumentPersistenceStatusSchema = z.literal("saved_health_document");
-
-export const medicalDocumentRecognitionEnvelopeSchema = z
-  .object({
-    category: z.literal("medical_document"),
-    attachmentRefId: z.string().uuid(),
-    documentId: z.string().uuid(),
-    documentType: documentTypeSchema,
-    title: z.string().min(1).max(160),
-    parseStatus: z.enum(["uploaded", "processing", "parsed", "summary_ready", "failed"]),
-    summarySnippet: z.string().min(1).max(500).nullable(),
-    reviewStatus: z.enum(["pending_review", "approved", "rejected"]).nullable(),
-    documentReviewPath: z.string().min(1).max(240).nullable(),
-    consentScopes: z.array(documentConsentScopeSchema).min(1),
-    provenance: recognitionProvenanceSchema,
-    wellnessContextOnlyNotice: z.string().min(1).max(240),
-    documentPersistenceStatus: medicalDocumentPersistenceStatusSchema.optional(),
-  })
-  .strict();
-
-export type MedicalDocumentRecognitionEnvelope = z.infer<
-  typeof medicalDocumentRecognitionEnvelopeSchema
->;
-
-export const workoutAttachmentSuggestedIntentSchema = z.enum([
-  "create_workout_plan",
-  "adapt_workout_plan",
-  "log_session_context",
-  "catalog_exercise_candidate",
-]);
-
-export type WorkoutAttachmentSuggestedIntent = z.infer<
-  typeof workoutAttachmentSuggestedIntentSchema
->;
-
-export const workoutAttachmentRecognitionEnvelopeSchema = z
-  .object({
-    category: z.literal("workout_attachment"),
-    attachmentRefId: z.string().uuid(),
-    attachmentKind: z.enum(["exercise_photo", "plan_screenshot", "training_file"]),
-    sessionLabel: z.string().min(1).max(160).nullable(),
-    sessionDate: isoDateTimeSchema.nullable(),
-    exercises: z.array(workoutExerciseSchema).max(20),
-    suggestedIntent: workoutAttachmentSuggestedIntentSchema,
-    planDraftTitle: z.string().min(1).max(160).nullable(),
-    provenance: recognitionProvenanceSchema,
-    manualFallbackNotice: z.string().min(1).max(500).nullable(),
-  })
-  .strict();
-
-export type WorkoutAttachmentRecognitionEnvelope = z.infer<
-  typeof workoutAttachmentRecognitionEnvelopeSchema
->;
-
-export const storedMedicalDocumentRecognitionEnvelopeSchema =
-  medicalDocumentRecognitionEnvelopeSchema.extend({
-    documentPersistenceStatus: z
-      .union([medicalDocumentPersistenceStatusSchema, legacyMedicalDocumentPersistenceStatusSchema])
-      .optional(),
-  });
-
-export const storedChatAttachmentRecognitionEnvelopeSchema = z.discriminatedUnion("category", [
-  foodPhotoRecognitionEnvelopeSchema,
-  storedMedicalDocumentRecognitionEnvelopeSchema,
-  workoutAttachmentRecognitionEnvelopeSchema,
-]);
-
-export const chatAttachmentRecognitionEnvelopeSchema = z.discriminatedUnion("category", [
-  foodPhotoRecognitionEnvelopeSchema,
-  medicalDocumentRecognitionEnvelopeSchema,
-  workoutAttachmentRecognitionEnvelopeSchema,
-]);
-
-export type ChatAttachmentRecognitionEnvelope = z.infer<
-  typeof chatAttachmentRecognitionEnvelopeSchema
 >;
 
 export const chatAttachmentCategorySourceSchema = z.enum([
@@ -241,7 +146,8 @@ export const chatAttachmentRecordSchema = z.object({
   linkedDocumentId: z.string().uuid().nullable(),
   linkedImageRefId: z.string().uuid().nullable(),
   consent: chatAttachmentConsentSchema.nullable(),
-  recognition: chatAttachmentRecognitionEnvelopeSchema.nullable(),
+  // recognition DB column stays readable (disposable-DB; to be dropped in a later schema pass)
+  // but is no longer included in the domain record type (B3 removal, C4 cluster).
   failureReason: z.string().min(1).max(240).nullable(),
   retentionPolicy: chatAttachmentRetentionPolicySchema,
   expiresAt: isoDateTimeSchema.nullable(),
@@ -276,7 +182,7 @@ export const chatAttachmentOutcomeSchema = z.object({
   attachmentRefId: z.string().uuid(),
   category: chatAttachmentCategorySchema,
   status: chatAttachmentStatusSchema,
-  recognition: chatAttachmentRecognitionEnvelopeSchema.nullable(),
+  // recognition field removed (B3 removal, C4 cluster); DB column stays readable but unused.
 });
 
 export type ChatAttachmentOutcome = z.infer<typeof chatAttachmentOutcomeSchema>;
@@ -406,12 +312,7 @@ export function isUnclassifiedChatAttachmentCategory(
 export function isChatAttachmentPendingMessageFirstSend(input: {
   category: ChatAttachmentCategory;
   status: ChatAttachmentStatus;
-  recognition: ChatAttachmentRecognitionEnvelope | null;
 }): boolean {
-  if (input.recognition) {
-    return false;
-  }
-
   return input.status === "queued" || input.status === "uploading";
 }
 
@@ -501,19 +402,6 @@ export function isChatAttachmentSendEligibleStatus(status: ChatAttachmentStatus)
   );
 }
 
-export function isAttachmentContextOnlyMedicalRecognition(
-  recognition: Pick<
-    MedicalDocumentRecognitionEnvelope,
-    "provenance" | "documentPersistenceStatus" | "documentId"
-  >,
-): boolean {
-  return (
-    recognition.documentPersistenceStatus === "attachment_context_only" ||
-    recognition.provenance.source === "attachment_context_only" ||
-    recognition.documentId === ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID
-  );
-}
-
 export function isChatAttachmentExpired(
   attachment: Pick<OwnedChatAttachmentRef, "expiresAt" | "retentionPolicy">,
   now: Date = new Date(),
@@ -523,36 +411,6 @@ export function isChatAttachmentExpired(
   }
 
   return new Date(attachment.expiresAt).getTime() <= now.getTime();
-}
-
-export function parseStoredChatAttachmentRecognition(
-  raw: unknown,
-): ChatAttachmentRecognitionEnvelope | null {
-  const parsed = storedChatAttachmentRecognitionEnvelopeSchema.safeParse(raw);
-
-  if (!parsed.success) {
-    return null;
-  }
-
-  if (parsed.data.category === "medical_document") {
-    return sanitizeMedicalRecognitionForClient(parsed.data);
-  }
-
-  return parsed.data;
-}
-
-export function sanitizeMedicalRecognitionForClient(
-  recognition: z.infer<typeof storedMedicalDocumentRecognitionEnvelopeSchema>,
-): MedicalDocumentRecognitionEnvelope {
-  return {
-    ...recognition,
-    documentId: ATTACHMENT_CONTEXT_ONLY_PLACEHOLDER_DOCUMENT_ID,
-    parseStatus: "uploaded",
-    summarySnippet: null,
-    reviewStatus: null,
-    documentReviewPath: null,
-    documentPersistenceStatus: "attachment_context_only",
-  };
 }
 
 export function getChatAttachmentOwnershipErrors(
@@ -598,7 +456,6 @@ export function getChatAttachmentSendEligibilityErrors(
       isChatAttachmentPendingMessageFirstSend({
         category: owned.category,
         status: owned.status,
-        recognition: null,
       })
     ) {
       continue;

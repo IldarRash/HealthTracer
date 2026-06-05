@@ -40,7 +40,7 @@ function makeBaseChanges(
   return workoutPlanProposalChangesSchema.parse({
     title: "Base plan",
     summary: "A weekly plan.",
-    days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+    days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
     notes: [],
     ...overrides,
   });
@@ -577,7 +577,7 @@ describe("adaptWorkoutPlanFromProgressChangesSchema — nested plan caloriePerHo
       plan: {
         title: "Adapted plan",
         summary: "Progress-based adaptation.",
-        days: [{ weekday: "monday", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
         caloriePerHourRate: 280,
         estimatedSessionCalorieBurn: 280,

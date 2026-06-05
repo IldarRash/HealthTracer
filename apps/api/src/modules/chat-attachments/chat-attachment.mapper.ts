@@ -2,16 +2,15 @@ import type { ChatAttachmentRecord } from "@health/types";
 import {
   chatAttachmentConsentSchema,
   chatAttachmentRecordSchema,
-  parseStoredChatAttachmentRecognition,
 } from "@health/types";
 import type { ChatAttachmentRow } from "./chat-attachments.repository.js";
 
 export function toChatAttachmentRecord(row: ChatAttachmentRow): ChatAttachmentRecord {
+  // S7: mapper does NOT persist or parse health_documents — linkedDocumentId is a passive
+  // nullable read-through. The recognition DB column is readable but excluded from the
+  // domain record type (B3 removal, C4 cluster).
   const consent = row.consent
     ? chatAttachmentConsentSchema.parse(row.consent)
-    : null;
-  const recognition = row.recognition
-    ? parseStoredChatAttachmentRecognition(row.recognition)
     : null;
 
   return chatAttachmentRecordSchema.parse({
@@ -29,7 +28,6 @@ export function toChatAttachmentRecord(row: ChatAttachmentRow): ChatAttachmentRe
     linkedDocumentId: row.linkedDocumentId,
     linkedImageRefId: row.linkedImageRefId,
     consent,
-    recognition,
     failureReason: row.failureReason,
     retentionPolicy: row.retentionPolicy,
     expiresAt: row.expiresAt?.toISOString() ?? null,

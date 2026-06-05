@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockEnv = vi.hoisted(() => ({
   CLERK_JWKS_URL: undefined as string | undefined,
-  AI_COACH_PROVIDER: "stub" as "stub" | "openai",
+  AI_COACH_PROVIDER: "openai" as const,
   OPENAI_API_KEY: undefined as string | undefined,
   CORS_ORIGINS: undefined as string | undefined,
   DATABASE_URL: "postgres://postgres:postgres@localhost:5432/health_tracer",
@@ -16,7 +16,7 @@ vi.mock("../env.js", () => ({
 describe("HealthReadinessService", () => {
   afterEach(() => {
     mockEnv.CLERK_JWKS_URL = undefined;
-    mockEnv.AI_COACH_PROVIDER = "stub";
+    mockEnv.AI_COACH_PROVIDER = "openai";
     mockEnv.OPENAI_API_KEY = undefined;
     vi.resetModules();
   });
@@ -59,7 +59,7 @@ describe("HealthReadinessService", () => {
     });
   });
 
-  it("returns not ready when openai provider is selected without an API key", async () => {
+  it("returns not ready when openai API key is missing", async () => {
     mockEnv.CLERK_JWKS_URL = "https://clerk.example.com/.well-known/jwks.json";
     mockEnv.AI_COACH_PROVIDER = "openai";
     mockEnv.OPENAI_API_KEY = undefined;
@@ -77,13 +77,14 @@ describe("HealthReadinessService", () => {
     expect(readiness.checks).toContainEqual({
       name: "openai_api_key",
       status: "error",
-      message: "OPENAI_API_KEY is required when AI_COACH_PROVIDER=openai",
+      message: "OPENAI_API_KEY is required for the AI coach provider",
     });
   });
 
   it("returns ready when static checks and database connectivity pass", async () => {
     mockEnv.CLERK_JWKS_URL = "https://clerk.example.com/.well-known/jwks.json";
-    mockEnv.AI_COACH_PROVIDER = "stub";
+    mockEnv.AI_COACH_PROVIDER = "openai";
+    mockEnv.OPENAI_API_KEY = "sk-test-key";
 
     const postgresClient = Object.assign(
       vi.fn(async () => [{ "?column?": 1 }]),

@@ -20,6 +20,7 @@ import { createFallbackDomainAnswer } from "@health/types";
 import { DecisionMakerExecutorService } from "./decision-maker-executor.service.js";
 import type { DecisionMakerInput } from "./decision-maker-executor.service.js";
 import type { CoachAiProvider } from "@health/ai";
+import { createCoachAiProviderMock } from "@health/ai/testing";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,14 +28,14 @@ import type { CoachAiProvider } from "@health/ai";
 
 function makeProvider(
   returnValue: FinalDecisionOutputInput | Error,
-): Pick<CoachAiProvider, "generateFinalDecision"> {
-  return {
+): CoachAiProvider {
+  return createCoachAiProviderMock({
     generateFinalDecision: vi.fn(async (req: FinalDecisionRequest) => {
       void req;
       if (returnValue instanceof Error) throw returnValue;
       return returnValue as FinalDecisionOutputInput;
     }),
-  };
+  });
 }
 
 function makeInput(

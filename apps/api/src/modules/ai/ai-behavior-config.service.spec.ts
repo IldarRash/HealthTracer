@@ -1,8 +1,6 @@
 import {
   buildDefaultAiBehaviorConfig,
   buildDefaultAttachmentBehaviorConfig,
-  normalizeAiBehaviorConfig,
-  normalizeAttachmentBehaviorConfig,
   resolveLoadedAiBehaviorConfig,
   resolveLoadedAttachmentBehaviorConfig,
 } from "@health/types";
@@ -24,7 +22,6 @@ describe("AiBehaviorConfigService", () => {
     expect(service.getProposalRevisionRouting().fallbackCapabilityId).toBe("general");
     expect(service.getDeterministicProposalTriggers().wellbeingCheckin.enabled).toBe(true);
     expect(service.getAttachmentBehavior().turnStages.order[0]).toBe("validate_refs");
-    expect(service.getAttachmentRouting().defaultCapabilityId).toBe("attachment_food_photo");
   });
 
   it("falls back to defaults when attachment preload is invalid", () => {
@@ -44,39 +41,6 @@ describe("AiBehaviorConfigService", () => {
       "Invalid attachment behavior config; using built-in defaults.",
     );
     expect(service.getAttachmentBehavior().safetyFloors.requireMedicalConsent).toBe(true);
-  });
-
-  it("uses attachment behavior routing as the sole runtime routing source", () => {
-    const attachmentDefaults = buildDefaultAttachmentBehaviorConfig();
-    const attachmentConfig = normalizeAttachmentBehaviorConfig({
-      routing: {
-        ...attachmentDefaults.routing,
-        defaultCapabilityId: "attachment_workout",
-      },
-    });
-    const aiBehaviorConfig = normalizeAiBehaviorConfig({
-      attachmentRouting: {
-        ...buildDefaultAiBehaviorConfig().attachmentRouting,
-        defaultCapabilityId: "attachment_food_photo",
-      },
-    });
-
-    const service = new AiBehaviorConfigService(
-      {
-        config: aiBehaviorConfig,
-        source: "file",
-        errors: [],
-        warnings: [],
-      },
-      {
-        config: attachmentConfig,
-        source: "file",
-        errors: [],
-        warnings: [],
-      },
-    );
-
-    expect(service.getAttachmentRouting().defaultCapabilityId).toBe("attachment_workout");
   });
 
   it("compiles prompt templates with safe fallback for invalid config bodies", () => {

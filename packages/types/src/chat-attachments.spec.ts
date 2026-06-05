@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  chatAttachmentRecognitionEnvelopeSchema,
   chatAttachmentRecordSchema,
   chatMessageAttachmentMetaSchema,
   chatMessageSchema,
@@ -16,8 +15,6 @@ import {
   isChatAttachmentImageMimeType,
   isChatAttachmentSendEligibleStatus,
   parseChatMessageAttachmentRefIds,
-  parseStoredChatAttachmentRecognition,
-  sanitizeMedicalRecognitionForClient,
   sendChatMessageSchema,
   CHAT_PROVISIONAL_UPLOAD_MIME_TYPES,
   getProvisionalAttachmentMimeTypeError,
@@ -370,158 +367,12 @@ describe("chat attachment contracts", () => {
     expect(tooMany.success).toBe(false);
   });
 
-  describe("DB-compat: historical recognition envelope parsing (plan item 7)", () => {
-    it("parses legacy food_photo recognition envelopes from DB rows", () => {
-      const foodEnvelope = chatAttachmentRecognitionEnvelopeSchema.parse({
-        category: "food_photo",
-        attachmentRefId: "a1000001-0000-4000-8000-000000000001",
-        analysis: {
-          candidates: [
-            {
-              items: [{ name: "Salad", calories: 320 }],
-              estimatedCalories: 320,
-              estimatedMacros: { proteinGrams: 12, carbsGrams: 20, fatGrams: 18 },
-              confidence: "medium",
-              provenance: {
-                source: "dev_stub",
-                providerId: "dev_food_photo",
-                analysisId: "b1000001-0000-4000-8000-000000000002",
-              },
-            },
-          ],
-          lowConfidenceNotice: null,
-        },
-        provenance: {
-          source: "dev_stub",
-          providerId: "dev_food_photo",
-          recognitionId: "b1000001-0000-4000-8000-000000000002",
-          confidence: "medium",
-        },
-      });
-
-      expect(foodEnvelope.category).toBe("food_photo");
-    });
-
-    it("parses legacy medical_document recognition envelopes from DB rows", () => {
-      const medicalEnvelope = chatAttachmentRecognitionEnvelopeSchema.parse({
-        category: "medical_document",
-        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-        documentId: "00000000-0000-4000-8000-000000000000",
-        documentType: "lab_report",
-        title: "Labs",
-        parseStatus: "uploaded",
-        summarySnippet: null,
-        reviewStatus: null,
-        consentScopes: ["upload_storage", "parse_ocr"],
-        provenance: {
-          source: "attachment_context_only",
-          providerId: "chat_attachment",
-          recognitionId: "f1000001-0000-4000-8000-000000000001",
-        },
-        wellnessContextOnlyNotice:
-          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
-        documentReviewPath: null,
-        documentPersistenceStatus: "attachment_context_only",
-      });
-
-      expect(medicalEnvelope.category).toBe("medical_document");
-      if (medicalEnvelope.category === "medical_document") {
-        expect(medicalEnvelope.documentPersistenceStatus).toBe("attachment_context_only");
-      }
-    });
-
-    it("parses legacy saved_health_document recognition rows as context-only", () => {
-      const parsed = parseStoredChatAttachmentRecognition({
-        category: "medical_document",
-        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-        documentId: "e1000001-0000-4000-8000-000000000001",
-        documentType: "lab_report",
-        title: "Labs",
-        parseStatus: "summary_ready",
-        summarySnippet: "Vitamin D is slightly below the reference range.",
-        reviewStatus: "pending_review",
-        documentReviewPath: "/profile#documents?documentId=e1000001-0000-4000-8000-000000000001",
-        consentScopes: ["upload_storage", "parse_ocr"],
-        provenance: {
-          source: "chat_attachment",
-          providerId: "chat_attachment",
-          recognitionId: "f1000001-0000-4000-8000-000000000001",
-        },
-        wellnessContextOnlyNotice:
-          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
-        documentPersistenceStatus: "saved_health_document",
-      });
-
-      expect(parsed?.category).toBe("medical_document");
-      if (parsed?.category === "medical_document") {
-        expect(parsed.documentPersistenceStatus).toBe("attachment_context_only");
-        expect(parsed.summarySnippet).toBeNull();
-        expect(parsed.documentId).toBe("00000000-0000-4000-8000-000000000000");
-      }
-    });
-
-    it("sanitizes medical recognition to context-only client shape", () => {
-      const sanitized = sanitizeMedicalRecognitionForClient({
-        category: "medical_document",
-        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-        documentId: "e1000001-0000-4000-8000-000000000001",
-        documentType: "lab_report",
-        title: "Labs",
-        parseStatus: "summary_ready",
-        summarySnippet: "Vitamin D is slightly below the reference range.",
-        reviewStatus: "pending_review",
-        documentReviewPath: "/profile#documents?documentId=e1000001-0000-4000-8000-000000000001",
-        consentScopes: ["upload_storage", "parse_ocr"],
-        provenance: {
-          source: "attachment_context_only",
-          providerId: "chat_attachment",
-          recognitionId: "f1000001-0000-4000-8000-000000000001",
-        },
-        wellnessContextOnlyNotice:
-          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
-      });
-
-      expect(sanitized.documentPersistenceStatus).toBe("attachment_context_only");
-      expect(sanitized.summarySnippet).toBeNull();
-      expect(sanitized.reviewStatus).toBeNull();
-      expect(sanitized.documentReviewPath).toBeNull();
-      expect(sanitized.parseStatus).toBe("uploaded");
-      expect(sanitized.documentId).toBe("00000000-0000-4000-8000-000000000000");
-    });
-
-    it("does not expose saved-document semantics for context-only medical recognition", () => {
-      const sanitized = sanitizeMedicalRecognitionForClient({
-        category: "medical_document",
-        attachmentRefId: "d1000001-0000-4000-8000-000000000001",
-        documentId: "d1000001-0000-4000-8000-000000000001",
-        documentType: "lab_report",
-        title: "Labs",
-        parseStatus: "uploaded",
-        summarySnippet: null,
-        reviewStatus: "pending_review",
-        documentReviewPath: null,
-        consentScopes: ["upload_storage", "parse_ocr"],
-        provenance: {
-          source: "attachment_context_only",
-          providerId: "chat_attachment",
-          recognitionId: "f1000001-0000-4000-8000-000000000001",
-        },
-        wellnessContextOnlyNotice:
-          "This attachment is wellness coaching context only. It has not been saved or parsed as a health document.",
-        documentPersistenceStatus: "attachment_context_only",
-      });
-
-      expect(sanitized.documentPersistenceStatus).toBe("attachment_context_only");
-      expect(sanitized.summarySnippet).toBeNull();
-      expect(sanitized.reviewStatus).toBeNull();
-      expect(sanitized.documentReviewPath).toBeNull();
-      expect(sanitized.parseStatus).toBe("uploaded");
-    });
-
-    it("chatAttachmentRecordSchema parses a row carrying legacy category, status, and recognition — DB backwards compat", () => {
-      // DB columns for category, status, and recognition remain readable on historically
-      // persisted rows. New rows use category=unclassified, status=queued, recognition=null,
-      // but the schema must still parse old rows without dropping data.
+  describe("DB-compat: historical category/status still readable (B3 removal)", () => {
+    it("chatAttachmentRecordSchema parses a row carrying legacy category and status — DB backwards compat", () => {
+      // DB columns for category, status remain readable on historically persisted rows.
+      // The recognition DB column stays readable at the DB level but is excluded from
+      // the domain record type (B3 removal, C4 cluster). Passing unknown keys to .parse()
+      // just strips them — no error.
       const legacyRow = chatAttachmentRecordSchema.parse({
         id: "b1000001-0000-4000-8000-000000000001",
         userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
@@ -537,32 +388,6 @@ describe("chat attachment contracts", () => {
         linkedDocumentId: null,
         linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
         consent: null,
-        recognition: {
-          category: "food_photo",
-          attachmentRefId: "b1000001-0000-4000-8000-000000000001",
-          analysis: {
-            candidates: [
-              {
-                items: [{ name: "Pasta", calories: 450 }],
-                estimatedCalories: 450,
-                estimatedMacros: { proteinGrams: 15, carbsGrams: 65, fatGrams: 10 },
-                confidence: "high",
-                provenance: {
-                  source: "dev_stub",
-                  providerId: "dev_food_photo",
-                  analysisId: "c1000001-0000-4000-8000-000000000001",
-                },
-              },
-            ],
-            lowConfidenceNotice: null,
-          },
-          provenance: {
-            source: "dev_stub",
-            providerId: "dev_food_photo",
-            recognitionId: "c1000001-0000-4000-8000-000000000001",
-            confidence: "high",
-          },
-        },
         failureReason: null,
         retentionPolicy: "ephemeral_recognition",
         expiresAt: null,
@@ -570,11 +395,12 @@ describe("chat attachment contracts", () => {
         updatedAt: new Date().toISOString(),
       });
 
-      // Legacy category / status / recognition all parse correctly.
+      // Legacy category / status parse correctly.
       expect(legacyRow.category).toBe("food_photo");
       expect(legacyRow.categorySource).toBe("ai_classified");
       expect(legacyRow.status).toBe("ready");
-      expect(legacyRow.recognition?.category).toBe("food_photo");
+      // recognition field no longer exists on the domain record type.
+      expect((legacyRow as Record<string, unknown>)["recognition"]).toBeUndefined();
     });
   });
 });

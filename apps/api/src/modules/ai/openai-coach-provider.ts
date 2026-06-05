@@ -1,11 +1,7 @@
 import type {
   CoachAiProvider,
-  CoachAiLoopRequest,
-  CoachAiRequest,
 } from "@health/ai";
 import type {
-  AgentLoopOutputInput,
-  AiStructuredOutputInput,
   CompiledPromptTemplates,
   DomainLlmStepOutputInput,
   DomainLlmStepRequest,
@@ -15,8 +11,6 @@ import type {
   RouterDecisionRequest,
 } from "@health/types";
 import {
-  agentLoopOutputSchema,
-  aiStructuredOutputSchema,
   clampRouterDecisionOutput,
   createFallbackFinalDecision,
   createFallbackRouterDecision,
@@ -24,7 +18,6 @@ import {
   finalDecisionOutputSchema,
   getDefaultCompiledPromptTemplates,
   routerDecisionOutputSchema,
-  validateAgentLoopOutputShape,
   validateDomainLlmStepOutputShape,
   validateFinalDecisionOutputShape,
   validateRouterDecisionOutputShape,
@@ -33,7 +26,7 @@ import {
 export class OpenAiCoachProviderMissingKeyError extends Error {
   constructor() {
     super(
-      "OpenAI coach provider is selected but OPENAI_API_KEY is not configured. Set OPENAI_API_KEY or use AI_COACH_PROVIDER=stub.",
+      "OpenAI coach provider requires OPENAI_API_KEY, but it is not configured. Set OPENAI_API_KEY.",
     );
     this.name = "OpenAiCoachProviderMissingKeyError";
   }
@@ -67,37 +60,9 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     this.promptTemplates = options.promptTemplates ?? getDefaultCompiledPromptTemplates();
   }
 
-  async generateAgentLoopStep(request: CoachAiLoopRequest): Promise<AgentLoopOutputInput> {
-    const systemPrompt = buildOpenAiIntentLoopPrompt(request, this.promptTemplates);
-    const payload = await this.requestJsonCompletion(
-      systemPrompt,
-      request.userMessage,
-      request.recentMessages,
-    );
-
-    return coerceOpenAiLoopOutput(payload);
-  }
-
-  async generateCoachResponse(request: CoachAiRequest): Promise<AiStructuredOutputInput> {
-    const loopStep = await this.generateAgentLoopStep({
-      ...request,
-      iteration: 1,
-      maxIterations: 1,
-      priorToolResults: [],
-    });
-
-    if (loopStep.kind === "final_answer") {
-      return coerceOpenAiStructuredOutput({
-        reply: loopStep.reply,
-        proposals: loopStep.proposals ?? [],
-      });
-    }
-
-    throw new Error("OpenAI coach provider returned a tool request during single-pass generation.");
-  }
-
   // ---------------------------------------------------------------------------
-  // Phase 2 — parallel-domain pipeline methods (dark; not called by orchestrator yet)
+  // Fan-out pipeline methods — live via the fan-out path
+  // (RouterLlm → parallel domain LLMs → DecisionMaker).
   // ---------------------------------------------------------------------------
 
   async generateRouterDecision(request: RouterDecisionRequest): Promise<RouterDecisionOutputInput> {
@@ -127,8 +92,9 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     // is called; here we check if any item carries a data URI and route to the
     // vision endpoint. If no data URIs are present, falls back to text-only.
     //
-    // Safety floor: medical_document items only reach here with consentState === "granted"
-    // (enforced in buildDomainAttachmentContext in domain-llm-executor.service.ts).
+    // Note: there is no pre-upload consent gate for images. Image content
+    // (including a photo of a medical document) reaches the LLM directly;
+    // the pre-upload medical consent gate was removed per the locked architecture.
     const imageDataUris = resolveImageDataUrisFromAttachmentContext(request);
 
     const payload =
@@ -224,16 +190,16 @@ export class OpenAiCoachProvider implements CoachAiProvider {
 
   /**
    * Multimodal completion — sends the user message alongside one or more image
-   * data URIs. Used by generateDomainStep when a food_photo or consented medical
-   * image is present in the domain attachment context.
+   * data URIs. Used by generateDomainStep when an image attachment is present
+   * in the domain attachment context.
    *
    * The user message content is an array combining the text part and one image_url
    * part per data URI. Only image/* MIME types are sent as vision content;
    * non-image MIMEs (e.g. application/pdf) are excluded (they cannot be rendered
    * by the vision endpoint).
    *
-   * Safety: the imageDataUris are already filtered by the caller so only
-   * consented medical content and food photos are included.
+   * Note: images reach the LLM without a pre-upload consent gate. The
+   * imageDataUris are filtered by the caller to image/* MIMEs and size limits only.
    */
   private async requestMultimodalJsonCompletion(
     systemPrompt: string,
@@ -310,12 +276,11 @@ export class OpenAiCoachProvider implements CoachAiProvider {
  * Returns an array of data URIs ready for the OpenAI vision endpoint. Only
  * image/* MIME types are included — PDFs and other non-image MIMEs cannot be
  * sent to the vision endpoint. Items without an imageDataUri are skipped
- * (e.g. when the storage ref was null after consent purge).
+ * (e.g. when storageRef was null or the image exceeded the size cap).
  *
- * Safety floors (already enforced by buildDomainAttachmentContext):
- *  - medical_document items only present when consentState === "granted".
- *  - imageDataUri is set by DomainLlmExecutorService.buildAttachmentContextWithImages
- *    only when the domain is nutrition/health AND the attachment is an image MIME.
+ * Note: imageDataUri is set by DomainLlmExecutorService.buildAttachmentContextWithImages
+ * only when the domain is nutrition/health AND the attachment is an image MIME.
+ * There is no consent filter — all images reach the LLM regardless of category.
  */
 function resolveImageDataUrisFromAttachmentContext(request: DomainLlmStepRequest): string[] {
   const items = request.attachmentContext?.items;
@@ -337,89 +302,8 @@ function resolveImageDataUrisFromAttachmentContext(request: DomainLlmStepRequest
     .map((item) => item.imageDataUri as string);
 }
 
-function buildOpenAiIntentLoopPrompt(
-  request: CoachAiLoopRequest,
-  promptTemplates: CompiledPromptTemplates,
-): string {
-  const metadata = request.agentMetadata;
-  const intentDefinition = metadata?.intentDefinition;
-
-  return promptTemplates.renderCoachLoop({
-    iteration: String(request.iteration),
-    maxIterations: String(request.maxIterations),
-    selectedIntentLabel: intentDefinition
-      ? intentDefinition.id
-      : (metadata?.catalogIntentId ?? metadata?.intent ?? "general"),
-    intentInstructions: intentDefinition?.promptInstructions
-      ? intentDefinition.promptInstructions
-      : "Provide conservative wellness coaching.",
-    intentSafetyGuidance: intentDefinition?.safetyGuidance?.length
-      ? intentDefinition.safetyGuidance.join(" | ")
-      : "none",
-    allowedTools: metadata?.allowedTools?.length
-      ? metadata.allowedTools.join(", ")
-      : "getUserContextSlice",
-    allowedProposalIntents: metadata?.allowedProposalIntents?.length
-      ? metadata.allowedProposalIntents.join(", ")
-      : "none",
-    taskPurpose: metadata?.purpose ?? "general_chat",
-    taskIntent: metadata?.intent ?? "general",
-    expectedResponseMode:
-      metadata?.expectedResponseMode ?? "recommendation_with_optional_proposal",
-    safetyFlags: metadata?.safetyFlags?.length ? metadata.safetyFlags.join(", ") : "none",
-    missingContextNotes: metadata?.missingContextNotes?.length
-      ? metadata.missingContextNotes.join(" | ")
-      : "none",
-    priorToolResultsJson: request.priorToolResults.length
-      ? JSON.stringify(request.priorToolResults)
-      : "none",
-    safetyConstraints:
-      metadata?.safetyConstraints?.join("\n- ") ??
-      "Do not diagnose, prescribe, or claim to treat diseases.",
-    coachingContextJson: JSON.stringify(request.coachingContext),
-  });
-}
-
-function coerceOpenAiLoopOutput(value: unknown): AgentLoopOutputInput {
-  const shapeErrors = validateAgentLoopOutputShape(value);
-
-  if (shapeErrors.length > 0) {
-    throw new Error(
-      `OpenAI coach provider returned invalid loop output: ${shapeErrors.join(" ")}`,
-    );
-  }
-
-  return agentLoopOutputSchema.parse(value);
-}
-
-function coerceOpenAiStructuredOutput(value: unknown): AiStructuredOutputInput {
-  const validated = aiStructuredOutputSchema.safeParse(value);
-
-  if (validated.success) {
-    return validated.data;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    "reply" in value &&
-    typeof value.reply === "string" &&
-    value.reply.trim().length > 0 &&
-    value.reply.length <= 8000
-  ) {
-    return {
-      reply: value.reply,
-      proposals: [],
-    };
-  }
-
-  throw new Error(
-    `OpenAI coach provider returned invalid structured output: ${validated.error.message}`,
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Phase 2 prompt builders
+// Fan-out prompt builders
 // ---------------------------------------------------------------------------
 
 function buildOpenAiRouterDecisionPrompt(

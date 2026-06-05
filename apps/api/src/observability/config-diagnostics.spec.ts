@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockEnv = vi.hoisted(() => ({
   CLERK_JWKS_URL: undefined as string | undefined,
-  AI_COACH_PROVIDER: "stub" as "stub" | "openai",
+  AI_COACH_PROVIDER: "openai" as const,
   OPENAI_API_KEY: undefined as string | undefined,
   CORS_ORIGINS: undefined as string | undefined,
   DATABASE_URL: "postgres://postgres:postgres@localhost:5432/health_tracer",
@@ -16,7 +16,7 @@ vi.mock("../env.js", () => ({
 describe("config diagnostics", () => {
   afterEach(() => {
     mockEnv.CLERK_JWKS_URL = undefined;
-    mockEnv.AI_COACH_PROVIDER = "stub";
+    mockEnv.AI_COACH_PROVIDER = "openai";
     mockEnv.OPENAI_API_KEY = undefined;
     mockEnv.CORS_ORIGINS = undefined;
     vi.resetModules();
@@ -55,7 +55,7 @@ describe("config diagnostics", () => {
     });
   });
 
-  it("flags missing OpenAI configuration when openai provider is selected", async () => {
+  it("flags missing OpenAI API key in readiness checks (unconditional — A2 closed)", async () => {
     mockEnv.AI_COACH_PROVIDER = "openai";
     mockEnv.OPENAI_API_KEY = undefined;
 
@@ -65,7 +65,18 @@ describe("config diagnostics", () => {
     expect(checks).toContainEqual({
       name: "openai_api_key",
       status: "error",
-      message: "OPENAI_API_KEY is required when AI_COACH_PROVIDER=openai",
+      message: "OPENAI_API_KEY is required for the AI coach provider",
     });
+  });
+
+  it("reports openai as misconfigured when API key is missing", async () => {
+    mockEnv.AI_COACH_PROVIDER = "openai";
+    mockEnv.OPENAI_API_KEY = undefined;
+
+    const { getConfigDiagnostics } = await import("./config-diagnostics.js");
+    const diagnostics = getConfigDiagnostics();
+
+    expect(diagnostics.openai).toBe("misconfigured");
+    expect(diagnostics.aiCoachProvider).toBe("openai");
   });
 });

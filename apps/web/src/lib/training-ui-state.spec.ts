@@ -46,8 +46,9 @@ const sampleExercise = (
 });
 
 describe("training UI state", () => {
-  it("formats string and structured exercises", () => {
-    expect(formatExerciseLabel("Goblet squat")).toBe("Goblet squat");
+  it("formats structured exercises (B6 removal: string form removed)", () => {
+    // B6 removal: string exercises removed; formatExerciseLabel now only receives objects.
+    expect(formatExerciseLabel({ name: "Goblet squat" })).toBe("Goblet squat");
     expect(
       formatExerciseLabel({
         name: "Romanian deadlift",
@@ -190,24 +191,19 @@ describe("training UI state", () => {
     expect(isValidPlannedDate("05/22/2026")).toBe(false);
   });
 
-  it("builds session titles from plan days", () => {
-    expect(
-      buildSessionTitleFromDay({ day: "Day 1", focus: "Strength" }),
-    ).toBe("Day 1 · Strength");
+  it("builds session titles from plan days (B5 removal: weekday required)", () => {
+    // B5 removal: day field removed; weekday is required.
     expect(
       buildSessionTitleFromDay({ weekday: "monday", focus: "Upper body" }),
     ).toBe("Monday · Upper body");
     expect(getWorkoutPlanDayLabel({ weekday: "wednesday" })).toBe("Wednesday");
-    expect(getWorkoutPlanDayLabel({ day: "Day 2" })).toBe("Day 2");
   });
 
-  it("builds stable React keys from weekday or legacy day labels", () => {
+  it("builds stable React keys from weekday (B5 removal)", () => {
+    // B5 removal: day field removed; key now comes from weekday.
     expect(
       getWorkoutPlanDayKey({ weekday: "monday", focus: "Upper body" }),
     ).toBe("monday-Upper body");
-    expect(getWorkoutPlanDayKey({ day: "Day 1", focus: "Strength" })).toBe(
-      "Day 1-Strength",
-    );
     expect(getWorkoutPlanDayKey({ weekday: "friday", focus: "Lower body" }, 2)).toBe(
       "friday-Lower body-2",
     );

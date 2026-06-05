@@ -48,23 +48,7 @@
         "maxBytes": 10000000,
         "label": "Workout attachment"
       }
-    ],
-    "provisionalUploadMimeTypes": [
-      "image/jpeg",
-      "image/png",
-      "image/webp"
-    ],
-    "maxProvisionalBytes": 10000000
-  },
-  "routing": {
-    "categoryPriority": [
-      "medical_document",
-      "workout_attachment",
-      "food_photo"
-    ],
-    "defaultCapabilityId": "attachment_food_photo",
-    "confidence": 0.98,
-    "routingMethod": "attachment_family"
+    ]
   },
   "retention": {
     "byCategory": {
@@ -73,22 +57,6 @@
       "medical_document": "document_consent_rules",
       "workout_attachment": "ephemeral_recognition"
     }
-  },
-  "consent": {
-    "requiredMedicalScopes": [
-      "upload_storage"
-    ],
-    "requireDocumentType": true,
-    "requireDocumentTitle": true,
-    "consentVersionDefault": "v1",
-    "uploadStorageScopeRequired": true
-  },
-  "outcomeHints": {
-    "medicalNeedsConsent": "This attachment was identified as a wellness document after send. Grant consent below to store and process it. Nothing is saved until you confirm.",
-    "medicalNeedsReview": "This wellness document needs review before it can be used in coaching context.",
-    "medicalContextOnly": "This wellness document is available as chat attachment context only. It has not been saved or parsed as a health document.",
-    "manualFallback": "We could not confidently classify this attachment. Choose a category or try again with clearer context.",
-    "lowConfidenceFoodPhoto": "The meal photo was analyzed with low confidence. Review items before logging."
   },
   "turnStages": {
     "order": [

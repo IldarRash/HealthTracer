@@ -57,19 +57,21 @@ describe("NutritionRepository.createIncident", () => {
     imageRefs: [],
   };
 
+  function makeInsertMock(capturedValues: { date?: string }) {
+    return vi.fn(() => ({
+      values: vi.fn((values: Record<string, unknown>) => {
+        capturedValues.date = values["date"] as string;
+        return {
+          returning: vi.fn(async () => [{ id: "incident-1", userId, sourceProposalId }]),
+        };
+      }),
+    }));
+  }
+
   it("inserts through the passed transaction client instead of the root db pool", async () => {
     const rootInsert = vi.fn();
-    const txInsert = vi.fn(() => ({
-      values: vi.fn(() => ({
-        returning: vi.fn(async () => [
-          {
-            id: "incident-1",
-            userId,
-            sourceProposalId,
-          },
-        ]),
-      })),
-    }));
+    const capturedValues = {};
+    const txInsert = makeInsertMock(capturedValues);
 
     const tx = { insert: txInsert, marker: "acceptance-tx" };
     const db = { insert: rootInsert };
@@ -81,5 +83,62 @@ describe("NutritionRepository.createIncident", () => {
     expect(row.id).toBe("incident-1");
     expect(txInsert).toHaveBeenCalledOnce();
     expect(rootInsert).not.toHaveBeenCalled();
+  });
+
+  it("derives incidentDate in UTC when no timezone is provided", async () => {
+    // 2026-05-26T23:30:00Z is May 26 in UTC
+    const nearMidnightUtcPayload = {
+      ...payload,
+      incidentDateTime: "2026-05-26T23:30:00.000Z",
+    };
+    const capturedValues: { date?: string } = {};
+    const db = { insert: makeInsertMock(capturedValues) };
+    const repository = new NutritionRepository(db as never);
+
+    await repository.createIncident(userId, sourceProposalId, nearMidnightUtcPayload);
+
+    expect(capturedValues.date).toBe("2026-05-26");
+  });
+
+  it("derives incidentDate in the user's local day when timezone is provided", async () => {
+    // 2026-05-26T23:30:00Z is already May 27 in Asia/Tokyo (UTC+9)
+    const nearMidnightUtcPayload = {
+      ...payload,
+      incidentDateTime: "2026-05-26T23:30:00.000Z",
+    };
+    const capturedValues: { date?: string } = {};
+    const db = { insert: makeInsertMock(capturedValues) };
+    const repository = new NutritionRepository(db as never);
+
+    await repository.createIncident(
+      userId,
+      sourceProposalId,
+      nearMidnightUtcPayload,
+      db as never,
+      "Asia/Tokyo",
+    );
+
+    expect(capturedValues.date).toBe("2026-05-27");
+  });
+
+  it("falls back to the UTC date when the provided timezone is invalid", async () => {
+    const nearMidnightUtcPayload = {
+      ...payload,
+      incidentDateTime: "2026-05-26T23:30:00.000Z",
+    };
+    const capturedValues: { date?: string } = {};
+    const db = { insert: makeInsertMock(capturedValues) };
+    const repository = new NutritionRepository(db as never);
+
+    // formatIsoDateInTimezone falls back to UTC on invalid timezone
+    await repository.createIncident(
+      userId,
+      sourceProposalId,
+      nearMidnightUtcPayload,
+      db as never,
+      "Bad/Timezone",
+    );
+
+    expect(capturedValues.date).toBe("2026-05-26");
   });
 });

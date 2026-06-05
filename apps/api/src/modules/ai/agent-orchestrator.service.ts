@@ -15,7 +15,12 @@ import type {
   RawAiProposal,
   ResolvedCapabilityPresentationMetadata,
 } from "@health/types";
-import { createFallbackDomainAnswer, isDeterministicResponseModeExecutorMode } from "@health/types";
+import {
+  buildResponseModeExecutionMetadata,
+  createFallbackDomainAnswer,
+  isDeterministicResponseModeExecutorMode,
+  resolveResponseModeExecutorLoopPolicy,
+} from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { CoachingContextService } from "../coaching-context/coaching-context.service.js";
@@ -30,10 +35,10 @@ import { DecisionMakerExecutorService } from "./decision-maker-executor.service.
 import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import type { DomainLlmExecutorResult } from "./domain-llm-executor.service.js";
 import { MessagePreprocessorService } from "./message-preprocessor.service.js";
-import { ResponseModeExecutorService } from "./response-mode-executor.service.js";
 import { RouterLlmService } from "./router-llm.service.js";
+import type { RouterLlmResult } from "./router-llm.service.js";
 import { SystemPlannerService } from "./system-planner.service.js";
-import type { DomainFanoutEntry } from "./system-planner.service.js";
+import type { CapabilityPlanResult, DomainFanoutEntry, DomainFanoutPlan } from "./system-planner.service.js";
 
 /**
  * Bounded attachment metadata passed into the orchestrator.
@@ -44,6 +49,7 @@ export interface AttachmentTurnContextItem {
   attachmentRefId: string;
   category: ChatAttachmentCategory;
   mimeType: string;
+  // "needs_consent" is never produced at runtime; retained for historical DB-row reads only.
   consentState: "granted" | "needs_consent" | "none";
   storageRef: string | null;
 }
@@ -82,13 +88,16 @@ export interface OrchestratedCoachTurnResult {
    * auto-persisted — the proposal must be accepted through the normal
    * proposal-accept flow.
    *
-   * Only set on fan-out turns; undefined on single-executor / pre-AI-gate turns.
+   * Only set on fan-out turns; undefined on deterministic gate-miss turns.
    */
   consentRequired?: boolean;
 }
 
 const FAN_OUT_SAFE_FALLBACK_REPLY =
   "I could not safely process that response. Please try again with a wellness-focused question.";
+
+const DETERMINISTIC_PRE_AI_GATE_REPLY =
+  "That quick action should have been handled before the AI coach ran. Please try your request again.";
 
 @Injectable()
 export class AgentOrchestratorService {
@@ -99,7 +108,6 @@ export class AgentOrchestratorService {
     private readonly contextCompressionService: ContextCompressionService,
     private readonly contextExpansionPolicyService: ContextExpansionPolicyService,
     private readonly systemPlannerService: SystemPlannerService,
-    private readonly responseModeExecutorService: ResponseModeExecutorService,
     private readonly aiBehaviorConfigService: AiBehaviorConfigService,
     private readonly messagePreprocessorService: MessagePreprocessorService,
     private readonly routerLlmService: RouterLlmService,
@@ -148,8 +156,8 @@ export class AgentOrchestratorService {
     const { route } = plan;
     const capabilityTurnMetadata = toAgentTurnCapabilityPresentation(plan.presentationMetadata);
 
-    // Build primary context packet for the current route (used by the single-domain
-    // path and as a fallback for the fan-out path metadata).
+    // Build primary context packet for the current route (used as a fallback
+    // for fan-out path metadata and for domain context building).
     const contextPacket = await this.coachingContextService.buildAgentContext(
       input.auth,
       {
@@ -223,67 +231,136 @@ export class AgentOrchestratorService {
       coachingContext.proposalExplainer = input.proposalExplainer;
     }
 
-    const directPathCandidate = this.systemPlannerService.classifyDirectPathCandidate({
-      userMessage: input.userMessage,
-      attachmentTurn: input.attachmentTurn,
-      proposalRevision: input.proposalRevision,
-    });
-
     // ---------------------------------------------------------------------------
-    // Route selection: fan-out vs. single-executor path
+    // Route selection
     //
-    // Fan-out path: the router ran, returned a confident LLM result, and the plan
-    // is not a deterministic mode. For this path we run one DomainLlmExecutorService
-    // loop per selected domain concurrently (Stage 8), then synthesize via
-    // DecisionMakerExecutorService (Stage 9) and ActionResolver (Stage 10).
-    // Pre-gates (crisis/explainer/direct-path/proposal-revision) always bypass the
-    // fan-out — their turns reach this code only via the ResponseModeExecutorService path below.
+    // S4: deterministic gate-miss (deterministic_read / deterministic_write) is
+    // handled INLINE by buildDeterministicGateMissResult — a rare safety-net for
+    // the case where a deterministic executor mode somehow reaches the orchestrator
+    // without the pre-AI gate having handled it. No ADDITIONAL LLM calls are made
+    // from this point; however, for eligible turns the router will already have run
+    // above (before SystemPlannerService produced the executorMode). The genuine
+    // zero-LLM path is the pre-AI gate in chat.service.ts (crisis, direct-path,
+    // quota), which returns before AiService is called.
     //
-    // Single-executor path: all other turns (proposal-revision, proposal-explainer,
-    // low-confidence fallback, deterministic modes). ResponseModeExecutorService
-    // handles both the LLM loop (proposal-revision, explainer, fallback) and the
-    // deterministic gate-miss path (buildDelegatedResult).
+    // All other turns fan out through runFanOutTurn:
+    //   - revision turns (router skipped; single-domain fan-out via the revision capability)
+    //   - explainer-with-proposal turns (router skipped; read-only single-domain fan-out)
+    //   - low-confidence / fallback turns (single-domain fan-out via "general" capability)
+    //   - confident multi-domain turns (parallel fan-out; the primary case)
+    //
+    // Pre-AI gates (crisis, no-proposal explainer, direct-path, quota) never reach the
+    // orchestrator, so they are never in scope here (S4 holds at chat.service.ts).
     // ---------------------------------------------------------------------------
-    const isFanOutTurn =
-      shouldRunRouter &&
-      routerResult?.source === "llm" &&
-      !isDeterministicResponseModeExecutorMode(plan.executorMode);
-
-    if (isFanOutTurn) {
-      return this.runFanOutTurn(input, {
+    if (isDeterministicResponseModeExecutorMode(plan.executorMode)) {
+      return this.buildDeterministicGateMissResult({
         plan,
         contextPacket,
-        // Pass the primary coachingContext (with compression summary if applied) so
-        // domain executors have access to review compression context. Each domain's
-        // per-domain packet context is merged on top of this base.
-        primaryCoachingContext: coachingContext,
         capabilityTurnMetadata,
-        routerResult: routerResult!,
+        routerResult,
+        shouldRunRouter,
       });
     }
 
-    // Single-executor path — proposal-revision, explainer, fallback, deterministic modes.
-    const executed = await this.responseModeExecutorService.execute({
+    // Every non-deterministic turn fans out.
+    return this.runFanOutTurn(input, {
       plan,
-      orchestratorInput: input,
       contextPacket,
-      coachingContext,
+      primaryCoachingContext: coachingContext,
       capabilityTurnMetadata,
-      routerTurn: {
-        routerRan: shouldRunRouter,
-        routerResult,
-      },
-      directPathCandidate,
-      provider: this.provider,
+      routerResult,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private — deterministic gate-miss safety-net
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Handles deterministic gate-miss turns (executorMode = deterministic_read |
+   * deterministic_write) INLINE — a safety-net for turns that reach the orchestrator
+   * without the pre-AI gate having handled them (S4). No additional LLM calls are
+   * made from this point; for eligible turns the router may already have run above.
+   *
+   * Returns a canned reply with responseModeExecution.delegatedToPreAiGate=true
+   * and preAiGateDelegationMissed=true so downstream telemetry can flag the miss.
+   * The metadata shape mirrors what the pre-C6 ResponseModeExecutorService.buildDelegatedResult emitted.
+   */
+  private buildDeterministicGateMissResult(params: {
+    plan: CapabilityPlanResult;
+    contextPacket: AgentContextPacket;
+    capabilityTurnMetadata: AgentTurnCapabilityPresentation;
+    routerResult: RouterLlmResult | undefined;
+    shouldRunRouter: boolean;
+  }): OrchestratedCoachTurnResult {
+    const { plan, contextPacket, capabilityTurnMetadata, routerResult, shouldRunRouter } = params;
+    const { route } = plan;
+
+    const loopPolicy = resolveResponseModeExecutorLoopPolicy(plan.executorMode);
+    const providerMode = resolveAiCoachProviderMode();
+
+    // llmRouterInvoked is true when the router ran and returned a source="llm" result.
+    const llmRouterInvoked =
+      shouldRunRouter && routerResult?.source === "llm";
+
+    const responseModeExecution = buildResponseModeExecutionMetadata({
+      executorMode: plan.executorMode,
+      llmInvoked: false,
+      expectedResponseMode: plan.expectedResponseMode,
+      delegatedToPreAiGate: true,
+      preAiGateDelegationMissed: true,
     });
 
+    const routing: AgentTurnMetadata["routing"] = {
+      confidence: route.confidence,
+      routingMethod: route.routingMethod,
+      llmRouterInvoked: llmRouterInvoked ?? false,
+      unifiedTurnDecisionInvoked: shouldRunRouter,
+      catalogIntentId: route.catalogIntentId,
+      safetyFlags: route.safetyFlags,
+      expectedResponseMode: route.expectedResponseMode,
+      contextSliceCount: route.requiredContextSlices.length,
+      loopIterations: 0,
+      maxLoopIterations: loopPolicy.maxLoopIterations,
+    };
+
+    const unifiedTurnDecision: AgentTurnMetadata["unifiedTurnDecision"] = routerResult
+      ? {
+          ran: shouldRunRouter,
+          source: routerResult.source,
+          confidence: routerResult.output.confidence,
+          routingMethod: "unified_turn_decision" as const,
+          ...(routerResult.validationErrors.length > 0
+            ? { validationErrorCount: routerResult.validationErrors.length }
+            : {}),
+        }
+      : { ran: shouldRunRouter };
+
     return {
-      output: executed.output,
-      parseErrors: executed.parseErrors,
-      replySafetyErrors: executed.replySafetyErrors,
+      output: { reply: DETERMINISTIC_PRE_AI_GATE_REPLY, proposals: [] },
+      parseErrors: [],
+      replySafetyErrors: [],
       agentMetadata: {
-        ...executed.agentMetadata,
-        responseModeExecution: executed.responseModeExecution,
+        provider: providerMode,
+        intent: route.intent,
+        catalogIntentId: route.catalogIntentId,
+        primaryCapabilityId: capabilityTurnMetadata.primaryCapabilityId,
+        selectedCapabilityIds: [...capabilityTurnMetadata.selectedCapabilityIds],
+        capabilityPresentation: capabilityTurnMetadata,
+        purpose: contextPacket.purpose,
+        depth: contextPacket.depth,
+        timeRange: contextPacket.timeRange,
+        toolsInvoked: [],
+        citations: mapContextSourceRefsToAgentCitations(contextPacket.sourceRefs),
+        routing,
+        unifiedTurnDecision,
+        missingContextNotes: contextPacket.missingContextNotes,
+        responseModeExecution,
+        safety: {
+          status: "passed",
+          blockedReasons: [],
+          constraintsApplied: contextPacket.safetyConstraints,
+        },
       },
     };
   }
@@ -295,12 +372,13 @@ export class AgentOrchestratorService {
   private async runFanOutTurn(
     input: OrchestrateCoachTurnInput,
     params: {
-      plan: import("./system-planner.service.js").DomainFanoutPlan;
+      plan: DomainFanoutPlan;
       contextPacket: AgentContextPacket;
       /** Primary coaching context with compression summary already applied. */
       primaryCoachingContext: Record<string, unknown>;
       capabilityTurnMetadata: AgentTurnCapabilityPresentation;
-      routerResult: import("./router-llm.service.js").RouterLlmResult;
+      /** undefined for revision/explainer turns where the router was skipped */
+      routerResult: RouterLlmResult | undefined;
     },
   ): Promise<OrchestratedCoachTurnResult> {
     const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult } = params;
@@ -363,9 +441,10 @@ export class AgentOrchestratorService {
 
     // Resolve the decision-maker output through ActionResolver (Stage 10).
     // ActionResolver filters proposals to the union of the selected domains'
-    // allowedProposalIntents and handles the consent-gated medical-save action.
-    // When a workout calorie estimate or rate is present, it is stamped onto
-    // workout proposals.
+    // allowedProposalIntents. consentRequired is a forwarded LLM boolean — there
+    // is no consent-gated action variant currently in the catalog (medical-save is
+    // deferred). When a workout calorie estimate or rate is present, it is stamped
+    // onto workout proposals with provenance 'workout_llm' (R1/S8).
     const resolved = this.actionResolverService.resolveFinalDecisionOutput({
       finalDecision: decisionResult.output,
       selectedDomains,
@@ -374,17 +453,15 @@ export class AgentOrchestratorService {
     });
 
     // Safety floor: validate the decision-maker's synthesized reply for diagnosis/treatment language.
-    // This mirrors ResponseModeExecutorService.validateAndResolveFinalAnswer — the decision-maker
-    // re-synthesizes a new reply that may introduce unsafe language not present in any domain summary.
+    // This covers all turn types now (revision, explainer, fallback, confident multi-domain) — S9/R2.
     // On failure, replace the reply with a safe fallback and drop all proposals (reply_blocked).
     const replySafetyErrors = validateReplySafety(resolved.reply);
     const replyBlocked = replySafetyErrors.length > 0;
 
-    // Carry the consent-required flag from ActionResolver: when true, the
-    // decision-maker selected a consent-gated action (e.g. medical document save).
-    // Surface it to ChatService so the response can include the distinct consent
-    // prompt flag. Nothing is auto-persisted — the proposal flows through the
-    // normal proposal validation + accept path.
+    // Carry the consent-required flag from ActionResolver: this is the LLM boolean
+    // forwarded from the decision-maker output (consentRequired). No consent-gated
+    // action variant currently exists in the catalog — medical-save is deferred.
+    // Surface it to ChatService for the ChatTurnResponse flag; nothing is auto-persisted.
     const consentRequired = replyBlocked ? false : resolved.consentRequired;
 
     const finalOutput: AiStructuredOutput = replyBlocked
@@ -619,14 +696,18 @@ function toAgentTurnCapabilityPresentation(
 
 /**
  * Build AgentTurnMetadata for a fan-out turn result.
- * The metadata mirrors the shape produced by ResponseModeExecutorService so
- * downstream callers (ChatService, tests) see a consistent structure.
+ *
+ * Supports revision/explainer turns where routerResult is undefined (router
+ * was skipped). In those cases, the router-derived fields default to
+ * `ran: false` / `llmRouterInvoked: false` so metadata parity is preserved
+ * without fabricating router data (R3).
  */
 function buildFanOutTurnMetadata(params: {
-  plan: import("./system-planner.service.js").DomainFanoutPlan;
+  plan: DomainFanoutPlan;
   contextPacket: AgentContextPacket;
   capabilityTurnMetadata: AgentTurnCapabilityPresentation;
-  routerResult: import("./router-llm.service.js").RouterLlmResult;
+  /** undefined for revision/explainer turns where the router was skipped */
+  routerResult: RouterLlmResult | undefined;
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>;
   mergedOutput: AiStructuredOutput;
   decisionDegraded?: boolean;
@@ -640,6 +721,25 @@ function buildFanOutTurnMetadata(params: {
   const degradedDomains = domainResults
     .filter((r) => r.result.degraded)
     .map((r) => r.domain);
+
+  // Router-derived metadata: only set when the router actually ran.
+  // For revision/explainer turns (routerResult=undefined), emit ran:false so
+  // telemetry correctly records that the router was not invoked (R3 metadata parity).
+  const llmRouterInvoked = routerResult !== undefined && routerResult.source === "llm";
+  const unifiedTurnDecisionInvoked = routerResult !== undefined;
+
+  const unifiedTurnDecision: AgentTurnMetadata["unifiedTurnDecision"] = routerResult
+    ? {
+        ran: true,
+        source: routerResult.source,
+        confidence: routerResult.output.confidence,
+        routingMethod: "unified_turn_decision" as const,
+        ...(routerResult.validationErrors.length > 0
+          ? { validationErrorCount: routerResult.validationErrors.length }
+          : {}),
+        ...(degradedDomains.length > 0 ? { blockedFallback: false } : {}),
+      }
+    : { ran: false };
 
   return {
     provider: providerMode,
@@ -656,8 +756,8 @@ function buildFanOutTurnMetadata(params: {
     routing: {
       confidence: route.confidence,
       routingMethod: route.routingMethod,
-      llmRouterInvoked: routerResult.source === "llm",
-      unifiedTurnDecisionInvoked: true,
+      llmRouterInvoked,
+      unifiedTurnDecisionInvoked,
       catalogIntentId: route.catalogIntentId,
       safetyFlags: route.safetyFlags,
       expectedResponseMode: route.expectedResponseMode,
@@ -665,16 +765,7 @@ function buildFanOutTurnMetadata(params: {
       loopIterations: totalIterations,
       maxLoopIterations: domainResults.length * 3, // 3 per domain (DOMAIN_MAX_LOOP_ITERATIONS)
     },
-    unifiedTurnDecision: {
-      ran: true,
-      source: routerResult.source,
-      confidence: routerResult.output.confidence,
-      routingMethod: "unified_turn_decision" as const,
-      ...(routerResult.validationErrors.length > 0
-        ? { validationErrorCount: routerResult.validationErrors.length }
-        : {}),
-      ...(degradedDomains.length > 0 ? { blockedFallback: false } : {}),
-    },
+    unifiedTurnDecision,
     missingContextNotes: contextPacket.missingContextNotes,
     responseModeExecution: {
       executorMode: plan.executorMode,
@@ -750,8 +841,8 @@ function buildDomainContextRequest(
  *
  * Source restriction: this function ONLY reads from the workout domain answer.
  * The decision-maker LLM and non-workout domains must never be the source of
- * the workout calorie estimate. The domainAnswerSchema superRefine guarantees
- * workoutCalorieEstimate is absent on non-workout answers at the Zod level.
+ * the workout calorie estimate. The domainLlmStepOutputSchema superRefine
+ * guarantees workoutCalorieEstimate is absent on non-workout answers at the Zod level.
  */
 function extractWorkoutCalorieEstimate(
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,
@@ -778,8 +869,8 @@ function extractWorkoutCalorieEstimate(
  *
  * Source restriction: this function ONLY reads from the workout domain answer.
  * The decision-maker LLM and non-workout domains must never be the source of
- * the workout calorie per hour rate. The domainAnswerSchema superRefine guarantees
- * workoutCaloriePerHourRate is absent on non-workout answers at the Zod level.
+ * the workout calorie per hour rate. The domainLlmStepOutputSchema superRefine
+ * guarantees workoutCaloriePerHourRate is absent on non-workout answers at the Zod level.
  */
 function extractWorkoutCaloriePerHourRate(
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,
@@ -796,4 +887,3 @@ function extractWorkoutCaloriePerHourRate(
 
   return undefined;
 }
-

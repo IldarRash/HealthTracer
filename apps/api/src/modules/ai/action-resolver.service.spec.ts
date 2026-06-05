@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getCapabilityConfig, DEFAULT_CONTEXT_BUDGET_POLICY } from "@health/types";
-import type { AiStructuredOutput, FinalDecisionOutput } from "@health/types";
+import { DEFAULT_CONTEXT_BUDGET_POLICY } from "@health/types";
+import type { FinalDecisionOutput } from "@health/types";
 import {
   ActionResolverService,
-  type CoachDirectActionAttempt,
   type ActionResolverFinalDecisionInput,
 } from "./action-resolver.service.js";
 import { PLAIN_REPLY_ACTION_VARIANT_ID } from "./action-variant-catalog.service.js";
@@ -17,7 +16,8 @@ const WORKOUT_PROPOSAL = {
   proposedChanges: {
     title: "Strength base",
     summary: "Lighter session today.",
-    days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+    // B5/B6: weekday required, object exercises only.
+    days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
     notes: [],
   },
 };
@@ -38,101 +38,6 @@ const NUTRITION_PROPOSAL = {
   },
 };
 
-describe("ActionResolverService", () => {
-  const service = new ActionResolverService();
-
-  function resolveForCapability(
-    capabilityId: "adjust_workout",
-    output: AiStructuredOutput,
-    directActions?: readonly CoachDirectActionAttempt[],
-  ) {
-    const config = getCapabilityConfig(capabilityId);
-
-    return service.resolveProposalOnlyOutput({
-      output,
-      catalogIntentId: capabilityId,
-      allowedProposalIntents: config.allowedProposals,
-      directActions,
-    });
-  }
-
-  it("passes allowed proposals through unchanged", () => {
-    const output: AiStructuredOutput = {
-      reply: "Here is a lighter workout option you can review.",
-      proposals: [WORKOUT_PROPOSAL],
-    };
-
-    const resolved = resolveForCapability("adjust_workout", output);
-
-    expect(resolved).toEqual(output);
-  });
-
-  it("filters proposals outside the capability allowlist", () => {
-    const resolved = resolveForCapability("adjust_workout", {
-      reply: "Here is a lighter workout option you can review.",
-      proposals: [WORKOUT_PROPOSAL, NUTRITION_PROPOSAL],
-    });
-
-    expect(resolved.proposals).toHaveLength(1);
-    expect(resolved.proposals[0]?.intent).toBe("adapt_workout_plan");
-    expect(resolved.reply).toBe("Here is a lighter workout option you can review.");
-  });
-
-  it("blocks all proposals when the capability allowlist is empty", () => {
-    const resolved = service.resolveProposalOnlyOutput({
-      output: {
-        reply: "I can summarize what I see without changing your plans.",
-        proposals: [NUTRITION_PROPOSAL],
-      },
-      catalogIntentId: "attachment_medical_document",
-      allowedProposalIntents: getCapabilityConfig("attachment_medical_document").allowedProposals,
-    });
-
-    expect(resolved.proposals).toEqual([]);
-  });
-
-  it("blocks proposals on proposal explainer turns", () => {
-    const resolved = service.resolveProposalOnlyOutput({
-      output: {
-        reply: "I suggested this because your recovery signals were low.",
-        proposals: [WORKOUT_PROPOSAL],
-      },
-      catalogIntentId: "proposal_explainer",
-      allowedProposalIntents: getCapabilityConfig("proposal_explainer").allowedProposals,
-    });
-
-    expect(resolved.proposals).toEqual([]);
-    expect(resolved.reply).toContain("recovery signals");
-  });
-
-  it("ignores direct actions and returns proposal-only structured output", () => {
-    const resolved = resolveForCapability(
-      "adjust_workout",
-      {
-        reply: "Marked complete.",
-        proposals: [WORKOUT_PROPOSAL],
-      },
-      [{ type: "mark_today_workout_done", payload: { sessionId: "session-1" } }],
-    );
-
-    expect(resolved).toEqual({
-      reply: "Marked complete.",
-      proposals: [WORKOUT_PROPOSAL],
-    });
-  });
-
-  it("does not mutate the input proposal array", () => {
-    const proposals = [WORKOUT_PROPOSAL, NUTRITION_PROPOSAL];
-    const output: AiStructuredOutput = {
-      reply: "Review options.",
-      proposals,
-    };
-
-    resolveForCapability("adjust_workout", output);
-
-    expect(output.proposals).toHaveLength(2);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // resolveFinalDecisionOutput (Phase 5 — decision-maker path)
@@ -281,7 +186,6 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
       // Verify the service has no injectable dependencies that could cause DB access.
       // The constructor takes no arguments — mutation-free by construction.
       expect(typeof resolver.resolveFinalDecisionOutput).toBe("function");
-      expect(typeof resolver.resolveProposalOnlyOutput).toBe("function");
 
       const result = resolver.resolveFinalDecisionOutput({
         finalDecision: {
@@ -331,7 +235,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
     proposedChanges: {
       title: "Strength base",
       summary: "Lighter session today.",
-      days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+      days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
       notes: [],
     },
   };
@@ -407,7 +311,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
       proposedChanges: {
         title: "New strength base",
         summary: "Fresh three day plan.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
       },
     };
@@ -432,7 +336,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
     const originalChanges = {
       title: "Strength base",
       summary: "Lighter session today.",
-      days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+      days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
       notes: [],
     };
     const proposal = {
@@ -505,7 +409,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         plan: {
           title: "Adapted plan",
           summary: "Reduced load based on progress.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
         },
         sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
@@ -550,7 +454,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         plan: {
           title: "Adapted plan",
           summary: "Reduced load.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
         },
         sourceTrendObservationIds: [],
@@ -593,7 +497,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
       proposedChanges: {
         title: "Strength base",
         summary: "Lighter session.",
-        days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
         estimatedSessionCalorieBurn: 9999,         // Injected by decision-maker — must be stripped
         calorieEstimateProvenance: "workout_llm",  // Injected by decision-maker — must be stripped
@@ -628,7 +532,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         plan: {
           title: "Adapted plan",
           summary: "Lighter.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
           estimatedSessionCalorieBurn: 8888,        // Injected — must be stripped
           calorieEstimateProvenance: "workout_llm", // Injected — must be stripped
@@ -667,7 +571,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
       proposedChanges: {
         title: "Strength base",
         summary: "Session.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
         estimatedSessionCalorieBurn: 5555,         // Wrong fabricated value
         calorieEstimateProvenance: "workout_llm",
@@ -722,7 +626,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
     proposedChanges: {
       title: "Strength base",
       summary: "Lighter session.",
-      days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+      days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
       notes: [],
     },
   };
@@ -759,7 +663,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
       proposedChanges: {
         title: "Strength base",
         summary: "Session.",
-        days: [{ day: "Day 1", focus: "Strength", exercises: ["Squat"] }],
+        days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
         notes: [],
         caloriePerHourRate: 450, // Valid-range fabricated value — must be scrubbed when no trusted rate
       } as Record<string, unknown>,
@@ -791,7 +695,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
         plan: {
           title: "Adapted plan",
           summary: "Reduced load.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
         },
         sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
@@ -834,7 +738,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
         plan: {
           title: "Adapted plan",
           summary: "Lighter.",
-          days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+          days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
           notes: [],
           caloriePerHourRate: 350, // Valid-range fabricated value — must be scrubbed when no trusted rate
         },

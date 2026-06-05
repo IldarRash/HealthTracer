@@ -93,15 +93,11 @@ export const contextSliceRequestSchema = z.object({
 
 export type ContextSliceRequest = z.infer<typeof contextSliceRequestSchema>;
 
+// B7 removal: "llm_router", "message_understanding", "attachment_family" deleted.
+// Pre-launch disposable DB — no backfill needed. Surviving values: "rule_based" + "unified_turn_decision".
 export const agentRoutingMethodSchema = z.enum([
   "rule_based",
-  /** @deprecated Historical persisted metadata only; production uses unified_turn_decision. */
-  "llm_router",
-  /** @deprecated Historical persisted metadata only; production uses unified_turn_decision. */
-  "message_understanding",
   "unified_turn_decision",
-  /** @deprecated Historical persisted metadata only; attachments route via TurnDecision hints. */
-  "attachment_family",
 ]);
 
 export type AgentRoutingMethod = z.infer<typeof agentRoutingMethodSchema>;
@@ -110,7 +106,7 @@ export const agentRoutingMetadataSchema = z.object({
   confidence: z.number().min(0).max(1),
   routingMethod: agentRoutingMethodSchema,
   llmRouterInvoked: z.boolean(),
-  messageUnderstandingInvoked: z.boolean().optional(),
+  // messageUnderstandingInvoked deleted (B7 removal, C4 cluster) — no live writer remains.
   unifiedTurnDecisionInvoked: z.boolean().optional(),
   catalogIntentId: catalogIntentIdSchema.optional(),
   safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
@@ -537,7 +533,7 @@ export type AgentUnifiedTurnDecisionMetadata = z.infer<
 >;
 
 export const agentTurnMetadataSchema = z.object({
-  provider: z.enum(["stub", "openai"]),
+  provider: z.literal("openai"),
   intent: agentIntentSchema,
   catalogIntentId: catalogIntentIdSchema.optional(),
   primaryCapabilityId: catalogIntentIdSchema.optional(),
@@ -584,7 +580,7 @@ export const agentTurnMetadataSchema = z.object({
 
 export type AgentTurnMetadata = z.infer<typeof agentTurnMetadataSchema>;
 
-export const aiCoachProviderModeSchema = z.enum(["stub", "openai"]);
+export const aiCoachProviderModeSchema = z.literal("openai");
 
 export type AiCoachProviderMode = z.infer<typeof aiCoachProviderModeSchema>;
 

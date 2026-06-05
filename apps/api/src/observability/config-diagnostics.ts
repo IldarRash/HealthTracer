@@ -4,7 +4,7 @@ export type IntegrationStatus = "enabled" | "disabled" | "misconfigured";
 
 export type ConfigDiagnostics = {
   clerkJwks: IntegrationStatus;
-  aiCoachProvider: "stub" | "openai";
+  aiCoachProvider: "openai";
   openai: IntegrationStatus;
   corsOrigins: "configured" | "reflect_origin";
   documentStorage: "configured";
@@ -30,12 +30,7 @@ export function getConfigDiagnostics(): ConfigDiagnostics {
   return {
     clerkJwks: env.CLERK_JWKS_URL ? "enabled" : "disabled",
     aiCoachProvider: env.AI_COACH_PROVIDER,
-    openai:
-      env.AI_COACH_PROVIDER === "openai"
-        ? env.OPENAI_API_KEY
-          ? "enabled"
-          : "misconfigured"
-        : "disabled",
+    openai: env.OPENAI_API_KEY ? "enabled" : "misconfigured",
     corsOrigins: configuredOrigins?.length ? "configured" : "reflect_origin",
     documentStorage: "configured",
     databaseUrl: "configured",
@@ -55,11 +50,11 @@ export function getStaticReadinessChecks(): ReadinessCheck[] {
     checks.push({ name: "clerk_jwks", status: "ok" });
   }
 
-  if (env.AI_COACH_PROVIDER === "openai" && !env.OPENAI_API_KEY) {
+  if (!env.OPENAI_API_KEY) {
     checks.push({
       name: "openai_api_key",
       status: "error",
-      message: "OPENAI_API_KEY is required when AI_COACH_PROVIDER=openai",
+      message: "OPENAI_API_KEY is required for the AI coach provider",
     });
   } else {
     checks.push({ name: "openai_api_key", status: "ok" });

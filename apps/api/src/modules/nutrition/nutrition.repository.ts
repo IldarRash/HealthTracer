@@ -5,6 +5,7 @@ import type {
   NutritionPlanPayload,
   UpsertNutritionAdherenceInput,
 } from "@health/types";
+import { formatIsoDateInTimezone } from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -270,13 +271,12 @@ export class NutritionRepository {
     sourceProposalId: string,
     payload: LogNutritionIncidentProposalPayload,
     db: Pick<HealthDatabase, "insert"> = this.db,
+    timezone = "UTC",
   ) {
-    // TODO(C2): incidentDate is derived as a UTC prefix here. Ideally it should be
-    // derived in the user's timezone (as workouts.service.ts now does for plannedDate).
-    // The user timezone is not readily available at the repository layer; the fix
-    // belongs in a service-layer caller once the createIncident signature carries
-    // the timezone or a pre-computed date.
-    const incidentDate = payload.incidentDateTime.slice(0, 10);
+    // incidentDate reflects the user's local calendar day derived from incidentDateTime.
+    // The timezone is threaded in from NutritionService (which resolves it from the user
+    // record) so incidents near midnight land on the correct local day rather than the UTC day.
+    const incidentDate = formatIsoDateInTimezone(timezone, new Date(payload.incidentDateTime));
     const [row] = await db
       .insert(nutritionIncidents)
       .values({

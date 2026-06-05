@@ -6,13 +6,15 @@ import {
   routerDomainSchema,
   type RouterDecisionOutput,
 } from "@health/types";
-import { describe, expect, it, vi } from "vitest";
+import { createCoachAiProviderMock } from "@health/ai/testing";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import type { CapabilityRegistryService } from "./capability-registry.service.js";
 import {
   RouterLlmService,
   type RouterLlmServiceInput,
 } from "./router-llm.service.js";
+import * as coachProviderFactory from "./coach-provider.factory.js";
 
 // ---------------------------------------------------------------------------
 // Minimal stubs
@@ -68,6 +70,13 @@ function makeCapabilityRegistryService(): Pick<CapabilityRegistryService, "getCo
 function buildService(providerOverrides: Partial<{
   generateRouterDecision: (req: unknown) => Promise<RouterDecisionOutput>;
 }> = {}): RouterLlmService {
+  // Spy on createCoachAiProvider so the RouterLlmService constructor does not
+  // attempt to instantiate the real OpenAI provider (which requires a live key).
+  // This mirrors the pattern used by agent-orchestrator.service.spec.ts:711.
+  vi.spyOn(coachProviderFactory, "createCoachAiProvider").mockReturnValue(
+    createCoachAiProviderMock(),
+  );
+
   const service = new RouterLlmService(
     makeAiBehaviorConfigService() as AiBehaviorConfigService,
     makeCapabilityRegistryService() as CapabilityRegistryService,
@@ -87,8 +96,6 @@ function buildService(providerOverrides: Partial<{
           confidence: 0.8,
         }),
       ),
-    generateAgentLoopStep: vi.fn(),
-    generateCoachResponse: vi.fn(),
     generateDomainStep: vi.fn(),
     generateFinalDecision: vi.fn(),
   };
@@ -104,6 +111,10 @@ function buildService(providerOverrides: Partial<{
 // ---------------------------------------------------------------------------
 
 describe("RouterLlmService", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe("buildRequest", () => {
     it("populates originalText and normalizedText from the preprocessor result", () => {
       const service = buildService();
@@ -148,13 +159,13 @@ describe("RouterLlmService", () => {
       expect(domains).not.toContain("medical");
     });
 
-    it("passes attachment hints through", () => {
+    it("passes attachment hints through (category only — mimeType/consentState not routed)", () => {
       const service = buildService();
       const preprocessorResult = makePreprocessorResult({ hasAttachments: true });
 
       const request = service.buildRequest({
         preprocessorResult,
-        attachmentHints: [{ category: "food_photo", mimeType: "image/jpeg", consentState: "not_required" }],
+        attachmentHints: [{ category: "food_photo" }],
       });
 
       expect(request.attachmentHints).toHaveLength(1);

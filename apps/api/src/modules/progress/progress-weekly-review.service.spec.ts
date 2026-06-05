@@ -218,7 +218,7 @@ describe("ProgressWeeklyReviewService", () => {
             plan: {
               title: "Lighter week",
               summary: "Adjusted volume based on weekly completion patterns.",
-              days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+              days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
             },
           },
         },

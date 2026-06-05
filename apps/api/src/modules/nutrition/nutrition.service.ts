@@ -223,11 +223,15 @@ export class NutritionService {
       return existingIncident.id;
     }
 
+    const user = await this.usersService.getUserById(userId);
+    const timezone = user?.timezone ?? "UTC";
+
     const row = await this.nutritionRepository.createIncident(
       userId,
       sourceProposalId,
       parsedPayload,
       tx,
+      timezone,
     );
 
     return row.id;

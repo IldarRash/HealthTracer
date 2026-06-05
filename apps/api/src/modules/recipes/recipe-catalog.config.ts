@@ -1,15 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import {
-  THEMEALDB_PROVIDER,
+  SEEDED_ONLY_PROVIDER,
   type ProviderRecipeDraft,
   type RecipeCatalogProvider,
 } from "./recipe-catalog-provider.js";
 
 @Injectable()
 export class SeededOnlyRecipeCatalogProvider implements RecipeCatalogProvider {
-  readonly providerName = THEMEALDB_PROVIDER;
+  readonly providerName = SEEDED_ONLY_PROVIDER;
 
-  async fetchByGenericCategories(): Promise<ProviderRecipeDraft[]> {
+  async fetchByGenericCategories(_categories: readonly string[]): Promise<ProviderRecipeDraft[]> {
     return [];
   }
 }

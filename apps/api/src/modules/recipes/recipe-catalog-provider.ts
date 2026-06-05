@@ -7,8 +7,9 @@ import type {
 } from "@health/types";
 
 export const THEMEALDB_PROVIDER = "themealdb" as const;
+export const SEEDED_ONLY_PROVIDER = "seeded_only" as const;
 
-export type RecipeCatalogProviderName = typeof THEMEALDB_PROVIDER;
+export type RecipeCatalogProviderName = typeof THEMEALDB_PROVIDER | typeof SEEDED_ONLY_PROVIDER;
 
 export interface ProviderRecipeDraft {
   provider: RecipeCatalogProviderName;

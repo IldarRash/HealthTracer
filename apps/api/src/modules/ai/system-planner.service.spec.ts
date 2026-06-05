@@ -532,8 +532,7 @@ describe("SystemPlannerService", () => {
     // not rule_based (which would indicate the old path).
     expect(plan.route.routingMethod).toBe("unified_turn_decision");
     expect(plan.route.isConfident).toBe(true);
-    // The plan input type must not accept a turnDecision field (it's typed `never`).
-    // Ensure only routerResult is accepted.
+    // Ensure only routerResult (not the removed turnDecision field) is accepted.
     expect(plan.catalogIntentId).toBe("adjust_workout");
   });
 
@@ -586,7 +585,7 @@ describe("SystemPlannerService", () => {
           proposedChanges: {
             title: "Strength base",
             summary: "Lighter session today.",
-            days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+            days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
             notes: [],
           },
         },
@@ -678,7 +677,7 @@ describe("SystemPlannerService", () => {
             proposedChanges: {
               title: "Strength base",
               summary: "Lighter session today.",
-              days: [{ day: "Day 1", focus: "Recovery", exercises: ["Walk"] }],
+              days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
               notes: [],
             },
           },

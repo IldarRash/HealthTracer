@@ -328,7 +328,7 @@ describe("DirectChatPathService", () => {
           proposedChanges: {
             title: "Weekly plan",
             summary: "Build consistency with a simple weekly structure.",
-            days: [{ focus: "Strength", exercises: ["Squat"] }],
+            days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
             notes: [],
           },
         },
