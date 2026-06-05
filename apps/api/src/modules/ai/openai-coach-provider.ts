@@ -33,7 +33,7 @@ import {
 export class OpenAiCoachProviderMissingKeyError extends Error {
   constructor() {
     super(
-      "OpenAI coach provider is selected but OPENAI_API_KEY is not configured. Set OPENAI_API_KEY or use AI_COACH_PROVIDER=stub.",
+      "OpenAI coach provider requires OPENAI_API_KEY, but it is not configured. Set OPENAI_API_KEY.",
     );
     this.name = "OpenAiCoachProviderMissingKeyError";
   }

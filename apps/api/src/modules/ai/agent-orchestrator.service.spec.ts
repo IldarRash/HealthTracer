@@ -1121,8 +1121,8 @@ describe("AgentOrchestratorService", () => {
     vi.restoreAllMocks();
   });
 
-  it("orchestrates a stub coach turn with typed agent metadata", async () => {
-    vi.spyOn(coachProviderFactory, "resolveAiCoachProviderMode").mockReturnValue("stub");
+  it("orchestrates a coach turn with typed agent metadata", async () => {
+    vi.spyOn(coachProviderFactory, "resolveAiCoachProviderMode").mockReturnValue("openai");
 
     const contextPacket = createSlicePacket("workout_adaptation", "adjust_workout");
     const { service } = createOrchestratorWithCapturedProvider(contextPacket);
@@ -1138,7 +1138,7 @@ describe("AgentOrchestratorService", () => {
     });
 
     expect(result.output.reply.length).toBeGreaterThan(0);
-    expect(result.agentMetadata.provider).toBe("stub");
+    expect(result.agentMetadata.provider).toBe("openai");
     expect(result.agentMetadata.purpose).toBe("workout_adaptation");
     expect(result.agentMetadata.safety.status).toBe("passed");
   });

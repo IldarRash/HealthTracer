@@ -597,7 +597,7 @@ Selects provider mode from config/env.
 File: `apps/api/src/modules/ai/openai-coach-provider.ts`
 
 OpenAI-backed provider implementation. The `CoachAiProvider` surface
-(`packages/ai/src/stub-provider.ts` defines the interface). The three fan-out
+(`packages/ai/src/coach-ai-provider.ts` defines the interface). The three fan-out
 methods drive the live multi-domain path:
 
 - `generateRouterDecision` — the first-LLM domain selection
@@ -614,14 +614,14 @@ OpenAI prompt templates are keyed `router`, `domain_workout`, `domain_nutrition`
 `domain_health`, and `decision`, rendered through `CompiledPromptTemplates` and the
 shared JSON-completion + shape-validation helpers.
 
-### Stub Provider
+### Coach AI Provider Interface
 
-File: `packages/ai/src/stub-provider.ts`
+File: `packages/ai/src/coach-ai-provider.ts`
 
-Deterministic provider used for local/test behavior. It defines the
-`CoachAiProvider` interface and mirrors every provider method (the three fan-out
-methods plus the retained `generateAgentLoopStep` / `generateCoachResponse`) without
-external calls.
+Defines the `CoachAiProvider` interface and the `CoachAiRequest` / `CoachAiLoopRequest` types.
+The stub provider has been deleted (C2 removal program); tests use the shared mock
+from `@health/ai/testing` (`createCoachAiProviderMock`) and the real `OpenAiCoachProvider`
+is the mandatory production path.
 
 ### Agent Loop Parsing
 

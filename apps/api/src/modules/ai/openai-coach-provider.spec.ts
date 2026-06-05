@@ -116,7 +116,7 @@ describe("OpenAiCoachProvider", () => {
       OpenAiCoachProviderMissingKeyError,
     );
     expect(() => createOpenAiCoachProvider("   ", "gpt-4o-mini")).toThrow(
-      /OPENAI_API_KEY is not configured/,
+      /OPENAI_API_KEY/,
     );
   });
 

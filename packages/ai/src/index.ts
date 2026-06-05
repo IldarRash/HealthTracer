@@ -14,8 +14,7 @@ export {
   type ParsedAgentLoopOutput,
 } from "./agent-loop-output.js";
 export {
-  StubCoachAiProvider,
   type CoachAiProvider,
   type CoachAiLoopRequest,
   type CoachAiRequest,
-} from "./stub-provider.js";
+} from "./coach-ai-provider.js";

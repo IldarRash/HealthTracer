@@ -59,7 +59,7 @@ export type DomainAttachmentContext = z.infer<typeof domainAttachmentContextSche
 
 // ---------------------------------------------------------------------------
 // DomainLlmStepRequest
-// Extends CoachAiLoopRequest from packages/ai/src/stub-provider with a
+// Extends CoachAiLoopRequest from packages/ai/src/coach-ai-provider with a
 // domain discriminator so each bounded loop knows which domain it serves.
 // ---------------------------------------------------------------------------
 

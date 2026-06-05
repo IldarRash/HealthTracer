@@ -78,7 +78,7 @@ describe("agent context contracts", () => {
   describe("historical persisted metadata compatibility", () => {
     it("accepts deprecated llm_router routing metadata on stored agent turns", () => {
       const metadata = agentTurnMetadataSchema.parse({
-        provider: "stub",
+        provider: "openai",
         intent: "general",
         purpose: "general_chat",
         depth: "small",
@@ -110,7 +110,7 @@ describe("agent context contracts", () => {
     });
 
     const metadata = agentTurnMetadataSchema.parse({
-      provider: "stub",
+      provider: "openai",
       intent: "adjust_workout",
       catalogIntentId: "adjust_workout",
       primaryCapabilityId: "adjust_workout",

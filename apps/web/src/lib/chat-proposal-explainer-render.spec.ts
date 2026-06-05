@@ -31,7 +31,7 @@ describe("chat proposal explainer render path", () => {
       content: explainerContent,
       metadata: {
         agent: {
-          provider: "stub",
+          provider: "openai",
           intent: "proposal_explainer",
           catalogIntentId: "proposal_explainer",
           capabilityPresentation: {

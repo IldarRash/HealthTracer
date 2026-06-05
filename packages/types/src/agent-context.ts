@@ -537,7 +537,7 @@ export type AgentUnifiedTurnDecisionMetadata = z.infer<
 >;
 
 export const agentTurnMetadataSchema = z.object({
-  provider: z.enum(["stub", "openai"]),
+  provider: z.literal("openai"),
   intent: agentIntentSchema,
   catalogIntentId: catalogIntentIdSchema.optional(),
   primaryCapabilityId: catalogIntentIdSchema.optional(),
@@ -584,7 +584,7 @@ export const agentTurnMetadataSchema = z.object({
 
 export type AgentTurnMetadata = z.infer<typeof agentTurnMetadataSchema>;
 
-export const aiCoachProviderModeSchema = z.enum(["stub", "openai"]);
+export const aiCoachProviderModeSchema = z.literal("openai");
 
 export type AiCoachProviderMode = z.infer<typeof aiCoachProviderModeSchema>;
 

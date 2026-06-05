@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockEnv = vi.hoisted(() => ({
   CLERK_JWKS_URL: undefined as string | undefined,
-  AI_COACH_PROVIDER: "stub" as "stub" | "openai",
+  AI_COACH_PROVIDER: "openai" as const,
   OPENAI_API_KEY: "super-secret-key" as string | undefined,
   CORS_ORIGINS: undefined as string | undefined,
   DATABASE_URL: "postgres://postgres:postgres@localhost:5432/health_tracer",
@@ -16,7 +16,7 @@ vi.mock("../env.js", () => ({
 describe("startup diagnostics", () => {
   afterEach(() => {
     mockEnv.CLERK_JWKS_URL = undefined;
-    mockEnv.AI_COACH_PROVIDER = "stub";
+    mockEnv.AI_COACH_PROVIDER = "openai";
     mockEnv.OPENAI_API_KEY = "super-secret-key";
     mockEnv.CORS_ORIGINS = undefined;
     vi.resetModules();

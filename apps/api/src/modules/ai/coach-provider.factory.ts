@@ -1,4 +1,4 @@
-import { StubCoachAiProvider, type CoachAiProvider } from "@health/ai";
+import type { CoachAiProvider } from "@health/ai";
 import type { AiCoachProviderMode, CompiledPromptTemplates } from "@health/types";
 import { env } from "../../env.js";
 import {
@@ -17,7 +17,7 @@ export function createCoachAiProvider(
     return createOpenAiCoachProvider(env.OPENAI_API_KEY, env.OPENAI_MODEL, promptTemplates);
   }
 
-  return new StubCoachAiProvider();
+  throw new Error("AI_COACH_PROVIDER must be 'openai'; no stub provider exists.");
 }
 
 export { OpenAiCoachProviderMissingKeyError };

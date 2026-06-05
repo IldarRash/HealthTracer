@@ -144,7 +144,7 @@ function createDefaultAgentMetadataForTests(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
-    provider: "stub",
+    provider: "openai",
     intent: "general",
     catalogIntentId: "general",
     purpose: "general_chat",
@@ -232,7 +232,7 @@ describe("ChatService", () => {
   it("persists agent turn metadata on assistant messages", async () => {
     let assistantMetadata: Record<string, unknown> = {};
     const agentMetadata = {
-      provider: "stub" as const,
+      provider: "openai" as const,
       intent: "adjust_workout" as const,
       purpose: "workout_adaptation" as const,
       depth: "medium" as const,
@@ -369,7 +369,7 @@ describe("ChatService", () => {
             parseErrors: [],
             replySafetyErrors: [],
             agentMetadata: {
-              provider: "stub" as const,
+              provider: "openai" as const,
               intent: "adjust_workout" as const,
               purpose: "workout_adaptation" as const,
               depth: "medium" as const,
@@ -412,7 +412,7 @@ describe("ChatService", () => {
   it("persists unified turn decision routing metadata on assistant messages", async () => {
     let assistantMetadata: Record<string, unknown> = {};
     const agentMetadata = {
-      provider: "stub" as const,
+      provider: "openai" as const,
       intent: "adjust_nutrition" as const,
       purpose: "nutrition_adaptation" as const,
       depth: "medium" as const,
@@ -2144,7 +2144,7 @@ describe("ChatService", () => {
               parseErrors: [],
               replySafetyErrors: [],
               agentMetadata: {
-                provider: "stub" as const,
+                provider: "openai" as const,
                 intent: "adjust_nutrition" as const,
                 catalogIntentId: "attachment_food_photo" as const,
                 purpose: "nutrition_adaptation" as const,
@@ -2264,7 +2264,7 @@ describe("ChatService", () => {
               parseErrors: [],
               replySafetyErrors: [],
               agentMetadata: {
-                provider: "stub" as const,
+                provider: "openai" as const,
                 intent: "general" as const,
                 catalogIntentId: "general" as const,
                 purpose: "general_chat" as const,
@@ -2537,7 +2537,7 @@ describe("ChatService", () => {
             parseErrors: ["OpenAI coach provider request failed."],
             replySafetyErrors: [],
             agentMetadata: {
-              provider: "stub",
+              provider: "openai",
               intent: "general",
               catalogIntentId: "general",
               purpose: "general_chat",
@@ -3005,7 +3005,7 @@ describe("ChatService", () => {
               parseErrors: [],
               replySafetyErrors: [],
               agentMetadata: {
-                provider: "stub",
+                provider: "openai",
                 intent: "proposal_explainer",
                 catalogIntentId: "proposal_explainer",
                 purpose: "general_chat",
@@ -3131,7 +3131,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
             consentRequired: aiResult.consentRequired,
             agentMetadata: {
-              provider: "stub" as const,
+              provider: "openai" as const,
               intent: "general" as const,
               catalogIntentId: "general" as const,
               purpose: "general_chat" as const,

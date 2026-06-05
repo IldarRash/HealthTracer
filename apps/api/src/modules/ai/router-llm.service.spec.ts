@@ -6,13 +6,15 @@ import {
   routerDomainSchema,
   type RouterDecisionOutput,
 } from "@health/types";
-import { describe, expect, it, vi } from "vitest";
+import { createCoachAiProviderMock } from "@health/ai/testing";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import type { CapabilityRegistryService } from "./capability-registry.service.js";
 import {
   RouterLlmService,
   type RouterLlmServiceInput,
 } from "./router-llm.service.js";
+import * as coachProviderFactory from "./coach-provider.factory.js";
 
 // ---------------------------------------------------------------------------
 // Minimal stubs
@@ -68,6 +70,13 @@ function makeCapabilityRegistryService(): Pick<CapabilityRegistryService, "getCo
 function buildService(providerOverrides: Partial<{
   generateRouterDecision: (req: unknown) => Promise<RouterDecisionOutput>;
 }> = {}): RouterLlmService {
+  // Spy on createCoachAiProvider so the RouterLlmService constructor does not
+  // attempt to instantiate the real OpenAI provider (which requires a live key).
+  // This mirrors the pattern used by agent-orchestrator.service.spec.ts:711.
+  vi.spyOn(coachProviderFactory, "createCoachAiProvider").mockReturnValue(
+    createCoachAiProviderMock(),
+  );
+
   const service = new RouterLlmService(
     makeAiBehaviorConfigService() as AiBehaviorConfigService,
     makeCapabilityRegistryService() as CapabilityRegistryService,
@@ -104,6 +113,10 @@ function buildService(providerOverrides: Partial<{
 // ---------------------------------------------------------------------------
 
 describe("RouterLlmService", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe("buildRequest", () => {
     it("populates originalText and normalizedText from the preprocessor result", () => {
       const service = buildService();

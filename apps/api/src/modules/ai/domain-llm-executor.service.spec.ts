@@ -2,6 +2,7 @@ import { createFallbackDomainAnswer, DEFAULT_CONTEXT_BUDGET_POLICY } from "@heal
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentContextPacket } from "@health/types";
 import type { CoachAiProvider } from "@health/ai";
+import { createCoachAiProviderMock } from "@health/ai/testing";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import type { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
@@ -94,13 +95,9 @@ function makeOrchestratorInput(
 }
 
 function makeProvider(domainStepOutput: unknown): CoachAiProvider {
-  return {
+  return createCoachAiProviderMock({
     generateDomainStep: vi.fn().mockResolvedValue(domainStepOutput),
-    generateAgentLoopStep: vi.fn(),
-    generateCoachResponse: vi.fn(),
-    generateRouterDecision: vi.fn(),
-    generateFinalDecision: vi.fn(),
-  } as unknown as CoachAiProvider;
+  });
 }
 
 function makeToolRegistry(): AgentToolRegistryService {
