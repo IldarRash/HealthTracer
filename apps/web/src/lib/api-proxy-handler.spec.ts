@@ -173,4 +173,102 @@ describe("api proxy handler", () => {
       message: "Upstream API is unavailable.",
     });
   });
+
+  it("passes a 401 upstream response through with the JSON body intact", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const upstreamBody = JSON.stringify({
+      message: "Bearer token is required.",
+      error: "Unauthorized",
+      statusCode: 401,
+    });
+    const fetchMock = vi.fn(async () => {
+      return new Response(upstreamBody, {
+        status: 401,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [REQUEST_ID_HEADER]: requestId,
+        },
+      });
+    });
+
+    const result = await proxyApiRequest({
+      method: "GET",
+      pathSegments: ["users", "me", "state"],
+      search: "",
+      headers: new Headers(),
+      body: null,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(result.status).toBe(401);
+    expect(result.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(JSON.parse(new TextDecoder().decode(result.body))).toEqual({
+      message: "Bearer token is required.",
+      error: "Unauthorized",
+      statusCode: 401,
+    });
+  });
+
+  it("passes a 500 upstream response through with the JSON body intact", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const upstreamBody = JSON.stringify({ statusCode: 500, message: "Internal Server Error" });
+    const fetchMock = vi.fn(async () => {
+      return new Response(upstreamBody, {
+        status: 500,
+        headers: {
+          "content-type": "application/json",
+          [REQUEST_ID_HEADER]: requestId,
+        },
+      });
+    });
+
+    const result = await proxyApiRequest({
+      method: "GET",
+      pathSegments: ["some", "endpoint"],
+      search: "",
+      headers: new Headers(),
+      body: null,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(result.status).toBe(500);
+    expect(result.headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(new TextDecoder().decode(result.body))).toEqual({
+      statusCode: 500,
+      message: "Internal Server Error",
+    });
+  });
+
+  it("converts an opaque redirect (status=0) to a 502 instead of throwing", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // Simulate an opaque redirect: fetch with redirect:'manual' on some runtimes
+    // returns a response with status=0 and an unreadable body.
+    const fetchMock = vi.fn(async () => {
+      // Construct a minimal opaque-redirect-like response with status=0.
+      // The Response constructor rejects status=0, so we bypass it for the mock.
+      return {
+        status: 0,
+        headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      } as unknown as Response;
+    });
+
+    const result = await proxyApiRequest({
+      method: "GET",
+      pathSegments: ["users", "me"],
+      search: "",
+      headers: new Headers({ [REQUEST_ID_HEADER]: requestId }),
+      body: null,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(result.status).toBe(502);
+    expect(JSON.parse(new TextDecoder().decode(result.body))).toEqual({
+      statusCode: 502,
+      message: "Upstream API is unavailable.",
+    });
+  });
 });

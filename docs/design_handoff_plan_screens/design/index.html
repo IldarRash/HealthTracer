@@ -18,17 +18,19 @@
 <script type="text/babel" src="design-canvas.jsx"></script>
 <script type="text/babel" src="app/kit.jsx"></script>
 <script type="text/babel" src="app/shell.jsx"></script>
+<script type="text/babel" src="app/states.jsx"></script>
 <script type="text/babel" src="app/proposal.jsx"></script>
 <script type="text/babel" src="app/chat.jsx"></script>
 <script type="text/babel" src="app/today.jsx"></script>
 <script type="text/babel" src="app/longevity.jsx"></script>
-<script type="text/babel" src="app/plans.jsx"></script>
+<script type="text/babel" src="app/workouts.jsx"></script>
+<script type="text/babel" src="app/nutrition.jsx"></script>
 <script type="text/babel" src="app/profile.jsx"></script>
 <script type="text/babel" src="app/onboarding.jsx"></script>
 <script type="text/babel" src="app/paywall.jsx"></script>
 
 <script type="text/babel" data-presets="react">
-const W = 1200, H = 820;
+const W = 1200, H = 820, WD = 1200;
 
 function Canvas() {
   return (
@@ -62,13 +64,34 @@ function Canvas() {
         <DCArtboard id="today-empty" label="Пусто (нет плана)" width={W} height={H}><TodayScreen state="empty" /></DCArtboard>
       </DCSection>
 
-      <DCSection id="longevity" title="Динамика" subtitle="Недельный обзор · консистентность и тренды без клинических скоров">
-        <DCArtboard id="long-week" label="Неделя" width={W} height={H}><LongevityScreen /></DCArtboard>
+      <DCSection id="longevity" title="Динамика (Longevity)" subtitle="Недельный обзор · все состояния · тёмная тема, без клинических скоров">
+        <DCArtboard id="lng-loading" label="Загрузка" width={WD} height={640}><LongevityScreen state="loading" /></DCArtboard>
+        <DCArtboard id="lng-sparse" label="Пусто / Sparse (новый пользователь)" width={WD} height={1220}><LongevityScreen state="sparse" /></DCArtboard>
+        <DCArtboard id="lng-error" label="Ошибка (экран целиком)" width={WD} height={760}><LongevityScreen state="error" /></DCArtboard>
+        <DCArtboard id="lng-partial" label="Частичная ошибка" width={WD} height={1500}><LongevityScreen state="partial" /></DCArtboard>
+        <DCArtboard id="lng-done" label="Готово (с данными)" width={WD} height={1560}><LongevityScreen state="done" /></DCArtboard>
       </DCSection>
 
-      <DCSection id="plans" title="Планы · просмотр" subtitle="Тренировки и питание — только просмотр, меняются через чат">
-        <DCArtboard id="plan-training" label="Тренировки" width={W} height={H}><TrainingScreen /></DCArtboard>
-        <DCArtboard id="plan-nutrition" label="Питание" width={W} height={H}><NutritionScreen /></DCArtboard>
+      <DCSection id="workouts" title="Тренировки (Workouts)" subtitle="Активная программа · только просмотр · упражнения можно смотреть как видео">
+        <DCArtboard id="wk-loading" label="Загрузка" width={WD} height={620}><WorkoutsScreen state="loading" /></DCArtboard>
+        <DCArtboard id="wk-empty" label="Пустой план" width={WD} height={900}><WorkoutsScreen state="empty" /></DCArtboard>
+        <DCArtboard id="wk-error" label="Ошибка" width={WD} height={760}><WorkoutsScreen state="error" /></DCArtboard>
+        <DCArtboard id="wk-done" label="Готово (с данными)" width={WD} height={2400}><WorkoutsScreen state="done" /></DCArtboard>
+        <DCArtboard id="wk-video" label="Упражнение · видео-плеер" width={WD} height={720}><WorkoutsScreen state="video" /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="nutrition" title="Питание (Nutrition)" subtitle="Активный план питания · только просмотр · рецепты как видео">
+        <DCArtboard id="nt-loading" label="Загрузка" width={WD} height={620}><NutritionScreen state="loading" /></DCArtboard>
+        <DCArtboard id="nt-empty" label="Пустой план" width={WD} height={860}><NutritionScreen state="empty" /></DCArtboard>
+        <DCArtboard id="nt-error" label="Ошибка" width={WD} height={760}><NutritionScreen state="error" /></DCArtboard>
+        <DCArtboard id="nt-done" label="Готово (с данными)" width={WD} height={2280}><NutritionScreen state="done" /></DCArtboard>
+        <DCArtboard id="nt-recipe" label="Рецепт · детальный просмотр" width={WD} height={800}><NutritionScreen state="recipe" /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="adherence" title="Панель «сегодняшнее следование» · подсостояния" subtitle="Своя загрузка / ошибка / пусто внутри панели Nutrition">
+        <DCArtboard id="ad-loading" label="Загрузка" width={820} height={250}><AdherenceFrame state="loading" /></DCArtboard>
+        <DCArtboard id="ad-error" label="Ошибка" width={820} height={250}><AdherenceFrame state="error" /></DCArtboard>
+        <DCArtboard id="ad-empty" label="Пусто (ничего не залогировано)" width={820} height={360}><AdherenceFrame state="empty" /></DCArtboard>
       </DCSection>
 
       <DCSection id="profile" title="Профиль и онбординг" subtitle="Аккаунт, цели, документы с согласием, первый запуск">

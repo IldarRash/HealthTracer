@@ -14,6 +14,7 @@ import type {
 import { hasDocumentConsentScope, MIN_DOCUMENT_SIGNAL_CONFIDENCE_FOR_CONTEXT } from "@health/types";
 import type { BadgeProps } from "../components/ui";
 import type { ConsentScopeItem } from "../components/ui";
+import { formatDateTimeMedium } from "./date-format";
 
 export const DOCUMENT_CONSENT_VERSION = "v1";
 
@@ -197,10 +198,7 @@ export function isDocumentRevoked(document: Pick<HealthDocument, "revokedAt" | "
 }
 
 export function formatDocumentTimestamp(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTimeMedium(value);
 }
 
 export function signalExtractionStatusLabel(

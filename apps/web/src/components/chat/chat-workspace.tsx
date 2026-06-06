@@ -66,6 +66,7 @@ import {
   ChatTranscript,
   EmptyState,
   ErrorState,
+  Icon,
   LoadingState,
   PromptChip,
   PromptChipList,
@@ -658,7 +659,11 @@ export function ChatWorkspace() {
                   disabled={sendDisabled || !primaryThreadId}
                   aria-label="Send message"
                 >
-                  {sendMessageMutation.isPending ? "…" : "→"}
+                  {sendMessageMutation.isPending ? (
+                    <span className="chat-composer-controls__send-pending" aria-hidden>…</span>
+                  ) : (
+                    <Icon name="send" size={16} stroke="currentColor" aria-hidden />
+                  )}
                 </Button>
               </div>
               {sendMessageMutation.isError && !showRevisionSendRetry ? (

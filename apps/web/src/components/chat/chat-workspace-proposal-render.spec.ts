@@ -14,8 +14,16 @@ import { describe, expect, it } from "vitest";
 const chatDir = dirname(fileURLToPath(import.meta.url));
 const webSrcDir = join(chatDir, "../..");
 
-const chatWorkspaceSource = readFileSync(join(chatDir, "chat-workspace.tsx"), "utf8");
-const stylesSource = readFileSync(join(webSrcDir, "../app/styles.css"), "utf8");
+// Normalize CRLF→LF so the positional `\n`-anchored assertions below are
+// line-ending agnostic (Windows checkouts may have CRLF).
+const chatWorkspaceSource = readFileSync(join(chatDir, "chat-workspace.tsx"), "utf8").replace(
+  /\r\n/g,
+  "\n",
+);
+const stylesSource = readFileSync(join(webSrcDir, "../app/styles.css"), "utf8").replace(
+  /\r\n/g,
+  "\n",
+);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers for positional assertions

@@ -8,6 +8,11 @@ const workspaceSource = readFileSync(
   "utf8",
 );
 
+const stylesSource = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../../../app/styles.css"),
+  "utf8",
+);
+
 describe("DocumentsWorkspace embedded profile mode", () => {
   it("accepts an embedded flag for profile hub embedding", () => {
     expect(workspaceSource).toContain("embedded = false");
@@ -47,5 +52,15 @@ describe("DocumentsWorkspace embedded profile mode", () => {
       "This summary is wellness-oriented and not a medical interpretation.",
     );
     expect(workspaceSource).toContain("Discuss clinical");
+  });
+});
+
+describe("ConsentManagementCard CSS contracts", () => {
+  it("defines scroll-margin for the consent section anchor", () => {
+    expect(stylesSource).toMatch(/\.consent-management-card[\s\S]*scroll-margin-top:/);
+  });
+
+  it("lays out the consent card as a grid", () => {
+    expect(stylesSource).toMatch(/\.consent-management-card[\s\S]*display:\s*grid/);
   });
 });

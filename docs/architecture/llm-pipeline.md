@@ -219,15 +219,25 @@ adjustments, etc.). No `contextSummaries` / recognition envelope is produced, an
 there is no consent-gated medical-save proposal variant (that is deferred — see
 below).
 
-### Deferred follow-up (LATER, not implemented)
+### Document upload (LIVE) vs attachment-driven save (deferred)
 
-These are intentionally **not** built yet:
+**PDF/text document upload + parse is implemented** — but as a separate, explicit
+**Profile Documents** feature (`apps/api/src/modules/documents/*`,
+`apps/web/src/components/documents/*`), **not** part of the chat-attachment pipeline.
+The user explicitly uploads a PDF/plain-text file under a five-scope, per-operation
+consent model (`upload_storage`, `parse_ocr`, `ai_summarization`,
+`semantic_indexing`, `coach_chat_context`) with revoke + delete; raw bytes live on
+the storage adapter (local filesystem in dev, encrypted access-controlled store in
+prod), extracted text is never persisted or logged, summaries are governed and
+non-diagnostic, and access is ownership-scoped.
 
-- PDF/text document upload + a document-content path to the LLM.
+Still **not** built (deferred), and still a hard boundary:
+
 - The LLM-recognized medical **special save**: a domain recognition signal → a
   consent-gated save **proposal** → on accept, with consent, persist a
-  `health_document`. Until that lands, no attachment path may create or parse a
-  `health_document`.
+  `health_document`. Document persistence is **explicit-upload only**; **no
+  attachment path may create or parse a `health_document`** (image-only/context-only,
+  enforced and regression-tested).
 
 ## Stage 2: Code-Owned Pre-AI Gates
 

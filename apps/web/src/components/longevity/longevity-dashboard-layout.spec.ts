@@ -6,7 +6,6 @@ import {
   FORBIDDEN_LONGEVITY_TERMS,
   LONGEVITY_CTA_ROUTES,
   WEEKDAY_TREND_LABELS,
-  buildLongevityHeroSubtitles,
   buildLongevityHeroTrendStripView,
   buildSevenDayTrendAriaLabel,
 } from "../../lib/longevity-ui-state.js";
@@ -52,17 +51,15 @@ describe("LongevityDashboard layout regressions", () => {
     expect(componentSource).toMatch(/className="dashboard-card--span-6 dashboard-card--coach"[\s\S]*?label="Coach"/);
   });
 
-  it("shows honest sparse hero copy and hides metric ring and trend fills", () => {
-    expect(componentSource).toContain(
-      "const heroValue = hero.sparse ? hero.emptyMessage : `${hero.percent}%`",
-    );
-    expect(componentSource).toContain("{!hero.sparse ? (");
-    expect(componentSource).toContain("<OverviewMetricRing");
-    expect(componentSource).toContain("<TrendStrip");
-    expect(componentSource).toContain("sparse={heroTrend.sparse}");
+  it("shows honest sparse hero copy and switches between sparse invite and data ring", () => {
+    expect(componentSource).toContain("{hero.sparse ? (");
+    expect(componentSource).toContain("<DsRing");
+    expect(componentSource).toContain("<DsTrendStrip");
+    expect(componentSource).not.toContain("<OverviewMetricRing");
+    expect(componentSource).not.toContain('className="sr-only"');
   });
 
-  it("renders weekday labels for the seven-day trend strip via TrendStrip", () => {
+  it("renders weekday labels for the seven-day trend strip via DsTrendStrip", () => {
     expect(componentSource).toContain("WEEKDAY_TREND_LABELS");
     expect(componentSource).toContain("buildLongevityHeroTrendStripView");
     expect(componentSource).toContain('ariaLabel={heroTrend.ariaLabel}');
@@ -105,12 +102,12 @@ describe("LongevityDashboard layout regressions", () => {
     );
   });
 
-  it("consolidates hero subtitles through buildLongevityHeroSubtitles", () => {
-    expect(componentSource).toContain("buildLongevityHeroSubtitles");
-    expect(componentSource).toContain("heroSubtitles.map");
-    expect(componentSource).not.toMatch(
-      /<OverviewHeroSubtitle>\{hero\.activeDaysLabel\}<\/OverviewHeroSubtitle>/,
-    );
+  it("renders hero subtitle text inline inside the visual dark layout, not via sr-only copies", () => {
+    expect(componentSource).toContain("hero.subtitle");
+    expect(componentSource).toContain("hero.activeDaysLabel");
+    expect(componentSource).not.toContain("heroSubtitles");
+    expect(componentSource).not.toContain("buildLongevityHeroSubtitles");
+    expect(componentSource).not.toContain('className="sr-only"');
   });
 
   it("collapses deferred trend domains behind a native summary control", () => {
@@ -171,23 +168,4 @@ describe("LongevityDashboard layout regressions", () => {
     }
   });
 
-  it("never renders more than two hero subtitles from consolidated state", () => {
-    expect(
-      buildLongevityHeroSubtitles({
-        sparse: false,
-        subtitle: "Based on your logged workouts, Today adherence, and habits this week.",
-        activeDaysLabel: "5 of 7 days with logged activity",
-        habitHint: "80% required completion (7 days) · Evening walk · 4-day streak",
-      }),
-    ).toHaveLength(2);
-
-    expect(
-      buildLongevityHeroSubtitles({
-        sparse: true,
-        subtitle: "Not enough data yet — log tasks on Today or complete a workout to start seeing patterns.",
-        activeDaysLabel: "0 of 7 days with logged activity",
-        habitHint: null,
-      }),
-    ).toHaveLength(1);
-  });
 });

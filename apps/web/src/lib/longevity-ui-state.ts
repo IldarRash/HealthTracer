@@ -282,24 +282,6 @@ export function buildLongevityWeekEyebrowFromAnchorDate(anchorDate: string): str
   return buildLongevityWeekEyebrow(anchor);
 }
 
-export function buildLongevityHeroSubtitles(input: {
-  sparse: boolean;
-  subtitle: string;
-  activeDaysLabel: string;
-  habitHint: string | null;
-}): readonly string[] {
-  if (input.sparse) {
-    return [input.subtitle];
-  }
-
-  const secondaryParts = [input.activeDaysLabel];
-  if (input.habitHint) {
-    secondaryParts.push(input.habitHint);
-  }
-
-  return [input.subtitle, secondaryParts.join(" · ")];
-}
-
 export function shortenLongevityCoachPromptLabel(message: string): string {
   return LONGEVITY_COACH_PROMPT_DISPLAY_LABELS[message] ?? message;
 }

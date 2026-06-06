@@ -1,3 +1,16 @@
+/**
+ * training-workspace.spec.ts — structural contracts for the redesigned Workouts screen.
+ *
+ * The spec uses source-text analysis (no DOM render) to verify:
+ *  - read-only invariants (no mutations, chat/today links)
+ *  - all 5 UI states are wired (loading / error / empty / done / video)
+ *  - dark-world primitives are used (ChangeBanner, DailyExecCard, RevisionFacts, etc.)
+ *  - video state manages local state without plan mutation
+ *  - TrainingProgressPanel integration is preserved
+ *
+ * Updated from old plan-view assertions (PlanExecutionCallout, PlanViewLayout, etc.)
+ * to match the redesigned dark-world component set.
+ */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,52 +32,97 @@ const pageSource = readFileSync(
 );
 
 describe("TrainingWorkspace read-only contracts", () => {
-  it("keeps persistent Chat plan-change notice on active plan views", () => {
-    expect(workspaceSource).toContain("ChangeViaChatNotice");
+  it("renders ChangeBanner on both done and empty states — no plan edits allowed", () => {
+    expect(workspaceSource).toContain("ChangeBanner");
     expect(workspaceSource).toContain('href="/chat"');
-  });
-
-  it("routes workout execution to Today without inline mutation controls", () => {
-    expect(workspaceSource).toContain("PlanExecutionCallout");
-    expect(workspaceSource).toContain("Run workouts from Today");
-    expect(workspaceSource).toContain("PlanViewCtaLink");
-    expect(workspaceSource).toContain('href="/today"');
     expect(workspaceSource).not.toContain("useMutation");
     expect(workspaceSource).not.toContain("JSON.stringify");
-    expect(workspaceSource).not.toContain("proposal-details");
   });
 
-  it("preserves read-only plan display and collapsible revision history", () => {
-    expect(workspaceSource).toContain('label="Active plan"');
-    expect(workspaceSource).toContain("Training days");
-    expect(workspaceSource).toContain("TrainingPlanExerciseItem");
-    expect(workspaceSource).toContain("RevisionHistoryCollapsible");
-    expect(workspaceSource).toContain("RevisionHistoryItem");
-    expect(workspaceSource).toContain("revisionNumber={activeRevision.revisionNumber}");
-    expect(workspaceSource).toContain("active={revision.id === activeRevision.id}");
-    expect(workspaceSource).toContain('titleId="training-revision-history"');
-    expect(workspaceSource).not.toContain('type="checkbox"');
+  it("routes workout execution to Today via DailyExecCard and Today links", () => {
+    expect(workspaceSource).toContain("DailyExecCard");
+    expect(workspaceSource).toContain("Execution happens on Today");
+    expect(workspaceSource).toContain('href="/today"');
+    expect(workspaceSource).not.toContain("acceptProposal");
+    expect(workspaceSource).not.toContain("applyProposal");
+  });
+
+  it("shows revision context via RevisionFacts and RevisionHistoryDark", () => {
+    expect(workspaceSource).toContain("RevisionFacts");
+    expect(workspaceSource).toContain("RevisionHistoryDark");
     expect(workspaceSource).toContain("formatPlanRevisionSource");
-    expect(workspaceSource).toContain("formatRevisionHistoryMeta");
+    expect(workspaceSource).toContain("formatPlanRevisionTimestamp");
     expect(workspaceSource).not.toContain("ai_proposal");
   });
 
-  it("embeds weekly progress panel with collapsed review tools", () => {
+  it("embeds TrainingProgressPanel for weekly progress section", () => {
     expect(workspaceSource).toContain("TrainingProgressPanel");
+    expect(workspaceSource).toContain("WeeklyProgressSection");
     expect(progressPanelSource).toContain('summary="Advanced weekly review tools"');
     expect(progressPanelSource).toContain("ProgressiveDisclosure");
   });
 
-  it("uses shared plan view layout classes for structured canvas styling", () => {
-    expect(workspaceSource).toContain("PlanViewLayout");
-    expect(workspaceSource).toContain("PlanViewGrid");
-    expect(workspaceSource).toContain('variant="prominent"');
+  it("uses dark-world LoadingScreen for the loading state", () => {
+    expect(workspaceSource).toContain("LoadingScreen");
+    expect(workspaceSource).toContain("Loading your training plan");
+    expect(workspaceSource).toContain('layout="plan"');
   });
 
-  it("renders catalog-backed exercise metadata through plan exercise items", () => {
-    expect(workspaceSource).toContain("TrainingPlanExerciseItem");
+  it("wires all five states: loading, error, empty, done, video", () => {
+    expect(workspaceSource).toContain("isLoading");
+    expect(workspaceSource).toContain("isError");
+    expect(workspaceSource).toContain("ErrorState");
+    expect(workspaceSource).toContain("ActivePlanHeader");
+    expect(workspaceSource).toContain("TodaySession");
+    expect(workspaceSource).toContain("ExerciseVideo");
+    expect(workspaceSource).toContain("selectedExerciseIndex");
+  });
+
+  it("manages video view with local state only — no URL or plan mutations", () => {
+    expect(workspaceSource).toContain("useState");
+    expect(workspaceSource).toContain("setSelectedExerciseIndex");
+    expect(workspaceSource).toContain("onBack");
+    expect(workspaceSource).not.toContain("useRouter");
+    expect(workspaceSource).not.toContain("router.push");
     expect(workspaceSource).not.toContain("useMutation");
-    expect(workspaceSource).not.toContain('type="submit"');
+  });
+
+  it("renders TodaySession with MediaCard grid and Today deep-link", () => {
+    expect(workspaceSource).toContain("MediaCard");
+    expect(workspaceSource).toContain("TodaySession");
+    expect(workspaceSource).toContain("onOpenExercise");
+  });
+
+  it("renders the weekly schedule via WeekList with plan day data", () => {
+    expect(workspaceSource).toContain("WeekList");
+    expect(workspaceSource).toContain("getWorkoutPlanDayLabel");
+    expect(workspaceSource).toContain("getWorkoutPlanDayKey");
+  });
+
+  it("includes adaptation pack teaser in WeeklyProgressSection", () => {
+    expect(workspaceSource).toContain("WeeklyProgressSection");
+    expect(workspaceSource).toContain("Adaptation pack ready to discuss");
+  });
+
+  it("ExerciseVideo has back navigation, filmstrip, and honest technique empty state", () => {
+    expect(workspaceSource).toContain("ExerciseVideo");
+    expect(workspaceSource).toContain("Back to plan");
+    expect(workspaceSource).not.toContain("TECHNIQUE_CUES");
+    expect(workspaceSource).toContain("Technique guidance coming soon");
+    expect(workspaceSource).toContain("PlayBadge");
+    expect(workspaceSource).toContain("onSelectExercise");
+    expect(workspaceSource).toContain("filmstrip");
+  });
+
+  it("CoachNotes renders when plan payload has notes", () => {
+    expect(workspaceSource).toContain("CoachNotes");
+    expect(workspaceSource).toContain("payload.notes");
+  });
+
+  it("avoids diagnosis or treatment language in component copy", () => {
+    expect(workspaceSource).not.toMatch(/diagnos/i);
+    expect(workspaceSource).not.toMatch(/treatment protocol/i);
+    expect(workspaceSource).not.toMatch(/clinical/i);
   });
 });
 

@@ -22,7 +22,7 @@ describe("app route semantics", () => {
     expect(readAppPage("goals")).toContain("/profile#goals");
     expect(readAppPage("documents")).toContain("/profile#documents");
     expect(readAppPage("metrics")).toContain("/profile#data-consent");
-    expect(readAppPage("profile")).toContain("<ProfileDashboard />");
+    expect(readAppPage("profile")).toContain("<ProfileWorkspace />");
   });
 
   it("keeps the authenticated home entry on Chat", () => {

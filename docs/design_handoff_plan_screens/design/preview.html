@@ -12,11 +12,13 @@
 <div id="root"></div>
 <script type="text/babel" src="app/kit.jsx"></script>
 <script type="text/babel" src="app/shell.jsx"></script>
+<script type="text/babel" src="app/states.jsx"></script>
 <script type="text/babel" src="app/proposal.jsx"></script>
 <script type="text/babel" src="app/chat.jsx"></script>
 <script type="text/babel" src="app/today.jsx"></script>
 <script type="text/babel" src="app/longevity.jsx"></script>
-<script type="text/babel" src="app/plans.jsx"></script>
+<script type="text/babel" src="app/workouts.jsx"></script>
+<script type="text/babel" src="app/nutrition.jsx"></script>
 <script type="text/babel" src="app/profile.jsx"></script>
 <script type="text/babel" src="app/onboarding.jsx"></script>
 <script type="text/babel" src="app/paywall.jsx"></script>
@@ -30,9 +32,9 @@ const screens = {
   'today-partial': () => <TodayScreen state="partial"/>,
   'today-done': () => <TodayScreen state="done"/>,
   'today-empty': () => <TodayScreen state="empty"/>,
-  'longevity': () => <LongevityScreen/>,
-  'training': () => <TrainingScreen/>,
-  'nutrition': () => <NutritionScreen/>,
+  'longevity': () => <LongevityScreen state="done"/>,
+  'training': () => <WorkoutsScreen state="done"/>,
+  'nutrition': () => <NutritionScreen state="done"/>,
   'profile': () => <ProfileScreen/>,
   'onb-welcome': () => <OnboardingScreen step="welcome"/>,
   'onb-goal': () => <OnboardingScreen step="goal"/>,

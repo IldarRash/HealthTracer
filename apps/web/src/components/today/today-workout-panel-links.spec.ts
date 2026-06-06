@@ -8,16 +8,21 @@ const componentSource = readFileSync(
   "utf8",
 );
 
-describe("TodayWorkoutPanel link regressions", () => {
-  it("keeps a read-only Training weekly view link in the workout card", () => {
-    const workoutPanelStart = componentSource.indexOf("function TodayWorkoutPanel");
-    const workoutPanelEnd = componentSource.indexOf("export function TodayWorkspace");
-    const workoutPanelSource = componentSource.slice(workoutPanelStart, workoutPanelEnd);
+// MoveCard is the inlined workout card in the rebuilt two-column workspace.
+const moveCardSource = componentSource.slice(
+  componentSource.indexOf("function MoveCard"),
+  componentSource.indexOf("// ── Nutrition + water card"),
+);
 
-    expect(workoutPanelSource).toMatch(/today-workout-links[\s\S]*?href="\/training"/);
-    expect(workoutPanelSource).toContain("Open Workouts →");
-    expect(workoutPanelSource.indexOf("today-workout-links")).toBeLessThan(
-      workoutPanelSource.indexOf("isTerminalSessionStatus"),
-    );
+describe("MoveCard link regressions", () => {
+  it("keeps a read-only Training weekly view link in the movement card", () => {
+    expect(moveCardSource).toMatch(/href="\/training"/);
+    expect(moveCardSource).toContain("Open workout plan");
+  });
+
+  it("routes plan changes to Chat, not an edit form", () => {
+    expect(moveCardSource).toContain('href="/chat"');
+    expect(moveCardSource).not.toContain("Edit workout plan");
+    expect(moveCardSource).not.toContain("Save plan");
   });
 });

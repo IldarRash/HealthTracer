@@ -3,13 +3,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  PLAN_CHANGE_VIA_CHAT_NOTICE,
+  formatPlanRevisionSource,
   formatPlanRevisionTimestamp,
-  formatRevisionHistoryCollapsibleSummary,
-  planDetailCardClassName,
-  planViewCtaClassName,
-  planViewPanelClassName,
-  revisionBadgeLabel,
+  formatRevisionHistoryMeta,
 } from "../../lib/plan-view-ui-state.js";
 
 const uiDir = dirname(fileURLToPath(import.meta.url));
@@ -30,102 +26,67 @@ const nutritionWorkspaceSource = readFileSync(
 );
 
 describe("Plan view primitive contracts", () => {
-  it("defines layout, header, revision badge, and change-via-chat notice", () => {
-    expect(planViewSource).toContain("PlanViewLayout");
-    expect(planViewSource).toContain("PlanViewGrid");
-    expect(planViewSource).toContain("PlanHeader");
-    expect(planViewSource).toContain("RevisionBadge");
-    expect(planViewSource).toContain("ChangeViaChatNotice");
-    expect(planViewSource).toContain('role="note"');
-    expect(planViewSource).toContain("PLAN_CHANGE_VIA_CHAT_NOTICE");
-    expect(planViewSource).toContain("PLAN_CHANGE_VIA_CHAT_CTA");
-    expect(planViewSource).toContain('aria-label={revisionBadgeLabel');
-  });
-
-  it("defines week strip, detail cards, facts, and revision history items", () => {
-    expect(planViewSource).toContain("PlanWeekStrip");
-    expect(planViewSource).toContain("TrendStrip");
-    expect(planViewSource).toContain("PlanDetailCard");
-    expect(planViewSource).toContain("PlanDetailCardHeader");
+  it("retains PlanFacts for exercise catalog details", () => {
     expect(planViewSource).toContain("PlanFacts");
-    expect(planViewSource).toContain("RevisionHistoryItem");
-    expect(planViewSource).toContain("RevisionHistoryCollapsible");
-    expect(planViewSource).toContain("PlanExecutionCallout");
-    expect(planViewSource).toContain("PlanViewCtaLink");
-    expect(planViewSource).toContain('className={planViewCtaClassName("secondary")}');
+    expect(planViewSource).toContain("plan-view__facts");
+    expect(planViewSource).toContain("plan-view__fact");
   });
 
   it("keeps presentation tokens separate from domain logic", () => {
-    expect(planViewUiStateSource).toContain("PLAN_CHANGE_VIA_CHAT_NOTICE");
     expect(planViewUiStateSource).not.toContain("useQuery");
     expect(planViewUiStateSource).not.toContain("getActiveWorkoutPlan");
-    expect(PLAN_CHANGE_VIA_CHAT_NOTICE.toLowerCase()).toContain("read-only");
-    expect(PLAN_CHANGE_VIA_CHAT_NOTICE.toLowerCase()).toContain("chat");
+    expect(planViewUiStateSource).toContain("formatPlanRevisionTimestamp");
+    expect(planViewUiStateSource).toContain("formatPlanRevisionSource");
   });
 
-  it("maps panel and detail card class tokens for mobile stacking", () => {
-    expect(planViewPanelClassName("prominent")).toContain("plan-view__panel--plan");
-    expect(planViewPanelClassName("secondary")).toContain("plan-view__panel--history");
-    expect(planViewPanelClassName("wide")).toContain("panel-wide");
-    expect(planDetailCardClassName(true)).toContain("plan-view__detail-card--active");
-    expect(planViewCtaClassName("primary")).toContain("plan-view__cta--primary");
-    expect(revisionBadgeLabel(3, true)).toBe("Revision #3 · Active");
+  it("formats timestamps and sources for display", () => {
     expect(formatPlanRevisionTimestamp("2026-05-25T12:00:00.000Z")).toBeTruthy();
-    expect(formatRevisionHistoryCollapsibleSummary(2, 1)).toContain("#1 active");
-  });
-
-  it("maps structured plan view styles and responsive stacking", () => {
-    expect(stylesSource).toMatch(/\.plan-view__layout[\s\S]*gap:/);
-    expect(stylesSource).toMatch(/\.plan-view__header-row[\s\S]*flex-wrap:/);
-    expect(stylesSource).toMatch(/@media \(max-width: 899px\)[\s\S]*\.plan-view__header-row/);
-    expect(stylesSource).toMatch(/@media \(min-width: 900px\)[\s\S]*grid-template-areas:/);
-    expect(stylesSource).toMatch(/\.plan-view__detail-card--active[\s\S]*border-color:/);
-    expect(stylesSource).toContain(".plan-view__revision-history-summary");
-    expect(stylesSource).toContain(".plan-view__cta--primary");
-    expect(stylesSource).toMatch(/@media \(max-width: 899px\)[\s\S]*\.panel-wide/);
-  });
-
-  it("contains mobile overflow containment for secondary plan views", () => {
-    expect(stylesSource).toMatch(/\.plan-view[\s\S]*min-width:\s*0/);
-    expect(stylesSource).toMatch(/\.plan-view__layout > \*[\s\S]*min-width:\s*0/);
-    expect(stylesSource).toMatch(/\.plan-view__facts[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
-    expect(stylesSource).toMatch(/\.plan-view__fact dd[\s\S]*overflow-wrap:\s*break-word/);
-    expect(stylesSource).toMatch(/\.plan-view__detail-header strong[\s\S]*overflow-wrap:\s*break-word/);
-    expect(stylesSource).toMatch(/@media \(max-width: 480px\)[\s\S]*\.training-progress-panel \.action-row/);
-  });
-
-  it("wires training and nutrition workspaces to shared plan view primitives", () => {
-    expect(trainingWorkspaceSource).toContain("ChangeViaChatNotice");
-    expect(trainingWorkspaceSource).toContain("PlanWeekStrip");
-    expect(trainingWorkspaceSource).toContain("buildTrainingWeekStripView");
-    expect(trainingWorkspaceSource).toContain("RevisionHistoryCollapsible");
-    expect(trainingWorkspaceSource).toContain("PlanViewCtaLink");
-    expect(trainingWorkspaceSource).not.toContain("formatTimestamp(");
-    expect(nutritionWorkspaceSource).toContain("ChangeViaChatNotice");
-    expect(planViewSource).toContain("PLAN_CHANGE_VIA_CHAT_CTA");
-    expect(nutritionWorkspaceSource).toContain("PlanFacts");
-    expect(nutritionWorkspaceSource).toContain("Log on Today →");
-    expect(nutritionWorkspaceSource).toContain("What you've logged today");
-    expect(nutritionWorkspaceSource).not.toContain("JSON.stringify");
-    expect(nutritionWorkspaceSource).not.toContain("useMutation");
-    expect(nutritionWorkspaceSource).not.toContain("Read-only adherence summary");
-    expect(nutritionWorkspaceSource).toContain("RevisionHistoryCollapsible");
-  });
-
-  it("anchors plan view layout on training-workspace class for light-canvas overrides", () => {
-    expect(planViewSource).toContain('"plan-view training-workspace"');
-    expect(planViewSource).toContain('"plan-view__layout training-layout"');
-    expect(stylesSource).toMatch(
-      /\.app-shell__main--structured \.training-workspace \.panel[\s\S]*--color-surface-content-elevated/,
+    expect(formatPlanRevisionSource("ai_proposal")).toBe("Coach proposal");
+    expect(formatPlanRevisionSource("health_tracer_seed")).toBe("Starter plan");
+    expect(formatRevisionHistoryMeta("ai_proposal", "2026-05-25T15:30:00.000Z")).toMatch(
+      /Coach proposal · .*2026/,
     );
   });
 
-  it("renders revision badge and active history markers from shared primitives", () => {
-    expect(planViewSource).toContain("plan-view__revision-badge");
-    expect(planViewSource).toContain('aria-label={revisionBadgeLabel');
-    expect(planViewSource).toContain('tone="success"');
-    expect(planViewSource).toContain('<Badge tone="success">Active</Badge>');
+  it("maps structured plan view styles for facts layout", () => {
+    expect(stylesSource).toMatch(/\.plan-view__facts[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    expect(stylesSource).toMatch(/\.plan-view__fact dd[\s\S]*overflow-wrap:\s*break-word/);
+  });
+
+  it("wires training and nutrition workspaces to dark-world primitives", () => {
+    // Training workspace — redesigned to use dark-world primitives
+    expect(trainingWorkspaceSource).toContain("ChangeBanner");
+    expect(trainingWorkspaceSource).toContain("buildTrainingWeekStripView");
+    expect(trainingWorkspaceSource).toContain("RevisionHistoryDark");
+    expect(trainingWorkspaceSource).toContain("DailyExecCard");
+    expect(trainingWorkspaceSource).not.toContain("formatTimestamp(");
+    expect(trainingWorkspaceSource).not.toContain("useMutation");
+
+    // Nutrition workspace — redesigned to use dark-world primitives
+    expect(nutritionWorkspaceSource).toContain("ChangeBanner");
+    expect(nutritionWorkspaceSource).toContain("RevisionFacts");
+    expect(nutritionWorkspaceSource).toContain("RevisionHistoryDark");
+    expect(nutritionWorkspaceSource).toContain("DailyExecCard");
+    expect(nutritionWorkspaceSource).toContain("Log in Today");
+    expect(nutritionWorkspaceSource).not.toContain("JSON.stringify");
+    expect(nutritionWorkspaceSource).not.toContain("useMutation");
+    expect(nutritionWorkspaceSource).toContain("revisionNumber={activeRevision.revisionNumber}");
+  });
+
+  it("confirms dead plan-view components are removed from workspaces", () => {
+    expect(trainingWorkspaceSource).not.toContain("PlanViewLayout");
+    expect(trainingWorkspaceSource).not.toContain("PlanExecutionCallout");
+    expect(trainingWorkspaceSource).not.toContain("ChangeViaChatNotice");
+    expect(trainingWorkspaceSource).not.toContain("PlanWeekStrip");
+    expect(nutritionWorkspaceSource).not.toContain("PlanViewLayout");
+    expect(nutritionWorkspaceSource).not.toContain("ChangeViaChatNotice");
+    expect(nutritionWorkspaceSource).not.toContain("PlanExecutionCallout");
+  });
+
+  it("confirms revision badge and history are served by dark-world primitives", () => {
     expect(trainingWorkspaceSource).toContain("revisionNumber={activeRevision.revisionNumber}");
     expect(nutritionWorkspaceSource).toContain("revisionNumber={activeRevision.revisionNumber}");
+    expect(trainingWorkspaceSource).toContain("RevisionHistoryDark");
+    expect(nutritionWorkspaceSource).toContain("RevisionHistoryDark");
   });
 });

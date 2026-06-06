@@ -8,12 +8,12 @@ const pageSource = readFileSync(
   "utf8",
 );
 
-describe("Today page header", () => {
-  it("uses command-center copy without adherence tracking wording", () => {
-    expect(pageSource).toContain('title="Today"');
-    expect(pageSource).toContain(
-      'description="Your daily command center — plan, check-ins, and optional coaching feedback."',
-    );
+describe("Today page", () => {
+  it("mounts the workspace inside the app shell without adherence tracking wording", () => {
+    // New design: page is a thin server component that mounts AppShellMain + TodayWorkspace
+    // (no PageHeader with title/description props).
+    expect(pageSource).toContain("AppShellMain");
+    expect(pageSource).toContain("TodayWorkspace");
     expect(pageSource).not.toMatch(/track adherence/i);
     expect(pageSource).not.toMatch(/adherence/i);
   });

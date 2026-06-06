@@ -14,6 +14,7 @@ import {
   WEEKLY_REVIEW_CHAT_PROMPT,
   type ChatWeeklyReviewPackView,
 } from "./weekly-review-ui-state";
+import { formatDateTimeMedium } from "./date-format";
 
 export type OptimisticChatMessage = {
   id: string;
@@ -109,10 +110,7 @@ export function mergeDisplayMessages(
 }
 
 export function formatChatTimestamp(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTimeMedium(value);
 }
 
 export function resolveChatMessageCrisisSupport(
