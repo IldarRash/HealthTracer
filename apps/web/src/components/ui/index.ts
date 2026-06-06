@@ -19,17 +19,12 @@ export { DashboardCard, DashboardGrid } from "./dashboard-card";
 export {
   OverviewCardLink,
   OverviewHeroCard,
-  OverviewHeroContent,
-  OverviewHeroSubtitle,
   OverviewInlineEmptyState,
-  OverviewMetricRing,
   OverviewReadOnlyNotice,
   OverviewSignalItem,
   OverviewSignalList,
   OverviewSparseHint,
   OverviewTrendSection,
-  TrendStrip,
-  TrendStripDay,
 } from "./overview-cards";
 export {
   ConsentScopeChecklist,
@@ -55,32 +50,41 @@ export {
   type CommandCenterSection,
 } from "./command-center";
 export {
-  ChangeViaChatNotice,
-  PlanDetailCard,
-  PlanDetailCardHeader,
-  PlanDetailList,
-  PlanExecutionCallout,
   PlanFacts,
-  PlanHeader,
-  PlanSection,
-  PlanViewGrid,
-  PlanViewLayout,
-  PlanViewPanel,
-  PlanViewCtaLink,
-  PlanWeekStrip,
-  RevisionBadge,
-  RevisionHistoryCollapsible,
-  RevisionHistoryItem,
-  RevisionHistoryList,
   formatPlanRevisionTimestamp,
-  PLAN_CHANGE_VIA_CHAT_NOTICE,
 } from "./plan-view";
+export { ConsentManagementCard } from "./context-hub";
+export { Toggle, type ToggleProps } from "./toggle";
+export { CheckCircle, type CheckCircleProps } from "./check-circle";
+export { ProgressBar, type ProgressBarProps } from "./progress-bar";
+export { SegmentRow, type SegmentRowProps } from "./segment-row";
+
+export { IconBadge, type IconBadgeProps } from "./icon-badge";
+
+// ── Dark-world design system (visual redesign) ──────────────────
+export { Skeleton, SkeletonLines, SkeletonCard, type SkeletonProps, type SkeletonLinesProps, type SkeletonCardProps } from "./skeleton";
+export { LoadingScreen, type LoadingScreenProps, type LoadingScreenLayout } from "./loading-screen";
+export { PlayBadge, MediaCard, type PlayBadgeProps, type MediaCardProps, type MediaCardKind } from "./media-card";
 export {
-  CompactGoalHierarchyPanel,
-  ConsentManagementCard,
-  ContextHubDisclosure,
-  ContextHubLayout,
-  ContextSectionCard,
-  ProfileSummaryCard,
-  type ContextHubSection,
-} from "./context-hub";
+  CoachAvatar,
+  CoachNotes,
+  PartialBanner,
+  SectionError,
+  MedicalNote,
+  ChangeBanner,
+  DailyExecCard,
+  RevisionFacts,
+  RevisionHistoryDark,
+  type CoachNotesProps,
+  type PartialBannerProps,
+  type SectionErrorProps,
+  type MedicalNoteProps,
+  type ChangeBannerProps,
+  type DailyExecCardProps,
+  type DailyExecCardColor,
+  type RevisionFactItem,
+  type RevisionFactsProps,
+  type RevisionHistoryDarkProps,
+  type RevisionHistoryRow,
+} from "./dark-primitives";
+export { DsRing, DsTrendStrip, type DsRingProps, type DsTrendStripProps, type DsTrendStripDayData } from "./dark-charts";

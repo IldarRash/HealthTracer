@@ -13,3 +13,6 @@ coverage/
 !.env.*.example
 
 apps/api/.data/
+
+# transient design-audit scratch (screenshots, local server)
+.audit/

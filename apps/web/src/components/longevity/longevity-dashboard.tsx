@@ -23,7 +23,6 @@ import {
   buildDocumentsContextView,
   buildGoalsSectionView,
   buildLongevityCoachPrompts,
-  buildLongevityHeroSubtitles,
   buildLongevityTrendsView,
   buildLongevityHeroTrendStripView,
   buildLongevityWeeklyHero,
@@ -42,7 +41,33 @@ import {
 } from "../../lib/longevity-ui-state";
 import { WEEKLY_REVIEW_READ_ONLY_NOTICE } from "../../lib/weekly-review-ui-state";
 import type { WeeklyProgressSummaryResponse } from "@health/types";
-import { Badge, DashboardCard, DashboardGrid, ErrorState, LoadingState, OverviewCardLink, OverviewHeroCard, OverviewHeroContent, OverviewHeroSubtitle, OverviewInlineEmptyState, OverviewMetricRing, OverviewReadOnlyNotice, OverviewSignalItem, OverviewSignalList, OverviewSparseHint, OverviewTrendSection, PromptChipLink, PromptChipList, TrendStrip } from "../ui";
+import {
+  Badge,
+  DashboardCard,
+  DashboardGrid,
+  ErrorState,
+  IconBadge,
+  LoadingScreen,
+  OverviewCardLink,
+  OverviewHeroCard,
+  OverviewInlineEmptyState,
+  OverviewReadOnlyNotice,
+  OverviewSignalItem,
+  OverviewSignalList,
+  OverviewSparseHint,
+  OverviewTrendSection,
+  PartialBanner,
+  PromptChipLink,
+  PromptChipList,
+  MedicalNote,
+  SectionError,
+  CoachAvatar,
+  DsRing,
+  DsTrendStrip,
+  ProgressBar,
+  Icon,
+  type IconName,
+} from "../ui";
 import { WellbeingHistoryPanel } from "./wellbeing-history-panel";
 
 async function loadOptionalWeeklyProgress(
@@ -59,6 +84,180 @@ async function loadOptionalWeeklyProgress(
   }
 
   return { data: null, error: result.error };
+}
+
+// ── DomainSummaryCard (Today/Workouts/Nutrition) ───────────────
+function DomainSummaryCard({
+  icon,
+  color,
+  label,
+  value,
+  sub,
+  href,
+  linkLabel,
+  progress,
+  sparse,
+}: {
+  icon: IconName;
+  color: string;
+  label: string;
+  value?: string;
+  sub?: string;
+  href: string;
+  linkLabel: string;
+  progress?: number;
+  sparse?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        background: "var(--color-surface-card)",
+        border: "1px solid var(--color-border-default)",
+        borderRadius: 16,
+        padding: "18px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 0,
+        transition: "border-color 150ms ease",
+      }}
+    >
+      {/* Header row */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          marginBottom: 14,
+        }}
+      >
+        <IconBadge icon={icon} color={color} />
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: "var(--color-text-secondary)",
+            flex: 1,
+          }}
+        >
+          {label}
+        </span>
+        <Icon name="chevR" size={15} stroke="var(--color-text-muted)" />
+      </div>
+
+      {/* Body */}
+      {sparse ? (
+        <p
+          style={{ fontSize: 13, color: "var(--color-text-muted)", lineHeight: 1.45 }}
+        >
+          Not enough data yet
+        </p>
+      ) : (
+        <>
+          <div
+            style={{
+              fontSize: 27,
+              fontWeight: 700,
+              color,
+              letterSpacing: -0.6,
+              fontVariantNumeric: "tabular-nums",
+              lineHeight: 1.1,
+            }}
+          >
+            {value}
+          </div>
+          {progress != null ? (
+            <div style={{ marginTop: 11 }}>
+              <ProgressBar value={progress} color={color} />
+            </div>
+          ) : null}
+          {sub ? (
+            <p
+              style={{
+                fontSize: 12.5,
+                color: "var(--color-text-muted)",
+                marginTop: progress != null ? 9 : 7,
+                lineHeight: 1.4,
+              }}
+            >
+              {sub}
+            </p>
+          ) : null}
+        </>
+      )}
+
+      {/* Footer link */}
+      <Link
+        href={href}
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          color,
+          marginTop: 12,
+          textDecoration: "none",
+          display: "block",
+        }}
+      >
+        {linkLabel} →
+      </Link>
+    </div>
+  );
+}
+
+// ── Inline pattern card (CrossDomainTrends) ────────────────────
+function PatternCard({
+  icon,
+  color,
+  text,
+  tag,
+}: {
+  icon: IconName;
+  color: string;
+  text: string;
+  tag: string;
+}) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        padding: "14px 15px",
+        borderRadius: 13,
+        background: "rgba(255,255,255,0.03)",
+        border: "1px solid var(--color-border-default)",
+      }}
+    >
+      <div
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 9,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: `color-mix(in srgb, ${color} 14%, transparent)`,
+          marginBottom: 11,
+        }}
+      >
+        <Icon name={icon} size={16} stroke={color} />
+      </div>
+      <p
+        style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.45, margin: 0 }}
+      >
+        {text}
+      </p>
+      <p
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--color-text-muted)",
+          marginTop: 9,
+          letterSpacing: 0.2,
+        }}
+      >
+        {tag}
+      </p>
+    </div>
+  );
 }
 
 export function LongevityDashboard() {
@@ -143,7 +342,7 @@ export function LongevityDashboard() {
   });
 
   if (longevityQuery.isLoading) {
-    return <LoadingState title="Loading your weekly overview…" />;
+    return <LoadingScreen label="Loading your weekly overview" layout="longevity" />;
   }
 
   if (longevityQuery.isError) {
@@ -204,106 +403,271 @@ export function LongevityDashboard() {
     hasWeeklyProgress: trendsView.status === "ready",
   });
 
-  const heroValue = hero.sparse ? hero.emptyMessage : `${hero.percent}%`;
   const heroTrend = buildLongevityHeroTrendStripView(hero.trend, hero.sparse);
-  const heroSubtitles = buildLongevityHeroSubtitles({
-    sparse: hero.sparse,
-    subtitle: hero.subtitle,
-    activeDaysLabel: hero.activeDaysLabel,
-    habitHint,
-  });
+
+  // Determine partial failure scopes
+  const isPartial = data.partialErrors.length > 0;
+  // Signals section is considered "failed" in partial mode when wellness data is absent
+  const signalsFailed = isPartial && wellnessPanel.status !== "ready";
+  const crossDomainFailed = isPartial && trendsView.status !== "ready";
+
+  // ── Trend strip data for DsTrendStrip ─────────────────────────
+  const trendStripDays = heroTrend.trend.map((value, i) => ({
+    value: Math.round(value),
+    label: WEEKDAY_TREND_LABELS[i] ?? "",
+  }));
 
   return (
     <div className="page-content longevity-dashboard">
-      {data.partialErrors.length > 0 ? (
-        <section className="notice notice-inline" role="status">
-          <p>
+      {/* Partial failure banner */}
+      {isPartial ? (
+        <div role="status">
+          <PartialBanner onRetry={() => longevityQuery.refetch()}>
             Some sections could not refresh just now. Available wellness data is shown below.
-          </p>
-        </section>
+          </PartialBanner>
+        </div>
       ) : null}
 
       <DashboardGrid className="dashboard-grid--profile">
+        {/* ── Hero: Consistency ring + 7-day plan-by-day bars ── */}
         <OverviewHeroCard fullWidth>
-          <OverviewHeroContent label="Weekly consistency" value={heroValue}>
-            {heroSubtitles.map((line) => (
-              <OverviewHeroSubtitle key={line}>{line}</OverviewHeroSubtitle>
-            ))}
-          </OverviewHeroContent>
-          {!hero.sparse ? (
-            <OverviewMetricRing progress={hero.percent} label={`${hero.percent}% weekly consistency`} />
-          ) : null}
-          <TrendStrip
-            trend={heroTrend.trend}
-            dayLabels={WEEKDAY_TREND_LABELS}
-            sparse={heroTrend.sparse}
-            ariaLabel={heroTrend.ariaLabel}
-          />
+          {/* Visual dark hero layout */}
+          {hero.sparse ? (
+            /* Sparse invite */
+            <div
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 24,
+                padding: "24px",
+              }}
+            >
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 96,
+                  height: 96,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  border: "3px dashed var(--color-border-strong)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Icon name="spark" size={30} stroke="var(--color-metric-green)" sw={1.6} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p
+                  style={{
+                    fontSize: 19,
+                    fontWeight: 700,
+                    color: "var(--color-text-primary)",
+                    letterSpacing: -0.3,
+                    margin: 0,
+                  }}
+                >
+                  Let&apos;s build your week
+                </p>
+                <p
+                  style={{
+                    fontSize: 13.5,
+                    color: "var(--color-text-muted)",
+                    marginTop: 7,
+                    lineHeight: 1.5,
+                    maxWidth: 440,
+                  }}
+                >
+                  {hero.subtitle}
+                </p>
+                <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                  <Link
+                    href={LONGEVITY_CTA_ROUTES.today}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 10,
+                      background: "var(--color-metric-green)",
+                      color: "#04130c",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      textDecoration: "none",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    Open Today
+                  </Link>
+                  <Link
+                    href={LONGEVITY_CTA_ROUTES.chat}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: 10,
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid var(--color-border-default)",
+                      color: "var(--color-text-secondary)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      textDecoration: "none",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    Discuss goals
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Done: ring left + trend bars right */
+            <div
+              style={{
+                width: "100%",
+                display: "flex",
+                gap: 30,
+                alignItems: "center",
+                padding: "24px",
+              }}
+            >
+              {/* Left: ring + trend + streak */}
+              <div
+                style={{ flexShrink: 0, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" }}
+              >
+                <p
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: 1.2,
+                    textTransform: "uppercase",
+                    color: "var(--color-text-muted)",
+                    marginBottom: 16,
+                  }}
+                >
+                  Consistency
+                </p>
+                <DsRing
+                  value={hero.percent}
+                  size={138}
+                  sw={12}
+                  color="var(--color-metric-green)"
+                  label={hero.percent}
+                  sub="this week"
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    marginTop: 14,
+                  }}
+                >
+                  <Icon name="bolt" size={13} stroke="var(--color-metric-amber)" fill="var(--color-metric-amber)" />
+                  <span style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+                    {hero.activeDaysLabel}
+                  </span>
+                </div>
+                {habitHint ? (
+                  <p style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 6, maxWidth: 160 }}>
+                    {habitHint}
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Vertical divider */}
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 1,
+                  alignSelf: "stretch",
+                  background: "var(--color-border-default)",
+                  flexShrink: 0,
+                }}
+              />
+
+              {/* Right: 7-day plan bars */}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 18,
+                  }}
+                >
+                  <span
+                    style={{ fontSize: 13.5, fontWeight: 600, color: "var(--color-text-secondary)" }}
+                  >
+                    Plan completion by day
+                  </span>
+                </div>
+                <DsTrendStrip
+                  days={trendStripDays}
+                  maxH={96}
+                  ariaLabel={heroTrend.ariaLabel}
+                />
+              </div>
+            </div>
+          )}
         </OverviewHeroCard>
 
-        <DashboardCard
-          className="dashboard-card--span-4"
-          label="Today"
-          title="Today adherence"
-          value={todayCard.status === "ready" ? todayCard.scoreLabel : "Not enough data yet"}
-          hint={
-            todayCard.status === "ready"
-              ? [todayCard.summary, todayCard.feedbackNote].filter(Boolean).join(" · ")
-              : todayCard.message
-          }
-          footer={
-            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.today}>
-              Open Today →
-            </OverviewCardLink>
-          }
-        />
+        {/* ── Domain row: Today / Workouts / Nutrition ── */}
+        <div className="dashboard-card--span-4">
+          <DomainSummaryCard
+            icon="today"
+            color="var(--color-metric-green)"
+            label="Today"
+            value={todayCard.status === "ready" ? todayCard.scoreLabel : undefined}
+            sub={
+              todayCard.status === "ready"
+                ? [todayCard.summary, todayCard.feedbackNote].filter(Boolean).join(" · ")
+                : todayCard.message
+            }
+            href={LONGEVITY_CTA_ROUTES.today}
+            linkLabel="Open Today"
+            sparse={todayCard.status === "empty"}
+          />
+        </div>
 
-        <DashboardCard
-          className="dashboard-card--span-4"
-          label="Workouts"
-          title="Workout consistency"
-          value={
-            workoutCard.status === "ready"
-              ? workoutCard.value
-              : workoutCard.status === "load_error"
-                ? "Unavailable"
-                : "Not enough data yet"
-          }
-          hint={
-            workoutCard.status === "ready" ? workoutCard.hint : workoutCard.message
-          }
-          footer={
-            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.training}>
-              View training plan →
-            </OverviewCardLink>
-          }
-        />
+        <div className="dashboard-card--span-4">
+          <DomainSummaryCard
+            icon="dumbbell"
+            color="var(--color-metric-blue)"
+            label="Workouts"
+            value={workoutCard.status === "ready" ? workoutCard.value : undefined}
+            sub={workoutCard.status === "ready" ? workoutCard.hint : workoutCard.message}
+            href={LONGEVITY_CTA_ROUTES.training}
+            linkLabel="View training plan"
+            sparse={workoutCard.status !== "ready"}
+          />
+        </div>
 
-        <DashboardCard
-          className="dashboard-card--span-4"
-          label="Nutrition"
-          title="Nutrition consistency"
-          value={
-            nutritionCard.status === "empty" || nutritionCard.status === "load_error"
-              ? nutritionCard.status === "load_error"
-                ? "Unavailable"
-                : "Not enough data yet"
-              : nutritionCard.status === "ready"
+        <div className="dashboard-card--span-4">
+          <DomainSummaryCard
+            icon="fork"
+            color="var(--color-metric-amber)"
+            label="Nutrition"
+            value={
+              nutritionCard.status === "ready"
                 ? nutritionCard.detail
-                : nutritionCard.title
-          }
-          hint={
-            nutritionCard.status === "ready" || nutritionCard.status === "plan_only"
-              ? nutritionCard.summary
-              : nutritionCard.message
-          }
-          footer={
-            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.nutrition}>
-              View nutrition plan →
-            </OverviewCardLink>
-          }
-        />
+                : nutritionCard.status === "plan_only"
+                  ? nutritionCard.title
+                  : undefined
+            }
+            sub={
+              nutritionCard.status === "ready" || nutritionCard.status === "plan_only"
+                ? nutritionCard.summary
+                : nutritionCard.message
+            }
+            href={LONGEVITY_CTA_ROUTES.nutrition}
+            linkLabel="View nutrition plan"
+            sparse={nutritionCard.status === "empty" || nutritionCard.status === "load_error"}
+          />
+        </div>
 
+        {/* ── Goals card ── */}
         <DashboardCard
           className="dashboard-card--span-6"
           label="Goals"
@@ -337,6 +701,7 @@ export function LongevityDashboard() {
           )}
         </DashboardCard>
 
+        {/* ── Wellbeing card ── */}
         <DashboardCard
           className="dashboard-card--span-6"
           label="Wellbeing"
@@ -353,24 +718,45 @@ export function LongevityDashboard() {
             anchorDate={todayDate}
             errorMessage={data.wellbeingAggregatesError ?? null}
           />
+          <MedicalNote>
+            Your check-in history · not a clinical assessment.
+          </MedicalNote>
         </DashboardCard>
 
+        {/* ── Wellness signals (consent-gated) ── */}
         <DashboardCard
           className="dashboard-card--span-6"
           label="Wellness"
           title="Logged wellness signals"
           hint="Consent-gated trends from synced data and self-check-ins on Today."
         >
-          {wellnessPanel.status === "ready" ? (
-            <OverviewSignalList>
-              {wellnessPanel.signals.map((signal) => (
-                <OverviewSignalItem
-                  key={signal.id}
-                  title={signal.label}
-                  meta={signal.detail}
-                />
-              ))}
-            </OverviewSignalList>
+          {signalsFailed ? (
+            <SectionError
+              label="Wellness signals could not refresh"
+              height={96}
+              onRetry={() => longevityQuery.refetch()}
+            />
+          ) : wellnessPanel.status === "ready" ? (
+            <>
+              <OverviewSignalList>
+                {wellnessPanel.signals.map((signal) => (
+                  <OverviewSignalItem
+                    key={signal.id}
+                    title={signal.label}
+                    meta={signal.detail}
+                  />
+                ))}
+              </OverviewSignalList>
+              <Link
+                href={LONGEVITY_CTA_ROUTES.profileConsent}
+                style={{ fontSize: 12, fontWeight: 600, color: "var(--color-metric-blue)", marginTop: 8, display: "block", textDecoration: "none" }}
+              >
+                To Profile →
+              </Link>
+              <MedicalNote>
+                Wellness signals · not a clinical measurement.
+              </MedicalNote>
+            </>
           ) : (
             <OverviewInlineEmptyState
               title={
@@ -390,82 +776,7 @@ export function LongevityDashboard() {
           )}
         </DashboardCard>
 
-        <DashboardCard
-          className="dashboard-card--span-6"
-          label="Trends"
-          title="Cross-domain weekly review"
-          value={trendsView.status === "ready" ? trendsView.headline : "Not enough data yet"}
-          hint={
-            trendsView.status === "ready"
-              ? trendsView.detail
-              : trendsView.message
-          }
-          footer={
-            trendsView.status === "ready" ? (
-              <OverviewCardLink href={LONGEVITY_CTA_ROUTES.chat}>
-                Open Chat to review adaptation proposals →
-              </OverviewCardLink>
-            ) : undefined
-          }
-        >
-          {trendsView.status === "ready" ? (
-            <>
-              {trendsView.aggregates.length > 0 ? (
-                <OverviewTrendSection title="Included Domains">
-                  <OverviewSignalList>
-                    {trendsView.aggregates.map((aggregate) => (
-                      <OverviewSignalItem
-                        key={aggregate.id}
-                        title={aggregate.domain}
-                        meta={aggregate.sufficiency}
-                        detail={`${aggregate.headline} · ${aggregate.detail}`}
-                      />
-                    ))}
-                  </OverviewSignalList>
-                </OverviewTrendSection>
-              ) : null}
-              {trendsView.trends.length > 0 ? (
-                <OverviewTrendSection title="Detected Patterns">
-                  <OverviewSignalList>
-                    {trendsView.trends.map((trend) => (
-                      <OverviewSignalItem
-                        key={trend.id}
-                        title={trend.title}
-                        meta={trend.meta}
-                        detail={trend.message}
-                      />
-                    ))}
-                  </OverviewSignalList>
-                </OverviewTrendSection>
-              ) : (
-                <OverviewSparseHint>
-                  Cross-domain trends will appear after more structured entries are logged.
-                </OverviewSparseHint>
-              )}
-              {trendsView.deferredDomains.length > 0 ? (
-                <details className="overview-deferred-domains">
-                  <summary>
-                    {formatDeferredDomainsCollapsibleSummary(trendsView.deferredDomains)}
-                  </summary>
-                  <OverviewSignalList>
-                    {trendsView.deferredDomains.map((entry) => (
-                      <OverviewSignalItem
-                        key={`${entry.domain}-${entry.detail}`}
-                        title={entry.domain}
-                        meta={entry.detail}
-                        muted
-                      />
-                    ))}
-                  </OverviewSignalList>
-                </details>
-              ) : (
-                <OverviewSparseHint>{trendsView.deferredSummary}</OverviewSparseHint>
-              )}
-              <OverviewReadOnlyNotice>{WEEKLY_REVIEW_READ_ONLY_NOTICE}</OverviewReadOnlyNotice>
-            </>
-          ) : null}
-        </DashboardCard>
-
+        {/* ── Documents card ── */}
         <DashboardCard
           className="dashboard-card--span-6"
           label="Documents"
@@ -478,16 +789,21 @@ export function LongevityDashboard() {
           }
         >
           {documentsView.status === "ready" ? (
-            <OverviewSignalList>
-              {documentsView.items.map((document) => (
-                <OverviewSignalItem
-                  key={document.id}
-                  title={document.title}
-                  meta={`${document.uploadedLabel} · ${document.parseStatusLabel}`}
-                  badge={<Badge tone="neutral">{document.consentLabel}</Badge>}
-                />
-              ))}
-            </OverviewSignalList>
+            <>
+              <OverviewSignalList>
+                {documentsView.items.map((document) => (
+                  <OverviewSignalItem
+                    key={document.id}
+                    title={document.title}
+                    meta={`${document.uploadedLabel} · ${document.parseStatusLabel}`}
+                    badge={<Badge tone="neutral">{document.consentLabel}</Badge>}
+                  />
+                ))}
+              </OverviewSignalList>
+              <MedicalNote>
+                Metadata only — contents are not analyzed on this screen.
+              </MedicalNote>
+            </>
           ) : (
             <OverviewInlineEmptyState
               title="No documents yet"
@@ -501,6 +817,109 @@ export function LongevityDashboard() {
           )}
         </DashboardCard>
 
+        {/* ── Cross-domain trends ── */}
+        {!hero.sparse ? (
+          <DashboardCard
+            className="dashboard-card--span-6"
+            label="Trends"
+            title="Cross-domain weekly review"
+            value={trendsView.status === "ready" ? trendsView.headline : "Not enough data yet"}
+            hint={
+              trendsView.status === "ready"
+                ? trendsView.detail
+                : trendsView.message
+            }
+            footer={
+              trendsView.status === "ready" ? (
+                <OverviewCardLink href={LONGEVITY_CTA_ROUTES.chat}>
+                  Open Chat to review adaptation proposals →
+                </OverviewCardLink>
+              ) : undefined
+            }
+          >
+            {crossDomainFailed ? (
+              <SectionError
+                label="Cross-domain review could not refresh"
+                height={96}
+                onRetry={() => longevityQuery.refetch()}
+              />
+            ) : trendsView.status === "ready" ? (
+              <>
+                {/* Pattern cards */}
+                {trendsView.trends.length > 0 ? (
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                    {trendsView.trends.slice(0, 3).map((trend) => (
+                      <PatternCard
+                        key={trend.id}
+                        icon="longevity"
+                        color="var(--color-metric-green)"
+                        text={trend.message}
+                        tag={trend.title}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+
+                {trendsView.aggregates.length > 0 ? (
+                  <OverviewTrendSection title="Included Domains">
+                    <OverviewSignalList>
+                      {trendsView.aggregates.map((aggregate) => (
+                        <OverviewSignalItem
+                          key={aggregate.id}
+                          title={aggregate.domain}
+                          meta={aggregate.sufficiency}
+                          detail={`${aggregate.headline} · ${aggregate.detail}`}
+                        />
+                      ))}
+                    </OverviewSignalList>
+                  </OverviewTrendSection>
+                ) : null}
+
+                {trendsView.trends.length > 0 ? (
+                  <OverviewTrendSection title="Detected Patterns">
+                    <OverviewSignalList>
+                      {trendsView.trends.map((trend) => (
+                        <OverviewSignalItem
+                          key={trend.id}
+                          title={trend.title}
+                          meta={trend.meta}
+                          detail={trend.message}
+                        />
+                      ))}
+                    </OverviewSignalList>
+                  </OverviewTrendSection>
+                ) : (
+                  <OverviewSparseHint>
+                    Cross-domain trends will appear after more structured entries are logged.
+                  </OverviewSparseHint>
+                )}
+
+                {trendsView.deferredDomains.length > 0 ? (
+                  <details className="overview-deferred-domains">
+                    <summary>
+                      {formatDeferredDomainsCollapsibleSummary(trendsView.deferredDomains)}
+                    </summary>
+                    <OverviewSignalList>
+                      {trendsView.deferredDomains.map((entry) => (
+                        <OverviewSignalItem
+                          key={`${entry.domain}-${entry.detail}`}
+                          title={entry.domain}
+                          meta={entry.detail}
+                          muted
+                        />
+                      ))}
+                    </OverviewSignalList>
+                  </details>
+                ) : (
+                  <OverviewSparseHint>{trendsView.deferredSummary}</OverviewSparseHint>
+                )}
+                <OverviewReadOnlyNotice>{WEEKLY_REVIEW_READ_ONLY_NOTICE}</OverviewReadOnlyNotice>
+              </>
+            ) : null}
+          </DashboardCard>
+        ) : null}
+
+        {/* ── Coach chips ── */}
         <DashboardCard
           className="dashboard-card--span-6 dashboard-card--coach"
           label="Coach"
@@ -512,6 +931,18 @@ export function LongevityDashboard() {
             </Link>
           }
         >
+          {/* Coach avatar header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+            <CoachAvatar size={34} />
+            <div>
+              <p style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text-primary)", margin: 0 }}>
+                Talk to your coach
+              </p>
+              <p style={{ fontSize: 12.5, color: "var(--color-text-muted)", margin: 0 }}>
+                Plan changes always go through Chat
+              </p>
+            </div>
+          </div>
           <PromptChipList label="Suggested prompts for chat">
             {coachPrompts.map((prompt) => (
               <PromptChipLink

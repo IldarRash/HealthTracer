@@ -1,6 +1,5 @@
 import type {
   TodayAdherenceSummary,
-  TodayChecklistItem,
   TodayChecklistItemKind,
   TodayChecklistItemStatus,
   TodayDailyFeedback,
@@ -9,6 +8,7 @@ import type {
   TodayWorkoutDetail,
 } from "@health/types";
 import { isTerminalSessionStatus, sessionStatusLabel } from "./training-ui-state";
+import { formatDateMedium } from "./date-format";
 
 export { formatTodayHierarchySourceRef } from "./onboarding-ui-state";
 export { formatLocalIsoDate } from "./training-ui-state";
@@ -20,9 +20,7 @@ export function formatDisplayDate(isoDate: string): string {
     return isoDate;
   }
 
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
-    new Date(year, month - 1, day),
-  );
+  return formatDateMedium(new Date(year, month - 1, day));
 }
 
 export function todayItemStatusLabel(status: TodayChecklistItemStatus): string {
@@ -157,200 +155,6 @@ export function formatHistoryTaskCountBadge(
   }
 
   return `${completedRequired}/${totalRequired} tasks`;
-}
-
-export type TodayNextActionKind =
-  | "recovery_wellbeing"
-  | "workout"
-  | "habit_checklist"
-  | "nutrition_meal"
-  | "caught_up";
-
-export type TodayPlanSection = "movement" | "nutrition" | "habits";
-
-export type TodayNextActionView = {
-  kind: TodayNextActionKind;
-  title: string;
-  description: string;
-  anchorId: string;
-  ctaLabel: string;
-};
-
-export type ResolveTodayNextActionInput = {
-  items: readonly TodayChecklistItem[];
-  workout: TodayWorkoutDetail | null | undefined;
-  hasWellbeingCheckIn: boolean | null;
-  hasRecoveryCheckIn: boolean | null;
-  hasPendingNutritionMeal: boolean;
-  pendingNutritionMealLabel: string | null;
-  existingFeedback: TodayDailyFeedback | null;
-};
-
-export function isWorkoutActionNeeded(
-  workout: TodayWorkoutDetail | null | undefined,
-): boolean {
-  if (!workout || workout.isRestDay || isTerminalSessionStatus(workout.status)) {
-    return false;
-  }
-
-  if (canStartTodayWorkout(workout)) {
-    return true;
-  }
-
-  return workout.exercises.some((exercise) => exercise.execution.status === "planned");
-}
-
-export function findFirstPendingRequiredItem(
-  items: readonly TodayChecklistItem[],
-): TodayChecklistItem | null {
-  return items.find((item) => item.status === "pending" && item.required) ?? null;
-}
-
-export function resolveTodayNextAction(
-  input: ResolveTodayNextActionInput,
-): TodayNextActionView {
-  const checkInsLoaded =
-    input.hasWellbeingCheckIn !== null && input.hasRecoveryCheckIn !== null;
-
-  if (checkInsLoaded) {
-    const missingWellbeing = input.hasWellbeingCheckIn === false;
-    const missingRecovery = input.hasRecoveryCheckIn === false;
-
-    if (missingWellbeing && missingRecovery) {
-      return {
-        kind: "recovery_wellbeing",
-        title: "Log recovery and wellbeing",
-        description: "Quick check-ins help your coach tailor movement and recovery guidance.",
-        anchorId: "today-check-ins",
-        ctaLabel: "Open check-ins",
-      };
-    }
-
-    if (missingRecovery) {
-      return {
-        kind: "recovery_wellbeing",
-        title: "Log recovery check-in",
-        description: "Capture soreness and fatigue before your movement plan.",
-        anchorId: "today-check-ins",
-        ctaLabel: "Open recovery check-in",
-      };
-    }
-
-    if (missingWellbeing) {
-      return {
-        kind: "recovery_wellbeing",
-        title: "Log wellbeing check-in",
-        description: "A quick mood and stress snapshot for wellness coaching.",
-        anchorId: "today-check-ins",
-        ctaLabel: "Open wellbeing check-in",
-      };
-    }
-  }
-
-  const workout = input.workout;
-  if (workout && isWorkoutActionNeeded(workout)) {
-    const starting = canStartTodayWorkout(workout);
-
-    return {
-      kind: "workout",
-      title: starting ? "Start your workout" : "Finish your workout",
-      description: `${workout.title} · ${workout.focus}`,
-      anchorId: "today-movement",
-      ctaLabel: starting ? "Start workout" : "Continue workout",
-    };
-  }
-
-  const pendingItem = findFirstPendingRequiredItem(input.items);
-  if (pendingItem) {
-    return {
-      kind: "habit_checklist",
-      title: isTodayHabitItem(pendingItem) ? "Complete your habit" : "Complete your next task",
-      description: pendingItem.label,
-      anchorId: "today-habits",
-      ctaLabel: isTodayHabitItem(pendingItem) ? "Mark habit complete" : "Mark task complete",
-    };
-  }
-
-  if (input.hasPendingNutritionMeal) {
-    return {
-      kind: "nutrition_meal",
-      title: "Log your next meal",
-      description: input.pendingNutritionMealLabel ?? "Track today's meal plan.",
-      anchorId: "today-nutrition",
-      ctaLabel: "Open nutrition",
-    };
-  }
-
-  const hasReflection =
-    input.existingFeedback != null && Object.keys(input.existingFeedback).length > 0;
-
-  return {
-    kind: "caught_up",
-    title: "You're caught up",
-    description: hasReflection
-      ? "Required tasks are done. Review recent days or update your reflection."
-      : "Required tasks are done. Optional: add a daily reflection.",
-    anchorId: "today-details",
-    ctaLabel: hasReflection ? "Review details" : "Add reflection",
-  };
-}
-
-export function shouldExpandTodayPlanSection(
-  section: TodayPlanSection,
-  input: {
-    nextAction: TodayNextActionView;
-    workout: TodayWorkoutDetail | null | undefined;
-    items: readonly TodayChecklistItem[];
-    hasPendingNutritionMeal: boolean;
-  },
-): boolean {
-  switch (section) {
-    case "movement":
-      return (
-        input.nextAction.kind === "workout" ||
-        (input.workout != null && isWorkoutActionNeeded(input.workout))
-      );
-    case "nutrition":
-      return input.nextAction.kind === "nutrition_meal" || input.hasPendingNutritionMeal;
-    case "habits":
-      return (
-        input.nextAction.kind === "habit_checklist" ||
-        input.items.some((item) => item.status === "pending")
-      );
-  }
-}
-
-export function shouldExpandTodayCheckInsSection(input: {
-  nextAction: TodayNextActionView;
-  hasWellbeingCheckIn: boolean | null;
-  hasRecoveryCheckIn: boolean | null;
-  wellbeingIndicatesCrisisSupport?: boolean | null;
-}): boolean {
-  if (input.wellbeingIndicatesCrisisSupport === true) {
-    return true;
-  }
-
-  if (input.nextAction.kind === "recovery_wellbeing") {
-    return true;
-  }
-
-  if (input.hasWellbeingCheckIn === null || input.hasRecoveryCheckIn === null) {
-    return true;
-  }
-
-  return input.hasWellbeingCheckIn === false || input.hasRecoveryCheckIn === false;
-}
-
-export function shouldExpandTodayDetailsSection(nextAction: TodayNextActionView): boolean {
-  return nextAction.kind === "caught_up";
-}
-
-export function buildTodayDisclosureResetKey(
-  disclosureId: string,
-  selectedDate: string,
-  smartDefaultOpen: boolean,
-): string {
-  return `${disclosureId}:${selectedDate}:${smartDefaultOpen}`;
 }
 
 export function canSubmitTodayFeedback(input: {

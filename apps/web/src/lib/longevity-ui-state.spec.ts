@@ -19,7 +19,6 @@ import {
   buildDocumentsContextView,
   buildGoalsSectionView,
   buildLongevityCoachPrompts,
-  buildLongevityHeroSubtitles,
   buildLongevityHeroTrendStripView,
   buildLongevityTrendsView,
   buildLongevityWeekEyebrow,
@@ -409,28 +408,6 @@ describe("longevity UI state", () => {
 
       expect(populatedTrend.sparse).toBe(false);
       expect(populatedTrend.className).toBe("trend-strip");
-    });
-
-    it("consolidates hero subtitles to at most two lines", () => {
-      const sparseLines = buildLongevityHeroSubtitles({
-        sparse: true,
-        subtitle: "Not enough data yet — log tasks on Today or complete a workout to start seeing patterns.",
-        activeDaysLabel: "0 of 7 days with logged activity",
-        habitHint: null,
-      });
-
-      expect(sparseLines).toHaveLength(1);
-
-      const populatedLines = buildLongevityHeroSubtitles({
-        sparse: false,
-        subtitle: "Based on your logged workouts, Today adherence, and habits this week.",
-        activeDaysLabel: "3 of 7 days with logged activity",
-        habitHint: "71% required completion (7 days) · Morning hydration · 3-day streak",
-      });
-
-      expect(populatedLines).toHaveLength(2);
-      expect(populatedLines[1]).toContain("3 of 7 days");
-      expect(populatedLines[1]).toContain("71% required completion");
     });
 
     it("formats the current week range for the page header eyebrow", () => {

@@ -9,6 +9,7 @@ import type {
   WeeklyProgressSummary,
   WorkoutProgressAggregate,
 } from "@health/types";
+import { formatDateMedium, formatDateTimeMedium } from "./date-format";
 
 export const PROGRESS_PLAN_CHANGE_NOTICE =
   "Plan changes still require a coach proposal that you review and accept before anything updates.";
@@ -46,16 +47,11 @@ export function isProgressSummaryNotFoundError(error: string): boolean {
 export function formatWeekRange(weekStart: string, weekEnd: string): string {
   const start = new Date(`${weekStart}T12:00:00`);
   const end = new Date(`${weekEnd}T12:00:00`);
-  const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
-
-  return `${formatter.format(start)} – ${formatter.format(end)}`;
+  return `${formatDateMedium(start)} – ${formatDateMedium(end)}`;
 }
 
 export function formatProgressTimestamp(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatDateTimeMedium(value);
 }
 
 export function progressDataStatusLabel(status: ProgressDataStatus): string {

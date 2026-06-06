@@ -12,11 +12,10 @@ import {
   getSubscription,
 } from "../../lib/api";
 import { Button, EmptyState, ErrorState, Icon, LoadingState, Mark } from "../ui";
+import { formatDateMedium } from "../../lib/date-format";
 
 function formatPeriodEnd(isoDateTime: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
-    new Date(isoDateTime),
-  );
+  return formatDateMedium(isoDateTime);
 }
 
 // ── Shared feature row for both Free and Pro columns ──────────────────────

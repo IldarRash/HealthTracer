@@ -14,16 +14,10 @@ const promptChipUiStateSource = readFileSync(
 const stylesSource = readFileSync(join(uiDir, "../../../app/styles.css"), "utf8");
 
 describe("Overview card primitive contracts", () => {
-  it("defines hero overview card with metric ring and sparse trend strip", () => {
+  it("defines hero overview card as a dark section container", () => {
     expect(overviewCardsSource).toContain("OverviewHeroCard");
     expect(overviewCardsSource).toContain('className={cn("dashboard-hero"');
     expect(overviewCardsSource).toContain("dashboard-hero--full");
-    expect(overviewCardsSource).toContain("OverviewMetricRing");
-    expect(overviewCardsSource).toContain('className="sr-only"');
-    expect(overviewCardsSource).toContain("TrendStrip");
-    expect(overviewCardsSource).toContain('role="img"');
-    expect(overviewCardsSource).toContain('aria-hidden="true"');
-    expect(overviewCardsSource).toContain("trend-strip--sparse");
   });
 
   it("defines domain signal list items and read-only trend sections", () => {
@@ -86,12 +80,6 @@ describe("Overview card primitive contracts", () => {
     expect(stylesSource).not.toMatch(
       /\.app-shell__main--structured \.dashboard-hero[\s\S]*--color-surface-content-elevated/,
     );
-  });
-
-  it("caps hero subtitle typography for at most two stacked lines", () => {
-    expect(overviewCardsSource).toContain("dashboard-hero__subtitle");
-    expect(stylesSource).toContain(".dashboard-hero__subtitle + .dashboard-hero__subtitle");
-    expect(stylesSource).toMatch(/\.dashboard-hero__subtitle[\s\S]*line-height:/);
   });
 
   it("defines read-only trend notice with note semantics", () => {

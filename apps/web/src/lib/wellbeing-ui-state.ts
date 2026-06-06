@@ -15,6 +15,7 @@ import {
   WELLBEING_CRISIS_SUPPORT_COPY,
 } from "@health/types";
 import { formatDisplayDate } from "./today-ui-state";
+import { formatWeekdayShort } from "./date-format";
 
 export const WELLBEING_SCORE_OPTIONS: readonly WellbeingScore[] = [1, 2, 3, 4, 5] as const;
 
@@ -302,9 +303,7 @@ function shortWeekdayLabel(isoDate: string): string {
     return isoDate;
   }
 
-  return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(
-    new Date(year, month - 1, day),
-  );
+  return formatWeekdayShort(new Date(year, month - 1, day));
 }
 
 export function buildSevenDayWellbeingTrend(input: {

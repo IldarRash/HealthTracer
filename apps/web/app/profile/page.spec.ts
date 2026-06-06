@@ -9,17 +9,16 @@ const pageSource = readFileSync(
 );
 
 describe("Profile page shell", () => {
-  it("uses dashboard layout variant and context hub dashboard", () => {
+  it("uses dashboard layout variant and profile workspace", () => {
     expect(pageSource).toContain('<AppLayout variant="dashboard">');
-    expect(pageSource).toContain("<ProfileDashboard />");
+    expect(pageSource).toContain("<ProfileWorkspace />");
     expect(pageSource).not.toContain('variant="chat"');
   });
 
-  it("describes the profile hub without analytics dashboard framing", () => {
-    expect(pageSource).toContain('title="Profile"');
-    expect(pageSource).toContain(
-      "Your account, coaching profile, goals, device data and consent, and health documents in one hub.",
-    );
+  it("does not surface the old context hub dashboard", () => {
+    expect(pageSource).not.toContain("ProfileDashboard");
+    expect(pageSource).not.toContain("ContextHubLayout");
+    expect(pageSource).not.toContain("PageHeader");
     expect(pageSource).not.toMatch(/coaching snapshot/i);
     expect(pageSource).not.toMatch(/weekly consistency/i);
     expect(pageSource).not.toMatch(/health score/i);

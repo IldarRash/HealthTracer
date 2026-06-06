@@ -79,6 +79,11 @@ export async function proxyApiRequest(
       durationMs,
     });
 
+    // Opaque redirects (redirect:"manual" on some runtimes) return status=0, which is
+    // an invalid Response status. Treat them as a 502 rather than letting the caller throw.
+    const upstreamStatus =
+      upstreamResponse.status === 0 ? 502 : upstreamResponse.status;
+
     const responseHeaders = new Headers();
     responseHeaders.set(REQUEST_ID_HEADER, responseRequestId);
 
@@ -87,10 +92,17 @@ export async function proxyApiRequest(
       responseHeaders.set("content-type", contentType);
     }
 
+    const responseBody =
+      upstreamStatus === 502 && upstreamResponse.status === 0
+        ? new TextEncoder().encode(
+            JSON.stringify({ statusCode: 502, message: "Upstream API is unavailable." }),
+          ).buffer
+        : await upstreamResponse.arrayBuffer();
+
     return {
-      status: upstreamResponse.status,
+      status: upstreamStatus,
       headers: responseHeaders,
-      body: await upstreamResponse.arrayBuffer(),
+      body: responseBody,
       requestId: responseRequestId,
       durationMs,
     };

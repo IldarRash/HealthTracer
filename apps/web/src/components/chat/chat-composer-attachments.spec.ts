@@ -55,17 +55,19 @@ describe("chat composer attachments wiring", () => {
   });
 
   it("places the attach control in the composer input row", () => {
-    expect(composerAttachmentInputSource).toContain("FileInputTrigger");
-    expect(composerAttachmentInputSource).toContain('inputId="chat-attachment-input"');
-    expect(composerAttachmentsSource).not.toContain("FileInputTrigger");
+    // New design: two hidden file inputs + icon buttons (clip + camera), no FileInputTrigger wrapper.
+    expect(composerAttachmentInputSource).toContain('id="chat-attachment-input"');
+    expect(composerAttachmentInputSource).toContain('id="chat-camera-input"');
+    expect(composerAttachmentInputSource).toContain('capture="environment"');
     expect(composerAttachmentsSource).not.toContain("Attachment privacy");
     expect(composerAttachmentsSource).not.toContain("CHAT_ATTACHMENT_PRIVACY_NOTICE");
   });
 
-  it("uses shared file input primitives and attachment preview thumb", () => {
-    expect(composerAttachmentInputSource).toContain("FileInputTrigger");
-    expect(composerAttachmentInputSource).toContain('inputId="chat-attachment-input"');
-    expect(composerAttachmentInputSource).toContain("labelText=");
+  it("uses icon buttons for attachment and camera, and attachment preview thumb", () => {
+    // New design: clip + camera Icon buttons replace the old FileInputTrigger/labelText wrapper.
+    expect(composerAttachmentInputSource).toContain('name="clip"');
+    expect(composerAttachmentInputSource).toContain('name="camera"');
+    expect(composerAttachmentInputSource).toContain('id="chat-attachment-input"');
     expect(composerAttachmentsSource).toContain("AttachmentPreviewThumb");
     expect(composerAttachmentsSource).not.toContain("PrivacyBoundaryNote");
   });
