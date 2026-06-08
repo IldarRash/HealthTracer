@@ -10,7 +10,10 @@ import type {
   UserProfile,
 } from "@health/types";
 import { useQuery } from "@tanstack/react-query";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
 import {
   apiQueryKeys,
   getCurrentProfile,
@@ -24,6 +27,9 @@ import {
   formatHierarchyDirection,
   hasCoachingHierarchySummary,
 } from "../../lib/onboarding-ui-state";
+import { setLocaleCookie } from "../../i18n/set-locale-action";
+import { isLocale } from "../../i18n/config";
+import { LanguageSwitcher } from "../settings/language-switcher";
 import { DocumentsWorkspace } from "../documents/documents-workspace";
 import { Toggle } from "../ui/toggle";
 import { Icon } from "../ui/icon";
@@ -220,7 +226,7 @@ function FieldRow({
 
 // ── Loading / Error states ────────────────────────────────────────
 
-function ProfileLoading() {
+function ProfileLoading({ message }: { message: string }) {
   return (
     <div
       style={{
@@ -232,7 +238,7 @@ function ProfileLoading() {
         fontSize: 14,
       }}
     >
-      Loading your profile…
+      {message}
     </div>
   );
 }
@@ -260,9 +266,11 @@ function ProfileError({ message }: { message: string }) {
 function AccountHeaderCard({
   user,
   tier,
+  fallbackLabel,
 }: {
   user: User;
   tier: string;
+  fallbackLabel: string;
 }) {
   // Prefer real name → email → neutral label; never expose raw Clerk user ids.
   // A Clerk id starts with "user_" and contains only alphanumerics/underscores —
@@ -273,7 +281,7 @@ function AccountHeaderCard({
   const cleanName =
     user.displayName && !isRawClerkId(user.displayName) ? user.displayName : null;
   const cleanEmail = user.email && !isRawClerkId(user.email) ? user.email : null;
-  const safeDisplayName = cleanName ?? cleanEmail ?? "Your account";
+  const safeDisplayName = cleanName ?? cleanEmail ?? fallbackLabel;
 
   const initials = safeDisplayName
     .split(" ")
@@ -375,6 +383,7 @@ function GoalHierarchyCard({
 }: {
   hierarchy: CoachingHierarchySummary;
 }) {
+  const t = useTranslations("Profile.goals");
   const direction = formatHierarchyDirection(hierarchy);
   const hasContent = hasCoachingHierarchySummary(hierarchy);
 
@@ -384,17 +393,17 @@ function GoalHierarchyCard({
         <CardHead
           icon="flag"
           color={M.green}
-          title="Goal hierarchy"
+          title={t("title")}
           right={
-            <span style={{ fontSize: 12, color: L.mut2 }}>changes through your coach</span>
+            <span style={{ fontSize: 12, color: L.mut2 }}>{t("changesThrough")}</span>
           }
         />
         <div style={{ padding: "8px 0", fontSize: 13.5, color: L.mut }}>
-          No active goals yet.{" "}
+          {t("noActiveGoals")}{" "}
           <Link href="/onboarding" style={{ color: M.green, fontWeight: 600 }}>
-            Complete onboarding
+            {t("completeOnboarding")}
           </Link>{" "}
-          to set your direction.
+          {t("setDirection")}
         </div>
       </LightCard>
     );
@@ -405,15 +414,15 @@ function GoalHierarchyCard({
       <CardHead
         icon="flag"
         color={M.green}
-        title="Goal hierarchy"
+        title={t("title")}
         right={
-          <span style={{ fontSize: 12, color: L.mut2 }}>changes through your coach</span>
+          <span style={{ fontSize: 12, color: L.mut2 }}>{t("changesThrough")}</span>
         }
       />
 
       {direction ? (
         <div style={{ marginBottom: 14 }}>
-          <Eyebrow style={{ marginBottom: 6 }}>Direction</Eyebrow>
+          <Eyebrow style={{ marginBottom: 6 }}>{t("direction")}</Eyebrow>
           <div style={{ fontSize: 13.5, color: L.ink2, lineHeight: 1.45 }}>{direction}</div>
         </div>
       ) : null}
@@ -429,7 +438,7 @@ function GoalHierarchyCard({
             marginBottom: 12,
           }}
         >
-          <Eyebrow style={{ marginBottom: 8 }}>Quarterly goal</Eyebrow>
+          <Eyebrow style={{ marginBottom: 8 }}>{t("quarterlyGoal")}</Eyebrow>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Icon name="star" size={17} stroke={M.amber} fill={M.amber} />
             <span
@@ -457,14 +466,14 @@ function GoalHierarchyCard({
             color: L.mut,
           }}
         >
-          No active quarterly objective.
+          {t("noQuarterlyObjective")}
         </div>
       )}
 
       {/* Weekly goals */}
       {hierarchy.weeklyFocus.length > 0 ? (
         <div>
-          <Eyebrow style={{ marginBottom: 10, paddingLeft: 2 }}>Weekly goals</Eyebrow>
+          <Eyebrow style={{ marginBottom: 10, paddingLeft: 2 }}>{t("weeklyGoals")}</Eyebrow>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             {hierarchy.weeklyFocus.map((goal) => {
               const icon = goalDomainIcon(goal.type);
@@ -498,47 +507,32 @@ function GoalHierarchyCard({
 
 // ── Personal context card ─────────────────────────────────────────
 
-function activityLevelLabel(level: string | null): string {
-  switch (level) {
-    case "sedentary":
-      return "Sedentary";
-    case "lightly_active":
-      return "Lightly active";
-    case "moderately_active":
-      return "Moderately active";
-    case "very_active":
-      return "Very active";
-    case "extra_active":
-      return "Extra active";
-    default:
-      return "Not set";
-  }
-}
-
-function trainingExperienceLabel(exp: string | null): string {
-  switch (exp) {
-    case "beginner":
-      return "Beginner";
-    case "intermediate":
-      return "Intermediate";
-    case "advanced":
-      return "Advanced";
-    default:
-      return "Not set";
-  }
-}
-
 function PersonalContextCard({ profile }: { profile: UserProfile | null }) {
+  const t = useTranslations("Profile.personalContext");
+  const tCommon = useTranslations("Common");
+
+  function activityLevelLabel(level: string | null): string {
+    if (!level) return tCommon("notSet");
+    const key = `activityLevels.${level}` as Parameters<typeof t>[0];
+    return t(key);
+  }
+
+  function trainingExperienceLabel(exp: string | null): string {
+    if (!exp) return tCommon("notSet");
+    const key = `trainingExperiences.${exp}` as Parameters<typeof t>[0];
+    return t(key);
+  }
+
   if (!profile) {
     return (
       <LightCard>
-        <CardHead icon="profile" title="Personal context" />
+        <CardHead icon="profile" title={t("title")} />
         <div style={{ padding: "8px 0", fontSize: 13.5, color: L.mut }}>
-          Profile not set up yet.{" "}
+          {t("notSetUp")}{" "}
           <Link href="/onboarding" style={{ color: M.green, fontWeight: 600 }}>
-            Continue onboarding
+            {t("continueOnboarding")}
           </Link>{" "}
-          or update via Chat.
+          {t("updateViaChat")}
         </div>
       </LightCard>
     );
@@ -557,11 +551,11 @@ function PersonalContextCard({ profile }: { profile: UserProfile | null }) {
   if (!hasAnyContent) {
     return (
       <LightCard>
-        <CardHead icon="profile" title="Personal context" />
+        <CardHead icon="profile" title={t("title")} />
         <div style={{ padding: "8px 0", fontSize: 13.5, color: L.mut }}>
-          No coaching preferences set.{" "}
+          {t("noPreferences")}{" "}
           <Link href="/chat" style={{ color: M.green, fontWeight: 600 }}>
-            Update via Chat
+            {t("updateViaChat2")}
           </Link>
           .
         </div>
@@ -571,15 +565,15 @@ function PersonalContextCard({ profile }: { profile: UserProfile | null }) {
 
   return (
     <LightCard>
-      <CardHead icon="profile" title="Personal context" />
+      <CardHead icon="profile" title={t("title")} />
 
       {profile.activityLevel ? (
-        <FieldRow label="Activity level" value={activityLevelLabel(profile.activityLevel)} />
+        <FieldRow label={t("activityLevel")} value={activityLevelLabel(profile.activityLevel)} />
       ) : null}
 
       {profile.trainingExperience ? (
         <FieldRow
-          label="Training experience"
+          label={t("trainingExperience")}
           value={trainingExperienceLabel(profile.trainingExperience)}
         />
       ) : null}
@@ -591,7 +585,7 @@ function PersonalContextCard({ profile }: { profile: UserProfile | null }) {
             borderBottom: `1px solid ${L.line}`,
           }}
         >
-          <span style={{ fontSize: 13.5, color: L.mut }}>Constraints</span>
+          <span style={{ fontSize: 13.5, color: L.mut }}>{t("constraints")}</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
             {profile.constraints.map((c) => (
               <PrefChip key={c}>{c}</PrefChip>
@@ -607,7 +601,7 @@ function PersonalContextCard({ profile }: { profile: UserProfile | null }) {
             borderBottom: hasNotes ? `1px solid ${L.line}` : "none",
           }}
         >
-          <span style={{ fontSize: 13.5, color: L.mut }}>Preferences</span>
+          <span style={{ fontSize: 13.5, color: L.mut }}>{t("preferences")}</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
             {profile.preferences.map((p) => (
               <PrefChip key={p}>{p}</PrefChip>
@@ -618,7 +612,7 @@ function PersonalContextCard({ profile }: { profile: UserProfile | null }) {
 
       {hasNotes ? (
         <div style={{ paddingTop: 12 }}>
-          <span style={{ fontSize: 13.5, color: L.mut }}>Coach notes</span>
+          <span style={{ fontSize: 13.5, color: L.mut }}>{t("coachNotes")}</span>
           <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
             {profile.coachingNotes.map((note, i) => (
               <div key={i} style={{ fontSize: 13.5, color: L.ink2, lineHeight: 1.45 }}>
@@ -635,12 +629,13 @@ function PersonalContextCard({ profile }: { profile: UserProfile | null }) {
 // ── Documents card (amber accent, wraps existing DocumentsWorkspace) ─
 
 function DocumentsCard() {
+  const t = useTranslations("Profile.documents");
   return (
     <LightCard accent={M.amber}>
       <CardHead
         icon="doc"
         color={M.amber}
-        title="Health documents"
+        title={t("title")}
       />
       {/* Wellness / "visible only to you" framing */}
       <div
@@ -657,8 +652,7 @@ function DocumentsCard() {
           <Icon name="shield" size={17} stroke={M.amber} />
         </span>
         <div style={{ fontSize: 12.5, lineHeight: 1.5, color: L.ink2 }}>
-          Uploaded with your explicit consent and used as lifestyle context only — not for
-          diagnosis or treatment. Visible only to you. Delete any document at any time.
+          {t("privacyNotice")}
         </div>
       </div>
       {/* All upload / consent / list / parse logic stays in DocumentsWorkspace */}
@@ -669,17 +663,20 @@ function DocumentsCard() {
 
 // ── Devices card (disabled placeholder, not in MVP) ───────────────
 
-const DEVICE_ROWS: Array<{ label: string }> = [
-  { label: "Watch · sleep & heart rate" },
-  { label: "Smart scale" },
-  { label: "Phone steps" },
-];
-
 function DevicesCard() {
+  const t = useTranslations("Profile.devices");
+  const tCommon = useTranslations("Common");
+
+  const deviceRows = [
+    { label: t("watchLabel") },
+    { label: t("scaleLabel") },
+    { label: t("phoneLabel") },
+  ];
+
   return (
     <LightCard>
-      <CardHead icon="spark" title="Devices & data" />
-      {DEVICE_ROWS.map((row, i) => (
+      <CardHead icon="spark" title={t("title")} />
+      {deviceRows.map((row, i) => (
         <div
           key={row.label}
           style={{
@@ -687,7 +684,7 @@ function DevicesCard() {
             alignItems: "center",
             gap: 12,
             padding: "13px 0",
-            borderBottom: i < DEVICE_ROWS.length - 1 ? `1px solid ${L.line}` : "none",
+            borderBottom: i < deviceRows.length - 1 ? `1px solid ${L.line}` : "none",
             opacity: 0.55,
           }}
         >
@@ -700,7 +697,7 @@ function DevicesCard() {
               marginRight: 8,
             }}
           >
-            Coming soon
+            {tCommon("comingSoon")}
           </span>
           <Toggle
             checked={false}
@@ -726,16 +723,17 @@ function SubscriptionSummaryCard({
   subscription: SubscriptionSummary;
   entitlement: Entitlement;
 }) {
+  const t = useTranslations("Profile.subscription");
   const isPro = subscription.tier === "pro";
-  const tierLabel = isPro ? "Pro plan" : "Free plan";
+  const tierLabel = isPro ? t("proPlan") : t("freePlan");
   const msgLabel =
     entitlement.aiMessagesRemaining === null
-      ? "Unlimited AI messages"
-      : `${entitlement.aiMessagesRemaining} AI messages remaining today`;
+      ? t("unlimitedMessages")
+      : t("messagesRemaining", { count: entitlement.aiMessagesRemaining });
 
   return (
     <LightCard>
-      <CardHead icon="star" color={M.amber} title="Subscription" />
+      <CardHead icon="star" color={M.amber} title={t("title")} />
       <div
         style={{
           display: "flex",
@@ -765,9 +763,24 @@ function SubscriptionSummaryCard({
             flexShrink: 0,
           }}
         >
-          {isPro ? "Manage plan" : "Upgrade to Pro"}
+          {isPro ? t("managePlan") : t("upgradeToPro")}
         </Link>
       </div>
+    </LightCard>
+  );
+}
+
+// ── Language preferences card ─────────────────────────────────────
+
+function LanguageCard() {
+  const t = useTranslations("Profile.language");
+  return (
+    <LightCard>
+      <CardHead icon="spark" color={M.indigo} title={t("title")} />
+      <p style={{ fontSize: 13, color: L.mut, marginBottom: 14, marginTop: 0 }}>
+        {t("description")}
+      </p>
+      <LanguageSwitcher />
     </LightCard>
   );
 }
@@ -787,6 +800,11 @@ type ProfileData = {
 
 export function ProfileWorkspace() {
   const { getToken } = useAuth();
+  const t = useTranslations("Profile");
+  const locale = useLocale();
+  const router = useRouter();
+  // Guard so the reconciliation effect fires at most once per mount.
+  const reconciledRef = useRef(false);
 
   const profileQuery = useQuery({
     queryKey: apiQueryKeys.dashboardState,
@@ -843,8 +861,26 @@ export function ProfileWorkspace() {
     },
   });
 
+  // Backend→cookie reconciliation: when the durable backend locale differs
+  // from the cookie-derived locale, update the cookie once and refresh.
+  // First paint already used the cookie value — no round-trip delay.
+  useEffect(() => {
+    const backendLocale = profileQuery.data?.user.locale;
+    if (
+      !reconciledRef.current &&
+      backendLocale &&
+      isLocale(backendLocale) &&
+      backendLocale !== locale
+    ) {
+      reconciledRef.current = true;
+      void setLocaleCookie(backendLocale).then(() => {
+        router.refresh();
+      });
+    }
+  }, [profileQuery.data?.user.locale, locale, router]);
+
   // ── Async states ──
-  if (profileQuery.isLoading) return <ProfileLoading />;
+  if (profileQuery.isLoading) return <ProfileLoading message={t("loading")} />;
 
   if (profileQuery.isError) {
     return (
@@ -852,7 +888,7 @@ export function ProfileWorkspace() {
         message={
           profileQuery.error instanceof Error
             ? profileQuery.error.message
-            : "Your profile could not be loaded."
+            : t("error")
         }
       />
     );
@@ -881,10 +917,10 @@ export function ProfileWorkspace() {
             margin: 0,
           }}
         >
-          Profile
+          {t("title")}
         </h1>
         <div style={{ fontSize: 13.5, color: L.mut, marginTop: 4 }}>
-          Who you are and what your coach knows about you
+          {t("subtitle")}
         </div>
       </div>
 
@@ -901,7 +937,7 @@ export function ProfileWorkspace() {
             marginBottom: 16,
           }}
         >
-          Some profile sections could not refresh. Showing available data.
+          {t("partialError")}
         </div>
       ) : null}
 
@@ -924,7 +960,11 @@ export function ProfileWorkspace() {
             gap: 16,
           }}
         >
-          <AccountHeaderCard user={data.user} tier={data.subscription.tier} />
+          <AccountHeaderCard
+            user={data.user}
+            tier={data.subscription.tier}
+            fallbackLabel={t("account.yourAccount")}
+          />
           {/* goals anchor — /goals redirects to /profile#goals */}
           <div id="goals">
             <GoalHierarchyCard hierarchy={data.hierarchy} />
@@ -955,6 +995,8 @@ export function ProfileWorkspace() {
             subscription={data.subscription}
             entitlement={data.entitlement}
           />
+          {/* Preferences / language card */}
+          <LanguageCard />
         </div>
       </div>
     </div>

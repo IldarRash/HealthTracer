@@ -90,6 +90,11 @@ export interface DecisionMakerInput {
    * The instantiated coach AI provider for this turn.
    */
   provider: CoachAiProvider;
+  /**
+   * Resolved response language (hint ?? detected). Null/absent = fall back to message detection.
+   * Threaded into the final decision request so the decision-maker writes in the correct language.
+   */
+  responseLanguage?: string | null;
 }
 
 export interface DecisionMakerResult {
@@ -154,6 +159,7 @@ export class DecisionMakerExecutorService {
       actionVariantCatalog: input.actionVariantCatalog as ActionVariant[],
       safetyFlags: [...input.safetyFlags],
       safetyConstraints: [...input.safetyConstraints],
+      ...(input.responseLanguage != null ? { responseLanguage: input.responseLanguage } : {}),
     };
 
     let rawOutput: unknown;

@@ -57,6 +57,8 @@ export type CompiledPromptTemplates = {
        * this summary tells the LLM what is present without embedding the data URI.
        */
       attachmentContextJson: string;
+      /** Resolved response language (e.g. "en", "ru"). Empty string = fall back to message detection. */
+      responseLanguage: string;
     },
   ): string;
   renderFinalDecision(values: {
@@ -65,6 +67,8 @@ export type CompiledPromptTemplates = {
     actionVariantCatalogJson: string;
     safetyFlags: string;
     safetyConstraints: string;
+    /** Resolved response language (e.g. "en", "ru"). Empty string = fall back to message detection. */
+    responseLanguage: string;
   }): string;
 };
 

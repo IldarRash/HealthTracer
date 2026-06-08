@@ -82,11 +82,15 @@ export const goalPrioritySchema = z.enum(["primary", "secondary"]);
 
 export type GoalPriority = z.infer<typeof goalPrioritySchema>;
 
+export const userLocaleSchema = z.enum(["en", "ru"]);
+export type UserLocale = z.infer<typeof userLocaleSchema>;
+
 export const userSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   displayName: z.string().min(1).max(120).nullable(),
   timezone: z.string().min(1).max(80),
+  locale: userLocaleSchema,
   onboardingCompletedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -97,6 +101,7 @@ export type User = z.infer<typeof userSchema>;
 export const updateCurrentUserSchema = z.object({
   displayName: z.string().min(1).max(120).optional(),
   timezone: z.string().min(1).max(80).optional(),
+  locale: userLocaleSchema.optional(),
 });
 
 export type UpdateCurrentUserInput = z.infer<typeof updateCurrentUserSchema>;

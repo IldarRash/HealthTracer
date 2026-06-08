@@ -1,6 +1,7 @@
 export type NavLink = {
   href: string;
-  label: string;
+  /** i18n message key in the Nav namespace, e.g. 'Nav.chat' */
+  labelKey: string;
   featured?: true;
   /** Legacy routes that should highlight this nav item. */
   aliases?: readonly string[];
@@ -8,16 +9,20 @@ export type NavLink = {
 
 /** Primary web tabs: Chat, Today, Longevity, Profile. */
 export const PRIMARY_NAV_LINKS: readonly NavLink[] = [
-  { href: "/chat", label: "Chat", featured: true },
-  { href: "/today", label: "Today" },
-  { href: "/longevity", label: "Longevity" },
-  { href: "/profile", label: "Profile", aliases: ["/goals", "/documents", "/metrics", "/billing"] },
+  { href: "/chat", labelKey: "Nav.chat", featured: true },
+  { href: "/today", labelKey: "Nav.today" },
+  { href: "/longevity", labelKey: "Nav.longevity" },
+  {
+    href: "/profile",
+    labelKey: "Nav.profile",
+    aliases: ["/goals", "/documents", "/metrics", "/billing"],
+  },
 ] as const;
 
 /** Secondary read-only plan views — routeable but not primary nav tabs. */
 export const SECONDARY_ROUTE_LINKS: readonly NavLink[] = [
-  { href: "/training", label: "Workouts", aliases: ["/progress"] },
-  { href: "/nutrition", label: "Nutrition", aliases: ["/recipes"] },
+  { href: "/training", labelKey: "Nav.workouts", aliases: ["/progress"] },
+  { href: "/nutrition", labelKey: "Nav.nutrition", aliases: ["/recipes"] },
 ] as const;
 
 export function isActivePath(
@@ -54,8 +59,8 @@ export function findSecondaryRoute(pathname: string): NavLink | undefined {
 }
 
 export type RouteWayfindingTrail = {
-  parent: { href: string; label: string };
-  current: { label: string };
+  parent: { href: string; labelKey: string };
+  current: { labelKey: string };
 };
 
 /** Breadcrumb trail for secondary plan views — parent defaults to Today per IA. */
@@ -68,7 +73,7 @@ export function resolveSecondaryRouteWayfinding(
   }
 
   return {
-    parent: { href: "/today", label: "Today" },
-    current: { label: route.label },
+    parent: { href: "/today", labelKey: "Nav.today" },
+    current: { labelKey: route.labelKey },
   };
 }

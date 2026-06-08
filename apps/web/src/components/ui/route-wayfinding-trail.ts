@@ -1,9 +1,14 @@
 import { createElement, type ReactElement } from "react";
 import Link from "next/link";
-import type { RouteWayfindingTrail } from "../../lib/nav-ui-state";
+
+/** Resolved (translated) trail passed to this pure display component. */
+export type WayfindingTrailDisplay = {
+  parent: { href: string; label: string };
+  current: { label: string };
+};
 
 type RouteWayfindingTrailProps = {
-  trail: RouteWayfindingTrail;
+  trail: WayfindingTrailDisplay;
 };
 
 export function RouteWayfindingTrail({ trail }: RouteWayfindingTrailProps): ReactElement {

@@ -207,6 +207,51 @@ describe("RouterLlmService", () => {
       expect(parsed.success).toBe(true);
     });
 
+    // -----------------------------------------------------------------------
+    // i18n — detectedLanguage uses responseLanguage ?? detectedLanguage
+    // -----------------------------------------------------------------------
+
+    it("uses responseLanguage as detectedLanguage on the router request when hint overrides detection (responseLanguage='ru', detectedLanguage='en')", () => {
+      // The preprocessor has already applied hint ?? detected; the router request
+      // must carry the resolved responseLanguage in its detectedLanguage field.
+      const service = buildService();
+      const preprocessorResult = {
+        ...makePreprocessorResult({ detectedLanguage: "en" }),
+        // Simulate hint override: user locale is "ru", message text is English.
+        responseLanguage: "ru",
+      };
+
+      const request = service.buildRequest({ preprocessorResult });
+
+      // The router request detectedLanguage should be "ru" (the resolved hint).
+      expect(request.detectedLanguage).toBe("ru");
+    });
+
+    it("uses detectedLanguage on the router request when responseLanguage is null", () => {
+      const service = buildService();
+      const preprocessorResult = {
+        ...makePreprocessorResult({ detectedLanguage: "en" }),
+        responseLanguage: null,
+      };
+
+      const request = service.buildRequest({ preprocessorResult });
+
+      // responseLanguage is null → falls back to detectedLanguage "en".
+      expect(request.detectedLanguage).toBe("en");
+    });
+
+    it("omits detectedLanguage on the router request when both responseLanguage and detectedLanguage are null", () => {
+      const service = buildService();
+      const preprocessorResult = {
+        ...makePreprocessorResult({ detectedLanguage: null }),
+        responseLanguage: null,
+      };
+
+      const request = service.buildRequest({ preprocessorResult });
+
+      expect(request.detectedLanguage).toBeUndefined();
+    });
+
     it("includes safety guardrails in the request", () => {
       const service = buildService();
       const preprocessorResult = makePreprocessorResult();

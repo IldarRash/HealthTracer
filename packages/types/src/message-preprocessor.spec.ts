@@ -149,3 +149,52 @@ describe("message preprocessor contracts", () => {
     expect(result.directPathCandidate).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// i18n — responseLanguageHint precedence + detection edge cases
+// ---------------------------------------------------------------------------
+
+describe("responseLanguage — hint precedence and detection", () => {
+  it("responseLanguageHint 'ru' overrides English/Latin text detection (preference wins)", () => {
+    // Cyrillic hint wins even when the message body is pure English letters.
+    const result = preprocessMessage({
+      userMessage: "Should I train today?",
+      hasAttachments: false,
+      responseLanguageHint: "ru",
+    });
+
+    expect(result.detectedLanguage).toBe("en");
+    expect(result.responseLanguage).toBe("ru");
+  });
+
+  it("no hint + Cyrillic text → responseLanguage === 'ru' (falls back to detection)", () => {
+    const result = preprocessMessage({
+      userMessage: "Я плохо спал, стоит ли делать тренировку?",
+      hasAttachments: false,
+    });
+
+    expect(result.detectedLanguage).toBe("ru");
+    expect(result.responseLanguage).toBe("ru");
+  });
+
+  it("no hint + no letters (digits only) → responseLanguage === null", () => {
+    const result = preprocessMessage({
+      userMessage: "12345 67890",
+      hasAttachments: false,
+    });
+
+    expect(result.detectedLanguage).toBeNull();
+    expect(result.responseLanguage).toBeNull();
+  });
+
+  it("responseLanguageHint 'en' overrides Cyrillic text detection (preference wins)", () => {
+    const result = preprocessMessage({
+      userMessage: "Составь мне план тренировок",
+      hasAttachments: false,
+      responseLanguageHint: "en",
+    });
+
+    expect(result.detectedLanguage).toBe("ru");
+    expect(result.responseLanguage).toBe("en");
+  });
+});

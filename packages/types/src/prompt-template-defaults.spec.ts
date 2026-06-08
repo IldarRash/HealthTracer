@@ -3,8 +3,8 @@
  *
  * Asserts that the fan-out template bodies contain the language-match
  * instruction and the new payload/routing markers W2 added. Also asserts
- * that PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS is unchanged (W2 added no new
- * required placeholders).
+ * that PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS contains the expected placeholders
+ * (updated in the i18n feature to include responseLanguage for domain/decision templates).
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -16,6 +16,7 @@ import {
   DOMAIN_HEALTH_TEMPLATE_KEY,
   FINAL_DECISION_TEMPLATE_KEY,
 } from "./prompt-template-defaults.js";
+import { compilePromptTemplates } from "./prompt-template-renderer.js";
 
 // ---------------------------------------------------------------------------
 // Language-match instruction — every fan-out template must carry it
@@ -33,9 +34,12 @@ describe("prompt-template-defaults — language-match instruction (W2 [LANG])", 
   for (const key of fanOutKeys) {
     it(`${key} template body contains a language-match instruction`, () => {
       const body = DEFAULT_PROMPT_TEMPLATE_BODIES[key];
-      // The instruction should mention writing in the user's language.
+      // The instruction should mention responseLanguage (i18n feature) or fall back to
+      // the user's language / detectedLanguage (router template keeps the original form).
       const hasLangInstruction =
-        body.includes("user's language") || body.includes("detectedLanguage");
+        body.includes("responseLanguage") ||
+        body.includes("user's language") ||
+        body.includes("detectedLanguage");
       expect(hasLangInstruction).toBe(true);
     });
   }
@@ -167,6 +171,118 @@ describe("prompt-template-defaults — decision action-selection rule (W2 [ACTIO
 });
 
 // ---------------------------------------------------------------------------
+// i18n — responseLanguage placeholder in REQUIRED_PLACEHOLDERS + rendering
+// ---------------------------------------------------------------------------
+
+describe("prompt-template-defaults — i18n: responseLanguage placeholder (domain + decision)", () => {
+  const domainKeys = [
+    DOMAIN_WORKOUT_TEMPLATE_KEY,
+    DOMAIN_NUTRITION_TEMPLATE_KEY,
+    DOMAIN_HEALTH_TEMPLATE_KEY,
+  ] as const;
+
+  for (const key of domainKeys) {
+    it(`${key} PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS includes responseLanguage`, () => {
+      expect(PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS[key]).toContain("responseLanguage");
+    });
+
+    it(`${key} template body contains {{responseLanguage}} placeholder`, () => {
+      expect(DEFAULT_PROMPT_TEMPLATE_BODIES[key]).toContain("{{responseLanguage}}");
+    });
+  }
+
+  it("decision template PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS includes responseLanguage", () => {
+    expect(PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS[FINAL_DECISION_TEMPLATE_KEY]).toContain(
+      "responseLanguage",
+    );
+  });
+
+  it("decision template body contains {{responseLanguage}} placeholder", () => {
+    expect(DEFAULT_PROMPT_TEMPLATE_BODIES[FINAL_DECISION_TEMPLATE_KEY]).toContain(
+      "{{responseLanguage}}",
+    );
+  });
+});
+
+describe("prompt-template-renderer — renderDomainStep and renderFinalDecision render responseLanguage", () => {
+  const compiled = compilePromptTemplates({ templates: {} });
+
+  it("renderDomainStep renders the responseLanguage value into the workout prompt", () => {
+    const rendered = compiled.renderDomainStep("workout", {
+      domain: "workout",
+      userMessage: "Составь план",
+      iteration: "1",
+      maxIterations: "3",
+      priorToolResultsJson: "[]",
+      coachingContextJson: "{}",
+      allowedTools: "getUserContextSlice",
+      allowedProposalIntents: "create_workout_plan",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      attachmentContextJson: "none",
+      responseLanguage: "ru",
+    });
+
+    expect(rendered).toContain("ru");
+    expect(rendered).not.toContain("{{responseLanguage}}");
+  });
+
+  it("renderDomainStep renders the responseLanguage value into the nutrition prompt", () => {
+    const rendered = compiled.renderDomainStep("nutrition", {
+      domain: "nutrition",
+      userMessage: "Составь план питания",
+      iteration: "1",
+      maxIterations: "3",
+      priorToolResultsJson: "[]",
+      coachingContextJson: "{}",
+      allowedTools: "getUserContextSlice",
+      allowedProposalIntents: "create_nutrition_plan",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      attachmentContextJson: "none",
+      responseLanguage: "ru",
+    });
+
+    expect(rendered).toContain("ru");
+    expect(rendered).not.toContain("{{responseLanguage}}");
+  });
+
+  it("renderDomainStep renders the responseLanguage value into the health prompt", () => {
+    const rendered = compiled.renderDomainStep("health", {
+      domain: "health",
+      userMessage: "Как мое здоровье?",
+      iteration: "1",
+      maxIterations: "3",
+      priorToolResultsJson: "[]",
+      coachingContextJson: "{}",
+      allowedTools: "getUserContextSlice",
+      allowedProposalIntents: "",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      attachmentContextJson: "none",
+      responseLanguage: "ru",
+    });
+
+    expect(rendered).toContain("ru");
+    expect(rendered).not.toContain("{{responseLanguage}}");
+  });
+
+  it("renderFinalDecision renders the responseLanguage value into the decision prompt", () => {
+    const rendered = compiled.renderFinalDecision({
+      userMessage: "Составь план",
+      domainOutputsJson: "[]",
+      actionVariantCatalogJson: "[]",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      responseLanguage: "ru",
+    });
+
+    expect(rendered).toContain("ru");
+    expect(rendered).not.toContain("{{responseLanguage}}");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS unchanged (W2 added no new placeholders)
 // ---------------------------------------------------------------------------
 
@@ -185,24 +301,26 @@ describe("PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS — unchanged by W2", () => {
     expect(placeholders).toHaveLength(8);
   });
 
-  it("domain_workout template still requires its original 11 placeholders", () => {
+  it("domain_workout template requires its placeholders including responseLanguage", () => {
     const placeholders = PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS["domain_workout"];
     expect(placeholders).toContain("domain");
     expect(placeholders).toContain("userMessage");
     expect(placeholders).toContain("allowedProposalIntents");
     expect(placeholders).toContain("attachmentContextJson");
-    // 11 placeholders — no additions by W2
-    expect(placeholders).toHaveLength(11);
+    expect(placeholders).toContain("responseLanguage");
+    // 12 placeholders — 11 original + responseLanguage (i18n feature)
+    expect(placeholders).toHaveLength(12);
   });
 
-  it("decision template still requires its original 5 placeholders", () => {
+  it("decision template requires its placeholders including responseLanguage", () => {
     const placeholders = PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS["decision"];
     expect(placeholders).toContain("userMessage");
     expect(placeholders).toContain("domainOutputsJson");
     expect(placeholders).toContain("actionVariantCatalogJson");
     expect(placeholders).toContain("safetyFlags");
     expect(placeholders).toContain("safetyConstraints");
-    // Exactly 5 — no additions by W2
-    expect(placeholders).toHaveLength(5);
+    expect(placeholders).toContain("responseLanguage");
+    // 6 placeholders — 5 original + responseLanguage (i18n feature)
+    expect(placeholders).toHaveLength(6);
   });
 });

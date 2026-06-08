@@ -508,6 +508,68 @@ describe("DomainLlmExecutorService", () => {
   });
 
   // -------------------------------------------------------------------------
+  // i18n — responseLanguage flows into the domain step request
+  // -------------------------------------------------------------------------
+
+  it("threads responseLanguage='ru' into the domain step request", async () => {
+    const capturedRequest = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Reviewed workout.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+
+    const provider: CoachAiProvider = {
+      generateDomainStep: capturedRequest,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({ userMessage: "Составь план тренировок" }),
+      provider,
+      responseLanguage: "ru",
+    });
+
+    expect(capturedRequest).toHaveBeenCalled();
+    const stepRequest = capturedRequest.mock.calls[0]?.[0] as { responseLanguage?: string };
+    expect(stepRequest.responseLanguage).toBe("ru");
+  });
+
+  it("omits responseLanguage from the domain step request when it is null", async () => {
+    const capturedRequest = vi.fn().mockResolvedValue({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Reviewed workout.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+
+    const provider: CoachAiProvider = {
+      generateDomainStep: capturedRequest,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+      responseLanguage: null,
+    });
+
+    expect(capturedRequest).toHaveBeenCalled();
+    const stepRequest = capturedRequest.mock.calls[0]?.[0] as { responseLanguage?: string };
+    expect(stepRequest.responseLanguage).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
   // W4 — create_workout_plan candidate survives validation (W2 regression guard)
   // -------------------------------------------------------------------------
 

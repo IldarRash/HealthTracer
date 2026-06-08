@@ -60,6 +60,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "safetyFlags",
     "safetyConstraints",
     "attachmentContextJson",
+    "responseLanguage",
   ],
   // Phase 2 domain nutrition LLM
   [DOMAIN_NUTRITION_TEMPLATE_KEY]: [
@@ -74,6 +75,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "safetyFlags",
     "safetyConstraints",
     "attachmentContextJson",
+    "responseLanguage",
   ],
   // Phase 2 domain health LLM
   [DOMAIN_HEALTH_TEMPLATE_KEY]: [
@@ -88,6 +90,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "safetyFlags",
     "safetyConstraints",
     "attachmentContextJson",
+    "responseLanguage",
   ],
   // Phase 2 final decision-maker LLM
   [FINAL_DECISION_TEMPLATE_KEY]: [
@@ -96,6 +99,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "actionVariantCatalogJson",
     "safetyFlags",
     "safetyConstraints",
+    "responseLanguage",
   ],
 };
 
@@ -164,7 +168,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   [DOMAIN_WORKOUT_TEMPLATE_KEY]: [
     "You are a wellness coach handling the workout domain for a single turn.",
     // [LANG] Marker: language instruction
-    "Write all user-facing text (summary, proposal title, proposal reason) in the user's language — match the language of the user's message.",
+    "Write all user-facing text (summary, proposal title, proposal reason) in {{responseLanguage}} (use 'en' for English, 'ru' for Russian). If empty, match the language of the user's message.",
     "Return JSON only with one of these shapes:",
     '{"kind":"tool_request","tool":"getUserContextSlice|getWeeklyProgressContext","input":{},"rationale":"optional"}',
     '{"kind":"domain_answer","domain":"workout","summary":"string","candidateProposals":[],"domainSignals":["string"],"workoutCalorieEstimate":0,"workoutCaloriePerHourRate":0}',
@@ -212,7 +216,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   [DOMAIN_NUTRITION_TEMPLATE_KEY]: [
     "You are a wellness coach handling the nutrition domain for a single turn.",
     // [LANG] Marker: language instruction
-    "Write all user-facing text (summary, proposal title, proposal reason) in the user's language — match the language of the user's message.",
+    "Write all user-facing text (summary, proposal title, proposal reason) in {{responseLanguage}} (use 'en' for English, 'ru' for Russian). If empty, match the language of the user's message.",
     "Return JSON only with one of these shapes:",
     '{"kind":"tool_request","tool":"getUserContextSlice","input":{},"rationale":"optional"}',
     '{"kind":"domain_answer","domain":"nutrition","summary":"string","candidateProposals":[],"domainSignals":["string"]}',
@@ -247,7 +251,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   [DOMAIN_HEALTH_TEMPLATE_KEY]: [
     "You are a wellness coach handling the health domain for a single turn.",
     // [LANG] Marker: language instruction
-    "Write all user-facing text (summary) in the user's language — match the language of the user's message.",
+    "Write all user-facing text (summary) in {{responseLanguage}} (use 'en' for English, 'ru' for Russian). If empty, match the language of the user's message.",
     "Return JSON only with one of these shapes:",
     '{"kind":"tool_request","tool":"getUserContextSlice","input":{},"rationale":"optional"}',
     '{"kind":"domain_answer","domain":"health","summary":"string","candidateProposals":[],"domainSignals":["string"]}',
@@ -274,7 +278,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   [FINAL_DECISION_TEMPLATE_KEY]: [
     "You are a wellness coach synthesizing domain outputs into a final user reply.",
     // [LANG] Marker: language instruction
-    "Write all user-facing text (reply field) in the user's language — match the language of the user's message in the domain outputs.",
+    "Write all user-facing text (reply field) in {{responseLanguage}} (use 'en' for English, 'ru' for Russian). If empty, match the language of the user's message in the domain outputs.",
     "Return JSON only with this shape:",
     '{"reply":"string","selectedAction":"action-id or null","proposals":[],"consentRequired":false}',
     "reply is required and must be non-empty wellness coaching text.",
@@ -301,5 +305,6 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Safety flags: {{safetyFlags}}",
     "Safety constraints:",
     "- {{safetyConstraints}}",
+    "Response language: {{responseLanguage}}",
   ].join("\n"),
 };
