@@ -15,6 +15,7 @@ import type {
   ProposalExplainerTurnContext,
   RawAiProposal,
   ResolvedCapabilityPresentationMetadata,
+  UserLocale,
 } from "@health/types";
 import {
   buildResponseModeExecutionMetadata,
@@ -69,6 +70,8 @@ export interface ProposalRevisionContext {
 export interface OrchestrateCoachTurnInput {
   auth: ClerkAuthContext;
   userMessage: string;
+  /** Persisted user locale — forwarded as the authoritative responseLanguageHint to the preprocessor. */
+  responseLocale?: UserLocale;
   recentMessages: ReadonlyArray<{
     role: "user" | "assistant" | "system";
     content: string;
@@ -134,6 +137,9 @@ export class AgentOrchestratorService {
     const preprocessorResult = this.messagePreprocessorService.preprocess({
       userMessage: input.userMessage,
       hasAttachments: Boolean(input.attachmentTurn?.attachments.length),
+      // responseLanguageHint: persisted locale takes precedence over detected language.
+      // resolvePreprocessorResponseLanguage (in packages/types) applies hint ?? detected.
+      responseLanguageHint: input.responseLocale ?? null,
     });
 
     // RouterLlm is the only first-LLM routing stage for eligible turns.
@@ -272,6 +278,7 @@ export class AgentOrchestratorService {
       primaryCoachingContext: coachingContext,
       capabilityTurnMetadata,
       routerResult,
+      responseLanguage: preprocessorResult.responseLanguage,
     });
   }
 
@@ -382,9 +389,11 @@ export class AgentOrchestratorService {
       capabilityTurnMetadata: AgentTurnCapabilityPresentation;
       /** undefined for revision/explainer turns where the router was skipped */
       routerResult: RouterLlmResult | undefined;
+      /** Resolved response language (hint ?? detected). Null = fall back to message detection. */
+      responseLanguage: string | null;
     },
   ): Promise<OrchestratedCoachTurnResult> {
-    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult } = params;
+    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage } = params;
     const selectedDomains = plan.fanout.selectedDomains;
 
     // Build one bounded AgentContextPacket per selected domain.
@@ -404,6 +413,7 @@ export class AgentOrchestratorService {
       selectedDomains,
       domainContextPackets,
       primaryCoachingContext,
+      responseLanguage,
     );
 
     // Structured log: router stage done (counts/ids/flags only — no message text).
@@ -463,6 +473,7 @@ export class AgentOrchestratorService {
       safetyFlags,
       safetyConstraints,
       provider: this.provider,
+      responseLanguage,
     });
 
     // Structured log: decision stage done (counts/ids/flags only — no text/health content).
@@ -634,6 +645,7 @@ export class AgentOrchestratorService {
     selectedDomains: readonly DomainFanoutEntry[],
     domainContextPackets: AgentContextPacket[],
     primaryCoachingContext: Record<string, unknown>,
+    responseLanguage: string | null,
   ): Promise<Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>> {
     try {
       const results = await Promise.all(
@@ -705,6 +717,7 @@ export class AgentOrchestratorService {
             coachingContext: domainCoachingContext,
             orchestratorInput: input,
             provider: this.provider,
+            responseLanguage,
           });
 
           return { domain: domainEntry.domain, result: domainResult };

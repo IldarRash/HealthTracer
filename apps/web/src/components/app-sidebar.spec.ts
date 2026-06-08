@@ -37,7 +37,8 @@ describe("AppSidebar information architecture", () => {
     expect(shouldHidePrimaryNavDuringOnboarding(undefined)).toBe(true);
     expect(shouldHidePrimaryNavDuringOnboarding(true)).toBe(false);
     expect(sidebarSource).toContain("shouldHidePrimaryNavDuringOnboarding");
-    expect(sidebarSource).toContain("Complete onboarding to unlock navigation");
+    // Translated via Nav.completeOnboarding key — check the key reference, not the literal.
+    expect(sidebarSource).toContain('Nav.completeOnboarding');
     expect(sidebarSource).toContain("hidePrimaryNav ?");
   });
 
@@ -48,6 +49,7 @@ describe("AppSidebar information architecture", () => {
   it("does not contain secondary routes in primary nav area", () => {
     // secondary nav is rendered separately, not mixed into primary
     expect(sidebarSource).toContain("app-sidebar__nav-group");
-    expect(sidebarSource).toContain("Plans · view");
+    // Translated via Nav.plansView key — check the key reference, not the literal.
+    expect(sidebarSource).toContain('Nav.plansView');
   });
 });

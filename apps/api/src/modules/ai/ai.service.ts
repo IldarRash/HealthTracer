@@ -1,4 +1,4 @@
-import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext } from "@health/types";
+import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, UserLocale } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
@@ -13,6 +13,8 @@ const SAFE_FALLBACK_REPLY =
 export interface GenerateCoachResponseInput {
   auth: ClerkAuthContext;
   userMessage: string;
+  /** Persisted user locale — the authoritative language hint for AI replies. */
+  responseLocale?: UserLocale;
   recentMessages: ReadonlyArray<{
     role: "user" | "assistant" | "system";
     content: string;
@@ -43,7 +45,10 @@ export class AiService {
   async generateCoachResponse(
     input: GenerateCoachResponseInput,
   ): Promise<GeneratedCoachResponse> {
-    const orchestrated = await this.agentOrchestratorService.orchestrateCoachTurn(input);
+    const orchestrated = await this.agentOrchestratorService.orchestrateCoachTurn({
+      ...input,
+      responseLocale: input.responseLocale,
+    });
 
     return {
       output: orchestrated.output,

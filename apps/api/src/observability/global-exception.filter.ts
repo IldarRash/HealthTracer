@@ -6,6 +6,8 @@ import {
   HttpStatus,
 } from "@nestjs/common";
 import type { HttpRequest, HttpResponse } from "./http.types.js";
+import { isMessageKey, translate } from "../i18n/messages.js";
+import { resolveRequestLocale } from "../i18n/resolve-locale.js";
 import { sanitizePathForLogging } from "./path-sanitizer.js";
 import { getRequestId } from "./request-id.js";
 import {
@@ -132,6 +134,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const context = host.switchToHttp();
     const request = context.getRequest<HttpRequest>();
     const response = context.getResponse<HttpResponse>();
+    const locale = resolveRequestLocale(null, request);
     const { statusCode, category, clientMessage } = categorizeException(exception);
 
     if (statusCode >= 500) {
@@ -166,13 +169,36 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     if (exception instanceof HttpException) {
-      response.status(statusCode).json(exception.getResponse());
+      const body = exception.getResponse();
+
+      if (
+        typeof body === "object" &&
+        body !== null &&
+        "code" in body &&
+        isMessageKey((body as Record<string, unknown>)["code"])
+      ) {
+        const code = (body as Record<string, unknown>)["code"] as Parameters<typeof translate>[0];
+        const { message: _msg, ...rest } = body as Record<string, unknown>;
+        response.status(statusCode).json({
+          ...rest,
+          statusCode,
+          message: translate(code, locale),
+        });
+      } else {
+        response.status(statusCode).json(body);
+      }
+
       return;
     }
 
+    const localizedMessage =
+      statusCode >= 500
+        ? translate("internal_server_error", locale)
+        : clientMessage;
+
     response.status(statusCode).json({
       statusCode,
-      message: clientMessage,
+      message: localizedMessage,
     });
   }
 }

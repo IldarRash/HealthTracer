@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clerk/localizations": "^4.7.1",
     "@clerk/nextjs": "^7.4.0",
     "@health/config": "workspace:*",
     "@health/types": "workspace:^",
@@ -20,6 +21,7 @@
     "class-variance-authority": "latest",
     "clsx": "latest",
     "next": "latest",
+    "next-intl": "^4.13.0",
     "react": "latest",
     "react-dom": "latest",
     "tailwind-merge": "latest",

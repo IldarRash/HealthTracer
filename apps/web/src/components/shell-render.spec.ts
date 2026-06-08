@@ -3,7 +3,7 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { RouteWayfindingTrail } from "./ui/route-wayfinding-trail.js";
+import { RouteWayfindingTrail, type WayfindingTrailDisplay } from "./ui/route-wayfinding-trail.js";
 import {
   getNavLinkAriaCurrent,
   PRIMARY_NAV_LINKS,
@@ -28,6 +28,24 @@ function renderShellMarkup(element: Parameters<typeof renderToStaticMarkup>[0]):
   return renderToStaticMarkup(element);
 }
 
+/** Simulate translation resolution (labelKey → human label) for render tests. */
+function resolveTrailLabels(trail: ReturnType<typeof resolveSecondaryRouteWayfinding>): WayfindingTrailDisplay | undefined {
+  if (!trail) return undefined;
+  // Minimal mapping for test assertions — keys are "Nav.xxx".
+  const labelMap: Record<string, string> = {
+    "Nav.today": "Today",
+    "Nav.workouts": "Workouts",
+    "Nav.nutrition": "Nutrition",
+    "Nav.chat": "Chat",
+    "Nav.longevity": "Longevity",
+    "Nav.profile": "Profile",
+  };
+  return {
+    parent: { href: trail.parent.href, label: labelMap[trail.parent.labelKey] ?? trail.parent.labelKey },
+    current: { label: labelMap[trail.current.labelKey] ?? trail.current.labelKey },
+  };
+}
+
 describe("Modern Health OS shell render", () => {
   it("mounts wayfinding breadcrumb markup on secondary Training routes", () => {
     const pathname = "/training";
@@ -36,8 +54,11 @@ describe("Modern Health OS shell render", () => {
     const trail = resolveSecondaryRouteWayfinding(pathname);
     expect(trail).toBeDefined();
 
+    const displayTrail = resolveTrailLabels(trail);
+    expect(displayTrail).toBeDefined();
+
     const html = renderShellMarkup(
-      createElement(RouteWayfindingTrail, { trail: trail! }),
+      createElement(RouteWayfindingTrail, { trail: displayTrail! }),
     );
 
     expect(html).toContain('aria-label="Breadcrumb"');
@@ -55,12 +76,13 @@ describe("Modern Health OS shell render", () => {
 
     const trail = resolveSecondaryRouteWayfinding(pathname);
     expect(trail).toEqual({
-      parent: { href: "/today", label: "Today" },
-      current: { label: "Nutrition" },
+      parent: { href: "/today", labelKey: "Nav.today" },
+      current: { labelKey: "Nav.nutrition" },
     });
 
+    const displayTrail = resolveTrailLabels(trail);
     const html = renderShellMarkup(
-      createElement(RouteWayfindingTrail, { trail: trail! }),
+      createElement(RouteWayfindingTrail, { trail: displayTrail! }),
     );
 
     expect(html).toContain('href="/today"');
@@ -73,10 +95,11 @@ describe("Modern Health OS shell render", () => {
     expect(shouldShowRouteWayfinding(pathname)).toBe(true);
 
     const trail = resolveSecondaryRouteWayfinding(pathname);
-    expect(trail?.current.label).toBe("Workouts");
+    expect(trail?.current.labelKey).toBe("Nav.workouts");
 
+    const displayTrail = resolveTrailLabels(trail);
     const html = renderShellMarkup(
-      createElement(RouteWayfindingTrail, { trail: trail! }),
+      createElement(RouteWayfindingTrail, { trail: displayTrail! }),
     );
 
     expect(html).toContain("Workouts");

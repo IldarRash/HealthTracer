@@ -9,6 +9,7 @@ function createSnapshot(overrides: Partial<CoachingContextSnapshot> = {}): Coach
       email: "test@example.com",
       displayName: "Test User",
       timezone: "UTC",
+      locale: "en",
       onboardingCompletedAt: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

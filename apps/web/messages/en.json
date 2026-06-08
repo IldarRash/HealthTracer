@@ -1,0 +1,113 @@
+{
+  "Common": {
+    "loading": "Loading…",
+    "error": "Something went wrong.",
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel",
+    "empty": "Nothing here yet.",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "close": "Close",
+    "back": "Back",
+    "edit": "Edit",
+    "update": "Update",
+    "submit": "Submit",
+    "comingSoon": "Coming soon",
+    "notSet": "Not set",
+    "unknownError": "An unexpected error occurred."
+  },
+  "Nav": {
+    "chat": "Chat",
+    "today": "Today",
+    "longevity": "Longevity",
+    "profile": "Profile",
+    "workouts": "Workouts",
+    "nutrition": "Nutrition",
+    "plansView": "Plans · view",
+    "mainNavLabel": "Main navigation",
+    "primaryNavLabel": "Primary navigation",
+    "plansNavLabel": "Plans navigation",
+    "completeOnboarding": "Complete onboarding to unlock navigation",
+    "brandName": "AI Health Coach"
+  },
+  "Settings": {
+    "title": "Settings",
+    "language": "Language",
+    "languageLabel": "Interface language",
+    "english": "English",
+    "russian": "Русский",
+    "languageSaved": "Language updated.",
+    "languageSaving": "Saving…",
+    "languageError": "Could not save language preference."
+  },
+  "Profile": {
+    "title": "Profile",
+    "subtitle": "Who you are and what your coach knows about you",
+    "loading": "Loading your profile…",
+    "error": "Your profile could not be loaded.",
+    "partialError": "Some profile sections could not refresh. Showing available data.",
+    "account": {
+      "yourAccount": "Your account"
+    },
+    "goals": {
+      "title": "Goal hierarchy",
+      "changesThrough": "changes through your coach",
+      "direction": "Direction",
+      "quarterlyGoal": "Quarterly goal",
+      "weeklyGoals": "Weekly goals",
+      "noActiveGoals": "No active goals yet.",
+      "completeOnboarding": "Complete onboarding",
+      "setDirection": "to set your direction.",
+      "noQuarterlyObjective": "No active quarterly objective."
+    },
+    "personalContext": {
+      "title": "Personal context",
+      "notSetUp": "Profile not set up yet.",
+      "continueOnboarding": "Continue onboarding",
+      "updateViaChat": "or update via Chat.",
+      "noPreferences": "No coaching preferences set.",
+      "updateViaChat2": "Update via Chat",
+      "activityLevel": "Activity level",
+      "trainingExperience": "Training experience",
+      "constraints": "Constraints",
+      "preferences": "Preferences",
+      "coachNotes": "Coach notes",
+      "activityLevels": {
+        "sedentary": "Sedentary",
+        "lightly_active": "Lightly active",
+        "moderately_active": "Moderately active",
+        "very_active": "Very active",
+        "extra_active": "Extra active"
+      },
+      "trainingExperiences": {
+        "beginner": "Beginner",
+        "intermediate": "Intermediate",
+        "advanced": "Advanced"
+      }
+    },
+    "documents": {
+      "title": "Health documents",
+      "privacyNotice": "Uploaded with your explicit consent and used as lifestyle context only — not for diagnosis or treatment. Visible only to you. Delete any document at any time."
+    },
+    "devices": {
+      "title": "Devices & data",
+      "watchLabel": "Watch · sleep & heart rate",
+      "scaleLabel": "Smart scale",
+      "phoneLabel": "Phone steps"
+    },
+    "subscription": {
+      "title": "Subscription",
+      "proPlan": "Pro plan",
+      "freePlan": "Free plan",
+      "unlimitedMessages": "Unlimited AI messages",
+      "messagesRemaining": "{count} AI messages remaining today",
+      "managePlan": "Manage plan",
+      "upgradeToPro": "Upgrade to Pro"
+    },
+    "language": {
+      "title": "Language",
+      "description": "Choose the language for the interface."
+    }
+  }
+}

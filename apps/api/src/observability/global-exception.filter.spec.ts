@@ -7,6 +7,8 @@ import {
   categorizeException,
   GlobalExceptionFilter,
 } from "./global-exception.filter.js";
+import { parseBody, parseQuery } from "../common/zod.js";
+import { z } from "zod";
 
 const originalNodeEnv = process.env.NODE_ENV;
 
@@ -152,5 +154,142 @@ describe("GlobalExceptionFilter", () => {
     expect(payload.stack).toBe(error.stack);
 
     logSpy.mockRestore();
+  });
+
+  describe("Accept-Language localization for parseBody/parseQuery validation errors", () => {
+    function makeHost(acceptLanguage: string | undefined, logSpy?: ReturnType<typeof vi.spyOn>) {
+      void logSpy;
+      const json = vi.fn();
+      const status = vi.fn(() => ({ json }));
+      const request = {
+        method: "POST",
+        originalUrl: "/test",
+        headers: acceptLanguage ? { "accept-language": acceptLanguage } : {},
+      };
+      const host = {
+        switchToHttp: () => ({
+          getRequest: () => request,
+          getResponse: () => ({ status }),
+        }),
+      };
+      return { host, status, json };
+    }
+
+    it("returns Russian top-level message with statusCode and issues preserved when Accept-Language is ru", () => {
+      const logSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const filter = new GlobalExceptionFilter();
+      const schema = z.object({ name: z.string() });
+
+      let thrownException: BadRequestException | undefined;
+      try {
+        parseBody(schema, { name: 123 });
+      } catch (err) {
+        thrownException = err as BadRequestException;
+      }
+
+      expect(thrownException).toBeInstanceOf(BadRequestException);
+
+      const { host, status, json } = makeHost("ru");
+      filter.catch(thrownException, host as never);
+
+      expect(status).toHaveBeenCalledWith(400);
+      const responseBody = json.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(responseBody["message"]).toBe("Некорректное тело запроса");
+      expect(responseBody["statusCode"]).toBe(400);
+      expect(responseBody["code"]).toBe("invalid_request_body");
+      expect(Array.isArray(responseBody["issues"])).toBe(true);
+
+      logSpy.mockRestore();
+    });
+
+    it("returns English top-level message when Accept-Language is en", () => {
+      const logSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const filter = new GlobalExceptionFilter();
+      const schema = z.object({ name: z.string() });
+
+      let thrownException: BadRequestException | undefined;
+      try {
+        parseBody(schema, { name: 123 });
+      } catch (err) {
+        thrownException = err as BadRequestException;
+      }
+
+      const { host, status, json } = makeHost("en");
+      filter.catch(thrownException, host as never);
+
+      expect(status).toHaveBeenCalledWith(400);
+      const responseBody = json.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(responseBody["message"]).toBe("Invalid request body");
+      expect(responseBody["statusCode"]).toBe(400);
+      expect(responseBody["code"]).toBe("invalid_request_body");
+      expect(Array.isArray(responseBody["issues"])).toBe(true);
+
+      logSpy.mockRestore();
+    });
+
+    it("returns English top-level message when no Accept-Language header is present", () => {
+      const logSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const filter = new GlobalExceptionFilter();
+      const schema = z.object({ name: z.string() });
+
+      let thrownException: BadRequestException | undefined;
+      try {
+        parseBody(schema, { name: 123 });
+      } catch (err) {
+        thrownException = err as BadRequestException;
+      }
+
+      const { host, status, json } = makeHost(undefined);
+      filter.catch(thrownException, host as never);
+
+      expect(status).toHaveBeenCalledWith(400);
+      const responseBody = json.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(responseBody["message"]).toBe("Invalid request body");
+
+      logSpy.mockRestore();
+    });
+
+    it("returns Russian message for parseQuery validation errors with Accept-Language ru", () => {
+      const logSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const filter = new GlobalExceptionFilter();
+      const schema = z.object({ page: z.number() });
+
+      let thrownException: BadRequestException | undefined;
+      try {
+        parseQuery(schema, { page: "not-a-number" });
+      } catch (err) {
+        thrownException = err as BadRequestException;
+      }
+
+      const { host, status, json } = makeHost("ru");
+      filter.catch(thrownException, host as never);
+
+      expect(status).toHaveBeenCalledWith(400);
+      const responseBody = json.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(responseBody["message"]).toBe("Некорректные параметры запроса");
+      expect(responseBody["code"]).toBe("invalid_query_parameters");
+      expect(Array.isArray(responseBody["issues"])).toBe(true);
+
+      logSpy.mockRestore();
+    });
+
+    it("does not re-translate plain-string HttpException responses without a code", () => {
+      const logSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const filter = new GlobalExceptionFilter();
+      const exception = new BadRequestException("Only pending proposals can be decided.");
+      const { host, status, json } = makeHost("ru");
+
+      filter.catch(exception, host as never);
+
+      expect(status).toHaveBeenCalledWith(400);
+      const responseBody = json.mock.calls[0]?.[0] as string | Record<string, unknown>;
+      // Plain string response from NestJS — returned as-is (not re-translated)
+      const message = typeof responseBody === "string"
+        ? responseBody
+        : (responseBody as Record<string, unknown>)["message"];
+      expect(message).toBe("Only pending proposals can be decided.");
+
+      logSpy.mockRestore();
+    });
   });
 });
