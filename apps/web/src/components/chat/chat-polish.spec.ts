@@ -19,42 +19,38 @@ import { WEEKLY_REVIEW_CHAT_PROMPT } from "../../lib/weekly-review-ui-state.js";
 const chatDir = dirname(fileURLToPath(import.meta.url));
 const webSrcDir = join(chatDir, "../..");
 
-const chatWorkspaceSource = readFileSync(join(chatDir, "chat-workspace.tsx"), "utf8");
-const inlineProposalRouterSource = readFileSync(
+/** Normalize CRLF to LF so assertions use plain '\n' regardless of OS/git config. */
+function readNormalized(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+const chatWorkspaceSource = readNormalized(join(chatDir, "chat-workspace.tsx"));
+const inlineProposalRouterSource = readNormalized(
   join(webSrcDir, "components/proposals/inline-proposal-card.tsx"),
-  "utf8",
 );
-const genericInlineProposalSource = readFileSync(
+const genericInlineProposalSource = readNormalized(
   join(webSrcDir, "components/proposals/inline-proposal-card-generic.tsx"),
-  "utf8",
 );
-const wellbeingProposalSource = readFileSync(
+const wellbeingProposalSource = readNormalized(
   join(webSrcDir, "components/proposals/wellbeing-checkin-proposal-card.tsx"),
-  "utf8",
 );
-const nutritionProposalSource = readFileSync(
+const nutritionProposalSource = readNormalized(
   join(webSrcDir, "components/proposals/nutrition-incident-proposal-card.tsx"),
-  "utf8",
 );
-const proposalCardShellSource = readFileSync(
+const proposalCardShellSource = readNormalized(
   join(webSrcDir, "components/proposals/proposal-card-shell.tsx"),
-  "utf8",
 );
-const weeklyReviewSummarySource = readFileSync(
+const weeklyReviewSummarySource = readNormalized(
   join(chatDir, "weekly-review-chat-summary.tsx"),
-  "utf8",
 );
-const crisisPanelSource = readFileSync(
+const crisisPanelSource = readNormalized(
   join(webSrcDir, "components/wellbeing/crisis-support-panel.tsx"),
-  "utf8",
 );
-const metadataPanelSource = readFileSync(
+const metadataPanelSource = readNormalized(
   join(webSrcDir, "components/ui/chat-metadata-panel.tsx"),
-  "utf8",
 );
-const chatBubbleSource = readFileSync(
+const chatBubbleSource = readNormalized(
   join(webSrcDir, "components/ui/chat-bubble.tsx"),
-  "utf8",
 );
 const stylesSource = readFileSync(join(webSrcDir, "../app/styles.css"), "utf8");
 

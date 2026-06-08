@@ -4,41 +4,38 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const proposalsDir = dirname(fileURLToPath(import.meta.url));
-const inlineProposalSource = readFileSync(
+
+/** Normalize CRLF to LF so assertions use plain '\n' regardless of OS/git config. */
+function readNormalized(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+const inlineProposalSource = readNormalized(
   join(proposalsDir, "inline-proposal-card.tsx"),
-  "utf8",
 );
-const wellbeingProposalSource = readFileSync(
+const wellbeingProposalSource = readNormalized(
   join(proposalsDir, "wellbeing-checkin-proposal-card.tsx"),
-  "utf8",
 );
-const nutritionProposalSource = readFileSync(
+const nutritionProposalSource = readNormalized(
   join(proposalsDir, "nutrition-incident-proposal-card.tsx"),
-  "utf8",
 );
-const recommendRecipesProposalSource = readFileSync(
+const recommendRecipesProposalSource = readNormalized(
   join(proposalsDir, "recommend-recipes-proposal-card.tsx"),
-  "utf8",
 );
-const chatWorkspaceSource = readFileSync(
+const chatWorkspaceSource = readNormalized(
   join(proposalsDir, "../chat/chat-workspace.tsx"),
-  "utf8",
 );
-const inlineProposalActionsSource = readFileSync(
+const inlineProposalActionsSource = readNormalized(
   join(proposalsDir, "../../lib/use-inline-proposal-actions.ts"),
-  "utf8",
 );
-const contractProposalCardSource = readFileSync(
+const contractProposalCardSource = readNormalized(
   join(proposalsDir, "contract-proposal-card.tsx"),
-  "utf8",
 );
-const editableProposalContractSource = readFileSync(
+const editableProposalContractSource = readNormalized(
   join(proposalsDir, "editable-proposal-contract.tsx"),
-  "utf8",
 );
-const proposalCardShellSource = readFileSync(
+const proposalCardShellSource = readNormalized(
   join(proposalsDir, "proposal-card-shell.tsx"),
-  "utf8",
 );
 
 describe("InlineProposalCard chat hierarchy", () => {
@@ -180,9 +177,8 @@ describe("RecommendRecipesProposalCard", () => {
 });
 
 describe("GenericInlineProposalCard chat hierarchy", () => {
-  const genericProposalSource = readFileSync(
+  const genericProposalSource = readNormalized(
     join(proposalsDir, "inline-proposal-card-generic.tsx"),
-    "utf8",
   );
 
   it("does not render raw intent, domain, or validation status strings", () => {

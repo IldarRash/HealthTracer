@@ -161,4 +161,78 @@ describe("ai safety helpers", () => {
     });
     expect(errors.length).toBeGreaterThan(0);
   });
+
+  // ── C2 nutrition + weeklyPlan safety ───────────────────────────────
+
+  it("rejects create_nutrition_plan proposal whose summary contains medical wording", () => {
+    // A plan proposal carrying medical-certainty language in its summary must be
+    // caught before it can be accepted and create a new revision.
+    const errors = validateProposalSafety({
+      intent: "create_nutrition_plan",
+      targetDomain: "nutrition",
+      title: "Питание на неделю",
+      reason: "Coach set the weekly structure.",
+      proposedChanges: {
+        title: "Weekly plan",
+        summary: "Follow this clinical treatment protocol for weight loss.",
+        caloriesPerDay: 2000,
+        mealStructure: [{ label: "Breakfast", timingHint: null }],
+      },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it("rejects adjust_nutrition_plan proposal whose weeklyPlan meal text contains medical wording", () => {
+    // Medical-certainty language embedded inside weeklyPlan meal strings is
+    // serialized into proposedChanges and must trigger the safety check.
+    const errors = validateProposalSafety({
+      intent: "adjust_nutrition_plan",
+      targetDomain: "nutrition",
+      title: "Plan adjustment",
+      reason: "Adjust based on adherence.",
+      proposedChanges: {
+        title: "Adjusted plan",
+        summary: "Adjusted for adherence.",
+        caloriesPerDay: 2200,
+        mealStructure: [{ label: "Breakfast", timingHint: null }],
+        weeklyPlan: [
+          {
+            weekday: 1,
+            breakfast: "Oatmeal",
+            lunch: "Salad",
+            snack: "Fruit",
+            dinner: "Prescribe medication with dinner",
+            kcal: 2000,
+          },
+        ],
+      },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it("accepts create_nutrition_plan proposal with weeklyPlan and wellness-only copy", () => {
+    // A correctly-framed weekly plan proposal must pass safety validation.
+    const errors = validateProposalSafety({
+      intent: "create_nutrition_plan",
+      targetDomain: "nutrition",
+      title: "Рацион на неделю",
+      reason: "Примерный план питания на неделю, ккал — оценочно.",
+      proposedChanges: {
+        title: "Weekly balanced plan",
+        summary: "Balanced macros across 7 days, calories approximate.",
+        caloriesPerDay: 2200,
+        mealStructure: [{ label: "Breakfast", timingHint: "07:30" }],
+        weeklyPlan: [
+          { weekday: 1, breakfast: "Овсянка + яйца", lunch: "Индейка, гречка", snack: "Творог", dinner: "Треска, овощи", kcal: 2040 },
+          { weekday: 2, breakfast: "Яичница, тост", lunch: "Куриный суп", snack: "Яблоко", dinner: "Говядина, рис", kcal: 2100 },
+          { weekday: 3, breakfast: "Гречка, яйца", lunch: "Лосось, овощи", snack: "Кефир", dinner: "Куриная грудка", kcal: 2050 },
+          { weekday: 4, breakfast: "Омлет, хлеб", lunch: "Тефтели", snack: "Творог", dinner: "Минтай, брокколи", kcal: 2200 },
+          { weekday: 5, breakfast: "Овсянка, банан", lunch: "Индейка, булгур", snack: "Орех-микс", dinner: "Куриное филе", kcal: 2080 },
+          { weekday: 6, breakfast: "Блины, ягоды", lunch: "Говядина, гречка", snack: "Батончик", dinner: "Лосось, рис", kcal: 2400 },
+          { weekday: 7, breakfast: "Яичница, томаты", lunch: "Куриный бульон", snack: "Кефир, фрукты", dinner: "Запечённые овощи", kcal: 1950 },
+        ],
+      },
+    });
+    expect(errors).toEqual([]);
+  });
 });

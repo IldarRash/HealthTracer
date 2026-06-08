@@ -127,6 +127,73 @@ describe("nutrition mappers", () => {
     expect(merged.notes).toEqual([]);
   });
 
+  it("passes weeklyPlan through toNutritionPlanRevision unchanged (C2 round-trip)", () => {
+    const weeklyPlan = [
+      { weekday: 1, breakfast: "Овсянка + яйца", lunch: "Индейка, гречка", snack: "Творог, ягоды", dinner: "Треска, овощи", kcal: 2040 },
+      { weekday: 2, breakfast: "Яичница, тост",  lunch: "Куриный суп",     snack: "Яблоко",        dinner: "Говядина, рис",   kcal: 2100 },
+      { weekday: 3, breakfast: "Гречка, яйца",   lunch: "Лосось, овощи",   snack: "Кефир",         dinner: "Куриная грудка",  kcal: 2050 },
+      { weekday: 4, breakfast: "Омлет, хлеб",    lunch: "Тефтели",         snack: "Творог",        dinner: "Минтай, брокколи",kcal: 2200 },
+      { weekday: 5, breakfast: "Овсянка, банан",  lunch: "Индейка, булгур", snack: "Орех-микс",     dinner: "Куриное филе",    kcal: 2080 },
+      { weekday: 6, breakfast: "Блины, ягоды",    lunch: "Говядина, гречка",snack: "Батончик",      dinner: "Лосось, рис",     kcal: 2400 },
+      { weekday: 7, breakfast: "Яичница, томаты", lunch: "Куриный бульон",  snack: "Кефир, фрукты", dinner: "Запечённые овощи",kcal: 1950 },
+    ];
+
+    const revision = toNutritionPlanRevision({
+      id: "880099c6-3b5f-4383-8246-97b72bf61819",
+      nutritionPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      revisionNumber: 8,
+      reason: "Plan with weekly matrix",
+      source: "ai_proposal",
+      payload: {
+        title: "Weekly plan",
+        summary: "7-day matrix plan.",
+        caloriesPerDay: 2200,
+        proteinGrams: 140,
+        carbsGrams: 220,
+        fatGrams: 70,
+        hydrationLiters: 2.5,
+        mealStructure: [{ label: "Завтрак", timingHint: "07:30" }],
+        preferences: [],
+        restrictions: [],
+        allergies: [],
+        notes: [],
+        weeklyPlan,
+      },
+      createdAt: timestamp,
+    });
+
+    expect(revision.payload.weeklyPlan).toHaveLength(7);
+    expect(revision.payload.weeklyPlan?.[0]?.weekday).toBe(1);
+    expect(revision.payload.weeklyPlan?.[5]?.kcal).toBe(2400);
+    expect(revision.payload.weeklyPlan?.[6]?.dinner).toBe("Запечённые овощи");
+  });
+
+  it("weeklyPlan is absent (undefined) when not in stored payload (backward compat)", () => {
+    const revision = toNutritionPlanRevision({
+      id: "880099c6-3b5f-4383-8246-97b72bf61820",
+      nutritionPlanId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
+      revisionNumber: 2,
+      reason: "Legacy plan",
+      source: "ai_proposal",
+      payload: {
+        title: "Legacy plan",
+        summary: "No weekly matrix.",
+        caloriesPerDay: 2200,
+        proteinGrams: 140,
+        carbsGrams: 220,
+        fatGrams: 70,
+        hydrationLiters: 2.5,
+        mealStructure: [{ label: "Breakfast", timingHint: null }],
+        preferences: [],
+        restrictions: [],
+        notes: [],
+      },
+      createdAt: timestamp,
+    });
+
+    expect(revision.payload.weeklyPlan).toBeUndefined();
+  });
+
   it("throws a stable internal error when stored revision payload is invalid", () => {
     expect(() =>
       toNutritionPlanRevision({

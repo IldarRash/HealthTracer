@@ -38,6 +38,7 @@ import {
   type RevisionHistoryRow,
 } from "../ui";
 import { ErrorState } from "../ui";
+import { NutritionWeekPlan } from "./nutrition-week-plan";
 
 // ── ActiveNutritionHeader ────────────────────────────────────────
 
@@ -1729,19 +1730,22 @@ export function NutritionWorkspace() {
         />
       </div>
 
-      {/* 6. PrefsCard */}
+      {/* 6. NutritionWeekPlan — C2 7-day grid (shown when weeklyPlan is present; graceful empty otherwise) */}
+      <NutritionWeekPlan weeklyPlan={payload.weeklyPlan ?? null} />
+
+      {/* 7. PrefsCard */}
       <PrefsCard
         preferences={payload.preferences}
         restrictions={payload.restrictions}
         allergies={payload.allergies}
       />
 
-      {/* 7. CoachNotes */}
+      {/* 8. CoachNotes */}
       {payload.notes.length > 0 ? (
         <CoachNotes>{payload.notes.join(" ")}</CoachNotes>
       ) : null}
 
-      {/* 8. AdherencePanel */}
+      {/* 9. AdherencePanel */}
       {adherencePanelState === "data" ? (
         <AdherencePanel
           state="data"
@@ -1761,10 +1765,10 @@ export function NutritionWorkspace() {
         <AdherencePanel state="empty" />
       )}
 
-      {/* 9. RecipeIdeas */}
+      {/* 10. RecipeIdeas */}
       <RecipeIdeas onOpenRecipe={(id) => setSelectedRecipeId(id)} />
 
-      {/* 10. RevisionHistoryDark */}
+      {/* 11. RevisionHistoryDark */}
       <RevisionHistoryDark
         rows={historyRows}
         defaultOpen={true}
