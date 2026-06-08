@@ -611,6 +611,112 @@ describe("ProposalValidationService", () => {
     );
   });
 
+  // ── C1: per-meal kcal fields in nutrition proposals ──────────────
+
+  it("accepts create_nutrition_plan with per-meal C1 fields (kcal, macros, mealTime, dish)", () => {
+    const result = service.validateStoredProposal("create_nutrition_plan", {
+      title: "Plan with per-meal data",
+      summary: "Breakfast and lunch have calorie estimates.",
+      caloriesPerDay: 2100,
+      proteinGrams: 130,
+      carbsGrams: 210,
+      fatGrams: 65,
+      hydrationLiters: 2.5,
+      mealStructure: [
+        {
+          label: "Breakfast",
+          timingHint: "Morning",
+          mealTime: "07:30",
+          dish: "Oatmeal with berries",
+          kcal: 480,
+          proteinGrams: 32,
+          carbsGrams: 58,
+          fatGrams: 14,
+        },
+        {
+          label: "Lunch",
+          timingHint: null,
+          mealTime: "13:00",
+          dish: "Chicken + quinoa",
+          kcal: 620,
+          proteinGrams: 44,
+          carbsGrams: 62,
+          fatGrams: 20,
+        },
+      ],
+      preferences: [],
+      restrictions: [],
+      allergies: [],
+      notes: [],
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("accepts adjust_nutrition_plan with per-meal C1 fields (C1 additive fields preserve backward compat)", () => {
+    const result = service.validateStoredProposal("adjust_nutrition_plan", {
+      title: "Updated with per-meal data",
+      summary: "All meals now have kcal estimates.",
+      caloriesPerDay: 2000,
+      proteinGrams: 120,
+      carbsGrams: 200,
+      fatGrams: 60,
+      hydrationLiters: 2.0,
+      mealStructure: [
+        { label: "Breakfast", timingHint: "Morning", kcal: 450, proteinGrams: 30, carbsGrams: 50, fatGrams: 12 },
+        { label: "Dinner", timingHint: "Evening", kcal: 550, dish: "Salmon", mealTime: "20:00" },
+      ],
+      preferences: [],
+      restrictions: [],
+      allergies: [],
+      notes: [],
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects create_nutrition_plan with per-meal kcal exceeding 5000", () => {
+    const result = service.validateStoredProposal("create_nutrition_plan", {
+      title: "Over-kcal plan",
+      summary: "One meal has an out-of-range kcal.",
+      caloriesPerDay: 2200,
+      proteinGrams: 140,
+      carbsGrams: 220,
+      fatGrams: 70,
+      hydrationLiters: 2.5,
+      mealStructure: [
+        { label: "Breakfast", timingHint: null, kcal: 5001 },
+      ],
+      notes: [],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("accepts create_nutrition_plan with partial per-meal data (only kcal, no macros)", () => {
+    // Per-meal macros are optional — only kcal on some slots is valid.
+    const result = service.validateStoredProposal("create_nutrition_plan", {
+      title: "Partial per-meal plan",
+      summary: "Only kcal, no per-meal macros.",
+      caloriesPerDay: 1800,
+      proteinGrams: 110,
+      carbsGrams: 180,
+      fatGrams: 55,
+      hydrationLiters: 2.0,
+      mealStructure: [
+        { label: "Breakfast", timingHint: "Morning", kcal: 400 },
+        { label: "Lunch", timingHint: null }, // legacy-style, no C1 fields
+      ],
+      notes: [],
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
   it("validates recommend_recipes payloads by intent", () => {
     const result = service.validateStoredProposal("recommend_recipes", {
       recommendations: [

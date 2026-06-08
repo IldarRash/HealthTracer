@@ -378,6 +378,123 @@ describe("ProposalApplyService", () => {
     expect(capturedIntent).toBe("adapt_habit_plan");
   });
 
+  // ── C1: accepted nutrition proposal with per-meal kcal fields → revision (not overwrite) ──
+
+  it("routes create_nutrition_plan with per-meal C1 fields to nutrition service (accepted → revision)", async () => {
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
+
+    const nutritionPayloadC1 = {
+      ...nutritionPayload,
+      mealStructure: [
+        {
+          label: "Breakfast",
+          timingHint: "Morning",
+          mealTime: "07:30",
+          dish: "Oatmeal",
+          kcal: 480,
+          proteinGrams: 32,
+          carbsGrams: 58,
+          fatGrams: 14,
+        },
+        {
+          label: "Lunch",
+          timingHint: null,
+          mealTime: "13:00",
+          dish: "Chicken + quinoa",
+          kcal: 620,
+          proteinGrams: 44,
+          carbsGrams: 62,
+          fatGrams: 20,
+        },
+      ],
+    };
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          capturedPayload = payload;
+          capturedIntent = intent;
+          return "nutrition_revision:rev-c1-create";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never, // bodyService
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "create_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: nutritionPayloadC1,
+    });
+
+    expect(reference).toBe("nutrition_revision:rev-c1-create");
+    expect(capturedIntent).toBe("create_nutrition_plan");
+    // Per-meal fields must flow through to the service unmodified.
+    const slots = (capturedPayload as typeof nutritionPayloadC1).mealStructure;
+    expect(slots[0]?.kcal).toBe(480);
+    expect(slots[0]?.dish).toBe("Oatmeal");
+    expect(slots[0]?.mealTime).toBe("07:30");
+    expect(slots[1]?.kcal).toBe(620);
+  });
+
+  it("accepted adjust_nutrition_plan with C1 fields calls applyNutritionPlanProposal (revision) not a direct overwrite", async () => {
+    let applyNutritionCalled = false;
+    // No direct plan-mutation method should be invoked.  applyNutritionPlanProposal
+    // is the single allowed write path: it creates or appends a revision.
+    let directOverwriteCalled = false;
+
+    const nutritionPayloadWithMeals = {
+      ...nutritionPayload,
+      mealStructure: [
+        { label: "Breakfast", timingHint: "Morning", kcal: 500, proteinGrams: 35, carbsGrams: 55, fatGrams: 16 },
+      ],
+    };
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async () => {
+          applyNutritionCalled = true;
+          return "nutrition_revision:rev-c1-adjust";
+        },
+        // If a hypothetical "overwritePlan" method existed it would set directOverwriteCalled.
+        overwritePlan: async () => { directOverwriteCalled = true; },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never, // bodyService
+    );
+
+    await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adjust_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: nutritionPayloadWithMeals,
+    });
+
+    expect(applyNutritionCalled).toBe(true);
+    expect(directOverwriteCalled).toBe(false);
+  });
+
   it("routes accepted adjust_nutrition_plan proposals with progress provenance through the nutrition service", async () => {
     let nutritionCalled = false;
     let capturedPayload: unknown;

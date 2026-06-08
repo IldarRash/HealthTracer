@@ -48,6 +48,7 @@ function createRepositoryMock(overrides: Record<string, unknown> = {}) {
   return {
     findActivePlanByUserId: async () => null,
     findActiveRevisionByPlanId: async () => null,
+    findLatestTwoRevisionsByPlanId: async () => [],
     listRevisionsByUserId: async () => [],
     findAdherenceByUserIdAndDate: async () => null,
     listIncidentsByUserAndDate: async () => [],
@@ -778,5 +779,288 @@ describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
     expect(reference).toBe("nutrition_revision:rev-new-swap");
     expect(createCalled).toBe(true);
     expect(appendCalled).toBe(false);
+  });
+});
+
+// ─── C1: getMealCaloriesBreakdown ──────────────────────────────────────────
+
+const mealPayloadWithCalories = {
+  title: "Plan with per-meal data",
+  summary: "Balanced plan.",
+  caloriesPerDay: 2100,
+  proteinGrams: 140,
+  carbsGrams: 220,
+  fatGrams: 70,
+  hydrationLiters: 2.5,
+  mealStructure: [
+    {
+      label: "Breakfast",
+      timingHint: "Morning",
+      mealTime: "07:30",
+      dish: "Oatmeal",
+      kcal: 480,
+      proteinGrams: 32,
+      carbsGrams: 58,
+      fatGrams: 14,
+    },
+    {
+      label: "Lunch",
+      timingHint: null,
+      mealTime: "14:00",
+      dish: "Chicken quinoa",
+      kcal: 620,
+      proteinGrams: 44,
+      carbsGrams: 62,
+      fatGrams: 20,
+    },
+    {
+      label: "Dinner",
+      timingHint: "Evening",
+      mealTime: "20:00",
+      dish: "Salmon + veg",
+      kcal: 540,
+      proteinGrams: 38,
+      carbsGrams: 30,
+      fatGrams: 24,
+    },
+  ],
+  preferences: [],
+  restrictions: [],
+  allergies: [],
+  notes: [],
+};
+
+describe("NutritionService — getMealCaloriesBreakdown (C1)", () => {
+  it("returns null when no active nutrition plan exists", async () => {
+    const service = new NutritionService(
+      createRepositoryMock() as never,
+      usersService as never,
+    );
+
+    await expect(service.getMealCaloriesBreakdown(auth as never)).resolves.toBeNull();
+  });
+
+  it("returns null when active plan has no active revision id", async () => {
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-c1-1",
+          userId,
+          activeRevisionId: null,
+          status: "active",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+      }) as never,
+      usersService as never,
+    );
+
+    await expect(service.getMealCaloriesBreakdown(auth as never)).resolves.toBeNull();
+  });
+
+  it("returns the read model for a plan with one revision (no previous)", async () => {
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-c1-2",
+          userId,
+          activeRevisionId: "rev-c1-1",
+          status: "active",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        findLatestTwoRevisionsByPlanId: async () => [
+          {
+            id: "rev-c1-1",
+            nutritionPlanId: "plan-c1-2",
+            revisionNumber: 1,
+            reason: "Initial",
+            source: "seed",
+            payload: mealPayloadWithCalories,
+            createdAt: new Date(),
+          },
+        ],
+      }) as never,
+      usersService as never,
+    );
+
+    const model = await service.getMealCaloriesBreakdown(auth as never);
+
+    expect(model).not.toBeNull();
+    expect(model?.revisionNumber).toBe(1);
+    expect(model?.totalKcal).toBe(480 + 620 + 540); // 1640
+    expect(model?.remaining).toBe(2100 - 1640);     // 460
+    expect(model?.hasPerMealData).toBe(true);
+    // All meals changed = true (no previous revision).
+    expect(model?.meals.every((m) => m.changed)).toBe(true);
+  });
+
+  it("computes changed=false for unchanged slots vs previous revision", async () => {
+    const legacyPayload = {
+      ...mealPayloadWithCalories,
+      mealStructure: mealPayloadWithCalories.mealStructure.map((s) => ({
+        label: s.label,
+        timingHint: s.timingHint,
+        // Same kcal/macros/dish → should NOT be marked changed.
+        kcal: s.kcal,
+        proteinGrams: s.proteinGrams,
+        carbsGrams: s.carbsGrams,
+        fatGrams: s.fatGrams,
+        dish: s.dish,
+      })),
+    };
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-c1-3",
+          userId,
+          activeRevisionId: "rev-c1-2",
+          status: "active",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        findLatestTwoRevisionsByPlanId: async () => [
+          {
+            id: "rev-c1-2",
+            nutritionPlanId: "plan-c1-3",
+            revisionNumber: 2,
+            reason: "Same data",
+            source: "seed",
+            payload: mealPayloadWithCalories,
+            createdAt: new Date(),
+          },
+          {
+            id: "rev-c1-1",
+            nutritionPlanId: "plan-c1-3",
+            revisionNumber: 1,
+            reason: "Previous",
+            source: "seed",
+            payload: legacyPayload,
+            createdAt: new Date(),
+          },
+        ],
+      }) as never,
+      usersService as never,
+    );
+
+    const model = await service.getMealCaloriesBreakdown(auth as never);
+
+    expect(model?.meals.every((m) => !m.changed)).toBe(true);
+  });
+
+  it("does not call any write methods (read-only guarantee)", async () => {
+    let appendCalled = false;
+    let createCalled = false;
+    let upsertCalled = false;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-c1-4",
+          userId,
+          activeRevisionId: "rev-c1-ro",
+          status: "active",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        findLatestTwoRevisionsByPlanId: async () => [
+          {
+            id: "rev-c1-ro",
+            nutritionPlanId: "plan-c1-4",
+            revisionNumber: 1,
+            reason: "RO test",
+            source: "seed",
+            payload: mealPayloadWithCalories,
+            createdAt: new Date(),
+          },
+        ],
+        appendRevision: async () => { appendCalled = true; return { id: "x" }; },
+        createPlanWithRevision: async () => { createCalled = true; return { revision: { id: "x" } }; },
+        upsertAdherenceByUserIdAndDate: async () => { upsertCalled = true; return {} as never; },
+      }) as never,
+      usersService as never,
+    );
+
+    await service.getMealCaloriesBreakdown(auth as never);
+
+    expect(appendCalled).toBe(false);
+    expect(createCalled).toBe(false);
+    expect(upsertCalled).toBe(false);
+  });
+
+  it("returns null when findLatestTwoRevisionsByPlanId returns an empty array despite activeRevisionId being set", async () => {
+    // Defensive edge case: plan row has activeRevisionId but the revision query
+    // returns nothing (e.g. data inconsistency).  Service must return null safely.
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-c1-empty",
+          userId,
+          activeRevisionId: "rev-c1-ghost",
+          status: "active",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        findLatestTwoRevisionsByPlanId: async () => [], // returns nothing
+      }) as never,
+      usersService as never,
+    );
+
+    await expect(service.getMealCaloriesBreakdown(auth as never)).resolves.toBeNull();
+  });
+
+  it("marks only the meal slot with changed kcal as changed=true, not all slots", async () => {
+    const prevPayload = {
+      ...mealPayloadWithCalories,
+      mealStructure: mealPayloadWithCalories.mealStructure.map((s) => ({
+        ...s,
+        // Set kcal lower on Breakfast to trigger a change in the active revision.
+        kcal: s.label === "Breakfast" ? 400 : s.kcal,
+      })),
+    };
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-c1-partial-change",
+          userId,
+          activeRevisionId: "rev-c1-active",
+          status: "active",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        findLatestTwoRevisionsByPlanId: async () => [
+          {
+            id: "rev-c1-active",
+            nutritionPlanId: "plan-c1-partial-change",
+            revisionNumber: 2,
+            reason: "Breakfast kcal updated",
+            source: "ai_proposal",
+            payload: mealPayloadWithCalories, // active: Breakfast=480
+            createdAt: new Date(),
+          },
+          {
+            id: "rev-c1-prev",
+            nutritionPlanId: "plan-c1-partial-change",
+            revisionNumber: 1,
+            reason: "Initial",
+            source: "ai_proposal",
+            payload: prevPayload, // previous: Breakfast=400
+            createdAt: new Date(),
+          },
+        ],
+      }) as never,
+      usersService as never,
+    );
+
+    const model = await service.getMealCaloriesBreakdown(auth as never);
+
+    const breakfast = model?.meals.find((m) => m.label === "Breakfast");
+    const notBreakfast = model?.meals.filter((m) => m.label !== "Breakfast") ?? [];
+
+    expect(breakfast?.changed).toBe(true);
+    // All other slots should not be changed (they match the previous revision).
+    expect(notBreakfast.every((m) => !m.changed)).toBe(true);
   });
 });

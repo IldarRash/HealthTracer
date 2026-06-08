@@ -16,47 +16,37 @@ import {
 } from "../../lib/proposal-ui-state.js";
 import { WEEKLY_REVIEW_CHAT_PROMPT } from "../../lib/weekly-review-ui-state.js";
 
+/** Normalize CRLF to LF so whitespace assertions work on Windows checkouts. */
+function readSource(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
 const chatDir = dirname(fileURLToPath(import.meta.url));
 const webSrcDir = join(chatDir, "../..");
 
-// Normalize CRLF→LF so positional `\n`-anchored assertions are line-ending agnostic
-// (Windows checkouts may have CRLF — same approach as chat-workspace-proposal-render.spec.ts).
-function readNorm(path: string) {
-  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
-}
-const chatWorkspaceSource = readNorm(join(chatDir, "chat-workspace.tsx"));
-const inlineProposalRouterSource = readNorm(
+const chatWorkspaceSource = readSource(join(chatDir, "chat-workspace.tsx"));
+const inlineProposalRouterSource = readSource(
   join(webSrcDir, "components/proposals/inline-proposal-card.tsx"),
 );
-const genericInlineProposalSource = readNorm(
+const genericInlineProposalSource = readSource(
   join(webSrcDir, "components/proposals/inline-proposal-card-generic.tsx"),
 );
-const wellbeingProposalSource = readNorm(
+const wellbeingProposalSource = readSource(
   join(webSrcDir, "components/proposals/wellbeing-checkin-proposal-card.tsx"),
 );
-const nutritionProposalSource = readNorm(
+const nutritionProposalSource = readSource(
   join(webSrcDir, "components/proposals/nutrition-incident-proposal-card.tsx"),
 );
-const proposalCardShellSource = readNorm(
+const proposalCardShellSource = readSource(
   join(webSrcDir, "components/proposals/proposal-card-shell.tsx"),
 );
-const weeklyReviewSummarySource = readFileSync(
-  join(chatDir, "weekly-review-chat-summary.tsx"),
-  "utf8",
-);
-const crisisPanelSource = readFileSync(
+const weeklyReviewSummarySource = readSource(join(chatDir, "weekly-review-chat-summary.tsx"));
+const crisisPanelSource = readSource(
   join(webSrcDir, "components/wellbeing/crisis-support-panel.tsx"),
-  "utf8",
 );
-const metadataPanelSource = readFileSync(
-  join(webSrcDir, "components/ui/chat-metadata-panel.tsx"),
-  "utf8",
-);
-const chatBubbleSource = readFileSync(
-  join(webSrcDir, "components/ui/chat-bubble.tsx"),
-  "utf8",
-);
-const stylesSource = readFileSync(join(webSrcDir, "../app/styles.css"), "utf8");
+const metadataPanelSource = readSource(join(webSrcDir, "components/ui/chat-metadata-panel.tsx"));
+const chatBubbleSource = readSource(join(webSrcDir, "components/ui/chat-bubble.tsx"));
+const stylesSource = readSource(join(webSrcDir, "../app/styles.css"));
 
 const CHAT_USER_VISIBLE_SOURCES = [
   chatWorkspaceSource,
@@ -67,8 +57,8 @@ const CHAT_USER_VISIBLE_SOURCES = [
   weeklyReviewSummarySource,
   crisisPanelSource,
   chatBubbleSource,
-  readFileSync(join(chatDir, "chat-composer-attachments.tsx"), "utf8"),
-  readFileSync(join(chatDir, "chat-attachment-outcome-panel.tsx"), "utf8"),
+  readSource(join(chatDir, "chat-composer-attachments.tsx")),
+  readSource(join(chatDir, "chat-attachment-outcome-panel.tsx")),
   JSON.stringify(SUGGESTED_CHAT_PROMPTS),
   CHAT_EMPTY_STATE_TITLE,
   CHAT_EMPTY_STATE_DESCRIPTION,

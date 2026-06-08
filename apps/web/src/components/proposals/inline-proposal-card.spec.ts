@@ -3,21 +3,31 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const proposalsDir = dirname(fileURLToPath(import.meta.url));
-// Normalize CRLF→LF so positional `\n`-anchored assertions are line-ending agnostic
-// (Windows checkouts may have CRLF — same approach as chat-workspace-proposal-render.spec.ts).
-function readNorm(path: string) {
+/** Normalize CRLF to LF so whitespace assertions work on Windows checkouts. */
+function readSource(path: string): string {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 }
-const inlineProposalSource = readNorm(join(proposalsDir, "inline-proposal-card.tsx"));
-const wellbeingProposalSource = readNorm(join(proposalsDir, "wellbeing-checkin-proposal-card.tsx"));
-const nutritionProposalSource = readNorm(join(proposalsDir, "nutrition-incident-proposal-card.tsx"));
-const recommendRecipesProposalSource = readNorm(join(proposalsDir, "recommend-recipes-proposal-card.tsx"));
-const chatWorkspaceSource = readNorm(join(proposalsDir, "../chat/chat-workspace.tsx"));
-const inlineProposalActionsSource = readNorm(join(proposalsDir, "../../lib/use-inline-proposal-actions.ts"));
-const contractProposalCardSource = readNorm(join(proposalsDir, "contract-proposal-card.tsx"));
-const editableProposalContractSource = readNorm(join(proposalsDir, "editable-proposal-contract.tsx"));
-const proposalCardShellSource = readNorm(join(proposalsDir, "proposal-card-shell.tsx"));
+
+const proposalsDir = dirname(fileURLToPath(import.meta.url));
+const inlineProposalSource = readSource(join(proposalsDir, "inline-proposal-card.tsx"));
+const wellbeingProposalSource = readSource(
+  join(proposalsDir, "wellbeing-checkin-proposal-card.tsx"),
+);
+const nutritionProposalSource = readSource(
+  join(proposalsDir, "nutrition-incident-proposal-card.tsx"),
+);
+const recommendRecipesProposalSource = readSource(
+  join(proposalsDir, "recommend-recipes-proposal-card.tsx"),
+);
+const chatWorkspaceSource = readSource(join(proposalsDir, "../chat/chat-workspace.tsx"));
+const inlineProposalActionsSource = readSource(
+  join(proposalsDir, "../../lib/use-inline-proposal-actions.ts"),
+);
+const contractProposalCardSource = readSource(join(proposalsDir, "contract-proposal-card.tsx"));
+const editableProposalContractSource = readSource(
+  join(proposalsDir, "editable-proposal-contract.tsx"),
+);
+const proposalCardShellSource = readSource(join(proposalsDir, "proposal-card-shell.tsx"));
 
 describe("InlineProposalCard chat hierarchy", () => {
   it("routes wellbeing and nutrition incident intents to specialized cards", () => {
@@ -158,7 +168,9 @@ describe("RecommendRecipesProposalCard", () => {
 });
 
 describe("GenericInlineProposalCard chat hierarchy", () => {
-  const genericProposalSource = readNorm(join(proposalsDir, "inline-proposal-card-generic.tsx"));
+  const genericProposalSource = readSource(
+    join(proposalsDir, "inline-proposal-card-generic.tsx"),
+  );
 
   it("does not render raw intent, domain, or validation status strings", () => {
     expect(genericProposalSource).not.toContain("proposal.intent.replaceAll");

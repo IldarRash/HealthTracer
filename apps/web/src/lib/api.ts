@@ -28,6 +28,7 @@ import {
   habitAdherenceResponseSchema,
   habitPlanRevisionsResponseSchema,
   nutritionAdherenceResponseSchema,
+  nutritionMealCaloriesReadModelSchema,
   nutritionPlanRevisionSchema,
   proposalDecisionSchema,
   proposalModifyResponseSchema,
@@ -76,6 +77,7 @@ import {
   type ListHealthMetricAggregatesQuery,
   type ListHealthMetricSnapshotsQuery,
   type NutritionAdherenceResponse,
+  type NutritionMealCaloriesReadModel,
   type NutritionPlanRevision,
   type UpsertNutritionAdherenceInput,
   type Recipe,
@@ -199,6 +201,7 @@ export const apiQueryKeys = {
   workoutActive: ["workout-active"],
   workoutRevisions: ["workout-revisions"],
   nutritionActive: ["nutrition-active"],
+  nutritionMealsBreakdown: ["nutrition-meals-breakdown"],
   nutritionRevisions: ["nutrition-revisions"],
   habitActive: ["habit-active"],
   habitRevisions: ["habit-revisions"],
@@ -836,6 +839,16 @@ export async function getActiveNutritionPlan(
   token: string,
 ): Promise<ApiResult<ActiveNutritionPlanResponse>> {
   return apiFetch("/nutrition/active", token, activeNutritionPlanResponseSchema);
+}
+
+export async function getNutritionMealsBreakdown(
+  token: string,
+): Promise<ApiResult<NutritionMealCaloriesReadModel | null>> {
+  return apiFetch(
+    "/nutrition/active/meals-breakdown",
+    token,
+    nutritionMealCaloriesReadModelSchema.nullable(),
+  );
 }
 
 export async function listNutritionRevisions(

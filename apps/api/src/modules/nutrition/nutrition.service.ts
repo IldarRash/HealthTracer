@@ -2,12 +2,14 @@ import type {
   ActiveNutritionPlanResponse,
   LogNutritionIncidentProposalPayload,
   NutritionAdherenceResponse,
+  NutritionMealCaloriesReadModel,
   NutritionPlanPayload,
   NutritionPlanRevision,
   TodayNutritionDetail,
   UpsertNutritionAdherenceInput,
 } from "@health/types";
 import {
+  computeMealCaloriesBreakdown,
   getNutritionIncidentDomainErrors,
   getNutritionPlanDomainErrors,
   getTodayIsoDateInTimezone,
@@ -55,6 +57,44 @@ export class NutritionService {
       plan: toNutritionPlan(plan),
       activeRevision: activeRevision ? toNutritionPlanRevision(activeRevision) : null,
     };
+  }
+
+  /**
+   * C1 read model: per-meal calorie breakdown for the active nutrition plan.
+   *
+   * Returns null when there is no active plan or no active revision.
+   * The `changed` flag on each meal row is computed by diffing the active revision
+   * against the previous revision — it is never stored.
+   * This endpoint is strictly read-only; it never mutates plan state.
+   */
+  async getMealCaloriesBreakdown(
+    auth: ClerkAuthContext,
+  ): Promise<NutritionMealCaloriesReadModel | null> {
+    const user = await this.usersService.resolveFromAuth(auth);
+    const plan = await this.nutritionRepository.findActivePlanByUserId(user.id);
+
+    if (!plan?.activeRevisionId) {
+      return null;
+    }
+
+    const twoRevisions = await this.nutritionRepository.findLatestTwoRevisionsByPlanId(plan.id);
+    const [activeRow, previousRow] = twoRevisions;
+
+    if (!activeRow) {
+      return null;
+    }
+
+    const activeRevision = toNutritionPlanRevision(activeRow);
+
+    const previousPayload = previousRow
+      ? toNutritionPlanRevision(previousRow).payload
+      : null;
+
+    return computeMealCaloriesBreakdown(
+      activeRevision.revisionNumber,
+      activeRevision.payload,
+      previousPayload,
+    );
   }
 
   async listCurrentRevisions(
