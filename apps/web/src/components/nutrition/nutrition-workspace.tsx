@@ -43,6 +43,7 @@ import {
   type RevisionHistoryRow,
 } from "../ui";
 import { ErrorState } from "../ui";
+import { NutritionWeekPlan } from "./nutrition-week-plan";
 
 // ── ActiveNutritionHeader ────────────────────────────────────────
 
@@ -1775,6 +1776,9 @@ export function NutritionWorkspace() {
       <CoachNotes>
         Цифры — ориентир: вес порций оценивается по фото и описанию. Если калорий мало к вечеру, это нормально — день ещё не закончен. Точные граммы можно поправить в «Сегодня».
       </CoachNotes>
+
+      {/* 8. NutritionWeekPlan — C2 7-day grid (shown when weeklyPlan is present; graceful empty otherwise) */}
+      <NutritionWeekPlan weeklyPlan={payload.weeklyPlan ?? null} />
 
       {/* 9. PrefsCard */}
       <PrefsCard

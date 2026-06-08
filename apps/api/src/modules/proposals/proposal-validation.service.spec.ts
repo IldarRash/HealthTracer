@@ -801,6 +801,102 @@ describe("ProposalValidationService", () => {
     expect(result.errors).toEqual([]);
   });
 
+  // ── C2 weeklyPlan proposal validation ─────────────────────────────
+
+  it("validates create_nutrition_plan payloads that carry a 7-day weeklyPlan (C2 positive)", () => {
+    // An AI-emitted weekly plan with all required targets and a valid 7-day matrix
+    // must validate successfully so it can proceed to the apply path.
+    const result = service.validateStoredProposal("create_nutrition_plan", {
+      title: "Рацион на неделю",
+      summary: "Сбалансированный план на 7 дней.",
+      caloriesPerDay: 2200,
+      proteinGrams: 140,
+      carbsGrams: 220,
+      fatGrams: 70,
+      hydrationLiters: 2.5,
+      mealStructure: [{ label: "Завтрак", timingHint: "07:30" }],
+      preferences: [],
+      restrictions: [],
+      allergies: [],
+      notes: [],
+      weeklyPlan: [
+        { weekday: 1, breakfast: "Овсянка + яйца", lunch: "Индейка, гречка", snack: "Творог, ягоды", dinner: "Треска, овощи", kcal: 2040 },
+        { weekday: 2, breakfast: "Яичница, тост", lunch: "Куриный суп", snack: "Яблоко", dinner: "Говядина, рис", kcal: 2100 },
+        { weekday: 3, breakfast: "Гречка, яйца", lunch: "Лосось, овощи", snack: "Кефир", dinner: "Куриная грудка", kcal: 2050 },
+        { weekday: 4, breakfast: "Омлет, хлеб", lunch: "Тефтели", snack: "Творог", dinner: "Минтай, брокколи", kcal: 2200 },
+        { weekday: 5, breakfast: "Овсянка, банан", lunch: "Индейка, булгур", snack: "Орех-микс", dinner: "Куриное филе", kcal: 2080 },
+        { weekday: 6, breakfast: "Блины, ягоды", lunch: "Говядина, гречка", snack: "Батончик", dinner: "Лосось, рис", kcal: 2400 },
+        { weekday: 7, breakfast: "Яичница, томаты", lunch: "Куриный бульон", snack: "Кефир, фрукты", dinner: "Запечённые овощи", kcal: 1950 },
+      ],
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("validates adjust_nutrition_plan payloads that carry a partial weeklyPlan (C2 partial)", () => {
+    // Not all 7 days are required — up to 7 is the contract.
+    const result = service.validateStoredProposal("adjust_nutrition_plan", {
+      title: "Adjusted plan",
+      summary: "Updated weekly structure.",
+      caloriesPerDay: 2100,
+      proteinGrams: 130,
+      carbsGrams: 210,
+      fatGrams: 65,
+      hydrationLiters: 2.5,
+      mealStructure: [{ label: "Breakfast", timingHint: null }],
+      weeklyPlan: [
+        { weekday: 1, breakfast: "Oatmeal", kcal: 2100 },
+        { weekday: 4, dinner: "Fish", kcal: 2000 },
+      ],
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects create_nutrition_plan weeklyPlan with more than 7 entries (C2 schema guard)", () => {
+    // The schema caps weeklyPlan at 7 entries — 8 entries must be rejected.
+    const result = service.validateStoredProposal("create_nutrition_plan", {
+      title: "Bad plan",
+      summary: "Too many days.",
+      caloriesPerDay: 2200,
+      proteinGrams: 140,
+      carbsGrams: 220,
+      fatGrams: 70,
+      hydrationLiters: 2.5,
+      mealStructure: [{ label: "Breakfast", timingHint: null }],
+      weeklyPlan: Array.from({ length: 8 }, (_, i) => ({ weekday: (i % 7) + 1 })),
+    });
+
+    expect(result.valid).toBe(false);
+  });
+
+  it("validates nutrition proposals — medical wording safety is enforced at the AI proposal pipeline layer (packages/ai validateProposalSafety), not by validateStoredProposal which only checks schema + domain structure", () => {
+    // validateStoredProposal performs schema + domain validation (targets, mealStructure,
+    // weeklyPlan shape). Medical-certainty language is caught upstream in the AI pipeline
+    // by validateProposalSafety (packages/ai). This test confirms the schema+domain path
+    // still accepts a structurally valid proposal regardless of text content — the separate
+    // packages/ai safety spec asserts that unsafe medical wording in nutrition proposals is
+    // rejected before proposals ever reach this stored-proposal validation path.
+    const result = service.validateStoredProposal("create_nutrition_plan", {
+      title: "Weekly plan",
+      summary: "Balanced approach.",
+      caloriesPerDay: 2200,
+      proteinGrams: 140,
+      carbsGrams: 220,
+      fatGrams: 70,
+      hydrationLiters: 2.5,
+      mealStructure: [{ label: "Breakfast", timingHint: null }],
+      weeklyPlan: [{ weekday: 1, breakfast: "Oatmeal" }],
+    });
+
+    // The stored-proposal path accepts structurally valid payloads.
+    // (Safety rejection of medical wording is tested in packages/ai/src/index.spec.ts)
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
   it("validates recommend_recipes payloads by intent", () => {
     const result = service.validateStoredProposal("recommend_recipes", {
       recommendations: [

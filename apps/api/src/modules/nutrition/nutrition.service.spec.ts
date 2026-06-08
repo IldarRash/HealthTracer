@@ -637,6 +637,156 @@ describe("NutritionService", () => {
   });
 });
 
+// ─── C2 weeklyPlan round-trip ─────────────────────────────────────────────
+
+const weeklyPlan = [
+  { weekday: 1, breakfast: "Овсянка + яйца", lunch: "Индейка, гречка", snack: "Творог, ягоды", dinner: "Треска, овощи", kcal: 2040 },
+  { weekday: 2, breakfast: "Яичница, тост",  lunch: "Куриный суп",     snack: "Яблоко",        dinner: "Говядина, рис",   kcal: 2100 },
+  { weekday: 3, breakfast: "Гречка, яйца",   lunch: "Лосось, овощи",   snack: "Кефир",         dinner: "Куриная грудка",  kcal: 2050 },
+  { weekday: 4, breakfast: "Омлет, хлеб",    lunch: "Тефтели",         snack: "Творог",        dinner: "Минтай, брокколи",kcal: 2200 },
+  { weekday: 5, breakfast: "Овсянка, банан",  lunch: "Индейка, булгур", snack: "Орех-микс",     dinner: "Куриное филе",    kcal: 2080 },
+  { weekday: 6, breakfast: "Блины, ягоды",    lunch: "Говядина, гречка",snack: "Батончик",      dinner: "Лосось, рис",     kcal: 2400 },
+  { weekday: 7, breakfast: "Яичница, томаты", lunch: "Куриный бульон",  snack: "Кефир, фрукты", dinner: "Запечённые овощи",kcal: 1950 },
+];
+
+describe("NutritionService — C2 weeklyPlan round-trip", () => {
+  it("preserves weeklyPlan in the payload forwarded to appendRevision", async () => {
+    let capturedPayload: unknown;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({ id: "plan-weekly-1" }),
+        appendRevision: async (_planId: string, appendedPayload: unknown) => {
+          capturedPayload = appendedPayload;
+          return { id: "rev-weekly-1" };
+        },
+      }) as never,
+      usersService as never,
+    );
+
+    await service.applyNutritionPlanProposal(
+      userId,
+      { ...payload, weeklyPlan },
+      "Plan with 7-day matrix.",
+      "adjust_nutrition_plan",
+    );
+
+    const captured = capturedPayload as typeof payload & { weeklyPlan: typeof weeklyPlan };
+    expect(captured.weeklyPlan).toHaveLength(7);
+    expect(captured.weeklyPlan?.[0]?.breakfast).toBe("Овсянка + яйца");
+    expect(captured.weeklyPlan?.[5]?.kcal).toBe(2400);
+  });
+
+  it("preserves weeklyPlan when creating a first revision", async () => {
+    let capturedPayload: unknown;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        createPlanWithRevision: async (_userId: string, createdPayload: unknown) => {
+          capturedPayload = createdPayload;
+          return { revision: { id: "rev-weekly-new" } };
+        },
+      }) as never,
+      usersService as never,
+    );
+
+    await service.applyNutritionPlanProposal(
+      userId,
+      { ...payload, weeklyPlan },
+      "First plan with weekly matrix.",
+      "create_nutrition_plan",
+    );
+
+    const captured = capturedPayload as typeof payload & { weeklyPlan: typeof weeklyPlan };
+    expect(captured.weeklyPlan).toHaveLength(7);
+    expect(captured.weeklyPlan?.[6]?.dinner).toBe("Запечённые овощи");
+  });
+
+  it("returns weeklyPlan in getCurrentActivePlan when revision payload contains it", async () => {
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-weekly-read",
+          userId,
+          activeRevisionId: "rev-weekly-read",
+          status: "active",
+          createdAt: new Date("2026-06-02T10:00:00.000Z"),
+          updatedAt: new Date("2026-06-02T10:00:00.000Z"),
+        }),
+        findActiveRevisionByPlanId: async () => ({
+          id: "rev-weekly-read",
+          nutritionPlanId: "plan-weekly-read",
+          revisionNumber: 8,
+          reason: "Weekly plan set.",
+          source: "ai_proposal",
+          payload: { ...payload, weeklyPlan },
+          createdAt: new Date("2026-06-02T10:00:00.000Z"),
+        }),
+      }) as never,
+      usersService as never,
+    );
+
+    const response = await service.getCurrentActivePlan(auth as never);
+
+    expect(response.activeRevision?.payload.weeklyPlan).toHaveLength(7);
+    expect(response.activeRevision?.payload.weeklyPlan?.[3]?.weekday).toBe(4);
+    expect(response.activeRevision?.payload.weeklyPlan?.[3]?.kcal).toBe(2200);
+  });
+
+  it("returns weeklyPlan absent (undefined) when active revision payload has no weekly matrix", async () => {
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-no-weekly",
+          userId,
+          activeRevisionId: "rev-no-weekly",
+          status: "active",
+          createdAt: new Date("2026-06-02T10:00:00.000Z"),
+          updatedAt: new Date("2026-06-02T10:00:00.000Z"),
+        }),
+        findActiveRevisionByPlanId: async () => ({
+          id: "rev-no-weekly",
+          nutritionPlanId: "plan-no-weekly",
+          revisionNumber: 2,
+          reason: "Legacy plan without weekly matrix.",
+          source: "ai_proposal",
+          payload,
+          createdAt: new Date("2026-06-02T10:00:00.000Z"),
+        }),
+      }) as never,
+      usersService as never,
+    );
+
+    const response = await service.getCurrentActivePlan(auth as never);
+
+    expect(response.activeRevision?.payload.weeklyPlan).toBeUndefined();
+  });
+
+  it("domain validation passes when weeklyPlan is provided alongside required targets", async () => {
+    let appendCalled = false;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({ id: "plan-domain-weekly" }),
+        appendRevision: async () => {
+          appendCalled = true;
+          return { id: "rev-domain-weekly" };
+        },
+      }) as never,
+      usersService as never,
+    );
+
+    await service.applyNutritionPlanProposal(
+      userId,
+      { ...payload, weeklyPlan },
+      "Valid plan with weekly matrix.",
+      "adjust_nutrition_plan",
+    );
+
+    expect(appendCalled).toBe(true);
+  });
+});
+
 // ─── C4 swap path: adjust_nutrition_plan with swaps[] ─────────────────────
 
 /**

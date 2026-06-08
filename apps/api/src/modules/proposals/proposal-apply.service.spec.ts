@@ -298,6 +298,66 @@ describe("ProposalApplyService", () => {
     expect(nutritionCalled).toBe(true);
   });
 
+  it("forwards weeklyPlan through the nutrition service when accepting a C2 proposal (new revision created)", async () => {
+    // Accepted create_nutrition_plan with weeklyPlan must call the nutrition service
+    // with the full payload (including weeklyPlan) so a new revision is created.
+    // This verifies the apply path does not strip the C2 field.
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
+
+    const weeklyPlanPayload = {
+      ...nutritionPayload,
+      weeklyPlan: [
+        { weekday: 1, breakfast: "Овсянка + яйца", lunch: "Индейка, гречка", snack: "Творог, ягоды", dinner: "Треска, овощи", kcal: 2040 },
+        { weekday: 2, breakfast: "Яичница, тост", lunch: "Куриный суп", snack: "Яблоко", dinner: "Говядина, рис", kcal: 2100 },
+        { weekday: 3, breakfast: "Гречка, яйца", lunch: "Лосось, овощи", snack: "Кефир", dinner: "Куриная грудка", kcal: 2050 },
+        { weekday: 4, breakfast: "Омлет, хлеб", lunch: "Тефтели", snack: "Творог", dinner: "Минтай, брокколи", kcal: 2200 },
+        { weekday: 5, breakfast: "Овсянка, банан", lunch: "Индейка, булгур", snack: "Орех-микс", dinner: "Куриное филе", kcal: 2080 },
+        { weekday: 6, breakfast: "Блины, ягоды", lunch: "Говядина, гречка", snack: "Батончик", dinner: "Лосось, рис", kcal: 2400 },
+        { weekday: 7, breakfast: "Яичница, томаты", lunch: "Куриный бульон", snack: "Кефир, фрукты", dinner: "Запечённые овощи", kcal: 1950 },
+      ],
+    };
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          capturedPayload = payload;
+          capturedIntent = intent;
+          return "nutrition_revision:rev-weekly-1";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never, // bodyService
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "create_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: weeklyPlanPayload,
+    });
+
+    expect(reference).toBe("nutrition_revision:rev-weekly-1");
+    expect(capturedIntent).toBe("create_nutrition_plan");
+    const captured = capturedPayload as typeof weeklyPlanPayload;
+    // weeklyPlan must be preserved through the apply path — never dropped
+    expect(captured.weeklyPlan).toHaveLength(7);
+    expect(captured.weeklyPlan?.[0]?.breakfast).toBe("Овсянка + яйца");
+    expect(captured.weeklyPlan?.[5]?.kcal).toBe(2400);
+  });
+
   it("routes accepted create_habit_plan proposals through the habits service", async () => {
     let habitsCalled = false;
     let capturedIntent: string | undefined;
