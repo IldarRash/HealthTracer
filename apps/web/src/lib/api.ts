@@ -1,4 +1,6 @@
 import {
+  bodyCompositionAnalysisResponseSchema,
+  type BodyCompositionAnalysisResponse,
   updateCurrentUserSchema,
   activeHabitPlanResponseSchema,
   activeNutritionPlanResponseSchema,
@@ -234,6 +236,7 @@ export const apiQueryKeys = {
   recoveryContextPrefix: ["recovery-context"] as const,
   billingSubscription: ["billing-subscription"] as const,
   billingEntitlement: ["billing-entitlement"] as const,
+  bodyAnalysisLatest: ["body-analysis-latest"] as const,
 } as const;
 
 const syncHealthMetricsResultSchema = z.object({
@@ -1354,6 +1357,13 @@ export async function createBillingPortalSession(
     method: "POST",
     body: {},
   });
+}
+
+/** GET /body/analysis/latest — latest body-composition analysis for the authenticated user. */
+export async function getBodyAnalysisLatest(
+  token: string,
+): Promise<ApiResult<BodyCompositionAnalysisResponse>> {
+  return apiFetch("/body/analysis/latest", token, bodyCompositionAnalysisResponseSchema);
 }
 
 type ApiFetchOptions = {

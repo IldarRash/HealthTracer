@@ -242,6 +242,23 @@ describe("SubscriptionSummaryCard", () => {
   });
 });
 
+// ── Body analysis section ──────────────────────────────────────────
+
+describe("BodyAnalysisSection integration in ProfileWorkspace", () => {
+  it("renders BodyAnalysisSection below the two columns", () => {
+    expect(workspaceSource).toContain("<BodyAnalysisSection");
+  });
+
+  it("imports BodyAnalysisSection from the profile directory", () => {
+    expect(workspaceSource).toContain("body-analysis-section");
+    expect(workspaceSource).toContain("BodyAnalysisSection");
+  });
+
+  it("wraps the section in a div with marginTop for separation", () => {
+    expect(workspaceSource).toContain("marginTop: 16");
+  });
+});
+
 // ── Anchors for redirect routes ────────────────────────────────────
 
 describe("hash anchor ids for redirect routes", () => {

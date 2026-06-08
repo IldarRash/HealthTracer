@@ -7869,6 +7869,7 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
   display: flex;
   gap: 20px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .muscle-map__figures {
@@ -8150,5 +8151,26 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
 .body-analysis-card__footer {
   border-top: 1px solid var(--color-border-default);
   padding-top: 12px;
+}
+
+/* ── Body analysis section — dark instrument card dark-text overrides ── */
+/* Applied when dark cards float on the light Profile page (two-world rule). */
+/* .muscle-map inside a dark container: legend text and title use dark-world */
+/* muted text via inline color styles; the chip adopts dark-border tokens. */
+
+/* Responsive: narrow screens stack the figures panel above the legend */
+@media (max-width: 600px) {
+  .muscle-map__body {
+    flex-direction: column;
+  }
+
+  .muscle-map__figures {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .muscle-map__legend {
+    width: 100%;
+  }
 }
 

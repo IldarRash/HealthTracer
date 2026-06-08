@@ -34,6 +34,7 @@ import { DocumentsWorkspace } from "../documents/documents-workspace";
 import { Toggle } from "../ui/toggle";
 import { Icon } from "../ui/icon";
 import type { IconName } from "../ui/icon";
+import { BodyAnalysisSection } from "./body-analysis-section";
 
 // ── Token palette (inline – light "ChatGPT" world) ───────────────
 
@@ -998,6 +999,13 @@ export function ProfileWorkspace() {
           {/* Preferences / language card */}
           <LanguageCard />
         </div>
+      </div>
+
+      {/* "Анализ тела" — full-width section below the two columns.
+          Dark instrument cards float on the light Profile page (two-world rule).
+          The section owns its own TanStack Query; it is read-only. */}
+      <div style={{ marginTop: 16 }}>
+        <BodyAnalysisSection />
       </div>
     </div>
   );
