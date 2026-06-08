@@ -19,26 +19,26 @@ import { WEEKLY_REVIEW_CHAT_PROMPT } from "../../lib/weekly-review-ui-state.js";
 const chatDir = dirname(fileURLToPath(import.meta.url));
 const webSrcDir = join(chatDir, "../..");
 
-const chatWorkspaceSource = readFileSync(join(chatDir, "chat-workspace.tsx"), "utf8");
-const inlineProposalRouterSource = readFileSync(
+// Normalize CRLF→LF so positional `\n`-anchored assertions are line-ending agnostic
+// (Windows checkouts may have CRLF — same approach as chat-workspace-proposal-render.spec.ts).
+function readNorm(path: string) {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+const chatWorkspaceSource = readNorm(join(chatDir, "chat-workspace.tsx"));
+const inlineProposalRouterSource = readNorm(
   join(webSrcDir, "components/proposals/inline-proposal-card.tsx"),
-  "utf8",
 );
-const genericInlineProposalSource = readFileSync(
+const genericInlineProposalSource = readNorm(
   join(webSrcDir, "components/proposals/inline-proposal-card-generic.tsx"),
-  "utf8",
 );
-const wellbeingProposalSource = readFileSync(
+const wellbeingProposalSource = readNorm(
   join(webSrcDir, "components/proposals/wellbeing-checkin-proposal-card.tsx"),
-  "utf8",
 );
-const nutritionProposalSource = readFileSync(
+const nutritionProposalSource = readNorm(
   join(webSrcDir, "components/proposals/nutrition-incident-proposal-card.tsx"),
-  "utf8",
 );
-const proposalCardShellSource = readFileSync(
+const proposalCardShellSource = readNorm(
   join(webSrcDir, "components/proposals/proposal-card-shell.tsx"),
-  "utf8",
 );
 const weeklyReviewSummarySource = readFileSync(
   join(chatDir, "weekly-review-chat-summary.tsx"),

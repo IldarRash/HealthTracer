@@ -35,6 +35,8 @@ export function getProposalIntentLabel(
       return "Log activity";
     case "recommend_recipes":
       return "Recipe recommendations";
+    case "save_body_analysis":
+      return "Анализ тела";
     default:
       return null;
   }
@@ -226,6 +228,10 @@ export function getProposalRejectedMessage(
 
   if (proposal.intent === "recommend_recipes") {
     return "No changes were made. Recipe recommendations were not saved.";
+  }
+
+  if (proposal.intent === "save_body_analysis") {
+    return "Analysis not saved. No data was added to your profile.";
   }
 
   if (proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition") {

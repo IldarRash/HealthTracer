@@ -2,6 +2,7 @@
 
 import type { AiProposal, ProposalModifyResponse } from "@health/types";
 import { parseDisplayContract } from "../../lib/display-contract-ui-state";
+import { BodyAnalysisProposalCard } from "./body-analysis-proposal-card";
 import { ContractProposalCard } from "./contract-proposal-card";
 import { InlineProposalCard as GenericInlineProposalCard } from "./inline-proposal-card-generic";
 import { NutritionIncidentProposalCard } from "./nutrition-incident-proposal-card";
@@ -25,6 +26,10 @@ export function InlineProposalCard(props: InlineProposalCardProps) {
 
   if (props.proposal.intent === "recommend_recipes") {
     return <RecommendRecipesProposalCard {...props} />;
+  }
+
+  if (props.proposal.intent === "save_body_analysis") {
+    return <BodyAnalysisProposalCard {...props} />;
   }
 
   // Any proposal carrying a displayContract (workout plan, log_workout_activity, etc.)

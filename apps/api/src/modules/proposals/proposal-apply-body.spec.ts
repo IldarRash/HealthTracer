@@ -87,6 +87,37 @@ describe("ProposalApplyService — save_body_analysis", () => {
     });
   });
 
+  it("calls bodyService exactly once per accepted proposal (no double-write)", async () => {
+    let callCount = 0;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyBodyAnalysisProposal: async () => {
+          callCount++;
+          return "body_analysis:bca-once";
+        },
+      } as never,
+    );
+
+    await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "save_body_analysis",
+      targetDomain: "body",
+      proposedChanges: bodyPayload,
+    });
+
+    expect(callCount).toBe(1);
+  });
+
   it("does NOT call bodyService for nutrition plan proposals", async () => {
     let bodyServiceCalled = false;
     let nutritionCalled = false;
