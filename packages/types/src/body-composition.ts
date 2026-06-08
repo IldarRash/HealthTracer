@@ -51,6 +51,15 @@ export type SaveBodyAnalysisProposalPayload = z.infer<
 >;
 
 /**
+ * Input type for save_body_analysis proposal payload (before Zod defaults are applied).
+ * Use this when constructing minimal payloads where defaulted fields (weightSelfReported,
+ * strongGroups, weakGroups, muscleMap) are intentionally omitted.
+ */
+export type SaveBodyAnalysisProposalInput = z.input<
+  typeof saveBodyAnalysisProposalPayloadSchema
+>;
+
+/**
  * Domain errors for a save_body_analysis proposal payload.
  * Returns an empty array if valid; non-empty array of error strings if invalid.
  */
