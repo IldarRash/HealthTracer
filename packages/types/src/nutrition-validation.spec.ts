@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  adjustNutritionPlanFromProgressChangesSchema,
+  getAdjustNutritionPlanProteinFloorErrors,
   getNutritionPlanDomainErrors,
   nutritionAdherenceStateSchema,
   nutritionPlanPayloadSchema,
+  nutritionSwapItemSchema,
   upsertNutritionAdherenceSchema,
 } from "./index.js";
 
@@ -236,5 +239,237 @@ describe("nutrition adherence schemas", () => {
         notes: Array.from({ length: 11 }, (_, index) => `Note ${index}`),
       }),
     ).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C4 — nutritionSwapItemSchema boundaries
+// ---------------------------------------------------------------------------
+
+describe("nutritionSwapItemSchema", () => {
+  it("accepts a valid swap item with optional save string", () => {
+    expect(
+      nutritionSwapItemSchema.parse({ from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" }),
+    ).toMatchObject({ from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" });
+  });
+
+  it("accepts a swap item without a save value", () => {
+    const item = nutritionSwapItemSchema.parse({ from: "Whole milk", to: "Skimmed milk" });
+    expect(item.save).toBeUndefined();
+  });
+
+  it("rejects a swap item with an empty 'from' label", () => {
+    expect(() => nutritionSwapItemSchema.parse({ from: "", to: "Skimmed milk" })).toThrow();
+  });
+
+  it("rejects a swap item with an empty 'to' label", () => {
+    expect(() => nutritionSwapItemSchema.parse({ from: "Whole milk", to: "" })).toThrow();
+  });
+
+  it("rejects a swap item whose 'from' label exceeds 240 chars", () => {
+    expect(() =>
+      nutritionSwapItemSchema.parse({ from: "x".repeat(241), to: "Something else" }),
+    ).toThrow();
+  });
+
+  it("rejects a swap item whose 'to' label exceeds 240 chars", () => {
+    expect(() =>
+      nutritionSwapItemSchema.parse({ from: "Something", to: "x".repeat(241) }),
+    ).toThrow();
+  });
+
+  it("rejects a swap item whose 'save' string exceeds 240 chars", () => {
+    expect(() =>
+      nutritionSwapItemSchema.parse({ from: "Something", to: "Other", save: "x".repeat(241) }),
+    ).toThrow();
+  });
+
+  it("rejects a swap item missing both from and to", () => {
+    expect(() => nutritionSwapItemSchema.parse({})).toThrow();
+  });
+});
+
+// C4 — adjustNutritionPlanFromProgressChangesSchema with swaps
+describe("adjustNutritionPlanFromProgressChangesSchema — C4 swaps extension", () => {
+  const planBase = {
+    title: "Lighter plan",
+    summary: "Reduced carbs, protein preserved.",
+    caloriesPerDay: 1750,
+    proteinGrams: 130,
+    carbsGrams: 150,
+    fatGrams: 60,
+    hydrationLiters: 2.5,
+    mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+    preferences: [],
+    restrictions: [],
+    allergies: [],
+    notes: [],
+  };
+
+  it("accepts a valid payload with swaps and fromCaloriesPerDay", () => {
+    const result = adjustNutritionPlanFromProgressChangesSchema.parse({
+      plan: planBase,
+      sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+      sourceTrendObservationIds: [],
+      fromCaloriesPerDay: 2100,
+      swaps: [
+        { from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" },
+      ],
+    });
+    expect(result.swaps).toHaveLength(1);
+    expect(result.fromCaloriesPerDay).toBe(2100);
+  });
+
+  it("accepts a valid payload without swaps (plain adjust proposal, backward-compat)", () => {
+    const result = adjustNutritionPlanFromProgressChangesSchema.parse({
+      plan: planBase,
+      sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+      sourceTrendObservationIds: [],
+    });
+    expect(result.swaps).toBeUndefined();
+    expect(result.fromCaloriesPerDay).toBeUndefined();
+  });
+
+  it("rejects when swaps array exceeds 20 items", () => {
+    const tooManySwaps = Array.from({ length: 21 }, (_, i) => ({
+      from: `Food ${i}`,
+      to: `Substitute ${i}`,
+    }));
+    expect(() =>
+      adjustNutritionPlanFromProgressChangesSchema.parse({
+        plan: planBase,
+        swaps: tooManySwaps,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects when fromCaloriesPerDay is negative", () => {
+    expect(() =>
+      adjustNutritionPlanFromProgressChangesSchema.parse({
+        plan: planBase,
+        fromCaloriesPerDay: -100,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects when fromCaloriesPerDay exceeds 10000", () => {
+    expect(() =>
+      adjustNutritionPlanFromProgressChangesSchema.parse({
+        plan: planBase,
+        fromCaloriesPerDay: 10001,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects when a swap item has an invalid shape", () => {
+    expect(() =>
+      adjustNutritionPlanFromProgressChangesSchema.parse({
+        plan: planBase,
+        swaps: [{ from: "", to: "Something" }],
+      }),
+    ).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C4 — protein-floor validation for adjust_nutrition_plan proposals
+// ---------------------------------------------------------------------------
+
+const baseAdjustPayload = {
+  plan: {
+    title: "Lighter plan",
+    summary: "Reduced carbs, protein preserved.",
+    caloriesPerDay: 1750,
+    proteinGrams: 130,
+    carbsGrams: 150,
+    fatGrams: 60,
+    hydrationLiters: 2.5,
+    mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+    preferences: [],
+    restrictions: [],
+    allergies: [],
+    notes: [],
+  },
+  sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+  sourceTrendObservationIds: [] as string[],
+  fromCaloriesPerDay: 2100,
+  swaps: [
+    { from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" },
+    { from: "Whole milk", to: "Skimmed milk", save: "~80 kcal" },
+  ],
+};
+
+describe("getAdjustNutritionPlanProteinFloorErrors", () => {
+  it("returns no errors when calories are lowered and protein is preserved (no current plan)", () => {
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.parse(baseAdjustPayload);
+    const errors = getAdjustNutritionPlanProteinFloorErrors(parsed, null);
+
+    expect(errors).toEqual([]);
+  });
+
+  it("returns no errors when calories are lowered and protein matches the current floor", () => {
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.parse(baseAdjustPayload);
+    // Current protein is 130 g, proposal also sets 130 g — no cut
+    const errors = getAdjustNutritionPlanProteinFloorErrors(parsed, 130);
+
+    expect(errors).toEqual([]);
+  });
+
+  it("returns no errors when calories are lowered and protein is increased", () => {
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.parse({
+      ...baseAdjustPayload,
+      plan: { ...baseAdjustPayload.plan, proteinGrams: 140 },
+    });
+    // Current protein is 130 g, proposal increases to 140 g — allowed
+    const errors = getAdjustNutritionPlanProteinFloorErrors(parsed, 130);
+
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects when calories are lowered and protein is cut below current floor", () => {
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.parse({
+      ...baseAdjustPayload,
+      plan: { ...baseAdjustPayload.plan, proteinGrams: 100 }, // cut from 130
+    });
+    const errors = getAdjustNutritionPlanProteinFloorErrors(parsed, 130);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("Protein must not be cut while lowering calories");
+    expect(errors[0]).toContain("130");
+    expect(errors[0]).toContain("100");
+  });
+
+  it("rejects when calories are lowered and protein is set to null", () => {
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.parse({
+      ...baseAdjustPayload,
+      plan: { ...baseAdjustPayload.plan, proteinGrams: null },
+    });
+    const errors = getAdjustNutritionPlanProteinFloorErrors(parsed, 130);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("Protein target must remain set");
+  });
+
+  it("returns no errors when calories are NOT being lowered (no fromCaloriesPerDay)", () => {
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.parse({
+      ...baseAdjustPayload,
+      fromCaloriesPerDay: undefined,
+      plan: { ...baseAdjustPayload.plan, proteinGrams: 80 }, // would be a cut but no before-value
+    });
+    const errors = getAdjustNutritionPlanProteinFloorErrors(parsed, 130);
+
+    expect(errors).toEqual([]);
+  });
+
+  it("returns no errors when the proposed calories are NOT lower than fromCaloriesPerDay", () => {
+    // Increasing calories — protein check does not apply
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.parse({
+      ...baseAdjustPayload,
+      plan: { ...baseAdjustPayload.plan, caloriesPerDay: 2200, proteinGrams: 100 },
+      fromCaloriesPerDay: 2100,
+    });
+    const errors = getAdjustNutritionPlanProteinFloorErrors(parsed, 130);
+
+    expect(errors).toEqual([]);
   });
 });

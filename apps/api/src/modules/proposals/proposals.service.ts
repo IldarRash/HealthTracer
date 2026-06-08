@@ -319,6 +319,12 @@ export class ProposalsService {
         proposal.intent,
         effectiveProposedChanges,
       );
+    const adjustNutritionProteinFloorErrors =
+      await this.proposalValidationService.validateAdjustNutritionProteinFloor(
+        user.id,
+        proposal.intent,
+        effectiveProposedChanges,
+      );
     const storedEvidenceRefs = proposal.evidenceRefs as CorrelationEvidenceRef[] | null;
     const evidenceRefErrors = this.proposalValidationService.validateCorrelationEvidenceRefs(
       storedEvidenceRefs ?? undefined,
@@ -342,6 +348,7 @@ export class ProposalsService {
       ...nutritionIncidentImageRefErrors,
       ...nutritionIncidentRecipeRecommendationErrors,
       ...chatAttachmentProposalRefErrors,
+      ...adjustNutritionProteinFloorErrors,
       ...evidenceRefErrors,
       ...evidenceOwnershipErrors,
     ];
