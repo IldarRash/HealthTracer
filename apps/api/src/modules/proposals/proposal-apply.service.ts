@@ -15,6 +15,7 @@ import {
   parseWellbeingCheckinAppliedReferenceId,
   profileProposalChangesSchema,
   recipeRecommendationProposalPayloadSchema,
+  saveBodyAnalysisProposalPayloadSchema,
   todayChecklistPayloadSchema,
   updateGoalProposalChangesSchema,
   workoutPlanProposalChangesSchema,
@@ -22,6 +23,7 @@ import {
 } from "@health/types";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { HealthDatabaseTransaction } from "../../database/database.types.js";
+import { BodyService } from "../body/body.service.js";
 import { GoalsService } from "../goals/goals.service.js";
 import { HabitsService } from "../habits/habits.service.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
@@ -44,6 +46,7 @@ export class ProposalApplyService {
     private readonly todayService: TodayService,
     private readonly progressService: ProgressService,
     private readonly wellbeingCheckInsService: WellbeingCheckInsService,
+    private readonly bodyService: BodyService,
   ) {}
 
   async applyAcceptedProposal(
@@ -205,6 +208,17 @@ export class ProposalApplyService {
           payload,
           proposal.reason,
           tx,
+        );
+      }
+      case "save_body_analysis": {
+        const payload = saveBodyAnalysisProposalPayloadSchema.parse(
+          proposal.proposedChanges,
+        );
+
+        return this.bodyService.applyBodyAnalysisProposal(
+          userId,
+          proposal.id,
+          payload,
         );
       }
       default:

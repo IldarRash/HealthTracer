@@ -64,6 +64,7 @@ describe("capability config", () => {
       "update_profile",
       "create_goal",
       "update_goal",
+      "save_body_analysis",
     ]);
 
     expect(getAllowedToolsForCapability("adjust_workout")).toEqual([

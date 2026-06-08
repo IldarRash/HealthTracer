@@ -7804,3 +7804,351 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
   letter-spacing: 0.5px;
 }
 
+/* ==========================================================================
+   Body & Nutrition — shared atom CSS classes
+   Convention: ds-ring__* / ds-trend-strip__* naming;
+   figure geometry stays inline-styled (per DsRing/ProgressBar precedent).
+   ========================================================================== */
+
+/* ── body-figure ── */
+.body-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.body-figure__side-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* ── muscle-map (dark instrument card) ── */
+.muscle-map {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.muscle-map__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.muscle-map__header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.muscle-map__title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.muscle-map__chip {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-default);
+}
+
+.muscle-map__body {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.muscle-map__figures {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--color-border-default);
+  border-radius: 16px;
+  padding: 12px 8px;
+  flex-shrink: 0;
+}
+
+.muscle-map__divider {
+  width: 1px;
+  background: var(--color-border-default);
+  align-self: stretch;
+  margin: 0 4px;
+}
+
+.muscle-map__legend {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.muscle-map__legend-block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.muscle-map__legend-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.muscle-map__tone-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.muscle-map__legend-title {
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.muscle-map__legend-items {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin: 0;
+  padding-left: 15px;
+  line-height: 1.5;
+}
+
+.muscle-map__coach-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  background: rgba(25, 195, 125, 0.10);
+  border: 1px solid rgba(25, 195, 125, 0.26);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  margin-top: 4px;
+}
+
+.muscle-map__coach-hint-text {
+  font-size: var(--font-size-xs);
+  color: var(--color-metric-green);
+  line-height: 1.5;
+}
+
+.muscle-map__disclaimer {
+  border-top: 1px solid var(--color-border-default);
+  padding-top: 12px;
+  margin-top: 0;
+}
+
+/* ── stat ── */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat__value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.stat__value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  /* color set via inline style from token */
+}
+
+.stat__unit {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  /* color set via inline style */
+}
+
+.stat__label {
+  /* font-size / letter-spacing / text-transform via inline styles from tokens.typography.sectionLabel */
+  display: block;
+}
+
+.stat__sub {
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  margin-top: 2px;
+  /* color set via inline style */
+}
+
+/* ── macro-mini ── */
+.macro-mini {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.macro-mini__item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.macro-mini__square {
+  /* size, bg, border-radius set inline */
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.macro-mini__value {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.macro-mini__unit {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+/* ── grocery-check ── */
+.grocery-check {
+  /* box sizing, border-radius, bg set inline */
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.grocery-check--interactive {
+  /* Remove default button styles */
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+}
+
+.grocery-check--interactive:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+  box-shadow: var(--shadow-focus);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grocery-check {
+    transition: none;
+  }
+}
+
+/* ── body-analysis-card ── */
+.body-analysis-card {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.body-analysis-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.body-analysis-card__header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.body-analysis-card__title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.body-analysis-card__chip {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-default);
+}
+
+.body-analysis-card__metrics {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.body-analysis-card__metric-cell {
+  flex: 1;
+}
+
+/* Override stat value color via CSS custom property set inline */
+.body-analysis-card__stat .stat__value {
+  color: var(--stat-value-color, var(--color-text-primary));
+}
+
+.body-analysis-card__zones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.body-analysis-card__zone {
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.body-analysis-card__zone-label {
+  font-size: var(--font-size-section-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.body-analysis-card__zone--strong .body-analysis-card__zone-label {
+  color: var(--color-metric-green);
+}
+
+.body-analysis-card__zone--growth .body-analysis-card__zone-label {
+  color: var(--color-metric-red);
+}
+
+.body-analysis-card__zone-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.body-analysis-card__disclaimer {
+  border-top: 1px solid var(--color-border-default);
+  padding-top: 10px;
+  margin-top: 0;
+}
+
+.body-analysis-card__footer {
+  border-top: 1px solid var(--color-border-default);
+  padding-top: 12px;
+}
+

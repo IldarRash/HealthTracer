@@ -88,3 +88,24 @@ export {
   type RevisionHistoryRow,
 } from "./dark-primitives";
 export { DsRing, DsTrendStrip, type DsRingProps, type DsTrendStripProps, type DsTrendStripDayData } from "./dark-charts";
+
+// ── Body & Nutrition design-system atoms ────────────────────────
+export {
+  BodyFigure,
+  MuscleMap,
+  type BodyFigureProps,
+  type MuscleGroup,
+  type MuscleMapData,
+  type MuscleMapLegendBlock,
+  type MuscleMapProps,
+  type MuscleTone,
+} from "./body-figure";
+export {
+  BodyAnalysisCard,
+  type BodyAnalysisCardProps,
+  type BodyAnalysisMetric,
+  type BodyAnalysisZone,
+} from "./body-analysis-card";
+export { GroceryCheck, type GroceryCheckProps } from "./grocery-check";
+export { MacroMini, type MacroMiniProps } from "./macro-mini";
+export { Stat, type StatProps, type StatTone } from "./stat";

@@ -95,6 +95,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -126,6 +127,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -163,6 +165,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -239,6 +242,7 @@ describe("ProposalApplyService", () => {
       {} as never, // todayService
       {} as never, // progressService
       {} as never, // wellbeingCheckInsService
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -280,6 +284,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -318,6 +323,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -357,6 +363,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -398,6 +405,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -447,6 +455,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -485,6 +494,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -524,6 +534,7 @@ describe("ProposalApplyService", () => {
       } as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -576,6 +587,7 @@ describe("ProposalApplyService", () => {
         },
       } as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -601,6 +613,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     await expect(
@@ -657,6 +670,7 @@ describe("ProposalApplyService", () => {
           };
         },
       } as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -691,6 +705,7 @@ describe("ProposalApplyService", () => {
           throw new BadRequestException(WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR);
         },
       } as never,
+      {} as never, // bodyService
     );
 
     await expect(
@@ -752,6 +767,7 @@ describe("ProposalApplyService", () => {
           };
         },
       } as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -793,6 +809,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -844,6 +861,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     await service.applyAcceptedProposal(auth, userId, {
@@ -909,6 +927,7 @@ describe("ProposalApplyService — log_workout_activity (Part B)", () => {
       {} as never, // todayService
       {} as never, // progressService
       {} as never, // wellbeingCheckInsService
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -947,6 +966,7 @@ describe("ProposalApplyService — log_workout_activity (Part B)", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     await service.applyAcceptedProposal(auth, userId, {
@@ -989,6 +1009,7 @@ describe("ProposalApplyService — log_workout_activity (Part B)", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     await (service as {

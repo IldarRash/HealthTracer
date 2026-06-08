@@ -31,6 +31,7 @@ export const proposalTargetDomainEnum = pgEnum("proposal_target_domain", [
   "recipe",
   "today",
   "general",
+  "body",
 ]);
 
 export type ProposalEvidenceRefRow = {
@@ -56,6 +57,7 @@ export const proposalIntentEnum = pgEnum("proposal_intent", [
   "capture_wellbeing_checkin",
   "log_nutrition_incident",
   "log_workout_activity",
+  "save_body_analysis",
 ]);
 
 export const aiProposals = pgTable(

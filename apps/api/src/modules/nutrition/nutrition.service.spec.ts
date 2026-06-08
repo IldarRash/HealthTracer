@@ -635,3 +635,148 @@ describe("NutritionService", () => {
     expect(capturedTimezone).toBe("Asia/Tokyo");
   });
 });
+
+// ─── C4 swap path: adjust_nutrition_plan with swaps[] ─────────────────────
+
+/**
+ * The adjust_nutrition_plan proposal can carry optional swap metadata
+ * (adjustNutritionPlanFromProgressChangesSchema.swaps[]).  The service must:
+ *   1. Extract the nested plan payload (via extractNutritionPlanPayload).
+ *   2. Call appendRevision — never createPlanWithRevision — when a plan already exists.
+ *   3. Preserve the protein target (protein floor must not be cut by the swap path).
+ *   4. Accept the proposal when swaps is absent (backward compat).
+ */
+const swapPayloadBase = {
+  ...payload,
+  caloriesPerDay: 1900,   // lighter than the base 2200
+  proteinGrams: 140,      // protein floor preserved
+};
+
+describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
+  it("calls appendRevision when an existing plan is present (swaps path)", async () => {
+    let appendCalled = false;
+    let createCalled = false;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({ id: "plan-swap-1" }),
+        appendRevision: async () => {
+          appendCalled = true;
+          return { id: "rev-swap-1" };
+        },
+        createPlanWithRevision: async () => {
+          createCalled = true;
+          return { revision: { id: "rev-swap-create" } };
+        },
+      }) as never,
+      usersService as never,
+    );
+
+    const reference = await service.applyNutritionPlanProposal(
+      userId,
+      swapPayloadBase,           // extractNutritionPlanPayload already unwrapped by caller
+      "Make the plan lighter.",
+      "adjust_nutrition_plan",
+    );
+
+    expect(reference).toBe("nutrition_revision:rev-swap-1");
+    expect(appendCalled).toBe(true);
+    expect(createCalled).toBe(false);
+  });
+
+  it("preserves protein target through the swap path (protein floor not cut)", async () => {
+    let capturedPayload: unknown;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({ id: "plan-swap-2" }),
+        appendRevision: async (
+          _planId: string,
+          appendedPayload: unknown,
+        ) => {
+          capturedPayload = appendedPayload;
+          return { id: "rev-swap-2" };
+        },
+      }) as never,
+      usersService as never,
+    );
+
+    await service.applyNutritionPlanProposal(
+      userId,
+      swapPayloadBase,
+      "Lighter plan with ingredient swaps.",
+      "adjust_nutrition_plan",
+    );
+
+    expect((capturedPayload as typeof swapPayloadBase).proteinGrams).toBe(140);
+    expect((capturedPayload as typeof swapPayloadBase).caloriesPerDay).toBe(1900);
+  });
+
+  it("accepts adjust_nutrition_plan without swaps (backward compat)", async () => {
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({ id: "plan-no-swaps" }),
+        appendRevision: async () => ({ id: "rev-no-swaps" }),
+      }) as never,
+      usersService as never,
+    );
+
+    const reference = await service.applyNutritionPlanProposal(
+      userId,
+      payload,
+      "Standard adjustment.",
+      "adjust_nutrition_plan",
+    );
+
+    expect(reference).toBe("nutrition_revision:rev-no-swaps");
+  });
+
+  it("rejects adjust_nutrition_plan with swaps when plan has empty mealStructure", async () => {
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({ id: "plan-swap-invalid" }),
+      }) as never,
+      usersService as never,
+    );
+
+    await expect(
+      service.applyNutritionPlanProposal(
+        userId,
+        { ...swapPayloadBase, mealStructure: [] },
+        "Invalid swap plan.",
+        "adjust_nutrition_plan",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("creates a fresh plan revision when no existing plan (swaps path, new user)", async () => {
+    let createCalled = false;
+    let appendCalled = false;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        // findActivePlanByUserId returns null → new plan
+        createPlanWithRevision: async () => {
+          createCalled = true;
+          return { revision: { id: "rev-new-swap" } };
+        },
+        appendRevision: async () => {
+          appendCalled = true;
+          return { id: "rev-append-swap" };
+        },
+      }) as never,
+      usersService as never,
+    );
+
+    const reference = await service.applyNutritionPlanProposal(
+      userId,
+      swapPayloadBase,
+      "First plan with swap metadata.",
+      "adjust_nutrition_plan",
+    );
+
+    expect(reference).toBe("nutrition_revision:rev-new-swap");
+    expect(createCalled).toBe(true);
+    expect(appendCalled).toBe(false);
+  });
+});

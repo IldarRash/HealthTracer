@@ -112,6 +112,13 @@ export type DsTrendStripProps = HTMLAttributes<HTMLDivElement> & {
   /** Max bar height in px (defaults to 44). */
   maxH?: number;
   ariaLabel?: string;
+  /**
+   * When set, every bar uses this color (e.g. tokens.color.metric.amber for
+   * the fat% trend) and opacity is fixed at 1. Skips the threshold-based
+   * barColor() logic and the value<30 opacity dimming. Existing callers that
+   * omit this prop keep the current threshold behavior exactly.
+   */
+  barColor?: string;
 };
 
 function barColor(value: number): string {
@@ -124,6 +131,7 @@ export function DsTrendStrip({
   days,
   maxH = 44,
   ariaLabel = "Weekly consistency",
+  barColor: barColorOverride,
   className,
   ...props
 }: DsTrendStripProps): ReactElement {
@@ -138,8 +146,10 @@ export function DsTrendStrip({
     >
       {days.map((day, i) => {
         const height = Math.max(4, (day.value / maxVal) * maxH);
-        const color = barColor(day.value);
-        const opacity = day.value < 30 ? 0.55 : 1;
+        // When barColorOverride is set, use it uniformly at opacity 1;
+        // otherwise fall back to the threshold-based color + dimming.
+        const color = barColorOverride ?? barColor(day.value);
+        const opacity = barColorOverride != null ? 1 : day.value < 30 ? 0.55 : 1;
 
         return (
           <div

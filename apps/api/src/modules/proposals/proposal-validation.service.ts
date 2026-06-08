@@ -67,10 +67,12 @@ import {
   getNutritionIncidentDomainErrors,
   getNutritionIncidentImageRefOwnershipErrors,
   getRecipeRecommendationRevisionErrors,
+  getSaveBodyAnalysisDomainErrors,
   getWellbeingCheckinProposalDomainErrors,
   getTodayIsoDateInTimezone,
   logNutritionIncidentProposalPayloadSchema,
   logWorkoutActivityProposalPayloadSchema,
+  saveBodyAnalysisProposalPayloadSchema,
   getChatAttachmentProposalRefErrors,
 } from "@health/types";
 
@@ -525,6 +527,19 @@ export class ProposalValidationService {
     if (intent === "log_workout_activity") {
       const domainErrors = getLogWorkoutActivityDomainErrors(
         result.data as z.infer<typeof logWorkoutActivityProposalPayloadSchema>,
+      );
+
+      if (domainErrors.length > 0) {
+        return {
+          valid: false,
+          errors: domainErrors.map((error) => `proposedChanges: ${error}`),
+        };
+      }
+    }
+
+    if (intent === "save_body_analysis") {
+      const domainErrors = getSaveBodyAnalysisDomainErrors(
+        result.data as z.infer<typeof saveBodyAnalysisProposalPayloadSchema>,
       );
 
       if (domainErrors.length > 0) {
@@ -1093,6 +1108,8 @@ function getChangesSchemaForIntent(
       return logNutritionIncidentProposalPayloadSchema;
     case "log_workout_activity":
       return logWorkoutActivityProposalPayloadSchema;
+    case "save_body_analysis":
+      return saveBodyAnalysisProposalPayloadSchema;
     default:
       return null;
   }

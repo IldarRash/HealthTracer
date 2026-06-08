@@ -28,6 +28,7 @@ const PROPOSAL_INTENT_VALUES = [
   "capture_wellbeing_checkin",
   "log_nutrition_incident",
   "log_workout_activity",
+  "save_body_analysis",
 ] as const;
 
 export type CatalogProposalIntent = (typeof PROPOSAL_INTENT_VALUES)[number];
@@ -104,13 +105,14 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("general"),
     allowedTools: ["getUserContextSlice"],
-    allowedProposalIntents: ["update_profile", "create_goal", "update_goal"],
+    allowedProposalIntents: ["update_profile", "create_goal", "update_goal", "save_body_analysis"],
     safetyGuidance: [
       "Prefer advice-only responses unless a typed proposal is clearly warranted.",
       "Do not diagnose or prescribe treatment.",
+      "Body analysis proposals are visual estimates only — always include the disclaimer 'примерная визуальная оценка по фото, не замер состава тела и не диагноз'.",
     ],
     promptInstructions:
-      "Coach the user with concise, actionable wellness guidance. Use proposals sparingly for profile or goal updates only when explicitly requested.",
+      "Coach the user with concise, actionable wellness guidance. Use proposals sparingly for profile or goal updates only when explicitly requested. For body analysis from attached photos, emit a save_body_analysis proposal with estimates clearly labeled as approximate visual assessments, never as diagnoses.",
     mappedAgentIntent: "general",
   },
   {
