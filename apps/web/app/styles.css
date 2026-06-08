@@ -7856,13 +7856,13 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
 }
 
 .muscle-map__chip {
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border-default);
+  border-radius: 999px;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;
-  border-radius: 999px;
   padding: 2px 10px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border-default);
 }
 
 .muscle-map__body {
@@ -8068,35 +8068,37 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
 }
 
 .body-analysis-card__header-left {
-  display: flex;
   align-items: center;
+  display: flex;
   gap: 8px;
 }
 
 .body-analysis-card__title {
+  color: var(--color-text-primary);
   font-size: var(--font-size-sm);
   font-weight: 600;
-  color: var(--color-text-primary);
 }
 
+/* Chip uses surface tokens that work in both light and dark worlds. */
 .body-analysis-card__chip {
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border-default);
+  border-radius: 999px;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;
-  border-radius: 999px;
   padding: 2px 10px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border-default);
 }
 
 .body-analysis-card__metrics {
+  align-items: flex-start;
   display: flex;
   gap: 16px;
-  align-items: flex-start;
 }
 
 .body-analysis-card__metric-cell {
   flex: 1;
+  min-width: 0;
 }
 
 /* Override stat value color via CSS custom property set inline */
@@ -8112,18 +8114,18 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
 
 .body-analysis-card__zone {
   border-radius: var(--radius-md);
-  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 10px 12px;
 }
 
 .body-analysis-card__zone-label {
+  color: var(--color-text-muted);
   font-size: var(--font-size-section-label);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--color-text-muted);
 }
 
 .body-analysis-card__zone--strong .body-analysis-card__zone-label {
@@ -8135,20 +8137,290 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
 }
 
 .body-analysis-card__zone-text {
-  font-size: var(--font-size-sm);
   color: var(--color-text-primary);
-  margin: 0;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
+  margin: 0;
 }
 
 .body-analysis-card__disclaimer {
   border-top: 1px solid var(--color-border-default);
-  padding-top: 10px;
   margin-top: 0;
+  padding-top: 10px;
 }
 
 .body-analysis-card__footer {
   border-top: 1px solid var(--color-border-default);
   padding-top: 12px;
+}
+
+/* ── photo-guide ── */
+/* Displayed inside the coach message bubble on the light chat surface. */
+.photo-guide {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 480px;
+  padding: 16px;
+}
+
+.photo-guide__header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.photo-guide__heading {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.photo-guide__tiles {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Tile: white card, person silhouette icon is rendered by component. */
+.photo-guide__tile {
+  align-items: center;
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 88px;
+  padding: 28px 8px 10px;
+  position: relative;
+  text-align: center;
+}
+
+.photo-guide__tile-badge {
+  align-items: center;
+  background: var(--color-metric-green);
+  border-radius: 50%;
+  color: #fff;
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  height: 20px;
+  justify-content: center;
+  left: 7px;
+  position: absolute;
+  top: 7px;
+  width: 20px;
+}
+
+/* Person silhouette icon inside the tile */
+.photo-guide__tile-icon {
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+
+.photo-guide__tile-title {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.photo-guide__tile-hint {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* Checklist */
+.photo-guide__checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.photo-guide__checklist-item {
+  align-items: flex-start;
+  color: var(--color-text-secondary);
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: 7px;
+  line-height: 1.45;
+}
+
+.photo-guide__check-icon {
+  color: var(--color-metric-green);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Privacy block — blue-tinted per design */
+.photo-guide__privacy {
+  align-items: flex-start;
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: var(--radius-md);
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.photo-guide__privacy-icon {
+  color: #3a8dff;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.photo-guide__privacy-text {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* Action buttons — stacked full-width */
+.photo-guide__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.photo-guide__btn {
+  align-items: center;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  gap: var(--space-2);
+  justify-content: center;
+  min-height: var(--touch-target-min);
+  padding: 10px 16px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease;
+  width: 100%;
+}
+
+.photo-guide__btn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+/* Primary: green coach button */
+.photo-guide__btn--accept {
+  background: var(--color-coach-600);
+  border: none;
+  color: #fff;
+}
+
+.photo-guide__btn--accept:hover:not(:disabled) {
+  background: var(--color-coach-700);
+}
+
+.photo-guide__btn--accept:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Ghost: bordered secondary */
+.photo-guide__btn--ghost {
+  background: transparent;
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.photo-guide__btn--ghost:hover:not(:disabled) {
+  background: var(--color-surface-muted);
+  color: var(--color-text-primary);
+}
+
+.photo-guide__btn--ghost:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* ── body-analysis-proposal-card ── */
+.body-analysis-proposal-card__result {
+  margin: 8px 0;
+}
+
+/* ── proposal domain pill — body ── */
+.proposal-domain-pill--body {
+  background: var(--color-metric-amber-dim);
+  color: var(--color-metric-amber);
+}
+
+/* ── photo-strip-msg ── */
+.photo-strip-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.photo-strip-msg__tiles {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.photo-strip-msg__tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.photo-strip-msg__thumb {
+  width: 132px;
+  height: 168px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+
+.photo-strip-msg__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 132px;
+  height: 168px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  font-size: 32px;
+}
+
+.photo-strip-msg__label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-align: center;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photo-strip-msg__caption {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* ── chat-body-flow: ThinkingBlock label ── */
+.chat-thinking-indicator__body-label {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 

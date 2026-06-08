@@ -4,42 +4,20 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const proposalsDir = dirname(fileURLToPath(import.meta.url));
-const inlineProposalSource = readFileSync(
-  join(proposalsDir, "inline-proposal-card.tsx"),
-  "utf8",
-);
-const wellbeingProposalSource = readFileSync(
-  join(proposalsDir, "wellbeing-checkin-proposal-card.tsx"),
-  "utf8",
-);
-const nutritionProposalSource = readFileSync(
-  join(proposalsDir, "nutrition-incident-proposal-card.tsx"),
-  "utf8",
-);
-const recommendRecipesProposalSource = readFileSync(
-  join(proposalsDir, "recommend-recipes-proposal-card.tsx"),
-  "utf8",
-);
-const chatWorkspaceSource = readFileSync(
-  join(proposalsDir, "../chat/chat-workspace.tsx"),
-  "utf8",
-);
-const inlineProposalActionsSource = readFileSync(
-  join(proposalsDir, "../../lib/use-inline-proposal-actions.ts"),
-  "utf8",
-);
-const contractProposalCardSource = readFileSync(
-  join(proposalsDir, "contract-proposal-card.tsx"),
-  "utf8",
-);
-const editableProposalContractSource = readFileSync(
-  join(proposalsDir, "editable-proposal-contract.tsx"),
-  "utf8",
-);
-const proposalCardShellSource = readFileSync(
-  join(proposalsDir, "proposal-card-shell.tsx"),
-  "utf8",
-);
+// Normalize CRLF→LF so positional `\n`-anchored assertions are line-ending agnostic
+// (Windows checkouts may have CRLF — same approach as chat-workspace-proposal-render.spec.ts).
+function readNorm(path: string) {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+const inlineProposalSource = readNorm(join(proposalsDir, "inline-proposal-card.tsx"));
+const wellbeingProposalSource = readNorm(join(proposalsDir, "wellbeing-checkin-proposal-card.tsx"));
+const nutritionProposalSource = readNorm(join(proposalsDir, "nutrition-incident-proposal-card.tsx"));
+const recommendRecipesProposalSource = readNorm(join(proposalsDir, "recommend-recipes-proposal-card.tsx"));
+const chatWorkspaceSource = readNorm(join(proposalsDir, "../chat/chat-workspace.tsx"));
+const inlineProposalActionsSource = readNorm(join(proposalsDir, "../../lib/use-inline-proposal-actions.ts"));
+const contractProposalCardSource = readNorm(join(proposalsDir, "contract-proposal-card.tsx"));
+const editableProposalContractSource = readNorm(join(proposalsDir, "editable-proposal-contract.tsx"));
+const proposalCardShellSource = readNorm(join(proposalsDir, "proposal-card-shell.tsx"));
 
 describe("InlineProposalCard chat hierarchy", () => {
   it("routes wellbeing and nutrition incident intents to specialized cards", () => {
@@ -180,10 +158,7 @@ describe("RecommendRecipesProposalCard", () => {
 });
 
 describe("GenericInlineProposalCard chat hierarchy", () => {
-  const genericProposalSource = readFileSync(
-    join(proposalsDir, "inline-proposal-card-generic.tsx"),
-    "utf8",
-  );
+  const genericProposalSource = readNorm(join(proposalsDir, "inline-proposal-card-generic.tsx"));
 
   it("does not render raw intent, domain, or validation status strings", () => {
     expect(genericProposalSource).not.toContain("proposal.intent.replaceAll");

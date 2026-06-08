@@ -1960,6 +1960,7 @@ export {
   type PromptTemplateRenderValues,
 } from "./prompt-template-renderer.js";
 export {
+  DEFAULT_PROMPT_TEMPLATE_BODIES,
   DOMAIN_HEALTH_TEMPLATE_KEY,
   DOMAIN_NUTRITION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,

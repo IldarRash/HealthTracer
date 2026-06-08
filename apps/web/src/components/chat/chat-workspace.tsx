@@ -17,6 +17,7 @@ import {
 import {
   buildOptimisticAttachmentDisplays,
   canSendChatComposer,
+  createChatComposerAttachmentDraft,
   isChatAttachmentSendEligible,
   revokeChatAttachmentPreviewUrl,
   type ChatAttachmentOutcomeDisplay,
@@ -48,7 +49,16 @@ import { ChatAttachmentOutcomePanel } from "./chat-attachment-outcome-panel";
 import { ChatComposerAttachmentInput } from "./chat-composer-attachment-input";
 import { ChatComposerAttachments } from "./chat-composer-attachments";
 import { ChatMessageAttachmentPreviews } from "./chat-message-attachment-previews";
+import { PhotoGuide } from "./photo-guide";
+import { PhotoStripMsg } from "./photo-strip-msg";
 import { WeeklyReviewChatSummary } from "./weekly-review-chat-summary";
+import {
+  BODY_ANALYSIS_THINKING_LABEL,
+  hasBodyAnalysisProposal,
+  isBodyAnalysisProposalSaved,
+  resolveBodyPhotoRequestMessage,
+  type ChatBodyFlowStep,
+} from "../../lib/chat-body-flow-ui-state";
 import { mergeProposalsById } from "../../lib/proposal-ui-state";
 import {
   buildProposalRevisionChatSend,
@@ -96,6 +106,15 @@ export function ChatWorkspace() {
   const [attachmentOutcomesByMessageId, setAttachmentOutcomesByMessageId] = useState<
     Record<string, ChatAttachmentOutcomeDisplay[]>
   >({});
+  /**
+   * chatBodyFlow — tracks whether we are in the body-analysis photo intake flow.
+   * - "ask": coach has requested photos; PhotoGuide is mounted after the request message.
+   * - "uploading": user selected files from PhotoGuide; they are in the composer draft.
+   * - "analyzing": user sent the photo message; awaiting the AI response.
+   * - "result" / "saved": save_body_analysis proposal returned / accepted.
+   */
+  const [chatBodyFlowStep, setChatBodyFlowStep] =
+    useState<ChatBodyFlowStep | null>(null);
 
   const threadsQuery = useQuery({
     queryKey: ["chat-threads"],
@@ -195,6 +214,7 @@ export function ChatWorkspace() {
     setOptimisticMessage(null);
     setPendingRevisionSend(null);
     setAttachmentOutcomesByMessageId({});
+    setChatBodyFlowStep(null);
     setComposerAttachments((current) => {
       for (const attachment of current) {
         revokeChatAttachmentPreviewUrl(attachment);
@@ -338,6 +358,11 @@ export function ChatWorkspace() {
         return [];
       });
 
+      // Advance body flow step: if the response contains a body analysis proposal, mark "result".
+      if (hasBodyAnalysisProposal(turn.proposals)) {
+        setChatBodyFlowStep("result");
+      }
+
       setLocalProposals(turn.proposals);
       if (turn.attachmentOutcomes?.length) {
         setAttachmentOutcomesByMessageId((current) => ({
@@ -380,6 +405,58 @@ export function ChatWorkspace() {
     return map;
   }, [localProposals, threadProposalsQuery.data]);
 
+  // ── Body analysis chat flow derived state ─────────────────────────────────
+  //
+  // Detect when the latest coach message is a body-photo request.
+  // The "ask" step is shown when:
+  //   (a) a body-photo-request message exists in the thread, AND
+  //   (b) we are not already in a later step (uploading/analyzing/result/saved).
+  const bodyPhotoRequestMessage = useMemo(
+    () => resolveBodyPhotoRequestMessage(messages),
+    [messages],
+  );
+
+  // Derive "saved" when all body proposals are accepted.
+  const allBodyProposalsMerged = useMemo(
+    () => mergeProposalsById(threadProposalsQuery.data ?? [], localProposals)
+      .filter((p) => p.intent === "save_body_analysis"),
+    [threadProposalsQuery.data, localProposals],
+  );
+
+  const bodyAnalysisSaved = useMemo(
+    () => isBodyAnalysisProposalSaved(allBodyProposalsMerged),
+    [allBodyProposalsMerged],
+  );
+
+  // The step to display — local chatBodyFlowStep state takes precedence (set by
+  // user interactions), falling back to detecting "ask" from the message thread,
+  // and "saved" from the proposal list.
+  const resolvedBodyFlowStep: ChatBodyFlowStep | null = useMemo(() => {
+    if (bodyAnalysisSaved) return "saved";
+    if (chatBodyFlowStep === "result" || chatBodyFlowStep === "saved") return chatBodyFlowStep;
+    if (chatBodyFlowStep === "analyzing" || sendMessageMutation.isPending) {
+      return chatBodyFlowStep ?? null;
+    }
+    if (chatBodyFlowStep === "uploading") return "uploading";
+    if (bodyPhotoRequestMessage) return "ask";
+    return null;
+  }, [bodyAnalysisSaved, bodyPhotoRequestMessage, chatBodyFlowStep, sendMessageMutation.isPending]);
+
+  /**
+   * Whether to show the PhotoGuide card after the body-photo-request coach message.
+   * Only shown during the "ask" step — once the user starts uploading, it is dismissed.
+   */
+  const showPhotoGuide =
+    resolvedBodyFlowStep === "ask" &&
+    bodyPhotoRequestMessage !== null &&
+    !sendMessageMutation.isPending;
+
+  /**
+   * Whether to show the body analysis ThinkingBlock label during the analyzing step.
+   */
+  const showBodyAnalysisThinking =
+    sendMessageMutation.isPending && chatBodyFlowStep === "analyzing";
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const content = draft.trim();
@@ -400,6 +477,10 @@ export function ChatWorkspace() {
     }
 
     if (attachmentRefIds.length > 0) {
+      // If we are in the body-photo "uploading" step, advance to "analyzing" on send.
+      if (chatBodyFlowStep === "uploading" || resolvedBodyFlowStep === "ask") {
+        setChatBodyFlowStep("analyzing");
+      }
       sendMessageMutation.mutate({ content, attachmentRefIds });
       return;
     }
@@ -427,7 +508,38 @@ export function ChatWorkspace() {
 
   const handleProposalDecision = (updated: AiProposal) => {
     setLocalProposals((proposals) => mergeProposalsById(proposals, [updated]));
+
+    // If a body analysis proposal is now accepted, mark the flow as saved.
+    if (updated.intent === "save_body_analysis" && updated.status === "accepted") {
+      setChatBodyFlowStep("saved");
+    }
   };
+
+  /**
+   * Called when the user selects files from the PhotoGuide card.
+   * Feeds the files into the standard attachment machinery and advances the flow step.
+   */
+  const handlePhotoGuideFilesSelected = useCallback(
+    (files: File[]) => {
+      if (files.length === 0 || !primaryThreadId) return;
+
+      // Advance to "uploading" step — PhotoGuide is dismissed, files enter composer.
+      setChatBodyFlowStep("uploading");
+
+      // Build draft attachments from the selected files using the shared factory
+      // and trigger the upload process for each one.
+      const newDrafts = files.map((file) =>
+        createChatComposerAttachmentDraft(file),
+      );
+
+      setComposerAttachments((attachments) => [...attachments, ...newDrafts]);
+
+      for (const draft of newDrafts) {
+        void processAttachmentDraft(draft);
+      }
+    },
+    [primaryThreadId, processAttachmentDraft],
+  );
 
   const handleProposalModifyRequest = (response: ProposalModifyResponse) => {
     setLocalProposals((proposals) =>
@@ -493,6 +605,14 @@ export function ChatWorkspace() {
 
       {!isBootstrapping && !threadDetailQuery.isError && primaryThreadId ? (
         <>
+          {/* Coach status header */}
+          <div className="chat-header" aria-label="Coach status">
+            <div className="chat-header__coach-label">
+              <span className="chat-header__online-dot" aria-hidden="true" />
+              <span className="chat-header__coach-name">Coach</span>
+              <span className="chat-header__status">· online</span>
+            </div>
+          </div>
           <ChatTranscript>
             {messages.length === 0 && !sendMessageMutation.isPending ? (
               <li className="chat-empty-state">
@@ -533,6 +653,22 @@ export function ChatWorkspace() {
                 ? null
                 : resolveChatMessageDirectPathFeedback(message);
 
+              // Body-flow: show PhotoStripMsg instead of generic previews for user
+              // messages that carry body-analysis photos (3 images in body flow context).
+              const isBodyPhotoMessage =
+                isUser &&
+                attachmentPreviews.length >= 1 &&
+                (chatBodyFlowStep === "uploading" ||
+                  chatBodyFlowStep === "analyzing" ||
+                  chatBodyFlowStep === "result" ||
+                  chatBodyFlowStep === "saved");
+
+              // Show PhotoGuide after the specific coach message that requested photos.
+              const isBodyPhotoRequestMsg =
+                !isUser &&
+                showPhotoGuide &&
+                bodyPhotoRequestMessage?.id === message.id;
+
               return (
                 <li key={message.id}>
                   <ChatBubble
@@ -553,7 +689,13 @@ export function ChatWorkspace() {
                       />
                     ) : (
                       <>
-                        {attachmentPreviews.length > 0 ? (
+                        {/* Body-flow: labelled photo strip for the 3-angle upload */}
+                        {isBodyPhotoMessage ? (
+                          <PhotoStripMsg
+                            previews={attachmentPreviews}
+                            caption="Вот, со всех сторон"
+                          />
+                        ) : attachmentPreviews.length > 0 ? (
                           <ChatMessageAttachmentPreviews previews={attachmentPreviews} />
                         ) : null}
                         {messageText ? <p className="chat-bubble__text">{messageText}</p> : null}
@@ -585,6 +727,14 @@ export function ChatWorkspace() {
                     />
                   ) : null}
 
+                  {/* Body-flow: PhotoGuide card after the coach's photo-request message */}
+                  {isBodyPhotoRequestMsg ? (
+                    <PhotoGuide
+                      disabled={sendMessageMutation.isPending}
+                      onFilesSelected={handlePhotoGuideFilesSelected}
+                    />
+                  ) : null}
+
                   {attachmentOutcomesByMessageId[message.id]?.length ? (
                     <ChatAttachmentOutcomePanel
                       outcomes={attachmentOutcomesByMessageId[message.id] ?? []}
@@ -598,7 +748,14 @@ export function ChatWorkspace() {
             {sendMessageMutation.isPending ? (
               <li>
                 <ChatBubble role="assistant">
-                  <ChatThinkingIndicator />
+                  {/* Body-flow: show specialized thinking label during body analysis */}
+                  {showBodyAnalysisThinking ? (
+                    <p className="chat-thinking-indicator__body-label">
+                      {BODY_ANALYSIS_THINKING_LABEL}
+                    </p>
+                  ) : (
+                    <ChatThinkingIndicator />
+                  )}
                 </ChatBubble>
               </li>
             ) : null}
