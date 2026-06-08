@@ -1,4 +1,5 @@
 import {
+  updateCurrentUserSchema,
   activeHabitPlanResponseSchema,
   activeNutritionPlanResponseSchema,
   activeWorkoutPlanResponseSchema,
@@ -250,6 +251,14 @@ const chatThreadDetailSchema = z.object({
 
 export async function getCurrentUser(token: string): Promise<ApiResult<User>> {
   return apiFetch("/users/me", token, userSchema);
+}
+
+export async function updateUserLocale(
+  token: string,
+  locale: string,
+): Promise<ApiResult<User>> {
+  const body = updateCurrentUserSchema.parse({ locale });
+  return apiFetch("/users/me", token, userSchema, { method: "PATCH", body });
 }
 
 export async function getCurrentUserState(

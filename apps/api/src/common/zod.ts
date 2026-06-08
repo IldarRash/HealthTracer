@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import type { z } from "zod";
+import { translate } from "../i18n/messages.js";
 
 export function parseBody<TSchema extends z.ZodType>(
   schema: TSchema,
@@ -9,7 +10,8 @@ export function parseBody<TSchema extends z.ZodType>(
 
   if (!result.success) {
     throw new BadRequestException({
-      message: "Invalid request body",
+      message: translate("invalid_request_body", "en"),
+      code: "invalid_request_body",
       issues: result.error.issues,
     });
   }
@@ -25,7 +27,8 @@ export function parseQuery<TSchema extends z.ZodType>(
 
   if (!result.success) {
     throw new BadRequestException({
-      message: "Invalid query parameters",
+      message: translate("invalid_query_parameters", "en"),
+      code: "invalid_query_parameters",
       issues: result.error.issues,
     });
   }

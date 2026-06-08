@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { agentSafetyFlagSchema } from "./agent-context.js";
 import { domainAnswerSchema } from "./domain-llm-step.js";
+import { messagePreprocessorLanguageCodeSchema } from "./message-preprocessor.js";
 
 // ---------------------------------------------------------------------------
 // Action variant catalog entry
@@ -35,6 +36,13 @@ export const finalDecisionRequestSchema = z.object({
   actionVariantCatalog: z.array(actionVariantSchema).max(20).default([]),
   safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
   safetyConstraints: z.array(z.string().min(1).max(500)).max(15).default([]),
+  /**
+   * Resolved response language for this turn (hint ?? detected).
+   * Input-only: tells the decision-maker LLM which language to write the reply in.
+   * Never an output field — the forbidden-key guard remains unchanged.
+   * Null/absent means fall back to detecting from the user's message / domain outputs.
+   */
+  responseLanguage: messagePreprocessorLanguageCodeSchema.nullable().optional(),
 });
 
 export type FinalDecisionRequest = z.infer<typeof finalDecisionRequestSchema>;

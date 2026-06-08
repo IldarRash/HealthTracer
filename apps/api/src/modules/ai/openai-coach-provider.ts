@@ -349,6 +349,7 @@ function buildOpenAiDomainStepPrompt(
       ? request.safetyConstraints.join("\n- ")
       : "Do not diagnose, prescribe, or claim to treat diseases.",
     attachmentContextJson: attachmentContextSummary,
+    responseLanguage: request.responseLanguage ?? "",
   });
 }
 
@@ -385,6 +386,7 @@ function buildOpenAiFinalDecisionPrompt(
     safetyConstraints: request.safetyConstraints.length
       ? request.safetyConstraints.join("\n- ")
       : "Do not diagnose, prescribe, or claim to treat diseases.",
+    responseLanguage: request.responseLanguage ?? "",
   });
 }
 

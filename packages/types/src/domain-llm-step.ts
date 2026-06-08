@@ -5,6 +5,7 @@ import {
   agentToolNameSchema,
 } from "./agent-context.js";
 import { routerDomainSchema } from "./router-decision.js";
+import { messagePreprocessorLanguageCodeSchema } from "./message-preprocessor.js";
 
 // ---------------------------------------------------------------------------
 // Bounded attachment context for domain LLM steps
@@ -106,6 +107,13 @@ export const domainLlmStepRequestSchema = z.object({
    * Optional — absent on turns with no attachments.
    */
   attachmentContext: domainAttachmentContextSchema.optional(),
+  /**
+   * Resolved response language for this turn (hint ?? detected).
+   * Input-only: tells the domain LLM which language to write user-facing text in.
+   * Never an output field — the forbidden-key guard remains unchanged.
+   * Null/absent means fall back to detecting from the user's message.
+   */
+  responseLanguage: messagePreprocessorLanguageCodeSchema.nullable().optional(),
 });
 
 export type DomainLlmStepRequest = z.infer<typeof domainLlmStepRequestSchema>;

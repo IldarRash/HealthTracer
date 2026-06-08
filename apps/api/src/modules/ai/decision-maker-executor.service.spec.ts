@@ -401,6 +401,61 @@ describe("DecisionMakerExecutorService", () => {
   });
 
   // -------------------------------------------------------------------------
+  // i18n — responseLanguage flows into the final decision request
+  // -------------------------------------------------------------------------
+
+  describe("i18n — responseLanguage propagation to FinalDecisionRequest", () => {
+    it("threads responseLanguage='ru' onto the final decision request", async () => {
+      let capturedRequest: FinalDecisionRequest | undefined;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async (req) => {
+          capturedRequest = req;
+          return { reply: "Всё готово.", selectedAction: null, proposals: [], consentRequired: false };
+        }),
+      };
+      await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+        responseLanguage: "ru",
+      });
+      expect(capturedRequest?.responseLanguage).toBe("ru");
+    });
+
+    it("omits responseLanguage from the final decision request when it is null", async () => {
+      let capturedRequest: FinalDecisionRequest | undefined;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async (req) => {
+          capturedRequest = req;
+          return { reply: "Done.", selectedAction: null, proposals: [], consentRequired: false };
+        }),
+      };
+      await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+        responseLanguage: null,
+      });
+      // null must not set the field (conditional spread keeps it absent).
+      expect(capturedRequest?.responseLanguage).toBeUndefined();
+    });
+
+    it("threads responseLanguage='en' onto the final decision request", async () => {
+      let capturedRequest: FinalDecisionRequest | undefined;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async (req) => {
+          capturedRequest = req;
+          return { reply: "Done.", selectedAction: null, proposals: [], consentRequired: false };
+        }),
+      };
+      await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+        responseLanguage: "en",
+      });
+      expect(capturedRequest?.responseLanguage).toBe("en");
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // W4 — domain candidate + matching catalog action keeps the proposal
   // -------------------------------------------------------------------------
 

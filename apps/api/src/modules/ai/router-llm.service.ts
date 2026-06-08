@@ -149,7 +149,10 @@ export class RouterLlmService {
     return routerDecisionRequestSchema.parse({
       originalText: preprocessor.originalText,
       normalizedText: preprocessor.normalizedText,
-      detectedLanguage: preprocessor.detectedLanguage ?? undefined,
+      // Send the resolved response language (hint ?? detected) so the router receives
+      // the authoritative language signal. The router is read-only — this does not
+      // add a new output field and the clamped output schema is unchanged.
+      detectedLanguage: (preprocessor.responseLanguage ?? preprocessor.detectedLanguage) ?? undefined,
       preprocessor,
       attachmentHints,
       recentMessageHints,

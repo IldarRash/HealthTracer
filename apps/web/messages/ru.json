@@ -1,0 +1,113 @@
+{
+  "Common": {
+    "loading": "Загрузка…",
+    "error": "Что-то пошло не так.",
+    "retry": "Повторить",
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "empty": "Пока здесь ничего нет.",
+    "delete": "Удалить",
+    "confirm": "Подтвердить",
+    "close": "Закрыть",
+    "back": "Назад",
+    "edit": "Изменить",
+    "update": "Обновить",
+    "submit": "Отправить",
+    "comingSoon": "Скоро",
+    "notSet": "Не задано",
+    "unknownError": "Произошла непредвиденная ошибка."
+  },
+  "Nav": {
+    "chat": "Чат",
+    "today": "Сегодня",
+    "longevity": "Долголетие",
+    "profile": "Профиль",
+    "workouts": "Тренировки",
+    "nutrition": "Питание",
+    "plansView": "Планы · просмотр",
+    "mainNavLabel": "Основная навигация",
+    "primaryNavLabel": "Основная навигация",
+    "plansNavLabel": "Навигация по планам",
+    "completeOnboarding": "Завершите настройку для доступа к навигации",
+    "brandName": "AI Health Coach"
+  },
+  "Settings": {
+    "title": "Настройки",
+    "language": "Язык",
+    "languageLabel": "Язык интерфейса",
+    "english": "English",
+    "russian": "Русский",
+    "languageSaved": "Язык обновлён.",
+    "languageSaving": "Сохранение…",
+    "languageError": "Не удалось сохранить настройку языка."
+  },
+  "Profile": {
+    "title": "Профиль",
+    "subtitle": "Кто вы и что ваш тренер знает о вас",
+    "loading": "Загрузка профиля…",
+    "error": "Профиль не удалось загрузить.",
+    "partialError": "Некоторые разделы профиля не обновились. Показываем доступные данные.",
+    "account": {
+      "yourAccount": "Ваш аккаунт"
+    },
+    "goals": {
+      "title": "Иерархия целей",
+      "changesThrough": "изменяется через тренера",
+      "direction": "Направление",
+      "quarterlyGoal": "Квартальная цель",
+      "weeklyGoals": "Еженедельные цели",
+      "noActiveGoals": "Активных целей пока нет.",
+      "completeOnboarding": "Завершите настройку",
+      "setDirection": "чтобы задать направление.",
+      "noQuarterlyObjective": "Активная квартальная цель не задана."
+    },
+    "personalContext": {
+      "title": "Личный контекст",
+      "notSetUp": "Профиль ещё не настроен.",
+      "continueOnboarding": "Продолжить настройку",
+      "updateViaChat": "или обновить через чат.",
+      "noPreferences": "Предпочтения тренера не заданы.",
+      "updateViaChat2": "Обновить через чат",
+      "activityLevel": "Уровень активности",
+      "trainingExperience": "Опыт тренировок",
+      "constraints": "Ограничения",
+      "preferences": "Предпочтения",
+      "coachNotes": "Заметки тренера",
+      "activityLevels": {
+        "sedentary": "Малоподвижный",
+        "lightly_active": "Немного активный",
+        "moderately_active": "Умеренно активный",
+        "very_active": "Очень активный",
+        "extra_active": "Сверхактивный"
+      },
+      "trainingExperiences": {
+        "beginner": "Начинающий",
+        "intermediate": "Средний уровень",
+        "advanced": "Продвинутый"
+      }
+    },
+    "documents": {
+      "title": "Медицинские документы",
+      "privacyNotice": "Загружено с вашего явного согласия и используется только как контекст образа жизни — не для диагностики или лечения. Видимо только вам. Удалите любой документ в любое время."
+    },
+    "devices": {
+      "title": "Устройства и данные",
+      "watchLabel": "Часы · сон и пульс",
+      "scaleLabel": "Умные весы",
+      "phoneLabel": "Шаги с телефона"
+    },
+    "subscription": {
+      "title": "Подписка",
+      "proPlan": "Pro-план",
+      "freePlan": "Бесплатный план",
+      "unlimitedMessages": "Неограниченные AI-сообщения",
+      "messagesRemaining": "{count} AI-сообщений осталось сегодня",
+      "managePlan": "Управление планом",
+      "upgradeToPro": "Перейти на Pro"
+    },
+    "language": {
+      "title": "Язык",
+      "description": "Выберите язык интерфейса."
+    }
+  }
+}

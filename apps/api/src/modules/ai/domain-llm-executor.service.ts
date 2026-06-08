@@ -103,6 +103,11 @@ export interface DomainLlmExecutorInput {
    * The instantiated coach AI provider for this turn.
    */
   provider: CoachAiProvider;
+  /**
+   * Resolved response language (hint ?? detected). Null/absent = fall back to message detection.
+   * Threaded into the domain step request so the domain LLM writes in the correct language.
+   */
+  responseLanguage?: string | null;
 }
 
 export interface DomainLlmExecutorResult {
@@ -214,6 +219,7 @@ export class DomainLlmExecutorService {
       safetyFlags: [],
       safetyConstraints: [...contextPacket.safetyConstraints],
       ...(attachmentContext !== undefined ? { attachmentContext } : {}),
+      ...(input.responseLanguage != null ? { responseLanguage: input.responseLanguage } : {}),
     };
 
     for (let iteration = 1; iteration <= DOMAIN_MAX_LOOP_ITERATIONS; iteration += 1) {

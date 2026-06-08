@@ -12,11 +12,11 @@ import {
 
 describe("nav UI state", () => {
   it("exposes the four approved primary nav tabs only", () => {
-    expect(PRIMARY_NAV_LINKS.map((link) => link.label)).toEqual([
-      "Chat",
-      "Today",
-      "Longevity",
-      "Profile",
+    expect(PRIMARY_NAV_LINKS.map((link) => link.labelKey)).toEqual([
+      "Nav.chat",
+      "Nav.today",
+      "Nav.longevity",
+      "Nav.profile",
     ]);
     expect(PRIMARY_NAV_LINKS.map((link) => link.href)).toEqual([
       "/chat",
@@ -30,13 +30,13 @@ describe("nav UI state", () => {
     const featured = PRIMARY_NAV_LINKS.filter((link) => link.featured === true);
     expect(featured).toHaveLength(1);
     expect(featured[0]?.href).toBe("/chat");
-    expect(featured[0]?.label).toBe("Chat");
+    expect(featured[0]?.labelKey).toBe("Nav.chat");
   });
 
   it("keeps Training and Nutrition as secondary routes outside primary nav", () => {
-    expect(SECONDARY_ROUTE_LINKS.map((link) => link.label)).toEqual([
-      "Workouts",
-      "Nutrition",
+    expect(SECONDARY_ROUTE_LINKS.map((link) => link.labelKey)).toEqual([
+      "Nav.workouts",
+      "Nav.nutrition",
     ]);
     expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/training")).toBe(false);
     expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/nutrition")).toBe(false);
@@ -72,25 +72,25 @@ describe("nav UI state", () => {
     expect(isSecondaryRoute("/longevity")).toBe(false);
 
     const training = findSecondaryRoute("/training");
-    expect(training?.label).toBe("Workouts");
+    expect(training?.labelKey).toBe("Nav.workouts");
   });
 
   it("resolves secondary route wayfinding with Today as parent", () => {
     expect(resolveSecondaryRouteWayfinding("/nutrition")).toEqual({
-      parent: { href: "/today", label: "Today" },
-      current: { label: "Nutrition" },
+      parent: { href: "/today", labelKey: "Nav.today" },
+      current: { labelKey: "Nav.nutrition" },
     });
     expect(resolveSecondaryRouteWayfinding("/training")).toEqual({
-      parent: { href: "/today", label: "Today" },
-      current: { label: "Workouts" },
+      parent: { href: "/today", labelKey: "Nav.today" },
+      current: { labelKey: "Nav.workouts" },
     });
     expect(resolveSecondaryRouteWayfinding("/progress")).toEqual({
-      parent: { href: "/today", label: "Today" },
-      current: { label: "Workouts" },
+      parent: { href: "/today", labelKey: "Nav.today" },
+      current: { labelKey: "Nav.workouts" },
     });
     expect(resolveSecondaryRouteWayfinding("/recipes")).toEqual({
-      parent: { href: "/today", label: "Today" },
-      current: { label: "Nutrition" },
+      parent: { href: "/today", labelKey: "Nav.today" },
+      current: { labelKey: "Nav.nutrition" },
     });
     expect(resolveSecondaryRouteWayfinding("/longevity")).toBeUndefined();
     expect(resolveSecondaryRouteWayfinding("/today")).toBeUndefined();

@@ -2,6 +2,7 @@
 
 import { UserButton, useAuth } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { apiQueryKeys, getCurrentUserState, getSubscription } from "../lib/api";
@@ -42,6 +43,7 @@ function SidebarNavItem({ href, label, iconName, active }: NavItemProps) {
 export function AppSidebar() {
   const pathname = usePathname();
   const { getToken, isLoaded, isSignedIn } = useAuth();
+  const t = useTranslations();
 
   const userStateQuery = useQuery({
     queryKey: apiQueryKeys.currentUserState,
@@ -86,29 +88,29 @@ export function AppSidebar() {
   const isPro = subscriptionTier === "pro";
 
   return (
-    <aside className="app-sidebar" aria-label="Main navigation">
+    <aside className="app-sidebar" aria-label={t("Nav.mainNavLabel")}>
       {/* Brand row */}
       <div className="app-sidebar__brand">
         <Mark size={26} />
-        <span className="app-sidebar__brand-name">AI Health Coach</span>
+        <span className="app-sidebar__brand-name">{t("Nav.brandName")}</span>
       </div>
 
       {hidePrimaryNav ? (
         <p className="app-sidebar__onboarding-hint" aria-live="polite">
           <Icon name="lock" size={16} aria-hidden />
-          Complete onboarding to unlock navigation
+          {t("Nav.completeOnboarding")}
         </p>
       ) : (
         <>
           {/* Primary nav */}
-          <nav aria-label="Primary navigation" className="app-sidebar__nav-group">
+          <nav aria-label={t("Nav.primaryNavLabel")} className="app-sidebar__nav-group">
             {PRIMARY_NAV_LINKS.map((link) => {
               const iconName = NAV_ICON_MAP[link.href] ?? "today";
               return (
                 <SidebarNavItem
                   key={link.href}
                   href={link.href}
-                  label={link.label}
+                  label={t(link.labelKey)}
                   iconName={iconName}
                   active={isNavLinkActive(pathname, link)}
                 />
@@ -118,15 +120,15 @@ export function AppSidebar() {
 
           {/* Plans divider + secondary nav */}
           <div className="app-sidebar__divider" aria-hidden />
-          <p className="app-sidebar__eyebrow">Plans · view</p>
-          <nav aria-label="Plans navigation" className="app-sidebar__nav-group">
+          <p className="app-sidebar__eyebrow">{t("Nav.plansView")}</p>
+          <nav aria-label={t("Nav.plansNavLabel")} className="app-sidebar__nav-group">
             {SECONDARY_ROUTE_LINKS.map((link) => {
               const iconName = NAV_ICON_MAP[link.href] ?? "today";
               return (
                 <SidebarNavItem
                   key={link.href}
                   href={link.href}
-                  label={link.label}
+                  label={t(link.labelKey)}
                   iconName={iconName}
                   active={isNavLinkActive(pathname, link)}
                 />

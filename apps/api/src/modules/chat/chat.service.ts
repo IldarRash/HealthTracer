@@ -302,6 +302,7 @@ export class ChatService {
     const generated = await this.aiService.generateCoachResponse({
       auth,
       userMessage: messageContent,
+      responseLocale: user.locale,
       recentMessages: existingMessages
         .slice(-AI_RECENT_MESSAGE_LIMIT)
         .map((message) => ({
