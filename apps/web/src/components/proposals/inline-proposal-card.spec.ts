@@ -3,31 +3,23 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/** Normalize CRLF to LF so whitespace assertions work on Windows checkouts. */
+/** Normalize CRLF → LF so assertions work cross-platform. */
 function readSource(path: string): string {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 }
 
 const proposalsDir = dirname(fileURLToPath(import.meta.url));
 const inlineProposalSource = readSource(join(proposalsDir, "inline-proposal-card.tsx"));
-const wellbeingProposalSource = readSource(
-  join(proposalsDir, "wellbeing-checkin-proposal-card.tsx"),
-);
-const nutritionProposalSource = readSource(
-  join(proposalsDir, "nutrition-incident-proposal-card.tsx"),
-);
-const recommendRecipesProposalSource = readSource(
-  join(proposalsDir, "recommend-recipes-proposal-card.tsx"),
-);
+const wellbeingProposalSource = readSource(join(proposalsDir, "wellbeing-checkin-proposal-card.tsx"));
+const nutritionProposalSource = readSource(join(proposalsDir, "nutrition-incident-proposal-card.tsx"));
+const recommendRecipesProposalSource = readSource(join(proposalsDir, "recommend-recipes-proposal-card.tsx"));
 const chatWorkspaceSource = readSource(join(proposalsDir, "../chat/chat-workspace.tsx"));
-const inlineProposalActionsSource = readSource(
-  join(proposalsDir, "../../lib/use-inline-proposal-actions.ts"),
-);
+const inlineProposalActionsSource = readSource(join(proposalsDir, "../../lib/use-inline-proposal-actions.ts"));
 const contractProposalCardSource = readSource(join(proposalsDir, "contract-proposal-card.tsx"));
-const editableProposalContractSource = readSource(
-  join(proposalsDir, "editable-proposal-contract.tsx"),
-);
+const editableProposalContractSource = readSource(join(proposalsDir, "editable-proposal-contract.tsx"));
 const proposalCardShellSource = readSource(join(proposalsDir, "proposal-card-shell.tsx"));
+const adjustNutritionCardSource = readSource(join(proposalsDir, "adjust-nutrition-plan-proposal-card.tsx"));
+const actionProposalUiStateSource = readSource(join(proposalsDir, "../../lib/action-proposal-ui-state.ts"));
 
 describe("InlineProposalCard chat hierarchy", () => {
   it("routes wellbeing and nutrition incident intents to specialized cards", () => {
@@ -168,9 +160,7 @@ describe("RecommendRecipesProposalCard", () => {
 });
 
 describe("GenericInlineProposalCard chat hierarchy", () => {
-  const genericProposalSource = readSource(
-    join(proposalsDir, "inline-proposal-card-generic.tsx"),
-  );
+  const genericProposalSource = readSource(join(proposalsDir, "inline-proposal-card-generic.tsx"));
 
   it("does not render raw intent, domain, or validation status strings", () => {
     expect(genericProposalSource).not.toContain("proposal.intent.replaceAll");
@@ -344,5 +334,76 @@ describe("ChatWorkspace proposal revision routing", () => {
     expect(chatWorkspaceSource).toContain("shouldShowProposalRevisionSendRetry");
     expect(chatWorkspaceSource).toContain("Retry revision message");
     expect(chatWorkspaceSource).toContain("proposalRevision");
+  });
+});
+
+describe("AdjustNutritionPlanProposalCard — C4 dietary draft", () => {
+  it("is wired into the inline-proposal-card router for adjust_nutrition_plan with swaps", () => {
+    // Router must import and call tryRenderAdjustNutritionPlanProposalCard
+    expect(inlineProposalSource).toContain("tryRenderAdjustNutritionPlanProposalCard");
+    expect(inlineProposalSource).toContain("adjust-nutrition-plan-proposal-card");
+    // The dietary-draft check must appear BEFORE the displayContract fallback
+    const dietaryCardIndex = inlineProposalSource.indexOf("tryRenderAdjustNutritionPlanProposalCard(");
+    const parseContractIndex = inlineProposalSource.indexOf("parseDisplayContract(");
+    expect(dietaryCardIndex).toBeGreaterThan(-1);
+    expect(parseContractIndex).toBeGreaterThan(-1);
+    expect(dietaryCardIndex).toBeLessThan(parseContractIndex);
+  });
+
+  it("renders before/after calorie compare and swap DiffRow list", () => {
+    expect(adjustNutritionCardSource).toContain("dietary-draft__compare");
+    expect(adjustNutritionCardSource).toContain("dietary-draft__swap-row");
+    // struck-through "from" label uses the dietary-draft__swap-from CSS class
+    // (line-through is defined in styles.css .dietary-draft__swap-from)
+    expect(adjustNutritionCardSource).toContain("dietary-draft__swap-from");
+    expect(adjustNutritionCardSource).toContain("dietary-draft__swap-to");
+    expect(adjustNutritionCardSource).toContain("SwapList");
+    expect(adjustNutritionCardSource).toContain("BeforeAfterCompare");
+  });
+
+  it("renders protein-preserved macro chips on both sides of the compare", () => {
+    expect(adjustNutritionCardSource).toContain("MacroChip");
+    expect(adjustNutritionCardSource).toContain("fromProtein");
+    expect(adjustNutritionCardSource).toContain("toProtein");
+  });
+
+  it("uses ProposalCardShell for accept/modify/reject actions and never duplicates the lifecycle", () => {
+    expect(adjustNutritionCardSource).toContain("ProposalCardShell");
+    expect(adjustNutritionCardSource).toContain("useInlineProposalActions");
+    expect(adjustNutritionCardSource).toContain("acceptLabel");
+    // Must not duplicate apply/revision logic — lifecycle lives in the shell + hook
+    expect(adjustNutritionCardSource).not.toContain("decideProposal");
+    expect(adjustNutritionCardSource).not.toContain("appendRevision");
+  });
+
+  it("shows accepted success copy with a View on Nutrition link", () => {
+    expect(adjustNutritionCardSource).toContain("Plan updated");
+    expect(adjustNutritionCardSource).toContain("View nutrition");
+    expect(adjustNutritionCardSource).toContain("confirmation-card__link");
+  });
+
+  it("parseAdjustNutritionPlanProposalPayload returns null when swaps is absent", () => {
+    expect(actionProposalUiStateSource).toContain("parseAdjustNutritionPlanProposalPayload");
+    expect(actionProposalUiStateSource).toContain("adjustNutritionPlanFromProgressChangesSchema");
+    // Guard: only treat as dietary-draft card when swaps metadata is present
+    expect(actionProposalUiStateSource).toContain("parsed.data.swaps");
+    expect(actionProposalUiStateSource).toContain("swaps.length === 0");
+  });
+
+  it("does not contain medical, diagnosis, or treatment language", () => {
+    expect(adjustNutritionCardSource.toLowerCase()).not.toContain("diagnosis");
+    expect(adjustNutritionCardSource.toLowerCase()).not.toContain("treatment");
+    expect(adjustNutritionCardSource.toLowerCase()).not.toContain("prescription");
+    expect(adjustNutritionCardSource.toLowerCase()).not.toContain("medical advice");
+  });
+
+  it("renders an empty-swaps fallback state when no swaps are provided", () => {
+    expect(adjustNutritionCardSource).toContain("No substitution details");
+  });
+
+  it("shows the swap count and total kcal saved in the swaps header", () => {
+    expect(adjustNutritionCardSource).toContain("swap");
+    expect(adjustNutritionCardSource).toContain("totalSaved");
+    expect(adjustNutritionCardSource).toContain("kcal");
   });
 });

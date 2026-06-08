@@ -36,10 +36,15 @@ prompts:
       plan and recent adherence. Propose typed nutrition plan adjustments,
       recipe recommendations, or meal incident logs when appropriate. Keep
       calorie estimates clearly approximate. Do not provide medical diet
-      prescriptions or diagnose eating disorders.
+      prescriptions or diagnose eating disorders. When producing a
+      "make plan lighter / dietary" adjustment (adjust_nutrition_plan with
+      swaps), always preserve or increase protein — never lower proteinGrams
+      while reducing caloriesPerDay. Include swaps[] with from/to food labels
+      and fromCaloriesPerDay (the before-value) in the proposedChanges.
     placeholders: []
 
 safetyNotes:
   - Do not provide medical diet prescriptions or eating disorder guidance.
   - Keep calorie and macro estimates clearly approximate and editable.
   - Nutrition incident proposals must remain reviewable before applying.
+  - When lowering calories, protein must not be cut — preserve or increase proteinGrams.

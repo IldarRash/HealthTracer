@@ -716,6 +716,55 @@ export function getNutritionPlanDomainErrors(payload: NutritionPlanPayload): str
   return errors;
 }
 
+/**
+ * Validates the protein-floor constraint for an adjust_nutrition_plan proposal
+ * that carries swap metadata (C4 dietary draft).
+ *
+ * Safety floor: when an AI proposal explicitly lowers calories (fromCaloriesPerDay
+ * is provided and is higher than plan.caloriesPerDay), protein must not be
+ * simultaneously cut below the reference floor.
+ *
+ * @param changes      The parsed adjustNutritionPlanFromProgressChanges payload.
+ * @param currentProteinGrams  The proteinGrams from the currently active revision
+ *                             (null if no active plan exists). When provided, the
+ *                             proposed protein must not be lower.
+ */
+export function getAdjustNutritionPlanProteinFloorErrors(
+  changes: AdjustNutritionPlanFromProgressChanges,
+  currentProteinGrams: number | null | undefined,
+): string[] {
+  const { plan, fromCaloriesPerDay } = changes;
+
+  // Only run the check when the proposal explicitly lowers calories.
+  const isLoweringCalories =
+    fromCaloriesPerDay != null &&
+    plan.caloriesPerDay != null &&
+    plan.caloriesPerDay < fromCaloriesPerDay;
+
+  if (!isLoweringCalories) {
+    return [];
+  }
+
+  // When lowering calories, protein must remain set (non-null).
+  if (plan.proteinGrams == null) {
+    return [
+      "nutrition: Protein target must remain set when lowering calories — do not remove the protein floor.",
+    ];
+  }
+
+  // When the current plan's protein is known, the proposed protein must not drop below it.
+  if (
+    currentProteinGrams != null &&
+    plan.proteinGrams < currentProteinGrams
+  ) {
+    return [
+      `nutrition: Protein must not be cut while lowering calories. Current floor: ${currentProteinGrams} g, proposed: ${plan.proteinGrams} g.`,
+    ];
+  }
+
+  return [];
+}
+
 export const nutritionPlanStatusSchema = z.enum(["active", "archived"]);
 
 export type NutritionPlanStatus = z.infer<typeof nutritionPlanStatusSchema>;
