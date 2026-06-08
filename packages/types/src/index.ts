@@ -752,6 +752,126 @@ export type ActiveNutritionPlanResponse = z.infer<
   typeof activeNutritionPlanResponseSchema
 >;
 
+// ─── C1: per-meal calorie breakdown read model ─────────────────────────────
+
+/**
+ * One enriched meal row in the C1 read model.
+ * `changed` is computed by diffing the active revision's slot against the
+ * previous revision — it is never persisted.
+ */
+export const nutritionMealCaloriesRowSchema = z.object({
+  label: z.string(),
+  timingHint: z.string().nullable(),
+  mealTime: z.string().optional(),
+  dish: z.string().optional(),
+  kcal: z.number().int().nonnegative().optional(),
+  proteinGrams: z.number().int().nonnegative().optional(),
+  carbsGrams: z.number().int().nonnegative().optional(),
+  fatGrams: z.number().int().nonnegative().optional(),
+  /** True when this slot changed between the previous and active revision. */
+  changed: z.boolean(),
+});
+
+export type NutritionMealCaloriesRow = z.infer<typeof nutritionMealCaloriesRowSchema>;
+
+/**
+ * Full C1 read model: per-meal rows + day-level aggregates.
+ *
+ * `totalKcal` = Σ of meals with kcal populated.
+ * `remaining` = `caloriesPerDay ?? 0` − `totalKcal` (can be negative if over target).
+ * `hasPerMealData` = true when at least one meal slot has a kcal value.
+ */
+export const nutritionMealCaloriesReadModelSchema = z.object({
+  revisionNumber: z.number().int().positive(),
+  caloriesPerDay: z.number().int().positive().nullable(),
+  proteinTarget: z.number().int().nonnegative().nullable(),
+  carbsTarget: z.number().int().nonnegative().nullable(),
+  fatTarget: z.number().int().nonnegative().nullable(),
+  meals: z.array(nutritionMealCaloriesRowSchema),
+  totalKcal: z.number().int().nonnegative(),
+  totalProtein: z.number().int().nonnegative(),
+  totalCarbs: z.number().int().nonnegative(),
+  totalFat: z.number().int().nonnegative(),
+  remaining: z.number().int(),
+  hasPerMealData: z.boolean(),
+});
+
+export type NutritionMealCaloriesReadModel = z.infer<
+  typeof nutritionMealCaloriesReadModelSchema
+>;
+
+/**
+ * Compute the C1 per-meal calories read model from revision payloads.
+ *
+ * @param revisionNumber - the active revision number (from the DB row).
+ * @param activePayload - the active nutrition plan revision payload.
+ * @param previousPayload - the previous revision payload (null for first revision),
+ *   used to compute the `changed` flag by comparing slot labels and field values.
+ */
+export function computeMealCaloriesBreakdown(
+  revisionNumber: number,
+  activePayload: NutritionPlanPayload,
+  previousPayload: NutritionPlanPayload | null,
+): NutritionMealCaloriesReadModel {
+  const prevSlotLabels = new Set<string>(
+    previousPayload?.mealStructure.map((s) => s.label.trim().toLowerCase()) ?? [],
+  );
+
+  // Compare slot kcal/macros/dish to detect changes; fall back to label-presence diff
+  // for legacy previous revisions that predate per-meal fields.
+  const previousSlotByLabel = new Map<string, NutritionMealSlot>(
+    previousPayload?.mealStructure.map((s) => [s.label.trim().toLowerCase(), s]) ?? [],
+  );
+
+  const meals: NutritionMealCaloriesRow[] = activePayload.mealStructure.map((slot) => {
+    const key = slot.label.trim().toLowerCase();
+    const prevSlot = previousSlotByLabel.get(key);
+    const isNew = !prevSlotLabels.has(key);
+    const isChanged =
+      isNew ||
+      (prevSlot !== undefined &&
+        (prevSlot.kcal !== slot.kcal ||
+          prevSlot.dish !== slot.dish ||
+          prevSlot.proteinGrams !== slot.proteinGrams ||
+          prevSlot.carbsGrams !== slot.carbsGrams ||
+          prevSlot.fatGrams !== slot.fatGrams));
+
+    return {
+      label: slot.label,
+      timingHint: slot.timingHint ?? null,
+      mealTime: slot.mealTime,
+      dish: slot.dish,
+      kcal: slot.kcal,
+      proteinGrams: slot.proteinGrams,
+      carbsGrams: slot.carbsGrams,
+      fatGrams: slot.fatGrams,
+      changed: isChanged,
+    };
+  });
+
+  const totalKcal = meals.reduce((sum, m) => sum + (m.kcal ?? 0), 0);
+  const totalProtein = meals.reduce((sum, m) => sum + (m.proteinGrams ?? 0), 0);
+  const totalCarbs = meals.reduce((sum, m) => sum + (m.carbsGrams ?? 0), 0);
+  const totalFat = meals.reduce((sum, m) => sum + (m.fatGrams ?? 0), 0);
+  const remaining = (activePayload.caloriesPerDay ?? 0) - totalKcal;
+  const hasPerMealData = meals.some((m) => m.kcal !== undefined);
+
+  return {
+    revisionNumber,
+    caloriesPerDay: activePayload.caloriesPerDay,
+    proteinTarget: activePayload.proteinGrams,
+    carbsTarget: activePayload.carbsGrams,
+    fatTarget: activePayload.fatGrams,
+    meals,
+    totalKcal,
+    totalProtein,
+    totalCarbs,
+    totalFat,
+    remaining,
+    hasPerMealData,
+  };
+}
+
 export const nutritionMealCompletionSchema = z.object({
   label: z.string().min(1).max(80),
   completed: z.boolean().default(false),

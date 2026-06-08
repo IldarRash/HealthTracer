@@ -3,43 +3,31 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+/** Normalize CRLF to LF so whitespace assertions work on Windows checkouts. */
+function readSource(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
 const proposalsDir = dirname(fileURLToPath(import.meta.url));
-const inlineProposalSource = readFileSync(
-  join(proposalsDir, "inline-proposal-card.tsx"),
-  "utf8",
-);
-const wellbeingProposalSource = readFileSync(
+const inlineProposalSource = readSource(join(proposalsDir, "inline-proposal-card.tsx"));
+const wellbeingProposalSource = readSource(
   join(proposalsDir, "wellbeing-checkin-proposal-card.tsx"),
-  "utf8",
 );
-const nutritionProposalSource = readFileSync(
+const nutritionProposalSource = readSource(
   join(proposalsDir, "nutrition-incident-proposal-card.tsx"),
-  "utf8",
 );
-const recommendRecipesProposalSource = readFileSync(
+const recommendRecipesProposalSource = readSource(
   join(proposalsDir, "recommend-recipes-proposal-card.tsx"),
-  "utf8",
 );
-const chatWorkspaceSource = readFileSync(
-  join(proposalsDir, "../chat/chat-workspace.tsx"),
-  "utf8",
-);
-const inlineProposalActionsSource = readFileSync(
+const chatWorkspaceSource = readSource(join(proposalsDir, "../chat/chat-workspace.tsx"));
+const inlineProposalActionsSource = readSource(
   join(proposalsDir, "../../lib/use-inline-proposal-actions.ts"),
-  "utf8",
 );
-const contractProposalCardSource = readFileSync(
-  join(proposalsDir, "contract-proposal-card.tsx"),
-  "utf8",
-);
-const editableProposalContractSource = readFileSync(
+const contractProposalCardSource = readSource(join(proposalsDir, "contract-proposal-card.tsx"));
+const editableProposalContractSource = readSource(
   join(proposalsDir, "editable-proposal-contract.tsx"),
-  "utf8",
 );
-const proposalCardShellSource = readFileSync(
-  join(proposalsDir, "proposal-card-shell.tsx"),
-  "utf8",
-);
+const proposalCardShellSource = readSource(join(proposalsDir, "proposal-card-shell.tsx"));
 
 describe("InlineProposalCard chat hierarchy", () => {
   it("routes wellbeing and nutrition incident intents to specialized cards", () => {
@@ -180,9 +168,8 @@ describe("RecommendRecipesProposalCard", () => {
 });
 
 describe("GenericInlineProposalCard chat hierarchy", () => {
-  const genericProposalSource = readFileSync(
+  const genericProposalSource = readSource(
     join(proposalsDir, "inline-proposal-card-generic.tsx"),
-    "utf8",
   );
 
   it("does not render raw intent, domain, or validation status strings", () => {

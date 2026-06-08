@@ -6,6 +6,8 @@
 export type ProgressBarProps = {
   value: number; // 0–100
   color?: string;
+  /** Track (empty-fill) background color. Defaults to rgba(255,255,255,0.08) for dark surfaces. */
+  trackColor?: string;
   height?: number;
   className?: string;
 };
@@ -13,6 +15,7 @@ export type ProgressBarProps = {
 export function ProgressBar({
   value,
   color = "#19c37d",
+  trackColor = "rgba(255,255,255,0.08)",
   height = 7,
   className,
 }: ProgressBarProps) {
@@ -23,7 +26,7 @@ export function ProgressBar({
       style={{
         height,
         borderRadius: height,
-        background: "rgba(255,255,255,0.08)",
+        background: trackColor,
         overflow: "hidden",
       }}
     >

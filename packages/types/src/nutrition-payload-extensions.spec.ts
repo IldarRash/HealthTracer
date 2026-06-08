@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   adjustNutritionPlanFromProgressChangesSchema,
+  computeMealCaloriesBreakdown,
   getNutritionPlanDomainErrors,
   nutritionPlanPayloadSchema,
 } from "./index.js";
@@ -252,5 +253,188 @@ describe("domain errors still enforced on plans with new optional fields", () =>
     expect(errors).toContain(
       "nutrition: At least one daily target (calories, macros, or hydration) is required.",
     );
+  });
+});
+
+// ─── C1: computeMealCaloriesBreakdown ──────────────────────────────────────
+
+const payloadWithMealData = nutritionPlanPayloadSchema.parse({
+  ...basePayload,
+  caloriesPerDay: 2100,
+  mealStructure: [
+    {
+      label: "Breakfast",
+      timingHint: "Morning",
+      mealTime: "07:30",
+      dish: "Oatmeal",
+      kcal: 480,
+      proteinGrams: 32,
+      carbsGrams: 58,
+      fatGrams: 14,
+    },
+    {
+      label: "Lunch",
+      timingHint: null,
+      mealTime: "14:00",
+      dish: "Chicken + quinoa",
+      kcal: 620,
+      proteinGrams: 44,
+      carbsGrams: 62,
+      fatGrams: 20,
+    },
+    {
+      label: "Dinner",
+      timingHint: "Evening",
+      mealTime: "20:00",
+      dish: "Salmon + veg",
+      kcal: 540,
+      proteinGrams: 38,
+      carbsGrams: 30,
+      fatGrams: 24,
+    },
+  ],
+});
+
+describe("computeMealCaloriesBreakdown — first revision (no previous)", () => {
+  it("returns correct totals when no previous revision", () => {
+    const model = computeMealCaloriesBreakdown(1, payloadWithMealData, null);
+
+    expect(model.revisionNumber).toBe(1);
+    expect(model.caloriesPerDay).toBe(2100);
+    expect(model.totalKcal).toBe(480 + 620 + 540); // 1640
+    expect(model.totalProtein).toBe(32 + 44 + 38);  // 114
+    expect(model.totalCarbs).toBe(58 + 62 + 30);    // 150
+    expect(model.totalFat).toBe(14 + 20 + 24);      // 58
+    expect(model.remaining).toBe(2100 - 1640);      // 460
+    expect(model.hasPerMealData).toBe(true);
+  });
+
+  it("marks all meals as changed when no previous revision", () => {
+    const model = computeMealCaloriesBreakdown(1, payloadWithMealData, null);
+
+    // All slots are "new" relative to null previous → changed = true.
+    expect(model.meals.every((m) => m.changed)).toBe(true);
+  });
+
+  it("preserves per-meal fields in each row", () => {
+    const model = computeMealCaloriesBreakdown(1, payloadWithMealData, null);
+
+    const breakfast = model.meals.find((m) => m.label === "Breakfast");
+    expect(breakfast?.kcal).toBe(480);
+    expect(breakfast?.dish).toBe("Oatmeal");
+    expect(breakfast?.mealTime).toBe("07:30");
+  });
+});
+
+describe("computeMealCaloriesBreakdown — second revision (diff against previous)", () => {
+  const previousPayload = nutritionPlanPayloadSchema.parse({
+    ...basePayload,
+    caloriesPerDay: 2200,
+    mealStructure: [
+      { label: "Breakfast", timingHint: "Morning" },
+      { label: "Lunch",     timingHint: null },
+      { label: "Dinner",    timingHint: "Evening" },
+    ],
+  });
+
+  it("marks slots with new kcal data as changed vs legacy previous", () => {
+    const model = computeMealCaloriesBreakdown(2, payloadWithMealData, previousPayload);
+
+    // Previous had no kcal → active has kcal → changed for each slot.
+    const breakfast = model.meals.find((m) => m.label === "Breakfast");
+    expect(breakfast?.changed).toBe(true);
+  });
+
+  it("marks unchanged slots as not changed when kcal matches", () => {
+    // Previous revision already has the same kcal/dish/macros.
+    const prevWithSameData = nutritionPlanPayloadSchema.parse({
+      ...basePayload,
+      caloriesPerDay: 2100,
+      mealStructure: [
+        {
+          label: "Breakfast",
+          timingHint: "Morning",
+          mealTime: "07:30",
+          dish: "Oatmeal",
+          kcal: 480,
+          proteinGrams: 32,
+          carbsGrams: 58,
+          fatGrams: 14,
+        },
+        {
+          label: "Lunch",
+          timingHint: null,
+          mealTime: "14:00",
+          dish: "Chicken + quinoa",
+          kcal: 620,
+          proteinGrams: 44,
+          carbsGrams: 62,
+          fatGrams: 20,
+        },
+        {
+          label: "Dinner",
+          timingHint: "Evening",
+          mealTime: "20:00",
+          dish: "Salmon + veg",
+          kcal: 540,
+          proteinGrams: 38,
+          carbsGrams: 30,
+          fatGrams: 24,
+        },
+      ],
+    });
+
+    const model = computeMealCaloriesBreakdown(3, payloadWithMealData, prevWithSameData);
+    expect(model.meals.every((m) => !m.changed)).toBe(true);
+  });
+
+  it("marks a new slot (not present in previous) as changed", () => {
+    // Add a snack slot to the active revision that was absent in previous.
+    const activeWithSnack = nutritionPlanPayloadSchema.parse({
+      ...basePayload,
+      mealStructure: [
+        ...payloadWithMealData.mealStructure,
+        { label: "Snack", timingHint: null, kcal: 150, proteinGrams: 5, carbsGrams: 20, fatGrams: 5 },
+      ],
+    });
+
+    const model = computeMealCaloriesBreakdown(2, activeWithSnack, previousPayload);
+    const snack = model.meals.find((m) => m.label === "Snack");
+    expect(snack?.changed).toBe(true);
+  });
+});
+
+describe("computeMealCaloriesBreakdown — legacy plan without per-meal data", () => {
+  it("returns hasPerMealData=false when no slots have kcal", () => {
+    const legacyPayload = nutritionPlanPayloadSchema.parse(basePayload);
+    const model = computeMealCaloriesBreakdown(1, legacyPayload, null);
+
+    expect(model.hasPerMealData).toBe(false);
+    expect(model.totalKcal).toBe(0);
+    expect(model.meals.length).toBe(baseMealStructure.length);
+  });
+
+  it("remaining equals caloriesPerDay when no per-meal kcal (totalKcal=0)", () => {
+    const legacyPayload = nutritionPlanPayloadSchema.parse(basePayload);
+    const model = computeMealCaloriesBreakdown(1, legacyPayload, null);
+
+    expect(model.remaining).toBe(legacyPayload.caloriesPerDay);
+  });
+});
+
+describe("computeMealCaloriesBreakdown — remaining can be negative (over target)", () => {
+  it("returns negative remaining when meal totals exceed caloriesPerDay", () => {
+    const overTargetPayload = nutritionPlanPayloadSchema.parse({
+      ...basePayload,
+      caloriesPerDay: 1000,
+      mealStructure: [
+        { label: "Breakfast", timingHint: null, kcal: 600 },
+        { label: "Lunch",     timingHint: null, kcal: 600 },
+      ],
+    });
+
+    const model = computeMealCaloriesBreakdown(1, overTargetPayload, null);
+    expect(model.totalKcal).toBe(1200);
+    expect(model.remaining).toBe(-200);
   });
 });

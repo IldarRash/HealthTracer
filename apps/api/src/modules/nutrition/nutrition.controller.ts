@@ -16,6 +16,16 @@ export class NutritionController {
     return this.nutritionService.getCurrentActivePlan(auth);
   }
 
+  /**
+   * C1 read model: per-meal calorie breakdown for the active nutrition plan.
+   * Returns null when no active plan or no active revision exists.
+   * Read-only — never mutates plan state.
+   */
+  @Get("active/meals-breakdown")
+  getMealCaloriesBreakdown(@CurrentAuth() auth: ClerkAuthContext) {
+    return this.nutritionService.getMealCaloriesBreakdown(auth);
+  }
+
   @Get("revisions")
   listRevisions(@CurrentAuth() auth: ClerkAuthContext) {
     return this.nutritionService.listCurrentRevisions(auth);

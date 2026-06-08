@@ -8152,3 +8152,280 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
   padding-top: 12px;
 }
 
+/* ── meal-calories-breakdown (C1) ── */
+
+.meal-calories-breakdown {
+  width: 100%;
+}
+
+.meal-calories-breakdown__row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+/* ── LEFT: dark day-total card ── */
+
+.meal-calories-breakdown__day-card {
+  width: 290px;
+  flex-shrink: 0;
+  /* Instrument-dark: deepest surface so the amber ring reads as a lit gauge against
+     a dark field. In dark theme --color-surface-card = #131618. */
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  /* Amber top accent marks this as the calorie-instrument card */
+  border-top: 2px solid rgba(245, 165, 36, 0.4);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.meal-calories-breakdown__card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.meal-calories-breakdown__card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  flex: 1;
+}
+
+.meal-calories-breakdown__ring-wrap {
+  margin-bottom: 14px;
+}
+
+.meal-calories-breakdown__ring-caption {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
+  line-height: 1.5;
+  margin: 0 0 18px;
+}
+
+.meal-calories-breakdown__macro-tiles {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.meal-calories-breakdown__macro-tile {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 6px;
+  border-radius: 11px;
+  /* Slightly elevated above the dark day-card surface for readable Б/У/Ж tiles */
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border-default);
+  gap: 3px;
+}
+
+.meal-calories-breakdown__macro-tile-value {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.meal-calories-breakdown__macro-tile-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* ── RIGHT: light meal-list card ── */
+
+.meal-calories-breakdown__list-card {
+  flex: 1;
+  /* Elevated surface: slightly lighter than the day card in dark theme (#20262a vs #131618)
+     so the two-card pair reads as instrument-dark LEFT + content-light RIGHT. */
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: 16px;
+  padding: 20px;
+  min-width: 0;
+}
+
+.meal-calories-breakdown__list-note {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-style: italic;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.meal-calories-breakdown__meal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.meal-calories-breakdown__meal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 4px;
+}
+
+.meal-calories-breakdown__meal-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(245, 165, 36, 0.1);
+  border: 1px solid rgba(245, 165, 36, 0.18);
+  margin-top: 1px;
+}
+
+.meal-calories-breakdown__meal-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.meal-calories-breakdown__meal-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.meal-calories-breakdown__meal-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.meal-calories-breakdown__meal-time {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.meal-calories-breakdown__meal-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: rgba(245, 165, 36, 0.14);
+  color: var(--color-metric-amber);
+}
+
+.meal-calories-breakdown__meal-dish {
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  margin: 3px 0 6px;
+  line-height: 1.4;
+}
+
+.meal-calories-breakdown__bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.meal-calories-breakdown__bar-wrap {
+  flex: 1;
+}
+
+.meal-calories-breakdown__macro-mini {
+  flex-shrink: 0;
+}
+
+/* MacroMini inline layout override inside the bar-row */
+.meal-calories-breakdown .macro-mini {
+  display: flex;
+  gap: 7px;
+}
+
+.meal-calories-breakdown .macro-mini__item {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.meal-calories-breakdown .macro-mini__value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.meal-calories-breakdown .macro-mini__unit {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  display: none;
+}
+
+.meal-calories-breakdown__meal-kcal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.meal-calories-breakdown__meal-kcal-value {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.meal-calories-breakdown__meal-kcal-unit {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+}
+
+.meal-calories-breakdown__empty-label {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* Fallback for plans without per-meal data */
+.meal-calories-breakdown__fallback {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--color-border-default);
+}
+
+.meal-calories-breakdown__fallback-text {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Responsive: stack the two cards on narrow viewports */
+@media (max-width: 680px) {
+  .meal-calories-breakdown__row {
+    flex-direction: column;
+  }
+
+  .meal-calories-breakdown__day-card {
+    width: 100%;
+  }
+}
+

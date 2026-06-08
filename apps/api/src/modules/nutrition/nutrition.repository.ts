@@ -177,6 +177,20 @@ export class NutritionRepository {
     });
   }
 
+  /**
+   * Returns the two most-recent revisions for a plan ordered by revisionNumber DESC.
+   * The first element is the active/latest; the second (if present) is the previous.
+   * Used to compute the C1 per-meal `changed` flag without a separate DB count query.
+   */
+  async findLatestTwoRevisionsByPlanId(nutritionPlanId: string) {
+    return this.db
+      .select()
+      .from(nutritionPlanRevisions)
+      .where(eq(nutritionPlanRevisions.nutritionPlanId, nutritionPlanId))
+      .orderBy(desc(nutritionPlanRevisions.revisionNumber))
+      .limit(2);
+  }
+
   async appendRevision(
     nutritionPlanId: string,
     payload: NutritionPlanPayload,
