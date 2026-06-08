@@ -1,6 +1,9 @@
 import { BadRequestException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GroceryDerivationService } from "./grocery-derivation.service.js";
 import { NutritionService } from "./nutrition.service.js";
+
+const groceryDerivationService = new GroceryDerivationService();
 
 const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
 
@@ -87,6 +90,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -113,6 +117,7 @@ describe("NutritionService", () => {
         appendRevision: async () => ({ id: "rev-append-2" }),
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -130,6 +135,7 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(
@@ -146,6 +152,7 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(service.getCurrentActivePlan(auth as never)).resolves.toEqual({
@@ -158,6 +165,7 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(service.getAdherenceForDate(auth as never, "2026-05-22")).resolves.toEqual({
@@ -186,6 +194,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const first = await service.upsertAdherenceForDate(auth as never, "2026-05-22", {
@@ -205,6 +214,7 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(
@@ -238,6 +248,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await service.getAdherenceForDate(auth as never, "2026-05-22");
@@ -282,6 +293,7 @@ describe("NutritionService", () => {
           updatedAt: "2026-05-22T12:00:00.000Z",
         }),
       } as never,
+      groceryDerivationService,
     );
 
     const response = await service.upsertAdherenceForToday(auth as never, {
@@ -330,6 +342,7 @@ describe("NutritionService", () => {
           updatedAt: "2026-05-22T12:00:00.000Z",
         }),
       } as never,
+      groceryDerivationService,
     );
 
     await service.getAdherenceForToday(auth as never);
@@ -342,6 +355,7 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(service.getNutritionDayDetail(auth as never, "2026-05-22")).resolves.toBeNull();
@@ -360,6 +374,7 @@ describe("NutritionService", () => {
         }),
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(service.getNutritionDayDetail(auth as never, "2026-05-22")).resolves.toBeNull();
@@ -428,6 +443,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const detail = await service.getNutritionDayDetail(auth as never, "2026-05-22");
@@ -446,6 +462,7 @@ describe("NutritionService", () => {
     const service = new NutritionService(
       createRepositoryMock() as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(
@@ -469,6 +486,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await service.upsertAdherenceForDate(auth as never, "2026-05-22", {
@@ -500,6 +518,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const incidentId = await service.applyNutritionIncidentProposal(
@@ -537,6 +556,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const incidentId = await service.applyNutritionIncidentProposal(
@@ -568,6 +588,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(
@@ -616,6 +637,7 @@ describe("NutritionService", () => {
         },
       }) as never,
       tokyoUsersService as never,
+      groceryDerivationService,
     );
 
     await service.applyNutritionIncidentProposal(
@@ -661,6 +683,7 @@ describe("NutritionService — C2 weeklyPlan round-trip", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await service.applyNutritionPlanProposal(
@@ -687,6 +710,7 @@ describe("NutritionService — C2 weeklyPlan round-trip", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await service.applyNutritionPlanProposal(
@@ -723,6 +747,7 @@ describe("NutritionService — C2 weeklyPlan round-trip", () => {
         }),
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const response = await service.getCurrentActivePlan(auth as never);
@@ -754,6 +779,7 @@ describe("NutritionService — C2 weeklyPlan round-trip", () => {
         }),
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const response = await service.getCurrentActivePlan(auth as never);
@@ -773,6 +799,7 @@ describe("NutritionService — C2 weeklyPlan round-trip", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await service.applyNutritionPlanProposal(
@@ -820,6 +847,7 @@ describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -849,6 +877,7 @@ describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await service.applyNutritionPlanProposal(
@@ -869,6 +898,7 @@ describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
         appendRevision: async () => ({ id: "rev-no-swaps" }),
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -887,6 +917,7 @@ describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
         findActivePlanByUserId: async () => ({ id: "plan-swap-invalid" }),
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     await expect(
@@ -916,6 +947,7 @@ describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
         },
       }) as never,
       usersService as never,
+      groceryDerivationService,
     );
 
     const reference = await service.applyNutritionPlanProposal(
@@ -929,4 +961,222 @@ describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
     expect(createCalled).toBe(true);
     expect(appendCalled).toBe(false);
   });
+});
+
+// ── getGroceryList — bought-state isolation + derivation paths ─────────────
+
+describe("NutritionService.getGroceryList", () => {
+    it("returns empty response when user has no active nutrition plan", async () => {
+      const service = new NutritionService(
+        createRepositoryMock({
+          findActivePlanByUserId: async () => null,
+        }) as never,
+        usersService as never,
+        groceryDerivationService,
+      );
+
+      const result = await service.getGroceryList(auth as never);
+
+      expect(result.revisionId).toBeNull();
+      expect(result.revisionNumber).toBeNull();
+      expect(result.totalItems).toBe(0);
+      expect(result.categories).toEqual([]);
+      expect(result.allergies).toEqual([]);
+      expect(result.mealsPerDay).toBe(0);
+    });
+
+    it("returns empty response when active plan has no activeRevisionId", async () => {
+      const service = new NutritionService(
+        createRepositoryMock({
+          findActivePlanByUserId: async () => ({
+            id: "plan-1",
+            activeRevisionId: null,
+          }),
+        }) as never,
+        usersService as never,
+        groceryDerivationService,
+      );
+
+      const result = await service.getGroceryList(auth as never);
+
+      expect(result.revisionId).toBeNull();
+      expect(result.totalItems).toBe(0);
+    });
+
+    it("returns empty response when the active revision row is not found", async () => {
+      const service = new NutritionService(
+        createRepositoryMock({
+          findActivePlanByUserId: async () => ({
+            id: "plan-1",
+            activeRevisionId: "rev-missing",
+          }),
+          findActiveRevisionByPlanId: async () => null,
+        }) as never,
+        usersService as never,
+        groceryDerivationService,
+      );
+
+      const result = await service.getGroceryList(auth as never);
+
+      expect(result.revisionId).toBeNull();
+      expect(result.totalItems).toBe(0);
+    });
+
+    it("derives grocery list from a revision with ingredient data and never writes a plan revision", async () => {
+      const payloadWithIngredients = {
+        ...payload,
+        mealStructure: [
+          {
+            label: "Breakfast",
+            timingHint: "08:00",
+            ingredients: [
+              { name: "Oatmeal", quantity: 100, unit: "г" },
+              { name: "Banana", quantity: 1 },
+            ],
+          },
+          {
+            label: "Lunch",
+            timingHint: "13:00",
+            ingredients: [
+              { name: "Chicken breast", quantity: 200, unit: "г" },
+              { name: "Spinach", quantity: 80, unit: "г" },
+            ],
+          },
+        ],
+      };
+
+      let appendCalled = false;
+      let createCalled = false;
+
+      const service = new NutritionService(
+        createRepositoryMock({
+          findActivePlanByUserId: async () => ({
+            id: "plan-grocery-1",
+            activeRevisionId: "rev-grocery-1",
+          }),
+          findActiveRevisionByPlanId: async () => ({
+            id: "rev-grocery-1",
+            nutritionPlanId: "plan-grocery-1",
+            revisionNumber: 5,
+            reason: "Updated plan",
+            source: "ai_proposal",
+            payload: payloadWithIngredients,
+            createdAt: new Date("2026-06-01T00:00:00.000Z"),
+          }),
+          appendRevision: async () => {
+            appendCalled = true;
+            return { id: "rev-append-should-not" };
+          },
+          createPlanWithRevision: async () => {
+            createCalled = true;
+            return { revision: { id: "rev-create-should-not" } };
+          },
+        }) as never,
+        usersService as never,
+        groceryDerivationService,
+      );
+
+      const result = await service.getGroceryList(auth as never);
+
+      // Derived correctly
+      expect(result.revisionId).toBe("rev-grocery-1");
+      expect(result.revisionNumber).toBe(5);
+      expect(result.totalItems).toBe(4);
+      expect(result.mealsPerDay).toBe(2);
+      expect(result.categories.length).toBeGreaterThan(0);
+
+      // Safety invariant: no plan revision was written
+      expect(appendCalled).toBe(false);
+      expect(createCalled).toBe(false);
+    });
+
+    it("returns allergies from the plan payload in the grocery response", async () => {
+      const payloadWithAllergies = {
+        ...payload,
+        allergies: ["peanut", "nuts"],
+        mealStructure: [
+          {
+            label: "Snack",
+            timingHint: null,
+            ingredients: [
+              { name: "Peanut butter", quantity: 30, unit: "г" },
+              { name: "Chicken", quantity: 150, unit: "г" },
+            ],
+          },
+        ],
+      };
+
+      const service = new NutritionService(
+        createRepositoryMock({
+          findActivePlanByUserId: async () => ({
+            id: "plan-allergy",
+            activeRevisionId: "rev-allergy",
+          }),
+          findActiveRevisionByPlanId: async () => ({
+            id: "rev-allergy",
+            nutritionPlanId: "plan-allergy",
+            revisionNumber: 2,
+            reason: "Allergy-aware plan",
+            source: "ai_proposal",
+            payload: payloadWithAllergies,
+            createdAt: new Date("2026-06-01T00:00:00.000Z"),
+          }),
+        }) as never,
+        usersService as never,
+        groceryDerivationService,
+      );
+
+      const result = await service.getGroceryList(auth as never);
+
+      expect(result.allergies).toEqual(["peanut", "nuts"]);
+
+      // Peanut butter should be flagged as allergen
+      const allItems = result.categories.flatMap((g) => g.items);
+      const peanut = allItems.find((i) => i.name === "Peanut butter");
+      expect(peanut?.isAllergen).toBe(true);
+
+      // Chicken should not be flagged
+      const chicken = allItems.find((i) => i.name === "Chicken");
+      expect(chicken?.isAllergen).toBe(false);
+    });
+
+    it("returns empty categories when the revision has no ingredient data", async () => {
+      const payloadNoIngredients = {
+        ...payload,
+        mealStructure: [
+          { label: "Breakfast", timingHint: null },
+          { label: "Lunch", timingHint: null },
+          { label: "Dinner", timingHint: null },
+        ],
+      };
+
+      const service = new NutritionService(
+        createRepositoryMock({
+          findActivePlanByUserId: async () => ({
+            id: "plan-empty-ingredients",
+            activeRevisionId: "rev-empty-ingredients",
+          }),
+          findActiveRevisionByPlanId: async () => ({
+            id: "rev-empty-ingredients",
+            nutritionPlanId: "plan-empty-ingredients",
+            revisionNumber: 1,
+            reason: "Plan without ingredients",
+            source: "ai_proposal",
+            payload: payloadNoIngredients,
+            createdAt: new Date("2026-06-01T00:00:00.000Z"),
+          }),
+        }) as never,
+        usersService as never,
+        groceryDerivationService,
+      );
+
+      const result = await service.getGroceryList(auth as never);
+
+      expect(result.totalItems).toBe(0);
+      expect(result.categories).toEqual([]);
+      // revisionId and number are still present (plan exists, just no ingredients)
+      expect(result.revisionId).toBe("rev-empty-ingredients");
+      expect(result.revisionNumber).toBe(1);
+      expect(result.mealsPerDay).toBe(3);
+    });
 });
