@@ -28,6 +28,7 @@ This directory is the Claude Code equivalent of the project's `.cursor/` setup, 
 | `refactor-cleaner` | Remove superseded legacy code after a refactor |
 | `build-error-resolver` | Fix build / typecheck / lint failures |
 | `app-runner` | Start the stack and verify a flow works end-to-end |
+| `github-agent` | Bookend the feature workflow: open issue + branch, then commit + push + PR |
 | `visual-designer` | Screen-level visual direction / UX audit (plans only) |
 | `design-system-agent` | Reusable UI primitives, tokens, accessibility |
 | `ui-polish-implementer` | Approved visual-only polish |

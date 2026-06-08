@@ -141,7 +141,7 @@ When refactoring, **remove the superseded path** — dead files, exports, obsole
 
 This repo ships a Claude operating layer under `.claude/` (mirrored from the original `.cursor/` setup):
 
-- `.claude/agents/*` — specialized subagents (planner, backend/frontend implementers, reviewer, test-writer, app-runner, security-reviewer, design agents). Delegate role-specific work to them via the Agent tool.
+- `.claude/agents/*` — specialized subagents (planner, backend/frontend implementers, reviewer, test-writer, app-runner, security-reviewer, design agents, and **github-agent** which bookends the workflow with issue/branch then commit/push/PR). Delegate role-specific work to them via the Agent tool.
 - `.claude/skills/*` — invocable workflows (backend/frontend implementation, feature planning, test writing, security review, design system).
 - `.claude/rules/*` — the detailed style/security/AI-orchestrator rules ported from `.cursor/rules`; consult the relevant file when working in its area.
 

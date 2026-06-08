@@ -27,7 +27,6 @@
     "deny": [
       "Read(**/.env)",
       "Read(**/.env.*)",
-      "Bash(git push:*)",
       "Bash(rm -rf:*)",
       "Bash(drizzle-kit drop:*)"
     ]

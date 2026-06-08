@@ -32,7 +32,8 @@ Subagent scope rule: before launching a subagent, estimate whether the task is l
 3. Product Analyst writes the analyzed feature brief to `docs/product/features/<feature-slug>.md`.
 4. Feature Planner reviews and refines the feature brief into the final implementation plan, breaks it into smaller role-specific tasks, then asks the user for approval before implementation starts. If Product Analyst added to or changed the feature brief, those latest changes are authoritative planning input and must be considered by every implementation, testing, review, and runtime-verification subagent before source changes begin.
 5. After the plan is approved, Feature Planner explicitly asks the user to confirm which subagents should be used or skipped. The planner should propose a default subagent list and call out any roles that are unnecessary for the narrowed scope.
-6. After subagent confirmation, Feature Planner invokes the needed implementation, testing, and review subagents in order:
+6. Feature Planner launches **GitHub Agent (`mode: open`)** to open the GitHub lifecycle: search for an existing issue (dedupe), create the feature issue, and create the `feature/<slug>` branch. The returned issue number and branch are threaded through the rest of the run. GitHub Agent owns branch/commit/push and issue/PR creation and runs automatically.
+7. After subagent confirmation, Feature Planner invokes the needed implementation, testing, and review subagents in order:
    - N Backend Implementer subagents build NestJS, Drizzle, Zod, repositories, services, and backend tests.
    - N Frontend Implementer subagents build Next.js, Expo, TanStack Query integration, and UI states.
    - Visual Designer subagent audits implemented UI and produces screen-level visual direction or a prioritized design plan.
@@ -40,10 +41,11 @@ Subagent scope rule: before launching a subagent, estimate whether the task is l
    - UI Polish Implementer subagent applies approved visual-only polish without changing routing, data flow, or domain logic.
    - Test Writer subagent adds focused domain, API, schema, AI, and UI state tests.
    - Implementation Reviewer subagent checks correctness, architecture fit, security, tests, and docs impact.
-7. App Runner subagent starts the local stack from database dependencies through API and frontend, verifies the target routes or smoke flow, and returns running URLs, commands, status, screenshots or browser notes when useful, blockers, and the next required owner.
-8. If runtime, review, test, or live design verification fails, Feature Planner assigns the smallest corrective task to the right subagent and repeats the verification loop.
-9. After a feature is implemented and verified, Feature Planner updates the project knowledge base before final reporting. Use `agents-memory-updater` for durable agent knowledge and update relevant docs/rules when implementation changes product or architecture guidance.
-10. Feature Planner integrates subagent outputs, keeps the main dialog coherent, and reports the final result only after App Runner reports `working` for the relevant flow, or after a specific blocker prevents runtime verification.
+8. App Runner subagent starts the local stack from database dependencies through API and frontend, verifies the target routes or smoke flow, and returns running URLs, commands, status, screenshots or browser notes when useful, blockers, and the next required owner.
+9. If runtime, review, test, or live design verification fails, Feature Planner assigns the smallest corrective task to the right subagent and repeats the verification loop.
+10. After a feature is implemented and verified, Feature Planner updates the project knowledge base before final reporting. Use `agents-memory-updater` for durable agent knowledge and update relevant docs/rules when implementation changes product or architecture guidance.
+11. Once App Runner reports `working`, Feature Planner launches **GitHub Agent (`mode: ship`)** to close the GitHub lifecycle: stage the relevant files, commit (with `Closes #<issue>`), push the branch, and open a pull request to `main` linked to the issue. This runs automatically without further user confirmation.
+12. Feature Planner integrates subagent outputs, keeps the main dialog coherent, and reports the final result only after App Runner reports `working` for the relevant flow and GitHub Agent has opened the PR, or after a specific blocker prevents runtime verification or shipping.
 
 Role templates live in `.claude/agents`.
 
