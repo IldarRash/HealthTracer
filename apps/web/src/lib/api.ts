@@ -539,6 +539,8 @@ export function getAcceptedProposalRefreshQueryKeys(
       }
 
       return commonKeys;
+    case "body":
+      return [...commonKeys, apiQueryKeys.profile];
   }
 }
 

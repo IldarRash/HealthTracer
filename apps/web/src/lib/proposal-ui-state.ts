@@ -56,6 +56,8 @@ export function getProposalDomainLabel(domain: ProposalTargetDomain): string {
       return "Today";
     case "general":
       return "Coaching";
+    case "body":
+      return "Body";
   }
 }
 
@@ -75,6 +77,8 @@ export function getProposalDomainRoute(domain: ProposalTargetDomain): string | n
       return "/today";
     case "general":
       return null;
+    case "body":
+      return "/profile";
   }
 }
 
@@ -174,6 +178,8 @@ export function getProposalDomainPillClass(domain: ProposalTargetDomain): string
     case "today":
     case "general":
       return "proposal-domain-pill--general";
+    case "body":
+      return "proposal-domain-pill--body";
   }
 }
 

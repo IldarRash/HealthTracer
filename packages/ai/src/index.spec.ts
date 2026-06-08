@@ -105,4 +105,60 @@ describe("ai safety helpers", () => {
       }),
     ).toHaveLength(1);
   });
+
+  it("rejects save_body_analysis proposal whose reason contains unsafe medical wording", () => {
+    // The body analysis is wellness/visual only — medical-certainty language in the
+    // proposal reason must be flagged before the proposal can be accepted.
+    const errors = validateProposalSafety({
+      intent: "save_body_analysis",
+      targetDomain: "body",
+      title: "Анализ тела",
+      reason: "This confirms a diagnosis of high body fat disorder.",
+      proposedChanges: {
+        date: "2026-06-08",
+        source: "chat",
+        fatPctMin: 28,
+        fatPctMax: 32,
+      },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it("accepts save_body_analysis proposal with wellness-only reason", () => {
+    // A correctly framed body analysis proposal must pass safety validation.
+    const errors = validateProposalSafety({
+      intent: "save_body_analysis",
+      targetDomain: "body",
+      title: "Анализ тела",
+      reason:
+        "Примерная визуальная оценка по трём фото: жировая масса около 18–22%, тонус средний.",
+      proposedChanges: {
+        date: "2026-06-08",
+        source: "chat",
+        fatPctMin: 18,
+        fatPctMax: 22,
+        muscleTone: "average",
+        strongGroups: ["chest"],
+        weakGroups: ["lower_back"],
+        muscleMap: { chest: "strong", lower_back: "weak" },
+      },
+    });
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects save_body_analysis proposal whose title contains diagnostic language", () => {
+    const errors = validateProposalSafety({
+      intent: "save_body_analysis",
+      targetDomain: "body",
+      title: "Metabolic disorder treatment plan",
+      reason: "Visual assessment.",
+      proposedChanges: {
+        date: "2026-06-08",
+        source: "chat",
+        fatPctMin: 30,
+        fatPctMax: 35,
+      },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
 });

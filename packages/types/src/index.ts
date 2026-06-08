@@ -32,6 +32,7 @@ import {
   logWorkoutActivityProposalPayloadSchema,
   workoutPlanProposalChangesSchema,
 } from "./workouts.js";
+import { saveBodyAnalysisProposalPayloadSchema } from "./body-composition.js";
 
 export { isoDateSchema, isoDateTimeSchema, isCalendarValidIsoDate, isoDateOnly } from "./dates.js";
 
@@ -311,6 +312,7 @@ export const proposalTargetDomainSchema = z.enum([
   "recipe",
   "today",
   "general",
+  "body",
 ]);
 
 export type ProposalTargetDomain = z.infer<typeof proposalTargetDomainSchema>;
@@ -332,6 +334,7 @@ export const proposalIntentSchema = z.enum([
   "capture_wellbeing_checkin",
   "log_nutrition_incident",
   "log_workout_activity",
+  "save_body_analysis",
 ]);
 
 export type ProposalIntent = z.infer<typeof proposalIntentSchema>;
@@ -445,12 +448,58 @@ export {
   type WorkoutWeekday,
 } from "./workouts.js";
 
+/**
+ * Ingredient entry for a meal slot.
+ * Mirrors recipeIngredientSchema (defined later) — kept separate to avoid
+ * forward-reference issues. The shape is intentionally identical.
+ */
+export const nutritionMealIngredientSchema = z.object({
+  name: z.string().min(1).max(160),
+  quantity: z.number().positive().max(10000).nullable().optional(),
+  unit: z.string().min(1).max(40).nullable().optional(),
+  notes: z.string().min(1).max(240).nullable().optional(),
+});
+
+export type NutritionMealIngredient = z.infer<typeof nutritionMealIngredientSchema>;
+
 export const nutritionMealSlotSchema = z.object({
   label: z.string().min(1).max(80),
   timingHint: z.string().min(1).max(120).nullable().default(null),
+  // --- C1: per-meal kcal + macros + time + dish (all optional — old plans lack these) ---
+  /** Estimated kcal for this meal slot. */
+  kcal: z.number().int().nonnegative().max(5000).optional(),
+  /** Protein estimate for this meal slot in grams. */
+  proteinGrams: z.number().int().nonnegative().max(500).optional(),
+  /** Carbohydrate estimate for this meal slot in grams. */
+  carbsGrams: z.number().int().nonnegative().max(1000).optional(),
+  /** Fat estimate for this meal slot in grams. */
+  fatGrams: z.number().int().nonnegative().max(500).optional(),
+  /** Suggested meal time, e.g. "08:00". */
+  mealTime: z.string().min(1).max(20).optional(),
+  /** Suggested dish or meal description for this slot. */
+  dish: z.string().min(1).max(240).optional(),
+  /** Ingredients for this meal slot (drives C3 grocery list). */
+  ingredients: z.array(nutritionMealIngredientSchema).max(30).optional(),
 });
 
 export type NutritionMealSlot = z.infer<typeof nutritionMealSlotSchema>;
+
+/**
+ * A single day in the 7-day weekly plan matrix (C2).
+ * All meal slots are optional — an absent slot means "as usual" for that slot.
+ */
+export const nutritionWeekDaySchema = z.object({
+  /** ISO weekday: 1 = Monday … 7 = Sunday. */
+  weekday: z.number().int().min(1).max(7),
+  breakfast: z.string().min(1).max(240).optional(),
+  lunch: z.string().min(1).max(240).optional(),
+  snack: z.string().min(1).max(240).optional(),
+  dinner: z.string().min(1).max(240).optional(),
+  /** Total kcal target for this day (optional override). */
+  kcal: z.number().int().positive().max(10000).optional(),
+});
+
+export type NutritionWeekDay = z.infer<typeof nutritionWeekDaySchema>;
 
 export const nutritionPlanPayloadSchema = z.object({
   title: z.string().min(1).max(160),
@@ -465,14 +514,36 @@ export const nutritionPlanPayloadSchema = z.object({
   restrictions: z.array(z.string().min(1).max(160)).max(20).default([]),
   allergies: z.array(z.string().min(1).max(160)).max(20).default([]),
   notes: z.array(z.string().min(1).max(240)).max(20).default([]),
+  // --- C2: optional 7-day weekly matrix (absent = no weekly plan) ---
+  weeklyPlan: z.array(nutritionWeekDaySchema).min(1).max(7).optional(),
 });
 
 export type NutritionPlanPayload = z.infer<typeof nutritionPlanPayloadSchema>;
+
+/**
+ * A single swap item in an adjust_nutrition_plan proposal (C4 dietary draft).
+ * Describes a "before → after" substitution suggested by the AI.
+ */
+export const nutritionSwapItemSchema = z.object({
+  /** Original dish/ingredient label being replaced. */
+  from: z.string().min(1).max(240),
+  /** Replacement dish/ingredient label. */
+  to: z.string().min(1).max(240),
+  /** Approximate calorie/macro saving from this swap (informational only). */
+  save: z.string().min(1).max(240).optional(),
+});
+
+export type NutritionSwapItem = z.infer<typeof nutritionSwapItemSchema>;
 
 export const adjustNutritionPlanFromProgressChangesSchema = z.object({
   plan: nutritionPlanPayloadSchema,
   sourceSummaryId: z.string().uuid().optional(),
   sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
+  // --- C4: optional swap metadata (before/after items for dietary draft proposals) ---
+  /** Calorie target of the plan being replaced (for before/after display). */
+  fromCaloriesPerDay: z.number().int().positive().max(10000).optional(),
+  /** Swap list describing the substitutions this proposal makes (C4 DiffRow). */
+  swaps: z.array(nutritionSwapItemSchema).max(20).optional(),
 });
 
 export type AdjustNutritionPlanFromProgressChanges = z.infer<
@@ -1020,6 +1091,8 @@ export function getProposedChangesSchemaForIntent(
       return logNutritionIncidentProposalPayloadSchema;
     case "log_workout_activity":
       return logWorkoutActivityProposalPayloadSchema;
+    case "save_body_analysis":
+      return saveBodyAnalysisProposalPayloadSchema;
     default: {
       const _exhaustive: never = intent;
       return _exhaustive;
@@ -1056,6 +1129,7 @@ export const proposalChangesSchema = z.union([
   createGoalProposalChangesSchema,
   updateGoalProposalChangesSchema,
   profileProposalChangesSchema,
+  saveBodyAnalysisProposalPayloadSchema,
   emptyProposalChangesSchema,
 ]);
 
@@ -1163,6 +1237,12 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
     targetDomain: proposalTargetDomainSchema,
     ...proposalTitleReasonFields,
     proposedChanges: logWorkoutActivityProposalPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("save_body_analysis"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: saveBodyAnalysisProposalPayloadSchema,
   }),
 ]);
 
@@ -1353,6 +1433,7 @@ export {
   type HabitTemplateTargetConstraints,
   type HabitTimeOfDayHint,
 } from "./habits.js";
+export * from "./body-composition.js";
 export * from "./device-metrics.js";
 export * from "./document-signals.js";
 export * from "./documents.js";
