@@ -27,6 +27,7 @@ import {
   habitAdherenceQuerySchema,
   habitAdherenceResponseSchema,
   habitPlanRevisionsResponseSchema,
+  groceryListResponseSchema,
   nutritionAdherenceResponseSchema,
   nutritionMealCaloriesReadModelSchema,
   nutritionPlanRevisionSchema,
@@ -52,6 +53,7 @@ import {
   createPortalSessionResponseSchema,
   type ActiveHabitPlanResponse,
   type ActiveNutritionPlanResponse,
+  type GroceryListResponse,
   type ActiveWorkoutPlanResponse,
   type AiMetricsContextSummary,
   type AiProposal,
@@ -203,6 +205,7 @@ export const apiQueryKeys = {
   nutritionActive: ["nutrition-active"],
   nutritionMealsBreakdown: ["nutrition-meals-breakdown"],
   nutritionRevisions: ["nutrition-revisions"],
+  nutritionGroceryList: ["nutrition-grocery-list"],
   habitActive: ["habit-active"],
   habitRevisions: ["habit-revisions"],
   habitAdherence: (window: HabitAdherenceWindow = 7) => ["habit-adherence", window] as const,
@@ -855,6 +858,17 @@ export async function listNutritionRevisions(
   token: string,
 ): Promise<ApiResult<NutritionPlanRevision[]>> {
   return apiFetch("/nutrition/revisions", token, nutritionPlanRevisionSchema.array());
+}
+
+/**
+ * GET /nutrition/grocery-list
+ * Returns the grocery list derived from the active nutrition revision.
+ * Pure projection — never writes to the DB or creates a plan revision.
+ */
+export async function getGroceryList(
+  token: string,
+): Promise<ApiResult<GroceryListResponse>> {
+  return apiFetch("/nutrition/grocery-list", token, groceryListResponseSchema);
 }
 
 export async function getActiveHabitPlan(

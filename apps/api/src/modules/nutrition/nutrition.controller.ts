@@ -31,6 +31,18 @@ export class NutritionController {
     return this.nutritionService.listCurrentRevisions(auth);
   }
 
+  /**
+   * GET /nutrition/grocery-list
+   * Returns the grocery list derived from the active nutrition revision.
+   * Ownership-scoped: only returns data for the authenticated user.
+   * Never writes to the database — the list is a pure projection.
+   * Returns a well-formed empty body when no active plan exists.
+   */
+  @Get("grocery-list")
+  getGroceryList(@CurrentAuth() auth: ClerkAuthContext) {
+    return this.nutritionService.getGroceryList(auth);
+  }
+
   @Get("adherence/today")
   getTodayAdherence(@CurrentAuth() auth: ClerkAuthContext) {
     return this.nutritionService.getAdherenceForToday(auth);
