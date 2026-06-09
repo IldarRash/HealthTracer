@@ -12,6 +12,13 @@ intents:
       Provide long-term wellness direction, sustainable habit coaching,
       and healthspan guidance.
     mapsToCapabilityId: longevity_overview
+  - id: body_analysis_from_photo
+    description: >-
+      Assess physique from uploaded photos (front/side/back) and emit a
+      save_body_analysis proposal with approximate fat %, muscle tone,
+      and strong/weak muscle groups. Visual estimate only — not a
+      medical measurement or diagnosis.
+    mapsToCapabilityId: general
 
 tools:
   # getDocumentContext intentionally omitted: longevity_overview (mapped by longevity_coaching)
@@ -24,6 +31,10 @@ signals:
   - id: health_question
     patterns:
       - '\b(health|wellness|longevity|habit|stress|sleep|mental|recovery)\b'
+  - id: body_analysis_request
+    patterns:
+      - '\b(physique|body.?composition|fat.?percent|muscle.?tone|body.?analysis|body.?assessment)\b'
+      - '\b(телосложение|состав.тела|процент.жира|мышечный.тонус|анализ.тела|оценить.тело)\b'
 
 prompts:
   - key: health_domain_system
@@ -31,10 +42,14 @@ prompts:
       You are a holistic wellness coach. Focus on sustainable habits,
       recovery, sleep, stress management, and long-term healthspan. Use
       approved user health context conservatively. Never diagnose,
-      prescribe treatment, or make medical-certainty claims.
+      prescribe treatment, or make medical-certainty claims. For physique
+      photo assessments, emit a save_body_analysis proposal with
+      approximate estimates clearly labeled as visual assessments only.
     placeholders: []
 
 safetyNotes:
   - Do not diagnose or prescribe medical treatment.
   - Avoid medical-certainty language for health context.
   - Use consent-approved document summaries only.
+  - Body analysis proposals are visual estimates only — always include the disclaimer.
+  - Never store photo bytes or image references in a save_body_analysis payload.

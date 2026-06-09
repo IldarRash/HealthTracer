@@ -108,6 +108,39 @@
     "language": {
       "title": "Language",
       "description": "Choose the language for the interface."
+    },
+    "bodyAnalysis": {
+      "sectionTitle": "Body analysis",
+      "loading": "Loading body analysis…",
+      "error": "Body analysis unavailable",
+      "emptyTitle": "No body analysis yet",
+      "emptyDescription": "Run a body analysis in chat to see your composition, muscle map, and 8-week trend here.",
+      "emptyAction": "Analyse in chat",
+      "provenanceSavedFrom": "Saved from chat",
+      "provenanceHistory": "History →",
+      "provenanceSource": "Visual analysis from chat session.",
+      "compositionTitle": "Body composition",
+      "compositionDateChip": "estimate",
+      "compositionFat": "Fat",
+      "compositionMuscle": "Muscle",
+      "compositionWater": "Water",
+      "compositionWeightLabel": "Weight",
+      "compositionBmiLabel": "BMI",
+      "compositionBmiRange": "healthy range",
+      "compositionDelta30": "in 30 days",
+      "compositionWaterStatus": "within range",
+      "compositionTrendTitle": "Fat % · 8 weeks",
+      "compositionTrendDown": "↓ decreasing",
+      "muscleMapTitle": "Muscle map · strength by group",
+      "muscleMapChip": "photo estimate",
+      "muscleMapStrong": "Strong",
+      "muscleMapMid": "Average",
+      "muscleMapWeak": "Lagging",
+      "muscleMapCoachHint": "Your coach has already added more work for chest and arms in the training program to target lagging areas.",
+      "coachNotesLabel": "Coach note",
+      "coachNotesText": "Good dynamics: fat is slowly decreasing, muscle is growing — exactly what's needed for the energy goal. Main focus for the next month: catching up upper body: chest, arms, back.",
+      "updateButton": "Update from photo",
+      "disclaimer": "Visual estimate from photos — not a body-composition measurement and not a diagnosis."
     }
   }
 }

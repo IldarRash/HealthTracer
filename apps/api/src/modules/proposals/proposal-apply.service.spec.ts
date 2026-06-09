@@ -95,6 +95,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -126,6 +127,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -163,6 +165,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -239,6 +242,7 @@ describe("ProposalApplyService", () => {
       {} as never, // todayService
       {} as never, // progressService
       {} as never, // wellbeingCheckInsService
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -280,6 +284,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -291,6 +296,66 @@ describe("ProposalApplyService", () => {
 
     expect(reference).toBe("nutrition_revision:rev-1");
     expect(nutritionCalled).toBe(true);
+  });
+
+  it("forwards weeklyPlan through the nutrition service when accepting a C2 proposal (new revision created)", async () => {
+    // Accepted create_nutrition_plan with weeklyPlan must call the nutrition service
+    // with the full payload (including weeklyPlan) so a new revision is created.
+    // This verifies the apply path does not strip the C2 field.
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
+
+    const weeklyPlanPayload = {
+      ...nutritionPayload,
+      weeklyPlan: [
+        { weekday: 1, breakfast: "Овсянка + яйца", lunch: "Индейка, гречка", snack: "Творог, ягоды", dinner: "Треска, овощи", kcal: 2040 },
+        { weekday: 2, breakfast: "Яичница, тост", lunch: "Куриный суп", snack: "Яблоко", dinner: "Говядина, рис", kcal: 2100 },
+        { weekday: 3, breakfast: "Гречка, яйца", lunch: "Лосось, овощи", snack: "Кефир", dinner: "Куриная грудка", kcal: 2050 },
+        { weekday: 4, breakfast: "Омлет, хлеб", lunch: "Тефтели", snack: "Творог", dinner: "Минтай, брокколи", kcal: 2200 },
+        { weekday: 5, breakfast: "Овсянка, банан", lunch: "Индейка, булгур", snack: "Орех-микс", dinner: "Куриное филе", kcal: 2080 },
+        { weekday: 6, breakfast: "Блины, ягоды", lunch: "Говядина, гречка", snack: "Батончик", dinner: "Лосось, рис", kcal: 2400 },
+        { weekday: 7, breakfast: "Яичница, томаты", lunch: "Куриный бульон", snack: "Кефир, фрукты", dinner: "Запечённые овощи", kcal: 1950 },
+      ],
+    };
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          capturedPayload = payload;
+          capturedIntent = intent;
+          return "nutrition_revision:rev-weekly-1";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never, // bodyService
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "create_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: weeklyPlanPayload,
+    });
+
+    expect(reference).toBe("nutrition_revision:rev-weekly-1");
+    expect(capturedIntent).toBe("create_nutrition_plan");
+    const captured = capturedPayload as typeof weeklyPlanPayload;
+    // weeklyPlan must be preserved through the apply path — never dropped
+    expect(captured.weeklyPlan).toHaveLength(7);
+    expect(captured.weeklyPlan?.[0]?.breakfast).toBe("Овсянка + яйца");
+    expect(captured.weeklyPlan?.[5]?.kcal).toBe(2400);
   });
 
   it("routes accepted create_habit_plan proposals through the habits service", async () => {
@@ -318,6 +383,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -357,6 +423,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -369,6 +436,123 @@ describe("ProposalApplyService", () => {
     expect(reference).toBe("habit_revision:rev-adapt-1");
     expect(habitsCalled).toBe(true);
     expect(capturedIntent).toBe("adapt_habit_plan");
+  });
+
+  // ── C1: accepted nutrition proposal with per-meal kcal fields → revision (not overwrite) ──
+
+  it("routes create_nutrition_plan with per-meal C1 fields to nutrition service (accepted → revision)", async () => {
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
+
+    const nutritionPayloadC1 = {
+      ...nutritionPayload,
+      mealStructure: [
+        {
+          label: "Breakfast",
+          timingHint: "Morning",
+          mealTime: "07:30",
+          dish: "Oatmeal",
+          kcal: 480,
+          proteinGrams: 32,
+          carbsGrams: 58,
+          fatGrams: 14,
+        },
+        {
+          label: "Lunch",
+          timingHint: null,
+          mealTime: "13:00",
+          dish: "Chicken + quinoa",
+          kcal: 620,
+          proteinGrams: 44,
+          carbsGrams: 62,
+          fatGrams: 20,
+        },
+      ],
+    };
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          capturedPayload = payload;
+          capturedIntent = intent;
+          return "nutrition_revision:rev-c1-create";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never, // bodyService
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "create_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: nutritionPayloadC1,
+    });
+
+    expect(reference).toBe("nutrition_revision:rev-c1-create");
+    expect(capturedIntent).toBe("create_nutrition_plan");
+    // Per-meal fields must flow through to the service unmodified.
+    const slots = (capturedPayload as typeof nutritionPayloadC1).mealStructure;
+    expect(slots[0]?.kcal).toBe(480);
+    expect(slots[0]?.dish).toBe("Oatmeal");
+    expect(slots[0]?.mealTime).toBe("07:30");
+    expect(slots[1]?.kcal).toBe(620);
+  });
+
+  it("accepted adjust_nutrition_plan with C1 fields calls applyNutritionPlanProposal (revision) not a direct overwrite", async () => {
+    let applyNutritionCalled = false;
+    // No direct plan-mutation method should be invoked.  applyNutritionPlanProposal
+    // is the single allowed write path: it creates or appends a revision.
+    let directOverwriteCalled = false;
+
+    const nutritionPayloadWithMeals = {
+      ...nutritionPayload,
+      mealStructure: [
+        { label: "Breakfast", timingHint: "Morning", kcal: 500, proteinGrams: 35, carbsGrams: 55, fatGrams: 16 },
+      ],
+    };
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async () => {
+          applyNutritionCalled = true;
+          return "nutrition_revision:rev-c1-adjust";
+        },
+        // If a hypothetical "overwritePlan" method existed it would set directOverwriteCalled.
+        overwritePlan: async () => { directOverwriteCalled = true; },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never, // bodyService
+    );
+
+    await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adjust_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: nutritionPayloadWithMeals,
+    });
+
+    expect(applyNutritionCalled).toBe(true);
+    expect(directOverwriteCalled).toBe(false);
   });
 
   it("routes accepted adjust_nutrition_plan proposals with progress provenance through the nutrition service", async () => {
@@ -398,6 +582,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -418,6 +603,78 @@ describe("ProposalApplyService", () => {
       title: nutritionPayload.title,
       caloriesPerDay: nutritionPayload.caloriesPerDay,
     });
+  });
+
+  it("routes adjust_nutrition_plan with swaps payload through the nutrition service and creates a new revision", async () => {
+    // C4 dietary draft: swaps[] + fromCaloriesPerDay ride in proposedChanges;
+    // the apply path must extract the plan payload and call applyNutritionPlanProposal,
+    // which calls appendRevision — never an in-place update.
+    let nutritionCalled = false;
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          nutritionCalled = true;
+          capturedPayload = payload;
+          capturedIntent = intent;
+          return "nutrition_revision:rev-lighter";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never, // bodyService
+    );
+
+    const lighterPlan = {
+      ...nutritionPayload,
+      caloriesPerDay: 1750,
+      carbsGrams: 150,
+    };
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adjust_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: {
+        plan: lighterPlan,
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        fromCaloriesPerDay: 2200,
+        swaps: [
+          { from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" },
+          { from: "Whole milk", to: "Skimmed milk", save: "~80 kcal" },
+        ],
+      },
+    });
+
+    expect(reference).toBe("nutrition_revision:rev-lighter");
+    expect(nutritionCalled).toBe(true);
+    expect(capturedIntent).toBe("adjust_nutrition_plan");
+    // The apply path must pass the extracted plan payload (without swaps metadata)
+    // to applyNutritionPlanProposal — swaps are display-only and ride in the
+    // revision jsonb payload via the stored proposedChanges, not forwarded here.
+    expect(capturedPayload).toMatchObject({
+      title: lighterPlan.title,
+      caloriesPerDay: 1750,
+      carbsGrams: 150,
+      proteinGrams: 140, // protein preserved
+    });
+    // Confirm swaps are NOT forwarded as top-level keys into applyNutritionPlanProposal
+    expect((capturedPayload as Record<string, unknown>)["swaps"]).toBeUndefined();
+    expect((capturedPayload as Record<string, unknown>)["fromCaloriesPerDay"]).toBeUndefined();
   });
 
   it("routes accepted adapt_habit_plan proposals with progress provenance through the habits service", async () => {
@@ -447,6 +704,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -485,6 +743,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -524,6 +783,7 @@ describe("ProposalApplyService", () => {
       } as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -576,6 +836,7 @@ describe("ProposalApplyService", () => {
         },
       } as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -601,6 +862,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     await expect(
@@ -657,6 +919,7 @@ describe("ProposalApplyService", () => {
           };
         },
       } as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -691,6 +954,7 @@ describe("ProposalApplyService", () => {
           throw new BadRequestException(WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR);
         },
       } as never,
+      {} as never, // bodyService
     );
 
     await expect(
@@ -752,6 +1016,7 @@ describe("ProposalApplyService", () => {
           };
         },
       } as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -793,6 +1058,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -844,6 +1110,7 @@ describe("ProposalApplyService", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     await service.applyAcceptedProposal(auth, userId, {
@@ -909,6 +1176,7 @@ describe("ProposalApplyService — log_workout_activity (Part B)", () => {
       {} as never, // todayService
       {} as never, // progressService
       {} as never, // wellbeingCheckInsService
+      {} as never, // bodyService
     );
 
     const reference = await service.applyAcceptedProposal(auth, userId, {
@@ -947,6 +1215,7 @@ describe("ProposalApplyService — log_workout_activity (Part B)", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     await service.applyAcceptedProposal(auth, userId, {
@@ -989,6 +1258,7 @@ describe("ProposalApplyService — log_workout_activity (Part B)", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // bodyService
     );
 
     await (service as {

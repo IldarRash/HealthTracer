@@ -108,6 +108,39 @@
     "language": {
       "title": "Язык",
       "description": "Выберите язык интерфейса."
+    },
+    "bodyAnalysis": {
+      "sectionTitle": "Анализ тела",
+      "loading": "Загрузка анализа тела…",
+      "error": "Анализ тела недоступен",
+      "emptyTitle": "Анализ тела ещё не проводился",
+      "emptyDescription": "Запустите анализ в чате, чтобы увидеть здесь состав тела, карту мышц и тренд за 8 недель.",
+      "emptyAction": "Анализировать в чате",
+      "provenanceSavedFrom": "Сохранено из чата",
+      "provenanceHistory": "История →",
+      "provenanceSource": "Визуальный анализ из чата.",
+      "compositionTitle": "Состав тела",
+      "compositionDateChip": "оценка",
+      "compositionFat": "Жир",
+      "compositionMuscle": "Мышцы",
+      "compositionWater": "Вода",
+      "compositionWeightLabel": "Вес",
+      "compositionBmiLabel": "ИМТ",
+      "compositionBmiRange": "в норме",
+      "compositionDelta30": "за 30 дней",
+      "compositionWaterStatus": "в норме",
+      "compositionTrendTitle": "% жира · 8 недель",
+      "compositionTrendDown": "↓ снижается",
+      "muscleMapTitle": "Карта мышц · сила по группам",
+      "muscleMapChip": "оценка по фото",
+      "muscleMapStrong": "Сильные",
+      "muscleMapMid": "Средние",
+      "muscleMapWeak": "Отстают",
+      "muscleMapCoachHint": "Коуч уже добавил больше работы на грудь и руки в программу тренировок — чтобы подтянуть отстающие зоны.",
+      "coachNotesLabel": "Заметка коуча",
+      "coachNotesText": "Хорошая динамика: жир медленно снижается, мышцы растут — это именно то, что нужно для цели «энергия». Главный фокус на ближайший месяц — догнать верх тела: грудь, руки, спина.",
+      "updateButton": "Обновить по фото",
+      "disclaimer": "Оценка визуальная, по фотографиям — не замер состава тела и не диагноз."
     }
   }
 }

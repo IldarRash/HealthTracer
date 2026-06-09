@@ -1,5 +1,6 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
+import { BodyModule } from "../body/body.module.js";
 import { DocumentsModule } from "../documents/documents.module.js";
 import { ExercisesModule } from "../exercises/exercises.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
@@ -24,6 +25,7 @@ import { ProposalsService } from "./proposals.service.js";
 @Module({
   imports: [
     DatabaseModule,
+    BodyModule,
     DocumentsModule,
     HealthMetricsModule,
     UsersModule,

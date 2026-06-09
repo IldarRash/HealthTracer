@@ -8,11 +8,16 @@ import type { NutritionPlanRevision, Recipe } from "@health/types";
 import {
   apiQueryKeys,
   getActiveNutritionPlan,
+  getNutritionMealsBreakdown,
   getRecipe,
   getTodayNutritionAdherence,
   listNutritionRevisions,
   listRecipes,
 } from "../../lib/api";
+import {
+  MealCaloriesBreakdown,
+  type MealCaloriesBreakdownState,
+} from "./meal-calories-breakdown";
 import {
   buildAdherenceState,
   formatLocalIsoDate,
@@ -38,6 +43,7 @@ import {
   type RevisionHistoryRow,
 } from "../ui";
 import { ErrorState } from "../ui";
+import { NutritionWeekPlan } from "./nutrition-week-plan";
 
 // ── ActiveNutritionHeader ────────────────────────────────────────
 
@@ -1558,6 +1564,25 @@ export function NutritionWorkspace() {
     enabled: Boolean(activePlanQuery.data?.activeRevision),
   });
 
+  const mealsBreakdownQuery = useQuery({
+    queryKey: apiQueryKeys.nutritionMealsBreakdown,
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Clerk session token is unavailable.");
+      }
+
+      const result = await getNutritionMealsBreakdown(token);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      return result.data ?? null;
+    },
+    // Only fetch when there is an active plan revision to read from.
+    enabled: Boolean(activePlanQuery.data?.activeRevision),
+  });
+
   const selectedRecipeQuery = useQuery({
     queryKey: apiQueryKeys.recipeDetail(selectedRecipeId ?? ""),
     queryFn: async () => {
@@ -1678,6 +1703,21 @@ export function NutritionWorkspace() {
     adherencePanelState = "data";
   }
 
+  // ── Derive meal-calories breakdown state ──────────────────────
+  let mealsBreakdownState: MealCaloriesBreakdownState;
+  if (mealsBreakdownQuery.isLoading) {
+    mealsBreakdownState = { state: "loading" };
+  } else if (mealsBreakdownQuery.isError) {
+    mealsBreakdownState = {
+      state: "error",
+      onRetry: () => mealsBreakdownQuery.refetch(),
+    };
+  } else if (!mealsBreakdownQuery.data) {
+    mealsBreakdownState = { state: "empty" };
+  } else {
+    mealsBreakdownState = { state: "data", model: mealsBreakdownQuery.data };
+  }
+
   // ── Build revision history rows ────────────────────────────────
   const historyRows = buildNutritionRevisionRows(revisions, activeRevision.id);
 
@@ -1729,19 +1769,30 @@ export function NutritionWorkspace() {
         />
       </div>
 
-      {/* 6. PrefsCard */}
+      {/* 6. MealCaloriesBreakdown (C1) */}
+      <MealCaloriesBreakdown {...mealsBreakdownState} />
+
+      {/* 7. CoachNotes — portion estimate framing (C1 requirement) */}
+      <CoachNotes>
+        Цифры — ориентир: вес порций оценивается по фото и описанию. Если калорий мало к вечеру, это нормально — день ещё не закончен. Точные граммы можно поправить в «Сегодня».
+      </CoachNotes>
+
+      {/* 8. NutritionWeekPlan — C2 7-day grid (shown when weeklyPlan is present; graceful empty otherwise) */}
+      <NutritionWeekPlan weeklyPlan={payload.weeklyPlan ?? null} />
+
+      {/* 9. PrefsCard */}
       <PrefsCard
         preferences={payload.preferences}
         restrictions={payload.restrictions}
         allergies={payload.allergies}
       />
 
-      {/* 7. CoachNotes */}
+      {/* 10. CoachNotes — plan-level notes */}
       {payload.notes.length > 0 ? (
         <CoachNotes>{payload.notes.join(" ")}</CoachNotes>
       ) : null}
 
-      {/* 8. AdherencePanel */}
+      {/* 11. AdherencePanel */}
       {adherencePanelState === "data" ? (
         <AdherencePanel
           state="data"
@@ -1761,10 +1812,10 @@ export function NutritionWorkspace() {
         <AdherencePanel state="empty" />
       )}
 
-      {/* 9. RecipeIdeas */}
+      {/* 12. RecipeIdeas */}
       <RecipeIdeas onOpenRecipe={(id) => setSelectedRecipeId(id)} />
 
-      {/* 10. RevisionHistoryDark */}
+      {/* 13. RevisionHistoryDark */}
       <RevisionHistoryDark
         rows={historyRows}
         defaultOpen={true}

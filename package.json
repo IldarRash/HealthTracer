@@ -13,7 +13,9 @@
     "db:down": "docker compose down",
     "db:migrate": "corepack pnpm --dir packages/db db:migrate",
     "db:seed:recipes": "corepack pnpm --dir packages/db db:seed:recipes",
-    "db:seed:exercises": "corepack pnpm --dir packages/db db:seed:exercises"
+    "db:seed:exercises": "corepack pnpm --dir packages/db db:seed:exercises",
+    "db:seed:nutrition-demo": "corepack pnpm --dir packages/db db:seed:nutrition-demo",
+    "db:seed:demo-nutrition-week-plan": "corepack pnpm --dir packages/db db:seed:demo-nutrition-week-plan"
   },
   "devDependencies": {
     "@eslint/js": "latest",

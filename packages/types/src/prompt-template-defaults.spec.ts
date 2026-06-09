@@ -139,8 +139,22 @@ describe("prompt-template-defaults — domain_health context-only wording", () =
     expect(body).toContain("consent");
   });
 
-  it("instructs health domain to always return empty candidateProposals", () => {
+  it("domain_answer shape includes candidateProposals field", () => {
     expect(body).toContain("candidateProposals:[]");
+  });
+
+  it("describes body analysis rule for physique photo assessment", () => {
+    expect(body).toContain("BODY ANALYSIS RULE");
+    expect(body).toContain("save_body_analysis");
+    expect(body).toContain("примерная визуальная оценка по фото");
+  });
+
+  it("requires the body analysis disclaimer in proposal reason", () => {
+    expect(body).toContain("не замер состава тела и не диагноз");
+  });
+
+  it("prohibits photo bytes in save_body_analysis proposedChanges", () => {
+    expect(body).toContain("numbers only");
   });
 });
 

@@ -14,6 +14,8 @@
     "db:seed:recipes": "node ./scripts/seed-recipes.mjs",
     "db:seed:exercises": "node ./scripts/seed-exercises.mjs",
     "db:seed:habit-templates": "node ./scripts/seed-habit-templates.mjs",
+    "db:seed:nutrition-demo": "node ./scripts/seed-nutrition-demo.mjs",
+    "db:seed:demo-nutrition-week-plan": "node ./scripts/seed-demo-nutrition-week-plan.mjs",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

@@ -1,4 +1,6 @@
 import {
+  bodyCompositionAnalysisResponseSchema,
+  type BodyCompositionAnalysisResponse,
   updateCurrentUserSchema,
   activeHabitPlanResponseSchema,
   activeNutritionPlanResponseSchema,
@@ -25,7 +27,9 @@ import {
   habitAdherenceQuerySchema,
   habitAdherenceResponseSchema,
   habitPlanRevisionsResponseSchema,
+  groceryListResponseSchema,
   nutritionAdherenceResponseSchema,
+  nutritionMealCaloriesReadModelSchema,
   nutritionPlanRevisionSchema,
   proposalDecisionSchema,
   proposalModifyResponseSchema,
@@ -49,6 +53,7 @@ import {
   createPortalSessionResponseSchema,
   type ActiveHabitPlanResponse,
   type ActiveNutritionPlanResponse,
+  type GroceryListResponse,
   type ActiveWorkoutPlanResponse,
   type AiMetricsContextSummary,
   type AiProposal,
@@ -74,6 +79,7 @@ import {
   type ListHealthMetricAggregatesQuery,
   type ListHealthMetricSnapshotsQuery,
   type NutritionAdherenceResponse,
+  type NutritionMealCaloriesReadModel,
   type NutritionPlanRevision,
   type UpsertNutritionAdherenceInput,
   type Recipe,
@@ -197,7 +203,9 @@ export const apiQueryKeys = {
   workoutActive: ["workout-active"],
   workoutRevisions: ["workout-revisions"],
   nutritionActive: ["nutrition-active"],
+  nutritionMealsBreakdown: ["nutrition-meals-breakdown"],
   nutritionRevisions: ["nutrition-revisions"],
+  nutritionGroceryList: ["nutrition-grocery-list"],
   habitActive: ["habit-active"],
   habitRevisions: ["habit-revisions"],
   habitAdherence: (window: HabitAdherenceWindow = 7) => ["habit-adherence", window] as const,
@@ -234,6 +242,7 @@ export const apiQueryKeys = {
   recoveryContextPrefix: ["recovery-context"] as const,
   billingSubscription: ["billing-subscription"] as const,
   billingEntitlement: ["billing-entitlement"] as const,
+  bodyAnalysisLatest: ["body-analysis-latest"] as const,
 } as const;
 
 const syncHealthMetricsResultSchema = z.object({
@@ -539,6 +548,8 @@ export function getAcceptedProposalRefreshQueryKeys(
       }
 
       return commonKeys;
+    case "body":
+      return [...commonKeys, apiQueryKeys.profile];
   }
 }
 
@@ -833,10 +844,31 @@ export async function getActiveNutritionPlan(
   return apiFetch("/nutrition/active", token, activeNutritionPlanResponseSchema);
 }
 
+export async function getNutritionMealsBreakdown(
+  token: string,
+): Promise<ApiResult<NutritionMealCaloriesReadModel | null>> {
+  return apiFetch(
+    "/nutrition/active/meals-breakdown",
+    token,
+    nutritionMealCaloriesReadModelSchema.nullable(),
+  );
+}
+
 export async function listNutritionRevisions(
   token: string,
 ): Promise<ApiResult<NutritionPlanRevision[]>> {
   return apiFetch("/nutrition/revisions", token, nutritionPlanRevisionSchema.array());
+}
+
+/**
+ * GET /nutrition/grocery-list
+ * Returns the grocery list derived from the active nutrition revision.
+ * Pure projection — never writes to the DB or creates a plan revision.
+ */
+export async function getGroceryList(
+  token: string,
+): Promise<ApiResult<GroceryListResponse>> {
+  return apiFetch("/nutrition/grocery-list", token, groceryListResponseSchema);
 }
 
 export async function getActiveHabitPlan(
@@ -1352,6 +1384,13 @@ export async function createBillingPortalSession(
     method: "POST",
     body: {},
   });
+}
+
+/** GET /body/analysis/latest — latest body-composition analysis for the authenticated user. */
+export async function getBodyAnalysisLatest(
+  token: string,
+): Promise<ApiResult<BodyCompositionAnalysisResponse>> {
+  return apiFetch("/body/analysis/latest", token, bodyCompositionAnalysisResponseSchema);
 }
 
 type ApiFetchOptions = {

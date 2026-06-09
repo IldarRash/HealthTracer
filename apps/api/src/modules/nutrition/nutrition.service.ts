@@ -1,13 +1,16 @@
 import type {
   ActiveNutritionPlanResponse,
+  GroceryListResponse,
   LogNutritionIncidentProposalPayload,
   NutritionAdherenceResponse,
+  NutritionMealCaloriesReadModel,
   NutritionPlanPayload,
   NutritionPlanRevision,
   TodayNutritionDetail,
   UpsertNutritionAdherenceInput,
 } from "@health/types";
 import {
+  computeMealCaloriesBreakdown,
   getNutritionIncidentDomainErrors,
   getNutritionPlanDomainErrors,
   getTodayIsoDateInTimezone,
@@ -20,6 +23,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import type { HealthDatabaseTransaction } from "../../database/database.types.js";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { UsersService } from "../users/users.service.js";
+import { GroceryDerivationService } from "./grocery-derivation.service.js";
 import {
   toNutritionAdherenceRecord,
   toNutritionPlan,
@@ -32,6 +36,7 @@ export class NutritionService {
   constructor(
     private readonly nutritionRepository: NutritionRepository,
     private readonly usersService: UsersService,
+    private readonly groceryDerivationService: GroceryDerivationService,
   ) {}
 
   async getCurrentActivePlan(
@@ -57,6 +62,44 @@ export class NutritionService {
     };
   }
 
+  /**
+   * C1 read model: per-meal calorie breakdown for the active nutrition plan.
+   *
+   * Returns null when there is no active plan or no active revision.
+   * The `changed` flag on each meal row is computed by diffing the active revision
+   * against the previous revision — it is never stored.
+   * This endpoint is strictly read-only; it never mutates plan state.
+   */
+  async getMealCaloriesBreakdown(
+    auth: ClerkAuthContext,
+  ): Promise<NutritionMealCaloriesReadModel | null> {
+    const user = await this.usersService.resolveFromAuth(auth);
+    const plan = await this.nutritionRepository.findActivePlanByUserId(user.id);
+
+    if (!plan?.activeRevisionId) {
+      return null;
+    }
+
+    const twoRevisions = await this.nutritionRepository.findLatestTwoRevisionsByPlanId(plan.id);
+    const [activeRow, previousRow] = twoRevisions;
+
+    if (!activeRow) {
+      return null;
+    }
+
+    const activeRevision = toNutritionPlanRevision(activeRow);
+
+    const previousPayload = previousRow
+      ? toNutritionPlanRevision(previousRow).payload
+      : null;
+
+    return computeMealCaloriesBreakdown(
+      activeRevision.revisionNumber,
+      activeRevision.payload,
+      previousPayload,
+    );
+  }
+
   async listCurrentRevisions(
     auth: ClerkAuthContext,
   ): Promise<NutritionPlanRevision[]> {
@@ -64,6 +107,33 @@ export class NutritionService {
     const revisions = await this.nutritionRepository.listRevisionsByUserId(user.id);
 
     return revisions.map(toNutritionPlanRevision);
+  }
+
+  /**
+   * Derive a grocery list from the active nutrition plan revision.
+   * Returns a well-formed empty result when no active plan or revision exists.
+   * Never writes to the database — the list is a pure projection of the revision payload.
+   */
+  async getGroceryList(
+    auth: ClerkAuthContext,
+  ): Promise<GroceryListResponse> {
+    const user = await this.usersService.resolveFromAuth(auth);
+    const plan = await this.nutritionRepository.findActivePlanByUserId(user.id);
+
+    if (!plan?.activeRevisionId) {
+      return this.groceryDerivationService.emptyResponse();
+    }
+
+    const revision = await this.nutritionRepository.findActiveRevisionByPlanId(
+      plan.id,
+      plan.activeRevisionId,
+    );
+
+    if (!revision) {
+      return this.groceryDerivationService.emptyResponse();
+    }
+
+    return this.groceryDerivationService.deriveFromRevision(toNutritionPlanRevision(revision));
   }
 
   async getAdherenceForToday(auth: ClerkAuthContext): Promise<NutritionAdherenceResponse> {

@@ -263,14 +263,26 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Global safety constraints:",
     "- {{safetyConstraints}}",
     "Prior tool results: {{priorToolResultsJson}}",
-    "Attachment context (medical documents are sent as multimodal images when applicable): {{attachmentContextJson}}",
+    "Attachment context (physique photos and medical documents are sent as multimodal images when applicable): {{attachmentContextJson}}",
     "Structured coaching context:",
     "{{coachingContextJson}}",
     "User message: {{userMessage}}",
     // [HEALTH-CONTEXT-ONLY] Marker: health domain context-only + consent wording
     "Do not diagnose, prescribe, or claim to treat diseases. Health domain is context-only; consent is required before any document is saved.",
-    "The health domain does not create workout or nutrition proposals. Always return candidateProposals:[] for this domain.",
+    "The health domain does not create workout or nutrition proposals. Return candidateProposals:[] unless physique photo analysis is explicitly requested (see BODY ANALYSIS RULE below).",
     "Provide conservative wellness context using approved summaries only. Do not expose raw document contents.",
+    // [BODY-ANALYSIS-RULE] Marker: body analysis proposal rule
+    "BODY ANALYSIS RULE:",
+    "When the user explicitly requests a body/physique assessment AND image attachments with physique photos are present (hasImage=true in attachmentContextJson) AND 'save_body_analysis' is in {{allowedProposalIntents}},",
+    "analyze the image content directly and emit a save_body_analysis candidateProposal.",
+    "This is a VISUAL ESTIMATE ONLY — never a diagnosis, medical measurement, or treatment. Always label it as 'примерная визуальная оценка по фото'.",
+    "The disclaimer 'примерная визуальная оценка по фото, не замер состава тела и не диагноз' MUST appear in the proposal reason.",
+    "Never include photo references, image URLs, or attachment storage keys in proposedChanges — numbers only.",
+    "BODY ANALYSIS CANDIDATE PAYLOAD SHAPE (use exact field names):",
+    '{"intent":"save_body_analysis","targetDomain":"body","title":"Анализ тела по фото","reason":"Визуальная оценка по фото — примерная визуальная оценка по фото, не замер состава тела и не диагноз","proposedChanges":{"date":"YYYY-MM-DD","source":"chat","fatPctMin":18,"fatPctMax":22,"muscleTone":"average","strongGroups":["legs","core"],"weakGroups":["chest","arms"],"muscleMap":{"legs":"strong","core":"strong","chest":"weak","arms":"weak","back":"mid"}}}',
+    "muscleTone must be one of: above_average, average, below_average.",
+    "muscleMap values must be one of: strong, mid, weak.",
+    "Reject any physique assessment request that includes diagnostic language (e.g. 'disease', 'condition', 'disorder', 'treat', 'prescribe', 'diagnose', 'медицинский диагноз', 'лечение', 'заболевание').",
   ].join("\n"),
   // ---------------------------------------------------------------------------
   // Phase 2 final decision-maker LLM

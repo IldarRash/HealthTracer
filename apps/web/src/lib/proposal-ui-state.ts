@@ -35,6 +35,8 @@ export function getProposalIntentLabel(
       return "Log activity";
     case "recommend_recipes":
       return "Recipe recommendations";
+    case "save_body_analysis":
+      return "Анализ тела";
     default:
       return null;
   }
@@ -56,6 +58,8 @@ export function getProposalDomainLabel(domain: ProposalTargetDomain): string {
       return "Today";
     case "general":
       return "Coaching";
+    case "body":
+      return "Body";
   }
 }
 
@@ -75,6 +79,8 @@ export function getProposalDomainRoute(domain: ProposalTargetDomain): string | n
       return "/today";
     case "general":
       return null;
+    case "body":
+      return "/profile";
   }
 }
 
@@ -174,6 +180,8 @@ export function getProposalDomainPillClass(domain: ProposalTargetDomain): string
     case "today":
     case "general":
       return "proposal-domain-pill--general";
+    case "body":
+      return "proposal-domain-pill--body";
   }
 }
 
@@ -220,6 +228,10 @@ export function getProposalRejectedMessage(
 
   if (proposal.intent === "recommend_recipes") {
     return "No changes were made. Recipe recommendations were not saved.";
+  }
+
+  if (proposal.intent === "save_body_analysis") {
+    return "Analysis not saved. No data was added to your profile.";
   }
 
   if (proposal.targetDomain === "workout" || proposal.targetDomain === "nutrition") {

@@ -32,6 +32,7 @@ import {
   logWorkoutActivityProposalPayloadSchema,
   workoutPlanProposalChangesSchema,
 } from "./workouts.js";
+import { saveBodyAnalysisProposalPayloadSchema } from "./body-composition.js";
 
 export { isoDateSchema, isoDateTimeSchema, isCalendarValidIsoDate, isoDateOnly } from "./dates.js";
 
@@ -311,6 +312,7 @@ export const proposalTargetDomainSchema = z.enum([
   "recipe",
   "today",
   "general",
+  "body",
 ]);
 
 export type ProposalTargetDomain = z.infer<typeof proposalTargetDomainSchema>;
@@ -332,6 +334,7 @@ export const proposalIntentSchema = z.enum([
   "capture_wellbeing_checkin",
   "log_nutrition_incident",
   "log_workout_activity",
+  "save_body_analysis",
 ]);
 
 export type ProposalIntent = z.infer<typeof proposalIntentSchema>;
@@ -445,12 +448,58 @@ export {
   type WorkoutWeekday,
 } from "./workouts.js";
 
+/**
+ * Ingredient entry for a meal slot.
+ * Mirrors recipeIngredientSchema (defined later) — kept separate to avoid
+ * forward-reference issues. The shape is intentionally identical.
+ */
+export const nutritionMealIngredientSchema = z.object({
+  name: z.string().min(1).max(160),
+  quantity: z.number().positive().max(10000).nullable().optional(),
+  unit: z.string().min(1).max(40).nullable().optional(),
+  notes: z.string().min(1).max(240).nullable().optional(),
+});
+
+export type NutritionMealIngredient = z.infer<typeof nutritionMealIngredientSchema>;
+
 export const nutritionMealSlotSchema = z.object({
   label: z.string().min(1).max(80),
   timingHint: z.string().min(1).max(120).nullable().default(null),
+  // --- C1: per-meal kcal + macros + time + dish (all optional — old plans lack these) ---
+  /** Estimated kcal for this meal slot. */
+  kcal: z.number().int().nonnegative().max(5000).optional(),
+  /** Protein estimate for this meal slot in grams. */
+  proteinGrams: z.number().int().nonnegative().max(500).optional(),
+  /** Carbohydrate estimate for this meal slot in grams. */
+  carbsGrams: z.number().int().nonnegative().max(1000).optional(),
+  /** Fat estimate for this meal slot in grams. */
+  fatGrams: z.number().int().nonnegative().max(500).optional(),
+  /** Suggested meal time, e.g. "08:00". */
+  mealTime: z.string().min(1).max(20).optional(),
+  /** Suggested dish or meal description for this slot. */
+  dish: z.string().min(1).max(240).optional(),
+  /** Ingredients for this meal slot (drives C3 grocery list). */
+  ingredients: z.array(nutritionMealIngredientSchema).max(30).optional(),
 });
 
 export type NutritionMealSlot = z.infer<typeof nutritionMealSlotSchema>;
+
+/**
+ * A single day in the 7-day weekly plan matrix (C2).
+ * All meal slots are optional — an absent slot means "as usual" for that slot.
+ */
+export const nutritionWeekDaySchema = z.object({
+  /** ISO weekday: 1 = Monday … 7 = Sunday. */
+  weekday: z.number().int().min(1).max(7),
+  breakfast: z.string().min(1).max(240).optional(),
+  lunch: z.string().min(1).max(240).optional(),
+  snack: z.string().min(1).max(240).optional(),
+  dinner: z.string().min(1).max(240).optional(),
+  /** Total kcal target for this day (optional override). */
+  kcal: z.number().int().positive().max(10000).optional(),
+});
+
+export type NutritionWeekDay = z.infer<typeof nutritionWeekDaySchema>;
 
 export const nutritionPlanPayloadSchema = z.object({
   title: z.string().min(1).max(160),
@@ -465,14 +514,36 @@ export const nutritionPlanPayloadSchema = z.object({
   restrictions: z.array(z.string().min(1).max(160)).max(20).default([]),
   allergies: z.array(z.string().min(1).max(160)).max(20).default([]),
   notes: z.array(z.string().min(1).max(240)).max(20).default([]),
+  // --- C2: optional 7-day weekly matrix (absent = no weekly plan) ---
+  weeklyPlan: z.array(nutritionWeekDaySchema).min(1).max(7).optional(),
 });
 
 export type NutritionPlanPayload = z.infer<typeof nutritionPlanPayloadSchema>;
+
+/**
+ * A single swap item in an adjust_nutrition_plan proposal (C4 dietary draft).
+ * Describes a "before → after" substitution suggested by the AI.
+ */
+export const nutritionSwapItemSchema = z.object({
+  /** Original dish/ingredient label being replaced. */
+  from: z.string().min(1).max(240),
+  /** Replacement dish/ingredient label. */
+  to: z.string().min(1).max(240),
+  /** Approximate calorie/macro saving from this swap (informational only). */
+  save: z.string().min(1).max(240).optional(),
+});
+
+export type NutritionSwapItem = z.infer<typeof nutritionSwapItemSchema>;
 
 export const adjustNutritionPlanFromProgressChangesSchema = z.object({
   plan: nutritionPlanPayloadSchema,
   sourceSummaryId: z.string().uuid().optional(),
   sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
+  // --- C4: optional swap metadata (before/after items for dietary draft proposals) ---
+  /** Calorie target of the plan being replaced (for before/after display). */
+  fromCaloriesPerDay: z.number().int().positive().max(10000).optional(),
+  /** Swap list describing the substitutions this proposal makes (C4 DiffRow). */
+  swaps: z.array(nutritionSwapItemSchema).max(20).optional(),
 });
 
 export type AdjustNutritionPlanFromProgressChanges = z.infer<
@@ -645,6 +716,55 @@ export function getNutritionPlanDomainErrors(payload: NutritionPlanPayload): str
   return errors;
 }
 
+/**
+ * Validates the protein-floor constraint for an adjust_nutrition_plan proposal
+ * that carries swap metadata (C4 dietary draft).
+ *
+ * Safety floor: when an AI proposal explicitly lowers calories (fromCaloriesPerDay
+ * is provided and is higher than plan.caloriesPerDay), protein must not be
+ * simultaneously cut below the reference floor.
+ *
+ * @param changes      The parsed adjustNutritionPlanFromProgressChanges payload.
+ * @param currentProteinGrams  The proteinGrams from the currently active revision
+ *                             (null if no active plan exists). When provided, the
+ *                             proposed protein must not be lower.
+ */
+export function getAdjustNutritionPlanProteinFloorErrors(
+  changes: AdjustNutritionPlanFromProgressChanges,
+  currentProteinGrams: number | null | undefined,
+): string[] {
+  const { plan, fromCaloriesPerDay } = changes;
+
+  // Only run the check when the proposal explicitly lowers calories.
+  const isLoweringCalories =
+    fromCaloriesPerDay != null &&
+    plan.caloriesPerDay != null &&
+    plan.caloriesPerDay < fromCaloriesPerDay;
+
+  if (!isLoweringCalories) {
+    return [];
+  }
+
+  // When lowering calories, protein must remain set (non-null).
+  if (plan.proteinGrams == null) {
+    return [
+      "nutrition: Protein target must remain set when lowering calories — do not remove the protein floor.",
+    ];
+  }
+
+  // When the current plan's protein is known, the proposed protein must not drop below it.
+  if (
+    currentProteinGrams != null &&
+    plan.proteinGrams < currentProteinGrams
+  ) {
+    return [
+      `nutrition: Protein must not be cut while lowering calories. Current floor: ${currentProteinGrams} g, proposed: ${plan.proteinGrams} g.`,
+    ];
+  }
+
+  return [];
+}
+
 export const nutritionPlanStatusSchema = z.enum(["active", "archived"]);
 
 export type NutritionPlanStatus = z.infer<typeof nutritionPlanStatusSchema>;
@@ -680,6 +800,184 @@ export const activeNutritionPlanResponseSchema = z.object({
 export type ActiveNutritionPlanResponse = z.infer<
   typeof activeNutritionPlanResponseSchema
 >;
+
+// ─── C1: per-meal calorie breakdown read model ─────────────────────────────
+
+/**
+ * One enriched meal row in the C1 read model.
+ * `changed` is computed by diffing the active revision's slot against the
+ * previous revision — it is never persisted.
+ */
+export const nutritionMealCaloriesRowSchema = z.object({
+  label: z.string(),
+  timingHint: z.string().nullable(),
+  mealTime: z.string().optional(),
+  dish: z.string().optional(),
+  kcal: z.number().int().nonnegative().optional(),
+  proteinGrams: z.number().int().nonnegative().optional(),
+  carbsGrams: z.number().int().nonnegative().optional(),
+  fatGrams: z.number().int().nonnegative().optional(),
+  /** True when this slot changed between the previous and active revision. */
+  changed: z.boolean(),
+});
+
+export type NutritionMealCaloriesRow = z.infer<typeof nutritionMealCaloriesRowSchema>;
+
+/**
+ * Full C1 read model: per-meal rows + day-level aggregates.
+ *
+ * `totalKcal` = Σ of meals with kcal populated.
+ * `remaining` = `caloriesPerDay ?? 0` − `totalKcal` (can be negative if over target).
+ * `hasPerMealData` = true when at least one meal slot has a kcal value.
+ */
+export const nutritionMealCaloriesReadModelSchema = z.object({
+  revisionNumber: z.number().int().positive(),
+  caloriesPerDay: z.number().int().positive().nullable(),
+  proteinTarget: z.number().int().nonnegative().nullable(),
+  carbsTarget: z.number().int().nonnegative().nullable(),
+  fatTarget: z.number().int().nonnegative().nullable(),
+  meals: z.array(nutritionMealCaloriesRowSchema),
+  totalKcal: z.number().int().nonnegative(),
+  totalProtein: z.number().int().nonnegative(),
+  totalCarbs: z.number().int().nonnegative(),
+  totalFat: z.number().int().nonnegative(),
+  remaining: z.number().int(),
+  hasPerMealData: z.boolean(),
+});
+
+export type NutritionMealCaloriesReadModel = z.infer<
+  typeof nutritionMealCaloriesReadModelSchema
+>;
+
+/**
+ * Compute the C1 per-meal calories read model from revision payloads.
+ *
+ * @param revisionNumber - the active revision number (from the DB row).
+ * @param activePayload - the active nutrition plan revision payload.
+ * @param previousPayload - the previous revision payload (null for first revision),
+ *   used to compute the `changed` flag by comparing slot labels and field values.
+ */
+export function computeMealCaloriesBreakdown(
+  revisionNumber: number,
+  activePayload: NutritionPlanPayload,
+  previousPayload: NutritionPlanPayload | null,
+): NutritionMealCaloriesReadModel {
+  const prevSlotLabels = new Set<string>(
+    previousPayload?.mealStructure.map((s) => s.label.trim().toLowerCase()) ?? [],
+  );
+
+  // Compare slot kcal/macros/dish to detect changes; fall back to label-presence diff
+  // for legacy previous revisions that predate per-meal fields.
+  const previousSlotByLabel = new Map<string, NutritionMealSlot>(
+    previousPayload?.mealStructure.map((s) => [s.label.trim().toLowerCase(), s]) ?? [],
+  );
+
+  const meals: NutritionMealCaloriesRow[] = activePayload.mealStructure.map((slot) => {
+    const key = slot.label.trim().toLowerCase();
+    const prevSlot = previousSlotByLabel.get(key);
+    const isNew = !prevSlotLabels.has(key);
+    const isChanged =
+      isNew ||
+      (prevSlot !== undefined &&
+        (prevSlot.kcal !== slot.kcal ||
+          prevSlot.dish !== slot.dish ||
+          prevSlot.proteinGrams !== slot.proteinGrams ||
+          prevSlot.carbsGrams !== slot.carbsGrams ||
+          prevSlot.fatGrams !== slot.fatGrams));
+
+    return {
+      label: slot.label,
+      timingHint: slot.timingHint ?? null,
+      mealTime: slot.mealTime,
+      dish: slot.dish,
+      kcal: slot.kcal,
+      proteinGrams: slot.proteinGrams,
+      carbsGrams: slot.carbsGrams,
+      fatGrams: slot.fatGrams,
+      changed: isChanged,
+    };
+  });
+
+  const totalKcal = meals.reduce((sum, m) => sum + (m.kcal ?? 0), 0);
+  const totalProtein = meals.reduce((sum, m) => sum + (m.proteinGrams ?? 0), 0);
+  const totalCarbs = meals.reduce((sum, m) => sum + (m.carbsGrams ?? 0), 0);
+  const totalFat = meals.reduce((sum, m) => sum + (m.fatGrams ?? 0), 0);
+  const remaining = (activePayload.caloriesPerDay ?? 0) - totalKcal;
+  const hasPerMealData = meals.some((m) => m.kcal !== undefined);
+
+  return {
+    revisionNumber,
+    caloriesPerDay: activePayload.caloriesPerDay,
+    proteinTarget: activePayload.proteinGrams,
+    carbsTarget: activePayload.carbsGrams,
+    fatTarget: activePayload.fatGrams,
+    meals,
+    totalKcal,
+    totalProtein,
+    totalCarbs,
+    totalFat,
+    remaining,
+    hasPerMealData,
+  };
+}
+
+/**
+ * The five aisle categories for the C3 grocery list.
+ * Maps to the Russian labels shown in the design spec.
+ */
+export const groceryCategorySchema = z.enum([
+  "protein",
+  "vegetables",
+  "grains",
+  "fruits",
+  "pantry",
+]);
+
+export type GroceryCategory = z.infer<typeof groceryCategorySchema>;
+
+/** A single aggregated item on the grocery list. */
+export const groceryItemSchema = z.object({
+  /** Normalised ingredient name (lowercased for aggregation key). */
+  name: z.string().min(1).max(160),
+  /** Human-readable quantity string, e.g. "1.2 кг", "20 шт", "600 г". Empty string when unknown. */
+  quantity: z.string().max(80),
+  /** Aisle category bucket. */
+  category: groceryCategorySchema,
+  /** True when the ingredient matches a user allergy (allergen items are still returned but flagged). */
+  isAllergen: z.boolean(),
+});
+
+export type GroceryItem = z.infer<typeof groceryItemSchema>;
+
+/** A single category bucket with its items. */
+export const groceryCategoryGroupSchema = z.object({
+  category: groceryCategorySchema,
+  items: z.array(groceryItemSchema),
+});
+
+export type GroceryCategoryGroup = z.infer<typeof groceryCategoryGroupSchema>;
+
+/**
+ * Response from GET /nutrition/grocery-list.
+ * The list is a deterministic projection of the active revision — never persisted.
+ * revisionId and revisionNumber are null when no active plan exists (empty state).
+ */
+export const groceryListResponseSchema = z.object({
+  /** Id of the active nutrition revision this list was derived from. Null when no active plan. */
+  revisionId: z.string().uuid().nullable(),
+  /** Revision number for display (e.g. "Собрано из рациона · v8"). Null when no active plan. */
+  revisionNumber: z.number().int().positive().nullable(),
+  /** Total ingredient count across all categories. */
+  totalItems: z.number().int().nonnegative(),
+  /** Grouped by category in the canonical display order. Empty categories are omitted. */
+  categories: z.array(groceryCategoryGroupSchema),
+  /** User's declared allergies (for subtitle rendering on the frontend). */
+  allergies: z.array(z.string().min(1).max(160)),
+  /** Number of meal slots per day included in derivation (for the "N meals per day" subtitle). */
+  mealsPerDay: z.number().int().nonnegative(),
+});
+
+export type GroceryListResponse = z.infer<typeof groceryListResponseSchema>;
 
 export const nutritionMealCompletionSchema = z.object({
   label: z.string().min(1).max(80),
@@ -1020,6 +1318,8 @@ export function getProposedChangesSchemaForIntent(
       return logNutritionIncidentProposalPayloadSchema;
     case "log_workout_activity":
       return logWorkoutActivityProposalPayloadSchema;
+    case "save_body_analysis":
+      return saveBodyAnalysisProposalPayloadSchema;
     default: {
       const _exhaustive: never = intent;
       return _exhaustive;
@@ -1056,6 +1356,7 @@ export const proposalChangesSchema = z.union([
   createGoalProposalChangesSchema,
   updateGoalProposalChangesSchema,
   profileProposalChangesSchema,
+  saveBodyAnalysisProposalPayloadSchema,
   emptyProposalChangesSchema,
 ]);
 
@@ -1163,6 +1464,12 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
     targetDomain: proposalTargetDomainSchema,
     ...proposalTitleReasonFields,
     proposedChanges: logWorkoutActivityProposalPayloadSchema,
+  }),
+  z.object({
+    intent: z.literal("save_body_analysis"),
+    targetDomain: proposalTargetDomainSchema,
+    ...proposalTitleReasonFields,
+    proposedChanges: saveBodyAnalysisProposalPayloadSchema,
   }),
 ]);
 
@@ -1353,6 +1660,7 @@ export {
   type HabitTemplateTargetConstraints,
   type HabitTimeOfDayHint,
 } from "./habits.js";
+export * from "./body-composition.js";
 export * from "./device-metrics.js";
 export * from "./document-signals.js";
 export * from "./documents.js";
@@ -1879,6 +2187,7 @@ export {
   type PromptTemplateRenderValues,
 } from "./prompt-template-renderer.js";
 export {
+  DEFAULT_PROMPT_TEMPLATE_BODIES,
   DOMAIN_HEALTH_TEMPLATE_KEY,
   DOMAIN_NUTRITION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,
