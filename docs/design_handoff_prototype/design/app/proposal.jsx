@@ -46,7 +46,7 @@ function Why({ text }) {
    props: variant 'A'|'B'|'C', state 'proposed'|'edit'|'accepted'|'rejected',
           domain, title, why, changes:[{from,to}], width */
 function ProposalCard({ variant = 'A', state = 'proposed', domain = 'training',
-  title, why, changes = [], compact }) {
+  title, why, changes = [], compact, onAccept, onEdit, onReject, onUndo, onRestore }) {
   const dm = domainMeta(domain);
   const accent = dm.color;
 
@@ -95,7 +95,7 @@ function ProposalCard({ variant = 'A', state = 'proposed', domain = 'training',
           <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#0c6b45' }}>
             Принято · план обновлён <span style={{ fontWeight: 500, color: M.green }}>· v8</span>
           </div>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0c6b45', cursor: 'pointer',
+          <span onClick={onUndo} style={{ fontSize: 12.5, fontWeight: 600, color: '#0c6b45', cursor: 'pointer',
             textDecoration: 'underline', textUnderlineOffset: 2 }}>Отменить</span>
         </div>
       );
@@ -107,7 +107,7 @@ function ProposalCard({ variant = 'A', state = 'proposed', domain = 'training',
           <Icon name="x" size={16} stroke={L.mut} />
           <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: L.mut }}>
             Отклонено · план без изменений</div>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: L.ink2, cursor: 'pointer',
+          <span onClick={onRestore} style={{ fontSize: 12.5, fontWeight: 600, color: L.ink2, cursor: 'pointer',
             textDecoration: 'underline', textUnderlineOffset: 2 }}>Вернуть</span>
         </div>
       );
@@ -115,17 +115,17 @@ function ProposalCard({ variant = 'A', state = 'proposed', domain = 'training',
     if (state === 'edit') {
       return (
         <div style={{ display: 'flex', gap: 8, padding: '14px 16px', borderTop: `1px solid ${L.line}` }}>
-          <Btn kind="accept" icon="check" style={{ flex: 1 }}>Применить изменения</Btn>
-          <Btn kind="ghost">Отмена</Btn>
+          <Btn kind="accept" icon="check" onClick={onAccept} style={{ flex: 1 }}>Применить изменения</Btn>
+          <Btn kind="ghost" onClick={onReject}>Отмена</Btn>
         </div>
       );
     }
     // proposed
     return (
       <div style={{ display: 'flex', gap: 8, padding: '14px 16px', borderTop: `1px solid ${L.line}` }}>
-        <Btn kind="accept" icon="check" style={{ flex: 1 }}>Принять</Btn>
-        <Btn kind="ghost" icon="edit">Изменить</Btn>
-        <Btn kind="quiet" icon="x">Отклонить</Btn>
+        <Btn kind="accept" icon="check" onClick={onAccept} style={{ flex: 1 }}>Принять</Btn>
+        <Btn kind="ghost" icon="edit" onClick={onEdit}>Изменить</Btn>
+        <Btn kind="quiet" icon="x" onClick={onReject}>Отклонить</Btn>
       </div>
     );
   };

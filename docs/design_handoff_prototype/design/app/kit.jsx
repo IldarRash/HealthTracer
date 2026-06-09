@@ -5,18 +5,36 @@
 const FONT = '"Helvetica Neue", Helvetica, "Segoe UI", system-ui, -apple-system, sans-serif';
 const MONO = '"SF Mono", ui-monospace, "Roboto Mono", Menlo, monospace';
 
+// one-time global CSS: interaction states the original system lacked
+// (hover lift, focus-visible ring, smooth transitions on buttons & nav).
+(function injectKitCss() {
+  if (typeof document === 'undefined' || document.getElementById('ht-kit-css')) return;
+  const s = document.createElement('style');
+  s.id = 'ht-kit-css';
+  s.textContent = `
+    .htBtn{transition:transform .12s ease, box-shadow .12s ease, opacity .12s ease, background .12s ease;}
+    .htBtn:hover{transform:translateY(-1px)}
+    .htBtn:active{transform:translateY(0);opacity:.9}
+    .htNav{transition:background .12s ease, color .12s ease}
+    .htRow{transition:background .12s ease}
+    button:focus-visible, a:focus-visible, [tabindex]:focus-visible{outline:2px solid #19c37d;outline-offset:2px;border-radius:8px}
+  `;
+  document.head.appendChild(s);
+})();
+
 // ── Color tokens ────────────────────────────────────────────────
-const L = {              // light world (chat)
+const L = {              // single light world (interface everywhere)
   bg: '#ffffff',
-  panel: '#f9f9f8',
-  panel2: '#f3f3f1',
-  line: '#ececea',
-  line2: '#e2e2df',
-  ink: '#0e0e0d',
-  ink2: '#3b3b38',
-  mut: '#76766f',
-  mut2: '#9a9a92',
-  bubble: '#f4f4f2',
+  paper: '#f1efe9',      // warm page behind instrument cards (data screens)
+  panel: '#f6f5f1',
+  panel2: '#eceae3',
+  line: '#e6e3db',
+  line2: '#d9d5cb',
+  ink: '#181712',
+  ink2: '#403c34',
+  mut: '#6c685e',        // AA on light surfaces (~5:1)
+  mut2: '#837f74',       // quiet — large/secondary only
+  bubble: '#efece4',
   field: '#ffffff',
 };
 const D = {              // dark world (data)
@@ -28,8 +46,8 @@ const D = {              // dark world (data)
   line2: 'rgba(255,255,255,0.14)',
   ink: '#f3f5f6',
   ink2: '#cfd4d7',
-  mut: '#878d92',
-  mut2: '#5e656a',
+  mut: '#9aa0a5',        // AA on dark instrument cards
+  mut2: '#838a90',       // bumped from #5e656a (was sub-AA)
 };
 // semantic metric scale (shared)
 const M = {
@@ -60,6 +78,8 @@ const ICONS = {
   checkSm: 'M3 8.5 6.5 12 13 4.5',
   x: 'M6 6l12 12M18 6 6 18',
   plus: 'M12 5v14M5 12h14',
+  minus: 'M5 12h14',
+  play: 'M8 5v14l11-7z',
   edit: 'M4 20h4L18.5 9.5a2 2 0 0 0-3-3L5 17z',
   send: 'M5 12h13M12 5l7 7-7 7',
   arrow: 'M5 12h14M13 6l6 6-6 6',
@@ -124,9 +144,9 @@ function Chip({ children, tone = 'neutral', dark, style }) {
 }
 
 // Button
-function Btn({ children, kind = 'primary', dark, icon, size = 'md', style, full }) {
-  const pads = size === 'sm' ? '8px 12px' : size === 'lg' ? '14px 22px' : '11px 17px';
-  const fs = size === 'sm' ? 13 : size === 'lg' ? 16 : 14.5;
+function Btn({ children, kind = 'primary', dark, icon, size = 'md', style, full, onClick }) {
+  const pads = size === 'sm' ? '9px 13px' : size === 'lg' ? '14px 22px' : '11px 17px';
+  const fs = size === 'sm' ? 13.5 : size === 'lg' ? 16 : 15;
   const base = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
     padding: pads, fontSize: fs, fontWeight: 600, borderRadius: 12, cursor: 'pointer',
     border: '1px solid transparent', fontFamily: FONT, lineHeight: 1, whiteSpace: 'nowrap',
@@ -141,7 +161,7 @@ function Btn({ children, kind = 'primary', dark, icon, size = 'md', style, full 
     danger: { background: 'transparent', color: M.red, borderColor: 'rgba(240,80,106,0.4)' },
     quiet: { background: 'transparent', color: dark ? D.mut : L.mut },
   };
-  return <button style={{ ...base, ...(kinds[kind] || kinds.primary), ...style }}>
+  return <button onClick={onClick} className="htBtn" style={{ ...base, ...(kinds[kind] || kinds.primary), ...style }}>
     {icon && <Icon name={icon} size={size === 'sm' ? 15 : 17} sw={1.9} />}{children}
   </button>;
 }
@@ -201,12 +221,15 @@ function Avatar({ who = 'coach', size = 28 }) {
     fontSize: size * 0.4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>А</div>;
 }
 
-// Card (themeable)
+// Card (themeable) — dark variant floats on the light page as an "instrument" inlay
 function Card({ children, dark, pad = 18, style, accent }) {
   return (
     <div style={{ borderRadius: 16, padding: pad,
       background: dark ? D.panel : '#fff',
       border: `1px solid ${dark ? D.line : L.line}`,
+      boxShadow: dark
+        ? '0 2px 10px rgba(6,8,9,0.22), 0 18px 44px rgba(6,8,9,0.26)'
+        : '0 1px 2px rgba(24,23,18,0.05), 0 6px 18px rgba(24,23,18,0.05)',
       borderTop: accent ? `2px solid ${accent}` : undefined,
       ...style }}>{children}</div>
   );

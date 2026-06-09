@@ -43,6 +43,24 @@ function ProfileScreen() {
                 </div>
               </Card>
 
+              <Card pad={0} style={{ overflow: 'hidden' }}>
+                <div className="htRow" onClick={() => window.__htNav && window.__htNav('body')}
+                  style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', cursor: 'pointer' }}>
+                  <div style={{ width: 42, height: 42, borderRadius: 12, flexShrink: 0, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', background: M.greenDim }}>
+                    <Icon name="profile" size={21} stroke={M.green} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: L.ink }}>Анализ тела</span>
+                      <Chip tone="green" style={{ padding: '1px 8px', fontSize: 10.5 }}>новое</Chip>
+                    </div>
+                    <div style={{ fontSize: 12.5, color: L.mut, marginTop: 3 }}>
+                      Состав тела, % жира и карта мышц · обновлено 5 июня</div>
+                  </div>
+                  <Icon name="chevR" size={17} stroke={L.mut2} />
+                </div>
+              </Card>
+
               <Card pad={20}>
                 <CardHead title="Иерархия целей" icon="flag" color={M.green}
                   right={<span style={{ fontSize: 12, color: L.mut2 }}>меняется через коуча</span>} />
@@ -85,39 +103,6 @@ function ProfileScreen() {
 
             {/* right */}
             <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <Card pad={20} accent={M.amber}>
-                <CardHead title="Документы о здоровье" icon="doc" color={M.amber} />
-                <div style={{ display: 'flex', gap: 10, padding: '12px 14px', borderRadius: 12,
-                  background: M.amberDim, marginBottom: 16 }}>
-                  <Icon name="shield" size={17} stroke={M.amber} style={{ marginTop: 1 }} />
-                  <div style={{ fontSize: 12.5, lineHeight: 1.5, color: L.ink2 }}>
-                    Загружаются только с вашего согласия и используются как контекст для образа жизни —
-                    не для диагнозов или лечения. Удалить можно в любой момент.</div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '12px 0', borderBottom: `1px solid ${L.line}` }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: L.ink }}>Согласие на использование</div>
-                    <div style={{ fontSize: 12.5, color: L.mut, marginTop: 2 }}>Коуч учитывает данные в рекомендациях</div>
-                  </div>
-                  <Toggle on />
-                </div>
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
-                    borderRadius: 11, border: `1px solid ${L.line}`, marginBottom: 8 }}>
-                    <div style={{ width: 34, height: 34, borderRadius: 9, background: L.panel2,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name="doc" size={17} stroke={L.mut} /></div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: L.ink }}>Анализ крови · март.pdf</div>
-                      <div style={{ fontSize: 12, color: L.mut }}>Загружено 22 мая · видно только вам</div>
-                    </div>
-                    <Icon name="x" size={16} stroke={L.mut2} />
-                  </div>
-                  <Btn kind="ghost" icon="plus" size="sm" full>Загрузить документ</Btn>
-                </div>
-              </Card>
-
               <Card pad={20}>
                 <CardHead title="Устройства и данные" icon="spark" />
                 {[['Часы · сон и пульс', true], ['Умные весы', false], ['Шаги телефона', true]].map(([t, on], i) => (
@@ -138,7 +123,7 @@ function ProfileScreen() {
                     <div style={{ fontSize: 15, fontWeight: 700, color: L.ink }}>Бесплатный план</div>
                     <div style={{ fontSize: 12.5, color: L.mut, marginTop: 2 }}>10 сообщений коучу в день</div>
                   </div>
-                  <Btn kind="primary" size="sm">Перейти на Pro</Btn>
+                  <Btn kind="primary" size="sm" onClick={() => window.__htNav && window.__htNav('pricing')}>Перейти на Pro</Btn>
                 </div>
               </Card>
             </div>

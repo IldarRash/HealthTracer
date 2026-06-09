@@ -1,7 +1,8 @@
-/* longevity.jsx — dark weekly overview ("Динамика"). Full brief:
-   consistency hero, domain summaries, goals, 7-day wellbeing, consent-gated
-   device signals, cross-domain trends (with deferred domains), document
-   metadata, coach prompts. States: loading / sparse / error / partial / done. */
+/* longevity.jsx — weekly overview ("Динамика").
+   UNIFIED: light interface; the consistency hero (ring + day bars) and the
+   device-signals module are dark "instrument" inlays; domains / goals /
+   wellbeing / documents / trends / coach prompts are light.
+   States: loading / sparse / error / partial / done. */
 
 function Spark({ data, color = M.green, w = 120, h = 34 }) {
   const max = Math.max(...data), min = Math.min(...data);
@@ -32,7 +33,7 @@ function TrendArrow({ dir = 'up', good = true }) {
   );
 }
 
-// ── HERO · consistency (ring + percent + day bars) ──────────────
+// ── HERO · consistency — DARK instrument (sparse variant LIGHT) ─
 function ConsistencyHero({ sparse }) {
   const days = [
     { d: 'Пн', v: 90, c: M.green }, { d: 'Вт', v: 75, c: M.green }, { d: 'Ср', v: 40, c: M.amber },
@@ -41,22 +42,22 @@ function ConsistencyHero({ sparse }) {
   ];
   if (sparse) {
     return (
-      <Card dark pad={24} style={{ background: 'linear-gradient(135deg, rgba(25,195,125,0.07), rgba(19,22,24,0))' }}>
-        <Eyebrow dark style={{ marginBottom: 14 }}>Консистентность недели</Eyebrow>
+      <Card pad={24}>
+        <Eyebrow style={{ marginBottom: 14 }}>Консистентность недели</Eyebrow>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
           <div style={{ width: 96, height: 96, borderRadius: '50%', flexShrink: 0,
-            border: `3px dashed ${D.line2}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            border: `3px dashed ${L.line2}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="spark" size={30} stroke={M.green} sw={1.6} />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 19, fontWeight: 700, color: D.ink, letterSpacing: -0.3 }}>
+            <div style={{ fontSize: 19, fontWeight: 700, color: L.ink, letterSpacing: -0.3 }}>
               Соберём вашу неделю</div>
-            <div style={{ fontSize: 13.5, color: D.mut, marginTop: 7, lineHeight: 1.5, maxWidth: 440 }}>
+            <div style={{ fontSize: 13.5, color: L.mut, marginTop: 7, lineHeight: 1.5, maxWidth: 440 }}>
               Пока данных мало для процента консистентности. Отметьте пару тренировок и приёмов пищи
               на экране «Сегодня» — и здесь появится живая картина недели.</div>
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
               <Btn kind="accept" size="sm" icon="today">Открыть «Сегодня»</Btn>
-              <Btn kind="ghost" dark size="sm" icon="chat">Обсудить цели с коучем</Btn>
+              <Btn kind="ghost" size="sm" icon="chat">Обсудить цели с коучем</Btn>
             </div>
           </div>
         </div>
@@ -103,27 +104,27 @@ function ConsistencyHero({ sparse }) {
   );
 }
 
-// ── Domain summary cards (Сегодня / Тренировки / Питание) ───────
+// ── Domain summary cards — LIGHT ────────────────────────────────
 function DomainCard({ icon, color, label, value, sub, link, sparse, progress }) {
   return (
-    <Card dark pad={18} style={{ flex: 1 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
+    <Card pad={18} style={{ flex: 1 }}>
+      <div className="htRow" style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14, cursor: 'pointer' }}>
         <div style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center',
           justifyContent: 'center', background: `${color}1c` }}>
           <Icon name={icon} size={16} stroke={color} /></div>
-        <span style={{ fontSize: 13, fontWeight: 700, color: D.ink2, flex: 1 }}>{label}</span>
-        <Icon name="chevR" size={15} stroke={D.mut2} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: L.ink2, flex: 1 }}>{label}</span>
+        <Icon name="chevR" size={15} stroke={L.mut2} />
       </div>
       {sparse ? (
-        <div style={{ fontSize: 13, color: D.mut, lineHeight: 1.45 }}>Пока недостаточно данных</div>
+        <div style={{ fontSize: 13, color: L.mut, lineHeight: 1.45 }}>Пока недостаточно данных</div>
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
             <span style={{ fontSize: 27, fontWeight: 700, color, letterSpacing: -0.6,
               fontVariantNumeric: 'tabular-nums' }}>{value}</span>
           </div>
-          {progress != null && <div style={{ marginTop: 11 }}><Progress dark value={progress} color={color} h={6} /></div>}
-          <div style={{ fontSize: 12.5, color: D.mut, marginTop: progress != null ? 9 : 7, lineHeight: 1.4 }}>{sub}</div>
+          {progress != null && <div style={{ marginTop: 11 }}><Progress value={progress} color={color} h={6} /></div>}
+          <div style={{ fontSize: 12.5, color: L.mut, marginTop: progress != null ? 9 : 7, lineHeight: 1.4 }}>{sub}</div>
         </>
       )}
       <div style={{ fontSize: 12, fontWeight: 600, color, marginTop: 12 }}>{link} →</div>
@@ -144,16 +145,16 @@ function DomainRow({ sparse }) {
   );
 }
 
-// ── Goals ───────────────────────────────────────────────────────
+// ── Goals — LIGHT ───────────────────────────────────────────────
 function GoalsCard({ empty }) {
   if (empty) {
     return (
-      <Card dark pad={20} style={{ flex: 1.3 }}>
-        <CardHead dark icon="flag" color={M.green} title="Активные цели" />
-        <div style={{ borderRadius: 12, border: `1px dashed ${D.line2}`, padding: '26px 20px', textAlign: 'center' }}>
+      <Card pad={20} style={{ flex: 1.3 }}>
+        <CardHead icon="flag" color={M.green} title="Активные цели" />
+        <div style={{ borderRadius: 12, border: `1px dashed ${L.line2}`, padding: '26px 20px', textAlign: 'center' }}>
           <Icon name="flag" size={26} stroke={M.green} style={{ margin: '0 auto 10px' }} />
-          <div style={{ fontSize: 14, fontWeight: 600, color: D.ink }}>Целей пока нет</div>
-          <div style={{ fontSize: 12.5, color: D.mut, marginTop: 6, maxWidth: 300, margin: '6px auto 0', lineHeight: 1.5 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: L.ink }}>Целей пока нет</div>
+          <div style={{ fontSize: 12.5, color: L.mut, marginTop: 6, maxWidth: 300, margin: '6px auto 0', lineHeight: 1.5 }}>
             Расскажите коучу, чего хотите достичь — он предложит цель и план под неё.</div>
           <Btn kind="accept" size="sm" icon="chat" style={{ marginTop: 14 }}>Обсудить цель</Btn>
         </div>
@@ -167,8 +168,8 @@ function GoalsCard({ empty }) {
     { t: 'Сон 7+ часов', tag: 'Неделя', v: 57, c: M.indigo, note: '4 / 7 дней' },
   ];
   return (
-    <Card dark pad={20} style={{ flex: 1.3 }}>
-      <CardHead dark icon="flag" color={M.green} title="Прогресс по целям"
+    <Card pad={20} style={{ flex: 1.3 }}>
+      <CardHead icon="flag" color={M.green} title="Прогресс по целям"
         right={<span style={{ fontSize: 12.5, color: M.green, fontWeight: 600 }}>обсудить в чате →</span>} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 17 }}>
         {goals.map((g, i) => (
@@ -176,12 +177,12 @@ function GoalsCard({ empty }) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {g.star && <Icon name="star" size={14} stroke={M.amber} fill={M.amber} />}
-                <span style={{ fontSize: 14, fontWeight: 600, color: D.ink }}>{g.t}</span>
-                <Chip dark style={{ padding: '2px 8px', fontSize: 11 }}>{g.tag}</Chip>
+                <span style={{ fontSize: 14, fontWeight: 600, color: L.ink }}>{g.t}</span>
+                <Chip tone="neutral" style={{ padding: '2px 8px', fontSize: 11 }}>{g.tag}</Chip>
               </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: D.mut, fontVariantNumeric: 'tabular-nums' }}>{g.note}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: L.mut, fontVariantNumeric: 'tabular-nums' }}>{g.note}</span>
             </div>
-            <Progress dark value={g.v} color={g.c} h={8} />
+            <Progress value={g.v} color={g.c} h={8} />
           </div>
         ))}
       </div>
@@ -189,17 +190,17 @@ function GoalsCard({ empty }) {
   );
 }
 
-// ── 7-day wellbeing (mood + stress, no clinical scores) ─────────
+// ── 7-day wellbeing — LIGHT ─────────────────────────────────────
 function WellbeingCard({ sparse }) {
   const mood = [3, 4, 2, 4, 5, 3, 4];
   const stress = [2, 2, 4, 3, 2, 4, 3];
   const dlabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   const moodFaces = ['😖', '🙁', '😐', '🙂', '😄'];
   return (
-    <Card dark pad={18} style={{ flex: 1 }}>
-      <CardHead dark icon="heart" color={M.amber} title="Самочувствие · 7 дней" />
+    <Card pad={18} style={{ flex: 1 }}>
+      <CardHead icon="heart" color={M.amber} title="Самочувствие · 7 дней" />
       {sparse ? (
-        <div style={{ fontSize: 13, color: D.mut, lineHeight: 1.5, padding: '8px 0' }}>
+        <div style={{ fontSize: 13, color: L.mut, lineHeight: 1.5, padding: '8px 0' }}>
           Ежедневные чек-ины появятся здесь, как только вы начнёте отмечать настроение в «Сегодня».
         </div>
       ) : (
@@ -214,16 +215,16 @@ function WellbeingCard({ sparse }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-end', height: 44 }}>
             {stress.map((s, i) => (
               <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-                <div style={{ width: '64%', height: `${s * 9}px`, background: s >= 4 ? M.amber : 'rgba(245,165,36,0.4)',
+                <div style={{ width: '64%', height: `${s * 9}px`, background: s >= 4 ? M.amber : 'rgba(245,165,36,0.45)',
                   borderRadius: 3 }} />
-                <span style={{ fontSize: 11, color: D.mut2 }}>{dlabels[i]}</span>
+                <span style={{ fontSize: 11, color: L.mut2 }}>{dlabels[i]}</span>
               </div>
             ))}
           </div>
           <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
-            <span style={{ fontSize: 12, color: D.mut, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: L.mut, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ fontSize: 13 }}>🙂</span> настроение</span>
-            <span style={{ fontSize: 12, color: D.mut, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: L.mut, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 9, height: 9, borderRadius: 2, background: M.amber, display: 'inline-block' }} /> уровень стресса</span>
           </div>
         </>
@@ -233,7 +234,7 @@ function WellbeingCard({ sparse }) {
   );
 }
 
-// ── Cross-domain trends (with deferred domains under expander) ──
+// ── Cross-domain trends — LIGHT ─────────────────────────────────
 function CrossDomainTrends({ failed }) {
   if (failed) return <SectionError label="Кросс-доменный обзор не обновился" h={120} />;
   const trends = [
@@ -242,60 +243,60 @@ function CrossDomainTrends({ failed }) {
     { ic: 'heart', c: M.amber, t: 'Стресс растёт к концу недели, активность падает', tag: 'Стресс × Активность' },
   ];
   return (
-    <Card dark pad={18}>
-      <CardHead dark icon="longevity" color={M.green} title="Недельный обзор · что заметила система"
-        right={<Chip dark style={{ padding: '2px 9px', fontSize: 11 }}>паттерны</Chip>} />
+    <Card pad={18}>
+      <CardHead icon="longevity" color={M.green} title="Недельный обзор · что заметила система"
+        right={<Chip tone="neutral" style={{ padding: '2px 9px', fontSize: 11 }}>паттерны</Chip>} />
       <div style={{ display: 'flex', gap: 14 }}>
         {trends.map((t, i) => (
           <div key={i} style={{ flex: 1, padding: '14px 15px', borderRadius: 13,
-            background: 'rgba(255,255,255,0.03)', border: `1px solid ${D.line}` }}>
+            background: L.panel, border: `1px solid ${L.line}` }}>
             <div style={{ width: 30, height: 30, borderRadius: 9, display: 'flex', alignItems: 'center',
               justifyContent: 'center', background: `${t.c}1c`, marginBottom: 11 }}>
               <Icon name={t.ic} size={16} stroke={t.c} /></div>
-            <div style={{ fontSize: 13, color: D.ink2, lineHeight: 1.45 }}>{t.t}</div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: D.mut2, marginTop: 9, letterSpacing: 0.2 }}>{t.tag}</div>
+            <div style={{ fontSize: 13, color: L.ink2, lineHeight: 1.45 }}>{t.t}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: L.mut2, marginTop: 9, letterSpacing: 0.2 }}>{t.tag}</div>
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, padding: '11px 14px',
-        borderRadius: 11, background: 'rgba(255,255,255,0.02)', border: `1px dashed ${D.line}`, cursor: 'pointer' }}>
-        <Icon name="chevR" size={15} stroke={D.mut} />
-        <span style={{ flex: 1, fontSize: 12.5, color: D.mut }}>
+      <div className="htRow" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, padding: '11px 14px',
+        borderRadius: 11, background: L.panel, border: `1px dashed ${L.line2}`, cursor: 'pointer' }}>
+        <Icon name="chevR" size={15} stroke={L.mut} />
+        <span style={{ flex: 1, fontSize: 12.5, color: L.mut }}>
           Ещё 2 домена отложены — мало данных (вес, гидратация)</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: D.mut2 }}>показать</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: L.mut2 }}>показать</span>
       </div>
     </Card>
   );
 }
 
-// ── Documents (metadata only) ───────────────────────────────────
+// ── Documents — LIGHT ───────────────────────────────────────────
 function DocumentsCard({ sparse }) {
   const docs = [
     { t: 'Анализы крови', when: '14 мая', status: 'Обработан', tone: 'green' },
     { t: 'Выписка от врача', when: '2 мая', status: 'В обработке', tone: 'amber' },
   ];
   return (
-    <Card dark pad={18} style={{ flex: 1 }}>
-      <CardHead dark icon="doc" color={M.blue} title="Документы"
-        right={<Chip dark style={{ padding: '2px 9px', fontSize: 11 }}>
-          <Icon name="shield" size={11} stroke={D.mut} />по согласию</Chip>} />
+    <Card pad={18} style={{ flex: 1 }}>
+      <CardHead icon="doc" color={M.blue} title="Документы"
+        right={<Chip tone="neutral" style={{ padding: '2px 9px', fontSize: 11 }}>
+          <Icon name="shield" size={11} stroke={L.mut} />по согласию</Chip>} />
       {sparse ? (
-        <div style={{ borderRadius: 12, border: `1px dashed ${D.line2}`, padding: '20px', textAlign: 'center' }}>
+        <div style={{ borderRadius: 12, border: `1px dashed ${L.line2}`, padding: '20px', textAlign: 'center' }}>
           <Icon name="doc" size={22} stroke={M.blue} style={{ margin: '0 auto 9px' }} />
-          <div style={{ fontSize: 13, color: D.mut, lineHeight: 1.5, maxWidth: 260, margin: '0 auto' }}>
+          <div style={{ fontSize: 13, color: L.mut, lineHeight: 1.5, maxWidth: 260, margin: '0 auto' }}>
             Документов пока нет. Их можно загрузить в Профиле.</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           {docs.map((d) => (
-            <div key={d.t} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px',
-              borderRadius: 11, background: 'rgba(255,255,255,0.03)', border: `1px solid ${D.line}` }}>
+            <div key={d.t} className="htRow" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px',
+              borderRadius: 11, background: L.panel, border: `1px solid ${L.line}`, cursor: 'pointer' }}>
               <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex',
-                alignItems: 'center', justifyContent: 'center', background: 'rgba(58,141,255,0.14)' }}>
+                alignItems: 'center', justifyContent: 'center', background: M.blueDim }}>
                 <Icon name="doc" size={15} stroke={M.blue} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: D.ink }}>{d.t}</div>
-                <div style={{ fontSize: 12, color: D.mut2, marginTop: 2 }}>загружен {d.when}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: L.ink }}>{d.t}</div>
+                <div style={{ fontSize: 12, color: L.mut2, marginTop: 2 }}>загружен {d.when}</div>
               </div>
               <Chip tone={d.tone} style={{ padding: '2px 9px', fontSize: 11 }}>{d.status}</Chip>
             </div>
@@ -307,22 +308,22 @@ function DocumentsCard({ sparse }) {
   );
 }
 
-// ── Coach prompts ───────────────────────────────────────────────
+// ── Coach prompts — LIGHT ───────────────────────────────────────
 function CoachChips() {
   const chips = ['Обсудить эту неделю', 'Почему просел сон?', 'Можно ли добавить тренировку?', 'Цель на следующую неделю'];
   return (
-    <Card dark pad={18}>
+    <Card pad={18}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Avatar who="coach" size={34} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: D.ink }}>Поговорить с коучем</div>
-          <div style={{ fontSize: 12.5, color: D.mut, marginTop: 2 }}>Любые изменения плана — через чат</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: L.ink }}>Поговорить с коучем</div>
+          <div style={{ fontSize: 12.5, color: L.mut, marginTop: 2 }}>Любые изменения плана — через чат</div>
         </div>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginTop: 14 }}>
         {chips.map((c) => (
-          <span key={c} style={{ padding: '9px 14px', borderRadius: 999, fontSize: 13, fontWeight: 500,
-            color: D.ink2, background: 'rgba(255,255,255,0.04)', border: `1px solid ${D.line2}`, cursor: 'pointer' }}>
+          <span key={c} className="htRow" style={{ padding: '9px 14px', borderRadius: 999, fontSize: 13, fontWeight: 500,
+            color: L.ink2, background: L.panel, border: `1px solid ${L.line2}`, cursor: 'pointer' }}>
             {c}</span>
         ))}
       </div>
@@ -334,16 +335,17 @@ function CoachChips() {
 function LongevityScreen({ state = 'done' }) {
   const sparse = state === 'sparse';
   const partial = state === 'partial';
+  const navBtn = (rot) => (
+    <div className="htRow" style={{ width: 32, height: 32, borderRadius: 9, border: `1px solid ${L.line2}`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: '#fff' }}>
+      <Icon name="chevR" size={16} stroke={L.mut} style={rot ? { transform: 'rotate(180deg)' } : undefined} /></div>
+  );
   const top = (
-    <TopBar dark sub="Неделя · 30 мая – 5 июня" title="Динамика"
+    <TopBar sub="Неделя · 30 мая – 5 июня" title="Динамика"
       right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 9, border: `1px solid ${D.line}`, display: 'flex',
-          alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="chevR" size={16} stroke={D.mut} style={{ transform: 'rotate(180deg)' }} /></div>
-        <Chip dark>Эта неделя</Chip>
-        <div style={{ width: 32, height: 32, borderRadius: 9, border: `1px solid ${D.line}`, display: 'flex',
-          alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="chevR" size={16} stroke={D.mut} /></div>
+        {navBtn(true)}
+        <Chip tone="neutral">Эта неделя</Chip>
+        {navBtn(false)}
       </div>} />
   );
 
@@ -365,12 +367,12 @@ function LongevityScreen({ state = 'done' }) {
           <WellbeingCard sparse={sparse} />
         </div>
         <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-          {partial ? <div style={{ flex: 1 }}><Card dark pad={18}>
+          {partial ? <div style={{ flex: 1 }}><Card pad={18}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
               <div style={{ width: 26, height: 26, borderRadius: 8, display: 'flex', alignItems: 'center',
-                justifyContent: 'center', background: 'rgba(58,141,255,0.14)' }}>
+                justifyContent: 'center', background: M.blueDim }}>
                 <Icon name="shield" size={15} stroke={M.blue} /></div>
-              <span style={{ fontSize: 13.5, fontWeight: 700, color: D.ink, flex: 1 }}>Wellness-сигналы устройств</span></div>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: L.ink, flex: 1 }}>Wellness-сигналы устройств</span></div>
             <SectionError label="Сигналы устройств не обновились" h={96} />
           </Card></div>
             : <div style={{ flex: 1 }}><ConsentSignals state={sparse ? 'connect' : 'data'} /></div>}
@@ -383,7 +385,7 @@ function LongevityScreen({ state = 'done' }) {
   }
 
   return (
-    <AppShell theme="dark" active="longevity">
+    <AppShell active="longevity" contentBg={L.paper}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {top}
         <div style={{ flex: 1, minHeight: 0 }}>{body}</div>

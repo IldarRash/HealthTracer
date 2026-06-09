@@ -1,8 +1,8 @@
-/* nutrition.jsx — dark, read-only active nutrition plan ("Питание").
-   Plan + revision facts + nutrient goals + meal structure +
-   preferences/restrictions/allergies + coach notes + today's adherence panel
-   (own sub-states) + recipe ideas (watchable) + revision history.
-   States: loading / empty / error / done / recipe (detail). */
+/* nutrition.jsx — read-only active nutrition plan ("Питание").
+   UNIFIED: light interface; numeric block (NutrientGoals) is the dark
+   "instrument"; header / meal structure / prefs / adherence are light;
+   recipe media tiles stay dark; recipe detail is a dark "theater" stage.
+   States: loading / empty / error / done / recipe. */
 
 const MACROS = [
   { k: 'Калории', v: 2100, unit: 'ккал', cur: 1180, c: M.amber, pct: 56 },
@@ -18,16 +18,17 @@ const RECIPES = [
   { title: 'Чечевичный суп', meta: '≈ 340 ккал · 19 г белка', duration: '3:20', tags: ['Обед', 'Веган'], poster: 3 },
 ];
 
+// LIGHT text hero
 function ActiveNutritionHeader({ empty }) {
   if (empty) {
     return (
-      <Card dark pad={22}>
-        <div style={{ borderRadius: 14, border: `1px dashed ${D.line2}`, padding: '30px 24px', textAlign: 'center' }}>
+      <Card pad={22}>
+        <div style={{ borderRadius: 14, border: `1px dashed ${L.line2}`, padding: '30px 24px', textAlign: 'center' }}>
           <div style={{ width: 54, height: 54, borderRadius: 15, margin: '0 auto 16px', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', background: 'rgba(25,195,125,0.12)' }}>
+            alignItems: 'center', justifyContent: 'center', background: M.greenDim }}>
             <Icon name="fork" size={26} stroke={M.green} /></div>
-          <div style={{ fontSize: 19, fontWeight: 700, color: D.ink, letterSpacing: -0.3 }}>Активного плана питания пока нет</div>
-          <div style={{ fontSize: 13.5, color: D.mut, marginTop: 9, lineHeight: 1.5, maxWidth: 410, margin: '9px auto 0' }}>
+          <div style={{ fontSize: 19, fontWeight: 700, color: L.ink, letterSpacing: -0.3 }}>Активного плана питания пока нет</div>
+          <div style={{ fontSize: 13.5, color: L.mut, marginTop: 9, lineHeight: 1.5, maxWidth: 410, margin: '9px auto 0' }}>
             План питания собирается коучем под ваши цели, предпочтения и ограничения. Расскажите в чате,
             что любите и чего избегаете — и примите предложение одним нажатием.</div>
           <Btn kind="accept" icon="chat" style={{ marginTop: 18 }}>Открыть чат с коучем</Btn>
@@ -36,21 +37,21 @@ function ActiveNutritionHeader({ empty }) {
     );
   }
   return (
-    <Card dark pad={22}>
+    <Card pad={22}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <Chip tone="green" style={{ padding: '3px 10px' }}>Активный план</Chip>
-        <Chip dark style={{ padding: '3px 10px' }}>версия v8</Chip>
+        <Chip tone="neutral" style={{ padding: '3px 10px' }}>версия v8</Chip>
       </div>
-      <div style={{ fontSize: 25, fontWeight: 700, color: D.ink, letterSpacing: -0.5 }}>
+      <div style={{ fontSize: 25, fontWeight: 700, color: L.ink, letterSpacing: -0.5 }}>
         Белок + овощи · сбалансированный</div>
-      <div style={{ fontSize: 13.5, color: D.mut, marginTop: 8, lineHeight: 1.55, maxWidth: 560 }}>
+      <div style={{ fontSize: 13.5, color: L.mut, marginTop: 8, lineHeight: 1.55, maxWidth: 560 }}>
         Белок и овощи в каждый основной приём, умеренные углеводы вокруг тренировок и достаточно воды.
         Без жёстких запретов — фокус на регулярности и насыщении.</div>
     </Card>
   );
 }
 
-// daily nutrient goals
+// ── DARK instrument: daily nutrient goals (the numbers) ─────────
 function NutrientGoals() {
   return (
     <Card dark pad={20} style={{ flex: 1.2 }}>
@@ -74,7 +75,7 @@ function NutrientGoals() {
   );
 }
 
-// meal structure with timing
+// LIGHT — meal structure with timing
 function MealStructure() {
   const meals = [
     { t: 'Завтрак', time: '7:30', hint: 'Белок + сложные углеводы', ic: 'sun' },
@@ -84,23 +85,23 @@ function MealStructure() {
     { t: 'Ужин', time: '20:00', hint: 'Лёгкий белок + овощи', ic: 'moon' },
   ];
   return (
-    <Card dark pad={20} style={{ flex: 1 }}>
-      <CardHead dark icon="today" color={M.blue} title="Структура приёмов" />
+    <Card pad={20} style={{ flex: 1 }}>
+      <CardHead icon="today" color={M.blue} title="Структура приёмов" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {meals.map((m, i) => (
           <div key={m.t} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '11px 4px',
-            borderBottom: i === meals.length - 1 ? 'none' : `1px solid ${D.line}` }}>
+            borderBottom: i === meals.length - 1 ? 'none' : `1px solid ${L.line}` }}>
             <div style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', background: 'rgba(255,255,255,0.05)' }}>
-              <Icon name={m.ic} size={15} stroke={D.ink2} /></div>
+              justifyContent: 'center', background: L.panel2 }}>
+              <Icon name={m.ic} size={15} stroke={L.ink2} /></div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: D.ink }}>{m.t}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: L.ink }}>{m.t}</span>
                 {m.changed && <Chip tone="amber" style={{ padding: '1px 7px', fontSize: 10.5 }}>новое</Chip>}
               </div>
-              <div style={{ fontSize: 12, color: D.mut, marginTop: 2 }}>{m.hint}</div>
+              <div style={{ fontSize: 12, color: L.mut, marginTop: 2 }}>{m.hint}</div>
             </div>
-            <span style={{ fontSize: 13, fontWeight: 600, color: D.mut2, fontVariantNumeric: 'tabular-nums' }}>{m.time}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: L.mut2, fontVariantNumeric: 'tabular-nums' }}>{m.time}</span>
           </div>
         ))}
       </div>
@@ -108,7 +109,7 @@ function MealStructure() {
   );
 }
 
-// preferences / restrictions / allergies
+// LIGHT — preferences / restrictions / allergies
 function PrefsCard() {
   const groups = [
     { label: 'Предпочтения', tone: 'green', ic: 'star', items: ['Средиземноморская', 'Рыба', 'Овощи'] },
@@ -116,15 +117,15 @@ function PrefsCard() {
     { label: 'Аллергии', tone: 'red', ic: 'shield', items: ['Орехи'] },
   ];
   return (
-    <Card dark pad={20}>
-      <CardHead dark icon="heart" color={M.amber} title="Предпочтения, ограничения, аллергии" />
+    <Card pad={20}>
+      <CardHead icon="heart" color={M.amber} title="Предпочтения, ограничения, аллергии" />
       <div style={{ display: 'flex', gap: 14 }}>
         {groups.map((g) => (
           <div key={g.label} style={{ flex: 1, padding: '14px 15px', borderRadius: 13,
-            background: 'rgba(255,255,255,0.03)', border: `1px solid ${D.line}` }}>
+            background: L.panel, border: `1px solid ${L.line}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 11 }}>
               <Icon name={g.ic} size={14} stroke={M[g.tone]} />
-              <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: D.ink2 }}>{g.label}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: L.ink2 }}>{g.label}</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
               {g.items.map((it) => <Chip key={it} tone={g.tone} style={{ padding: '4px 10px' }}>{it}</Chip>)}
@@ -136,17 +137,17 @@ function PrefsCard() {
   );
 }
 
-// ── Today's adherence panel — own sub-states ────────────────────
+// ── Today's adherence panel — LIGHT, own sub-states ─────────────
 // state: 'data' | 'loading' | 'error' | 'empty'
 function AdherencePanel({ state = 'data' }) {
   const head = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 16 }}>
       <div style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center',
-        justifyContent: 'center', background: 'rgba(25,195,125,0.16)' }}>
+        justifyContent: 'center', background: M.greenDim }}>
         <Icon name="check" size={16} stroke={M.green} /></div>
-      <span style={{ fontSize: 14, fontWeight: 700, color: D.ink, flex: 1 }}>Сегодня залогировано</span>
-      <Chip dark><Icon name="lock" size={12} stroke={D.mut} />только чтение</Chip>
-      <Btn kind="soft" dark size="sm" icon="today">Логировать в «Сегодня»</Btn>
+      <span style={{ fontSize: 14, fontWeight: 700, color: L.ink, flex: 1 }}>Сегодня залогировано</span>
+      <Chip tone="neutral"><Icon name="lock" size={12} stroke={L.mut} />только чтение</Chip>
+      <Btn kind="soft" size="sm" icon="today">Логировать в «Сегодня»</Btn>
     </div>
   );
   let inner;
@@ -160,62 +161,62 @@ function AdherencePanel({ state = 'data' }) {
     inner = <SectionError label="Не удалось загрузить сегодняшнее следование" h={90} />;
   } else if (state === 'empty') {
     inner = (
-      <div style={{ borderRadius: 13, border: `1px dashed ${D.line2}`, padding: '26px 20px', textAlign: 'center' }}>
+      <div style={{ borderRadius: 13, border: `1px dashed ${L.line2}`, padding: '26px 20px', textAlign: 'center' }}>
         <Icon name="fork" size={24} stroke={M.green} style={{ margin: '0 auto 10px' }} />
-        <div style={{ fontSize: 14, fontWeight: 600, color: D.ink }}>Пока ничего не залогировано</div>
-        <div style={{ fontSize: 12.5, color: D.mut, marginTop: 6, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: L.ink }}>Пока ничего не залогировано</div>
+        <div style={{ fontSize: 12.5, color: L.mut, marginTop: 6, lineHeight: 1.5 }}>
           Отметьте первый приём пищи или стакан воды в «Сегодня» — сводка появится здесь.</div>
         <Btn kind="accept" size="sm" icon="today" style={{ marginTop: 14 }}>Открыть «Сегодня»</Btn>
       </div>
     );
   } else {
     const logged = [
-      { t: 'Завтрак', d: 'Овсянка + ягоды', c: M.green, done: true },
-      { t: 'Обед', d: 'Курица, рис, салат', c: M.green, done: true },
-      { t: 'Перекус', d: 'не отмечен', c: D.mut2, done: false },
-      { t: 'Ужин', d: 'впереди', c: D.mut2, done: false },
+      { t: 'Завтрак', d: 'Овсянка + ягоды', done: true },
+      { t: 'Обед', d: 'Курица, рис, салат', done: true },
+      { t: 'Перекус', d: 'не отмечен', done: false },
+      { t: 'Ужин', d: 'впереди', done: false },
     ];
     inner = (
       <>
         <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>
           {logged.map((m) => (
             <div key={m.t} style={{ flex: 1, padding: '13px 15px', borderRadius: 13,
-              background: m.done ? 'rgba(25,195,125,0.06)' : 'rgba(255,255,255,0.03)',
-              border: `1px solid ${m.done ? 'rgba(25,195,125,0.2)' : D.line}` }}>
+              background: m.done ? M.greenDim : L.panel,
+              border: `1px solid ${m.done ? 'rgba(25,195,125,0.28)' : L.line}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <CheckCircle done={m.done} dark size={18} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: m.done ? D.ink : D.mut }}>{m.t}</span>
+                <CheckCircle done={m.done} size={18} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: m.done ? L.ink : L.mut }}>{m.t}</span>
               </div>
-              <div style={{ fontSize: 12, color: D.mut, lineHeight: 1.4 }}>{m.d}</div>
+              <div style={{ fontSize: 12, color: L.mut, lineHeight: 1.4 }}>{m.d}</div>
             </div>
           ))}
         </div>
         <div style={{ display: 'flex', gap: 14 }}>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 15px',
-            borderRadius: 13, background: 'rgba(255,255,255,0.03)', border: `1px solid ${D.line}` }}>
+            borderRadius: 13, background: L.panel, border: `1px solid ${L.line}` }}>
             <Icon name="fork" size={18} stroke={M.green} />
-            <span style={{ flex: 1, fontSize: 13, color: D.ink2 }}>Белок</span>
+            <span style={{ flex: 1, fontSize: 13, color: L.ink2 }}>Белок</span>
             <span style={{ fontSize: 14, fontWeight: 700, color: M.green, fontVariantNumeric: 'tabular-nums' }}>78 / 130 г</span>
           </div>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 15px',
-            borderRadius: 13, background: 'rgba(255,255,255,0.03)', border: `1px solid ${D.line}` }}>
+            borderRadius: 13, background: L.panel, border: `1px solid ${L.line}` }}>
             <Icon name="drop" size={18} stroke={M.blue} />
-            <span style={{ flex: 1, fontSize: 13, color: D.ink2 }}>Вода</span>
+            <span style={{ flex: 1, fontSize: 13, color: L.ink2 }}>Вода</span>
             <span style={{ fontSize: 14, fontWeight: 700, color: M.blue, fontVariantNumeric: 'tabular-nums' }}>1.2 / 2 л</span>
           </div>
         </div>
       </>
     );
   }
-  return <Card dark pad={20}>{head}{inner}</Card>;
+  return <Card pad={20}>{head}{inner}</Card>;
 }
 
-// recipe ideas (watchable, do NOT change plan goals)
+// LIGHT container holding dark recipe tiles
 function RecipeIdeas() {
   return (
-    <Card dark pad={20}>
-      <CardHead dark icon="spark" color={M.green} title="Идеи блюд под план"
-        right={<span style={{ fontSize: 12.5, color: D.mut2 }}>примерная оценка нутриентов</span>} />
+    <Card pad={20}>
+      <CardHead icon="spark" color={M.green} title="Идеи блюд под план"
+        right={<span style={{ fontSize: 12.5, color: L.mut2 }}>примерная оценка нутриентов</span>} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
         {RECIPES.map((r, i) => (
           <MediaCard key={i} kind="recipe" icon="fork" color={M.green} title={r.title}
@@ -223,16 +224,16 @@ function RecipeIdeas() {
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16, padding: '11px 15px',
-        borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: `1px solid ${D.line}` }}>
-        <Icon name="info" size={16} stroke={D.mut} />
-        <span style={{ fontSize: 12.5, color: D.mut, lineHeight: 1.4 }}>
-          Сохранить или залогировать рецепт можно в «Сегодня» — это идеи, они <b style={{ color: D.ink2 }}>не меняют</b> цели плана.</span>
+        borderRadius: 12, background: L.panel, border: `1px solid ${L.line}` }}>
+        <Icon name="info" size={16} stroke={L.mut} />
+        <span style={{ fontSize: 12.5, color: L.mut, lineHeight: 1.4 }}>
+          Сохранить или залогировать рецепт можно в «Сегодня» — это идеи, они <b style={{ color: L.ink2 }}>не меняют</b> цели плана.</span>
       </div>
     </Card>
   );
 }
 
-// ── Recipe detail (focus) ───────────────────────────────────────
+// ── Recipe detail — DARK theater stage ──────────────────────────
 function RecipeDetail() {
   const ingredients = ['Филе лосося — 150 г', 'Киноа — 80 г (сухая)', 'Огурец, помидоры, шпинат',
     'Авокадо — ½', 'Лимон, оливковое масло', 'Соль, перец, зелень'];
@@ -241,20 +242,38 @@ function RecipeDetail() {
   return (
     <div style={{ padding: '20px 34px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-        <Btn kind="ghost" dark size="sm"><Icon name="chevR" size={15} stroke={D.ink2} style={{ transform: 'rotate(180deg)' }} />Назад к плану</Btn>
-        <Chip dark style={{ padding: '3px 10px' }}>Идея блюда · не меняет план</Chip>
+        <Btn kind="ghost" size="sm"><Icon name="chevR" size={15} stroke={L.ink2} style={{ transform: 'rotate(180deg)' }} />Назад к плану</Btn>
+        <Chip tone="neutral" style={{ padding: '3px 10px' }}>Идея блюда · не меняет план</Chip>
       </div>
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1.5 }}>
           <div style={{ position: 'relative', height: 360, borderRadius: 18, overflow: 'hidden',
             background: 'linear-gradient(135deg, #1b2620, #0c100e)', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', border: `1px solid ${D.line}` }}>
-            <Icon name="fork" size={84} stroke={M.green} sw={1.2} style={{ opacity: 0.22 }} />
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <PlayBadge size={72} />
+            justifyContent: 'center', border: `1px solid ${D.line}`,
+            boxShadow: '0 4px 14px rgba(6,8,9,0.2), 0 30px 70px rgba(6,8,9,0.26)' }}>
+            <Icon name="fork" size={84} stroke={M.green} sw={1.2}
+              style={{ opacity: 0.4, animation: 'htBob 2.6s ease-in-out infinite' }} />
+            <div style={{ position: 'absolute', top: 0, bottom: 0, width: 120,
+              background: 'linear-gradient(90deg, transparent, rgba(25,195,125,0.12), transparent)',
+              animation: 'htSweep 3.4s linear infinite' }} />
+            <div style={{ position: 'absolute', top: 14, left: 14, display: 'flex', alignItems: 'center', gap: 7,
+              padding: '5px 11px', borderRadius: 999, background: 'rgba(8,10,11,0.6)',
+              border: '1px solid rgba(255,255,255,0.14)' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: M.green,
+                animation: 'htPulse 1.4s ease-in-out infinite' }} />
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: '#fff', letterSpacing: 0.3 }}>Анимация · как готовить</span>
             </div>
-            <div style={{ position: 'absolute', top: 14, right: 14, padding: '4px 10px', borderRadius: 8,
-              background: 'rgba(8,10,11,0.6)', fontSize: 12, fontWeight: 600, color: '#fff' }}>4:10</div>
+            <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '34px 18px 14px',
+              background: 'linear-gradient(transparent, rgba(8,10,11,0.72))' }}>
+              <div style={{ height: 4, borderRadius: 4, background: 'rgba(255,255,255,0.2)', marginBottom: 11 }}>
+                <div style={{ height: '100%', borderRadius: 4, background: M.green,
+                  animation: 'htScrub 3.6s linear infinite' }} /></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Icon name="pause" size={17} stroke="#fff" />
+                <span style={{ fontSize: 12, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>1:28 / 4:10</span>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>HD · без звука</span>
+              </div>
+            </div>
           </div>
           <Card dark pad={20} style={{ marginTop: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase',
@@ -263,7 +282,7 @@ function RecipeDetail() {
               {steps.map((s, i) => (
                 <div key={i} style={{ display: 'flex', gap: 11 }}>
                   <div style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, fontSize: 12,
-                    fontWeight: 700, color: M.green, background: 'rgba(25,195,125,0.14)', display: 'flex',
+                    fontWeight: 700, color: M.green, background: 'rgba(25,195,125,0.18)', display: 'flex',
                     alignItems: 'center', justifyContent: 'center' }}>{i + 1}</div>
                   <span style={{ fontSize: 13.5, color: D.ink2, lineHeight: 1.45 }}>{s}</span>
                 </div>
@@ -282,7 +301,7 @@ function RecipeDetail() {
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
               {[['520', 'ккал', M.amber], ['38 г', 'белок', M.green], ['12 г', 'жиры', M.indigo]].map(([v, l, c]) => (
                 <div key={l} style={{ flex: 1, padding: '12px', borderRadius: 12, textAlign: 'center',
-                  background: 'rgba(255,255,255,0.03)', border: `1px solid ${D.line}` }}>
+                  background: 'rgba(255,255,255,0.04)', border: `1px solid ${D.line}` }}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: c }}>{v}</div>
                   <Eyebrow dark style={{ marginTop: 4 }}>{l}</Eyebrow>
                 </div>
@@ -300,12 +319,11 @@ function RecipeDetail() {
               ))}
             </div>
           </Card>
-          <Card dark pad={16} style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 13,
-            background: 'rgba(255,255,255,0.03)' }}>
-            <Icon name="info" size={18} stroke={D.mut} />
-            <div style={{ flex: 1, fontSize: 12.5, color: D.mut, lineHeight: 1.45 }}>
+          <Card pad={16} style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 13 }}>
+            <Icon name="info" size={18} stroke={L.mut} />
+            <div style={{ flex: 1, fontSize: 12.5, color: L.mut, lineHeight: 1.45 }}>
               Залогировать это блюдо можно в «Сегодня». Цели плана при этом не меняются.</div>
-            <Btn kind="soft" dark size="sm" icon="today">В «Сегодня»</Btn>
+            <Btn kind="soft" size="sm" icon="today">В «Сегодня»</Btn>
           </Card>
         </div>
       </div>
@@ -315,8 +333,8 @@ function RecipeDetail() {
 
 function NutritionScreen({ state = 'done', adherence = 'data' }) {
   const empty = state === 'empty';
-  const top = <TopBar dark sub={empty ? 'План питания' : 'Активная версия · v8'} title="Питание"
-    right={<Chip dark><Icon name="lock" size={13} stroke={D.mut} />Только просмотр</Chip>} />;
+  const top = <TopBar sub={empty ? 'План питания' : 'Активная версия · v8'} title="Питание"
+    right={<Chip tone="neutral"><Icon name="lock" size={13} stroke={L.mut} />Только просмотр</Chip>} />;
 
   let body;
   if (state === 'loading') {
@@ -362,7 +380,7 @@ function NutritionScreen({ state = 'done', adherence = 'data' }) {
   }
 
   return (
-    <AppShell theme="dark" active="nutrition">
+    <AppShell active="nutrition" contentBg={L.paper}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {top}
         <div style={{ flex: 1, minHeight: 0 }}>{body}</div>
@@ -371,13 +389,13 @@ function NutritionScreen({ state = 'done', adherence = 'data' }) {
   );
 }
 
-// isolated panel frame for sub-state artboards
+// isolated panel frame for sub-state artboards — LIGHT
 function AdherenceFrame({ state }) {
   return (
-    <div style={{ width: '100%', height: '100%', background: D.bg, fontFamily: FONT, padding: 28,
+    <div style={{ width: '100%', height: '100%', background: L.paper, fontFamily: FONT, padding: 28,
       display: 'flex', alignItems: 'center' }}>
       <div style={{ width: '100%' }}>
-        <Eyebrow dark style={{ marginBottom: 14, paddingLeft: 2 }}>
+        <Eyebrow style={{ marginBottom: 14, paddingLeft: 2 }}>
           Панель «сегодняшнее следование» · {state === 'loading' ? 'загрузка' : state === 'error' ? 'ошибка' : 'пусто'}</Eyebrow>
         <AdherencePanel state={state} />
       </div>

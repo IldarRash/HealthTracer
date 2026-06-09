@@ -160,6 +160,8 @@ These capabilities extend the product toward AI-first coaching for a longer and 
 | Feature | Brief | Depends on |
 |---------|-------|------------|
 | Editable proposals + performed log | [editable-proposals-performed-log.md](features/editable-proposals-performed-log.md) | Proposals, workouts, nutrition, Today, progress |
+| Real catalog data (exercises/recipes + user authoring) | [real-catalog-data.md](features/real-catalog-data.md) | Exercises, recipes, nutrition plan/revisions, proposals |
+| Body analysis + deeper nutrition (gap analysis) — archived | [archive/body-and-nutrition/00-overview.md](features/archive/body-and-nutrition/00-overview.md) | Chat attachments, profiles, nutrition plan/revisions, proposals, design system |
 
 ## AI Safety and State Rules
 
