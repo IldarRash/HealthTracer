@@ -752,6 +752,64 @@ export type ActiveNutritionPlanResponse = z.infer<
   typeof activeNutritionPlanResponseSchema
 >;
 
+/**
+ * The five aisle categories for the C3 grocery list.
+ * Maps to the Russian labels shown in the design spec.
+ */
+export const groceryCategorySchema = z.enum([
+  "protein",
+  "vegetables",
+  "grains",
+  "fruits",
+  "pantry",
+]);
+
+export type GroceryCategory = z.infer<typeof groceryCategorySchema>;
+
+/** A single aggregated item on the grocery list. */
+export const groceryItemSchema = z.object({
+  /** Normalised ingredient name (lowercased for aggregation key). */
+  name: z.string().min(1).max(160),
+  /** Human-readable quantity string, e.g. "1.2 кг", "20 шт", "600 г". Empty string when unknown. */
+  quantity: z.string().max(80),
+  /** Aisle category bucket. */
+  category: groceryCategorySchema,
+  /** True when the ingredient matches a user allergy (allergen items are still returned but flagged). */
+  isAllergen: z.boolean(),
+});
+
+export type GroceryItem = z.infer<typeof groceryItemSchema>;
+
+/** A single category bucket with its items. */
+export const groceryCategoryGroupSchema = z.object({
+  category: groceryCategorySchema,
+  items: z.array(groceryItemSchema),
+});
+
+export type GroceryCategoryGroup = z.infer<typeof groceryCategoryGroupSchema>;
+
+/**
+ * Response from GET /nutrition/grocery-list.
+ * The list is a deterministic projection of the active revision — never persisted.
+ * revisionId and revisionNumber are null when no active plan exists (empty state).
+ */
+export const groceryListResponseSchema = z.object({
+  /** Id of the active nutrition revision this list was derived from. Null when no active plan. */
+  revisionId: z.string().uuid().nullable(),
+  /** Revision number for display (e.g. "Собрано из рациона · v8"). Null when no active plan. */
+  revisionNumber: z.number().int().positive().nullable(),
+  /** Total ingredient count across all categories. */
+  totalItems: z.number().int().nonnegative(),
+  /** Grouped by category in the canonical display order. Empty categories are omitted. */
+  categories: z.array(groceryCategoryGroupSchema),
+  /** User's declared allergies (for subtitle rendering on the frontend). */
+  allergies: z.array(z.string().min(1).max(160)),
+  /** Number of meal slots per day included in derivation (for the "N meals per day" subtitle). */
+  mealsPerDay: z.number().int().nonnegative(),
+});
+
+export type GroceryListResponse = z.infer<typeof groceryListResponseSchema>;
+
 export const nutritionMealCompletionSchema = z.object({
   label: z.string().min(1).max(80),
   completed: z.boolean().default(false),

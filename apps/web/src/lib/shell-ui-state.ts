@@ -12,7 +12,21 @@ const DARK_ROUTE_PREFIXES = [
   "/metrics",
 ] as const;
 
+/**
+ * Routes that are nested under a dark prefix but intentionally use a light
+ * content canvas (design spec: `contentBg=L.paper`).
+ */
+const LIGHT_ROUTE_OVERRIDES = [
+  "/nutrition/grocery-list",
+] as const;
+
 export function resolveRouteTheme(pathname: string): RouteTheme {
+  // Light overrides take priority — check exact match or sub-path first.
+  for (const override of LIGHT_ROUTE_OVERRIDES) {
+    if (pathname === override || pathname.startsWith(`${override}/`)) {
+      return "light";
+    }
+  }
   for (const prefix of DARK_ROUTE_PREFIXES) {
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
       return "dark";
