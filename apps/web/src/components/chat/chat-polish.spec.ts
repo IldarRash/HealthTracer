@@ -2,6 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+
+/** Normalize CRLF → LF so assertions work cross-platform. */
+function readSource(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
 import { WELLBEING_CRISIS_SUPPORT_COPY } from "@health/types";
 import {
   CHAT_EMPTY_STATE_DESCRIPTION,
@@ -19,44 +24,33 @@ import { WEEKLY_REVIEW_CHAT_PROMPT } from "../../lib/weekly-review-ui-state.js";
 const chatDir = dirname(fileURLToPath(import.meta.url));
 const webSrcDir = join(chatDir, "../..");
 
-const chatWorkspaceSource = readFileSync(join(chatDir, "chat-workspace.tsx"), "utf8");
-const inlineProposalRouterSource = readFileSync(
+const chatWorkspaceSource = readSource(join(chatDir, "chat-workspace.tsx"));
+const inlineProposalRouterSource = readSource(
   join(webSrcDir, "components/proposals/inline-proposal-card.tsx"),
-  "utf8",
 );
-const genericInlineProposalSource = readFileSync(
+const genericInlineProposalSource = readSource(
   join(webSrcDir, "components/proposals/inline-proposal-card-generic.tsx"),
-  "utf8",
 );
-const wellbeingProposalSource = readFileSync(
+const wellbeingProposalSource = readSource(
   join(webSrcDir, "components/proposals/wellbeing-checkin-proposal-card.tsx"),
-  "utf8",
 );
-const nutritionProposalSource = readFileSync(
+const nutritionProposalSource = readSource(
   join(webSrcDir, "components/proposals/nutrition-incident-proposal-card.tsx"),
-  "utf8",
 );
-const proposalCardShellSource = readFileSync(
+const proposalCardShellSource = readSource(
   join(webSrcDir, "components/proposals/proposal-card-shell.tsx"),
-  "utf8",
 );
-const weeklyReviewSummarySource = readFileSync(
+const weeklyReviewSummarySource = readSource(
   join(chatDir, "weekly-review-chat-summary.tsx"),
-  "utf8",
 );
-const crisisPanelSource = readFileSync(
+const crisisPanelSource = readSource(
   join(webSrcDir, "components/wellbeing/crisis-support-panel.tsx"),
-  "utf8",
 );
-const metadataPanelSource = readFileSync(
+const metadataPanelSource = readSource(
   join(webSrcDir, "components/ui/chat-metadata-panel.tsx"),
-  "utf8",
 );
-const chatBubbleSource = readFileSync(
-  join(webSrcDir, "components/ui/chat-bubble.tsx"),
-  "utf8",
-);
-const stylesSource = readFileSync(join(webSrcDir, "../app/styles.css"), "utf8");
+const chatBubbleSource = readSource(join(webSrcDir, "components/ui/chat-bubble.tsx"));
+const stylesSource = readSource(join(webSrcDir, "../app/styles.css"));
 
 const CHAT_USER_VISIBLE_SOURCES = [
   chatWorkspaceSource,
@@ -67,8 +61,8 @@ const CHAT_USER_VISIBLE_SOURCES = [
   weeklyReviewSummarySource,
   crisisPanelSource,
   chatBubbleSource,
-  readFileSync(join(chatDir, "chat-composer-attachments.tsx"), "utf8"),
-  readFileSync(join(chatDir, "chat-attachment-outcome-panel.tsx"), "utf8"),
+  readSource(join(chatDir, "chat-composer-attachments.tsx")),
+  readSource(join(chatDir, "chat-attachment-outcome-panel.tsx")),
   JSON.stringify(SUGGESTED_CHAT_PROMPTS),
   CHAT_EMPTY_STATE_TITLE,
   CHAT_EMPTY_STATE_DESCRIPTION,

@@ -1,17 +1,38 @@
 import type {
+  AdjustNutritionPlanFromProgressChanges,
   CaptureWellbeingCheckinProposalPayload,
   LogNutritionIncidentProposalPayload,
   NutritionConfidenceBand,
   NutritionIncidentItem,
   NutritionIncidentMacros,
   NutritionProvenance,
+  NutritionSwapItem,
   WellbeingScore,
 } from "@health/types";
 import {
+  adjustNutritionPlanFromProgressChangesSchema,
   captureWellbeingCheckinProposalPayloadSchema,
   getNutritionIncidentDomainErrors,
   logNutritionIncidentProposalPayloadSchema,
 } from "@health/types";
+
+export type { NutritionSwapItem };
+
+/**
+ * Parses an adjust_nutrition_plan proposedChanges payload that carries the C4
+ * dietary-draft swaps extension. Returns null when the payload does not match
+ * the schema or carries no swaps array (i.e. is a plain nutrition adjustment
+ * without swap metadata).
+ */
+export function parseAdjustNutritionPlanProposalPayload(
+  proposedChanges: unknown,
+): AdjustNutritionPlanFromProgressChanges | null {
+  const parsed = adjustNutritionPlanFromProgressChangesSchema.safeParse(proposedChanges);
+  if (!parsed.success) return null;
+  // Only treat as a dietary-draft card when swaps metadata is present.
+  if (!parsed.data.swaps || parsed.data.swaps.length === 0) return null;
+  return parsed.data;
+}
 
 export const ENERGY_SCORE_LABELS: Record<WellbeingScore, string> = {
   1: "Very low",

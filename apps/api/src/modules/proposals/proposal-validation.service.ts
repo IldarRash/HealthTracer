@@ -6,6 +6,7 @@ import {
   createGoalProposalChangesSchema,
   extractHabitPlanPayload,
   extractNutritionPlanPayload,
+  getAdjustNutritionPlanProteinFloorErrors,
   getGoalHierarchyValidationErrors,
   getHabitPlanDomainErrors,
   getHabitPlanAdaptationContinuityErrors,
@@ -323,6 +324,60 @@ export class ProposalValidationService {
       activeRevisionId,
       revisionOwned: owned != null,
     });
+  }
+
+  /**
+   * Validates the protein-floor constraint for adjust_nutrition_plan proposals
+   * (C4 dietary draft). Fetches the current active revision's proteinGrams from
+   * the database so the check is context-aware.
+   *
+   * Safety floor: when lowering calories, protein must not be cut below the
+   * current plan floor. This is enforced even when the user edits the proposal
+   * before applying.
+   */
+  async validateAdjustNutritionProteinFloor(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<string[]> {
+    if (intent !== "adjust_nutrition_plan") {
+      return [];
+    }
+
+    const parsed = adjustNutritionPlanFromProgressChangesSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return [];
+    }
+
+    // Only run the contextual check when the proposal explicitly lowers calories.
+    const { plan, fromCaloriesPerDay } = parsed.data;
+    const isLoweringCalories =
+      fromCaloriesPerDay != null &&
+      plan.caloriesPerDay != null &&
+      plan.caloriesPerDay < fromCaloriesPerDay;
+
+    if (!isLoweringCalories) {
+      return [];
+    }
+
+    // Fetch the current active plan's protein floor from the database.
+    const activePlan = await this.nutritionRepository.findActivePlanByUserId(userId);
+    let currentProteinGrams: number | null = null;
+
+    if (activePlan?.activeRevisionId) {
+      const activeRevision = await this.nutritionRepository.findActiveRevisionByPlanId(
+        activePlan.id,
+        activePlan.activeRevisionId,
+      );
+      const parsed = nutritionPlanPayloadSchema.safeParse(activeRevision?.payload);
+
+      if (parsed.success) {
+        currentProteinGrams = parsed.data.proteinGrams;
+      }
+    }
+
+    return getAdjustNutritionPlanProteinFloorErrors(parsed.data, currentProteinGrams);
   }
 
   validateCorrelationEvidenceRefs(

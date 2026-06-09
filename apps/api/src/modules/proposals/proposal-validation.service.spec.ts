@@ -86,11 +86,15 @@ function createService(
     ) => Promise<{ id: string; imageRefId: string } | null>;
     findActivePlanByUserId?: (
       userId: string,
-    ) => Promise<{ activeRevisionId: string | null } | null>;
+    ) => Promise<{ id: string; activeRevisionId: string | null } | null>;
     findRevisionOwnedByUser?: (
       userId: string,
       revisionId: string,
     ) => Promise<{ id: string } | null>;
+    findActiveRevisionByPlanId?: (
+      nutritionPlanId: string,
+      activeRevisionId: string,
+    ) => Promise<{ payload: unknown } | null>;
   } = {},
   recipesRepository: {
     findRecommendationById?: (
@@ -159,6 +163,7 @@ function createService(
       findFoodPhotoAnalysisByIdForUser: async () => null,
       findActivePlanByUserId: async () => null,
       findRevisionOwnedByUser: async () => null,
+      findActiveRevisionByPlanId: async () => null,
       ...nutritionRepository,
     } as never,
     {
@@ -592,6 +597,85 @@ describe("ProposalValidationService", () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 
+  it("validates adjust_nutrition_plan with C4 swaps payload (wrapped form)", () => {
+    const result = service.validateStoredProposal("adjust_nutrition_plan", {
+      plan: {
+        title: "Lighter plan",
+        summary: "Reduced carbs, protein preserved.",
+        caloriesPerDay: 1750,
+        proteinGrams: 130,
+        carbsGrams: 150,
+        fatGrams: 60,
+        hydrationLiters: 2.5,
+        mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+        preferences: [],
+        restrictions: [],
+        allergies: [],
+        notes: [],
+      },
+      sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+      sourceTrendObservationIds: [],
+      fromCaloriesPerDay: 2100,
+      swaps: [
+        { from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" },
+        { from: "Whole milk", to: "Skimmed milk", save: "~80 kcal" },
+      ],
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects adjust_nutrition_plan with C4 swaps when the swap item shape is invalid", () => {
+    const result = service.validateStoredProposal("adjust_nutrition_plan", {
+      plan: {
+        title: "Lighter plan",
+        summary: "Reduced carbs.",
+        caloriesPerDay: 1750,
+        proteinGrams: 130,
+        carbsGrams: 150,
+        fatGrams: 60,
+        hydrationLiters: 2.5,
+        mealStructure: [{ label: "Breakfast", timingHint: null }],
+        preferences: [],
+        restrictions: [],
+        allergies: [],
+        notes: [],
+      },
+      swaps: [
+        { from: "", to: "Cauliflower rice 150g" }, // empty 'from' — schema rejects
+      ],
+      fromCaloriesPerDay: 2100,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("rejects adjust_nutrition_plan with C4 swaps when mealStructure is missing", () => {
+    const result = service.validateStoredProposal("adjust_nutrition_plan", {
+      plan: {
+        title: "Lighter plan",
+        summary: "Reduced carbs.",
+        caloriesPerDay: 1750,
+        proteinGrams: 130,
+        carbsGrams: 150,
+        fatGrams: 60,
+        hydrationLiters: 2.5,
+        mealStructure: [],
+        preferences: [],
+        restrictions: [],
+        allergies: [],
+        notes: [],
+      },
+      swaps: [{ from: "Rice", to: "Cauliflower" }],
+      fromCaloriesPerDay: 2100,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("nutrition: mealStructure must include at least one meal slot.");
+  });
+
   it("rejects nutrition proposals without any daily targets", () => {
     const result = service.validateStoredProposal("create_nutrition_plan", {
       title: "Balanced base",
@@ -631,7 +715,7 @@ describe("ProposalValidationService", () => {
     const staleRevisionId = "ad000002-0000-4000-8000-000000000001";
     const activeRevisionId = "ad000003-0000-4000-8000-000000000001";
     const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
-      findActivePlanByUserId: async () => ({ activeRevisionId }),
+      findActivePlanByUserId: async () => ({ id: "plan-id-1", activeRevisionId }),
       findRevisionOwnedByUser: async (_userId, revisionId) =>
         revisionId === staleRevisionId ? { id: staleRevisionId } : null,
     });
@@ -689,6 +773,7 @@ describe("ProposalValidationService", () => {
     const missingRevisionId = "ad000004-0000-4000-8000-000000000001";
     const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
       findActivePlanByUserId: async () => ({
+        id: "plan-id-2",
         activeRevisionId: "ad000003-0000-4000-8000-000000000001",
       }),
       findRevisionOwnedByUser: async () => null,
@@ -2262,5 +2347,190 @@ describe("ProposalValidationService", () => {
         "proposedChanges.imageRefs[0].id: Image reference was not analyzed for this user.",
       );
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C4 — validateAdjustNutritionProteinFloor (protein-floor safety constraint)
+// ---------------------------------------------------------------------------
+
+const nutritionPlanBase = {
+  title: "Current plan",
+  summary: "Active balanced plan.",
+  caloriesPerDay: 2100,
+  proteinGrams: 130,
+  carbsGrams: 210,
+  fatGrams: 70,
+  hydrationLiters: 2.5,
+  mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+  preferences: [],
+  restrictions: [],
+  allergies: [],
+  notes: [],
+};
+
+const lighterPlanPayload = {
+  title: "Lighter plan",
+  summary: "Reduced carbs, protein preserved.",
+  caloriesPerDay: 1750,
+  proteinGrams: 130,
+  carbsGrams: 150,
+  fatGrams: 60,
+  hydrationLiters: 2.5,
+  mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+  preferences: [],
+  restrictions: [],
+  allergies: [],
+  notes: [],
+};
+
+describe("ProposalValidationService.validateAdjustNutritionProteinFloor", () => {
+  const activePlanId = "a1000001-0000-4000-8000-000000000001";
+  const activeRevisionId = "b2000002-0000-4000-8000-000000000002";
+
+  it("returns no errors for non-adjust-nutrition intents", async () => {
+    const svc = createService();
+    const errors = await svc.validateAdjustNutritionProteinFloor(
+      "user-1",
+      "create_nutrition_plan",
+      { plan: lighterPlanPayload, fromCaloriesPerDay: 2100 },
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("returns no errors when no active plan exists (nothing to compare against)", async () => {
+    const svc = createService(
+      {}, // progressRepository
+      {}, // exercisesService
+      {}, // habitsService
+      {}, // documentSignalsRepository
+      {}, // metricsAiContextService
+      {}, // goalsRepository
+      {}, // recoveryContextService
+      {}, // workoutsRepository
+      {}, // usersRepository
+      {}, // habitsRepository
+      {}, // wellbeingCheckInsRepository
+      { findActivePlanByUserId: async () => null }, // nutritionRepository
+    );
+    const errors = await svc.validateAdjustNutritionProteinFloor(
+      "user-1",
+      "adjust_nutrition_plan",
+      {
+        plan: lighterPlanPayload,
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        fromCaloriesPerDay: 2100,
+        swaps: [{ from: "White rice", to: "Cauliflower rice" }],
+      },
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("returns no errors when protein is preserved and calories are lowered", async () => {
+    const svc = createService(
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {
+        findActivePlanByUserId: async () => ({ id: activePlanId, activeRevisionId }),
+        findActiveRevisionByPlanId: async () => ({ payload: nutritionPlanBase }),
+      },
+    );
+    const errors = await svc.validateAdjustNutritionProteinFloor(
+      "user-1",
+      "adjust_nutrition_plan",
+      {
+        plan: lighterPlanPayload, // same protein (130 g), lower kcal (1750)
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        fromCaloriesPerDay: 2100,
+      },
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects when protein is cut while calories are lowered", async () => {
+    const svc = createService(
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {
+        findActivePlanByUserId: async () => ({ id: activePlanId, activeRevisionId }),
+        findActiveRevisionByPlanId: async () => ({ payload: nutritionPlanBase }),
+      },
+    );
+    const errors = await svc.validateAdjustNutritionProteinFloor(
+      "user-1",
+      "adjust_nutrition_plan",
+      {
+        plan: {
+          ...lighterPlanPayload,
+          proteinGrams: 90, // cut from 130 to 90
+        },
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        fromCaloriesPerDay: 2100,
+      },
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("Protein must not be cut while lowering calories");
+    expect(errors[0]).toContain("130");
+    expect(errors[0]).toContain("90");
+  });
+
+  it("rejects when protein is nulled while calories are lowered", async () => {
+    const svc = createService(
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {
+        findActivePlanByUserId: async () => ({ id: activePlanId, activeRevisionId }),
+        findActiveRevisionByPlanId: async () => ({ payload: nutritionPlanBase }),
+      },
+    );
+    const errors = await svc.validateAdjustNutritionProteinFloor(
+      "user-1",
+      "adjust_nutrition_plan",
+      {
+        plan: {
+          ...lighterPlanPayload,
+          proteinGrams: null,
+        },
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        fromCaloriesPerDay: 2100,
+      },
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("Protein target must remain set");
+  });
+
+  it("returns no errors when fromCaloriesPerDay is absent (not a lighten proposal)", async () => {
+    const svc = createService(
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {
+        findActivePlanByUserId: async () => ({ id: activePlanId, activeRevisionId }),
+        findActiveRevisionByPlanId: async () => ({ payload: nutritionPlanBase }),
+      },
+    );
+    const errors = await svc.validateAdjustNutritionProteinFloor(
+      "user-1",
+      "adjust_nutrition_plan",
+      {
+        plan: {
+          ...lighterPlanPayload,
+          proteinGrams: 80, // would be a cut, but no fromCaloriesPerDay
+        },
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        // fromCaloriesPerDay omitted → not a lighten proposal
+      },
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("returns no errors when the proposed payload cannot be parsed as adjust_nutrition_plan (invalid shape)", async () => {
+    const svc = createService();
+    const errors = await svc.validateAdjustNutritionProteinFloor(
+      "user-1",
+      "adjust_nutrition_plan",
+      { invalid: "payload" },
+    );
+    expect(errors).toEqual([]);
   });
 });

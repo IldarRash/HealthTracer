@@ -93,6 +93,7 @@ describe("recipe nutrition incident proposal accept flow", () => {
         validateNutritionIncidentImageRefOwnership: async () => [],
         validateNutritionIncidentRecipeRecommendationContext: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
+        validateAdjustNutritionProteinFloor: async () => [],
       } as never,
       {
         applyAcceptedProposal: async () => {

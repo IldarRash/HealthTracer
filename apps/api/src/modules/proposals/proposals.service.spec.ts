@@ -110,6 +110,7 @@ function createValidationServiceMock(overrides: Record<string, unknown> = {}) {
     validateNutritionIncidentImageRefOwnership: async () => [],
     validateNutritionIncidentRecipeRecommendationContext: async () => [],
     validateChatAttachmentProposalRefs: async () => [],
+    validateAdjustNutritionProteinFloor: async () => [],
     ...overrides,
   };
 }
@@ -1130,6 +1131,121 @@ describe("ProposalsService", () => {
       service.decideProposal(auth, progressNutritionProposal.id, { decision: "accept" }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(applyCalled).toBe(false);
+  });
+
+  it("blocks acceptance when C4 dietary-draft proposal cuts protein while lowering calories (protein-floor safety)", async () => {
+    // C4 invariant: when a lighten proposal lowers calories, protein must not be cut.
+    // validateAdjustNutritionProteinFloor returns an error → decideProposal must throw
+    // BadRequestException and must NOT call applyAcceptedProposal.
+    let applyCalled = false;
+    const proteinCutError =
+      "nutrition: Protein must not be cut while lowering calories. Current floor: 130 g, proposed: 90 g.";
+
+    const lightenProposal = {
+      ...pendingProposal,
+      intent: "adjust_nutrition_plan" as const,
+      targetDomain: "nutrition" as const,
+      title: "Make plan lighter",
+      reason: "You asked for a lighter version.",
+      proposedChanges: {
+        plan: {
+          title: "Lighter plan",
+          summary: "Reduced carbs AND protein — should be rejected.",
+          caloriesPerDay: 1750,
+          proteinGrams: 90, // cut from 130 g — violates protein-floor rule
+          carbsGrams: 150,
+          fatGrams: 60,
+          hydrationLiters: 2.5,
+          mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+          preferences: [],
+          restrictions: [],
+          allergies: [],
+          notes: [],
+        },
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        fromCaloriesPerDay: 2100,
+        swaps: [
+          { from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" },
+        ],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({ findById: async () => lightenProposal }) as never,
+      { resolveFromAuth: async () => user } as never,
+      createValidationServiceMock({
+        validateAdjustNutritionProteinFloor: async () => [proteinCutError],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "nutrition_revision:rev-lighter";
+        },
+      } as never,
+    );
+
+    await expect(
+      service.decideProposal(auth, lightenProposal.id, { decision: "accept" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(applyCalled).toBe(false);
+  });
+
+  it("accepts a valid C4 dietary-draft proposal carrying swaps and preserved protein", async () => {
+    // C4 happy path: protein preserved, calories lowered, swaps present.
+    // validateAdjustNutritionProteinFloor returns [] → proposal proceeds to apply.
+    let applyCalled = false;
+
+    const lightenProposal = {
+      ...pendingProposal,
+      intent: "adjust_nutrition_plan" as const,
+      targetDomain: "nutrition" as const,
+      title: "Make plan lighter",
+      reason: "You asked for a lighter version.",
+      proposedChanges: {
+        plan: {
+          title: "Lighter plan",
+          summary: "Reduced carbs, protein preserved.",
+          caloriesPerDay: 1750,
+          proteinGrams: 130, // protein unchanged
+          carbsGrams: 150,
+          fatGrams: 60,
+          hydrationLiters: 2.5,
+          mealStructure: [{ label: "Breakfast", timingHint: "Morning" }],
+          preferences: [],
+          restrictions: [],
+          allergies: [],
+          notes: [],
+        },
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        fromCaloriesPerDay: 2100,
+        swaps: [
+          { from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" },
+          { from: "Whole milk", to: "Skimmed milk", save: "~80 kcal" },
+        ],
+      },
+    };
+
+    const service = new ProposalsService(
+      createRepositoryMock({ findById: async () => lightenProposal }) as never,
+      { resolveFromAuth: async () => user } as never,
+      createValidationServiceMock({
+        validateAdjustNutritionProteinFloor: async () => [],
+      }) as never,
+      {
+        applyAcceptedProposal: async () => {
+          applyCalled = true;
+          return "nutrition_revision:rev-lighter";
+        },
+      } as never,
+    );
+
+    const result = await service.decideProposal(auth, lightenProposal.id, { decision: "accept" });
+
+    expect(result.status).toBe("accepted");
+    expect(result.appliedReference).toBe("nutrition_revision:rev-lighter");
+    expect(applyCalled).toBe(true);
   });
 
   it("accepts wellbeing check-in with edited proposedChanges override", async () => {

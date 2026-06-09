@@ -428,6 +428,78 @@ describe("ProposalApplyService", () => {
     });
   });
 
+  it("routes adjust_nutrition_plan with swaps payload through the nutrition service and creates a new revision", async () => {
+    // C4 dietary draft: swaps[] + fromCaloriesPerDay ride in proposedChanges;
+    // the apply path must extract the plan payload and call applyNutritionPlanProposal,
+    // which calls appendRevision — never an in-place update.
+    let nutritionCalled = false;
+    let capturedPayload: unknown;
+    let capturedIntent: string | undefined;
+
+    const service = new ProposalApplyService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        applyNutritionPlanProposal: async (
+          _userId: string,
+          payload: unknown,
+          _reason: string,
+          intent: string,
+        ) => {
+          nutritionCalled = true;
+          capturedPayload = payload;
+          capturedIntent = intent;
+          return "nutrition_revision:rev-lighter";
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never, // bodyService
+    );
+
+    const lighterPlan = {
+      ...nutritionPayload,
+      caloriesPerDay: 1750,
+      carbsGrams: 150,
+    };
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "adjust_nutrition_plan",
+      targetDomain: "nutrition",
+      proposedChanges: {
+        plan: lighterPlan,
+        sourceSummaryId: "14a08176-64a7-4a2d-8a44-581807368394",
+        sourceTrendObservationIds: [],
+        fromCaloriesPerDay: 2200,
+        swaps: [
+          { from: "White rice 150g", to: "Cauliflower rice 150g", save: "~160 kcal" },
+          { from: "Whole milk", to: "Skimmed milk", save: "~80 kcal" },
+        ],
+      },
+    });
+
+    expect(reference).toBe("nutrition_revision:rev-lighter");
+    expect(nutritionCalled).toBe(true);
+    expect(capturedIntent).toBe("adjust_nutrition_plan");
+    // The apply path must pass the extracted plan payload (without swaps metadata)
+    // to applyNutritionPlanProposal — swaps are display-only and ride in the
+    // revision jsonb payload via the stored proposedChanges, not forwarded here.
+    expect(capturedPayload).toMatchObject({
+      title: lighterPlan.title,
+      caloriesPerDay: 1750,
+      carbsGrams: 150,
+      proteinGrams: 140, // protein preserved
+    });
+    // Confirm swaps are NOT forwarded as top-level keys into applyNutritionPlanProposal
+    expect((capturedPayload as Record<string, unknown>)["swaps"]).toBeUndefined();
+    expect((capturedPayload as Record<string, unknown>)["fromCaloriesPerDay"]).toBeUndefined();
+  });
+
   it("routes accepted adapt_habit_plan proposals with progress provenance through the habits service", async () => {
     let habitsCalled = false;
     let capturedPayload: unknown;
