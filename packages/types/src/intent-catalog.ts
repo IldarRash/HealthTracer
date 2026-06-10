@@ -104,7 +104,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "What helps with recovery between sessions?",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("general"),
-    allowedTools: ["getUserContextSlice"],
+    allowedTools: ["getUserContextSlice", "getRecentAdherence"],
     allowedProposalIntents: ["update_profile", "create_goal", "update_goal", "save_body_analysis"],
     safetyGuidance: [
       "Prefer advice-only responses unless a typed proposal is clearly warranted.",
@@ -150,7 +150,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "I just played volleyball for 90 minutes, log it.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("adjust_workout"),
-    allowedTools: ["getUserContextSlice", "getWeeklyProgressContext"],
+    allowedTools: ["getUserContextSlice", "getWeeklyProgressContext", "searchExerciseCatalog", "getActivePlanDetail", "getRecentAdherence"],
     allowedProposalIntents: [...WORKOUT_PROPOSAL_INTENTS],
     safetyGuidance: [
       "Respect fatigue, pain, and recovery signals.",
@@ -174,7 +174,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Suggest recipes for my plan.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("adjust_nutrition"),
-    allowedTools: ["getUserContextSlice", "getWeeklyProgressContext"],
+    allowedTools: ["getUserContextSlice", "getWeeklyProgressContext", "searchRecipeCatalog", "getActivePlanDetail", "getRecentAdherence"],
     allowedProposalIntents: [...NUTRITION_PROPOSAL_INTENTS],
     safetyGuidance: [
       "Do not provide medical diet prescriptions.",
@@ -196,7 +196,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Review my training and nutrition this week.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("review_progress"),
-    allowedTools: ["getWeeklyProgressContext", "getUserContextSlice"],
+    allowedTools: ["getWeeklyProgressContext", "getUserContextSlice", "getRecentAdherence", "getActivePlanDetail", "searchExerciseCatalog"],
     allowedProposalIntents: [...PROGRESS_PROPOSAL_INTENTS],
     safetyGuidance: [
       "Explain trends conservatively when data is partial or insufficient.",
@@ -218,7 +218,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Adjust my habit plan.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("longevity_overview"),
-    allowedTools: ["getUserContextSlice"],
+    allowedTools: ["getUserContextSlice", "getRecentAdherence"],
     allowedProposalIntents: [...HABIT_PROPOSAL_INTENTS, "create_goal", "update_goal"],
     safetyGuidance: [
       "Avoid medical longevity claims or treatment language.",
@@ -231,7 +231,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
   {
     id: "ask_health_context",
     kind: "normal",
-    description: "Consent-gated health document context and medical background questions.",
+    description: "Health context and medical background questions.",
     routerGuidance:
       "Use when the user references labs, medical reports, symptoms, or stored health documents outside attachment uploads.",
     examples: [
@@ -240,7 +240,10 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Review my medical background.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("ask_health_context"),
-    allowedTools: ["getDocumentContext", "getUserContextSlice"],
+    // getDocumentContext removed from allowedTools: the tool is intentionally unavailable
+    // in chat under the allowDocuments=false budget floor. Document context in chat is
+    // deferred; the consent-scoped design is not yet implemented.
+    allowedTools: ["getUserContextSlice", "getRecentAdherence"],
     allowedProposalIntents: [],
     safetyGuidance: [
       "Never diagnose or interpret labs as medical treatment guidance.",
@@ -248,7 +251,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Do not expose raw document contents.",
     ],
     promptInstructions:
-      "Explain document-aware coaching conservatively using approved summaries only. Do not create state-changing proposals from medical documents.",
+      "Provide conservative wellness context. Do not create state-changing proposals from medical questions.",
     mappedAgentIntent: "ask_health_context",
   },
   {
@@ -325,7 +328,8 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Selected automatically for medical document attachments. Do not use the generic text router for these turns.",
     examples: ["User uploaded a lab report PDF.", "User shared a medical document screenshot."],
     defaultContextSlice: buildContextSliceRequestForIntent("ask_health_context"),
-    allowedTools: ["getDocumentContext"],
+    // getDocumentContext removed: intentionally unavailable in chat; consent-scoped design deferred.
+    allowedTools: [],
     allowedProposalIntents: [],
     safetyGuidance: [
       "Medical attachments require consent before entering coaching context.",

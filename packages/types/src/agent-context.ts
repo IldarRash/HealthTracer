@@ -378,11 +378,145 @@ export type AgentSafetyMetadata = z.infer<typeof agentSafetyMetadataSchema>;
 
 export const agentToolNameSchema = z.enum([
   "getUserContextSlice",
-  "getDocumentContext",
+  // getDocumentContext removed: under the code-level allowDocuments=false budget floor
+  // it always returns empty, advertising a capability chat runtime cannot deliver.
+  // Document context in chat is intentionally unavailable; the consent-scoped design is deferred.
   "getWeeklyProgressContext",
+  "searchExerciseCatalog",
+  "searchRecipeCatalog",
+  "getActivePlanDetail",
+  "getRecentAdherence",
 ]);
 
 export type AgentToolName = z.infer<typeof agentToolNameSchema>;
+
+// ---------------------------------------------------------------------------
+// Slice B — new read-only context tool input/result schemas
+// All tools are ownership-scoped via userId from the orchestrating context.
+// ---------------------------------------------------------------------------
+
+export const searchExerciseCatalogInputSchema = z
+  .object({
+    query: z.string().min(1).max(200).optional(),
+    muscle: z.string().min(1).max(80).optional(),
+    equipment: z.string().min(1).max(80).optional(),
+    difficulty: z.enum(["beginner", "intermediate", "advanced"]).optional(),
+    limit: z.number().int().min(1).max(10).default(10),
+  })
+  .strict();
+
+export type SearchExerciseCatalogInput = z.input<typeof searchExerciseCatalogInputSchema>;
+
+export const exerciseCatalogItemSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(160),
+  primaryMuscles: z.array(z.string().min(1).max(80)).max(10).default([]),
+  equipment: z.array(z.string().min(1).max(80)).max(10).default([]),
+  difficulty: z.string().nullable(),
+  hasMedia: z.boolean(),
+});
+
+export type ExerciseCatalogItem = z.infer<typeof exerciseCatalogItemSchema>;
+
+export const searchExerciseCatalogResultSchema = z.object({
+  items: z.array(exerciseCatalogItemSchema).max(10),
+  total: z.number().int().nonnegative(),
+});
+
+export type SearchExerciseCatalogResult = z.infer<typeof searchExerciseCatalogResultSchema>;
+
+export const searchRecipeCatalogInputSchema = z
+  .object({
+    mealType: z.string().min(1).max(80).optional(),
+    tags: z.array(z.string().min(1).max(80)).max(5).optional(),
+    restrictions: z.array(z.string().min(1).max(80)).max(5).optional(),
+    limit: z.number().int().min(1).max(10).default(10),
+  })
+  .strict();
+
+export type SearchRecipeCatalogInput = z.input<typeof searchRecipeCatalogInputSchema>;
+
+export const recipeCatalogItemSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(160),
+  mealTypes: z.array(z.string().min(1).max(80)).max(10).default([]),
+  estimatedCalories: z.number().int().nonnegative().nullable(),
+  proteinGrams: z.number().int().nonnegative().nullable(),
+  carbsGrams: z.number().int().nonnegative().nullable(),
+  fatGrams: z.number().int().nonnegative().nullable(),
+  tags: z.array(z.string().min(1).max(80)).max(20).default([]),
+  confidence: z.string().min(1).max(40).nullable(),
+});
+
+export type RecipeCatalogItem = z.infer<typeof recipeCatalogItemSchema>;
+
+export const searchRecipeCatalogResultSchema = z.object({
+  items: z.array(recipeCatalogItemSchema).max(10),
+  total: z.number().int().nonnegative(),
+});
+
+export type SearchRecipeCatalogResult = z.infer<typeof searchRecipeCatalogResultSchema>;
+
+export const getActivePlanDetailInputSchema = z
+  .object({
+    domain: z.enum(["workout", "nutrition"]),
+  })
+  .strict();
+
+export type GetActivePlanDetailInput = z.input<typeof getActivePlanDetailInputSchema>;
+
+export const activePlanDetailSchema = z.object({
+  domain: z.enum(["workout", "nutrition"]),
+  planId: z.string().uuid().nullable(),
+  revisionId: z.string().uuid().nullable(),
+  title: z.string().min(1).max(160).nullable(),
+  summary: z.string().min(1).max(1000).nullable(),
+  dayCount: z.number().int().nonnegative().nullable(),
+  sessionCount: z.number().int().nonnegative().nullable(),
+  caloriesPerDay: z.number().int().positive().nullable(),
+  macroSummary: z
+    .object({
+      proteinGrams: z.number().int().nonnegative().nullable(),
+      carbsGrams: z.number().int().nonnegative().nullable(),
+      fatGrams: z.number().int().nonnegative().nullable(),
+    })
+    .nullable(),
+});
+
+export type ActivePlanDetail = z.infer<typeof activePlanDetailSchema>;
+
+export const getRecentAdherenceInputSchema = z
+  .object({
+    domain: z.enum(["workout", "nutrition", "health"]).optional(),
+  })
+  .strict();
+
+export type GetRecentAdherenceInput = z.input<typeof getRecentAdherenceInputSchema>;
+
+export const recentAdherenceResultSchema = z.object({
+  periodDays: z.literal(7),
+  workout: z
+    .object({
+      plannedCount: z.number().int().nonnegative(),
+      completedCount: z.number().int().nonnegative(),
+      adherencePercent: z.number().min(0).max(100).nullable(),
+    })
+    .nullable(),
+  nutrition: z
+    .object({
+      loggedDays: z.number().int().nonnegative(),
+      adherencePercent: z.number().min(0).max(100).nullable(),
+    })
+    .nullable(),
+  habits: z
+    .object({
+      activeCount: z.number().int().nonnegative(),
+      adherencePercent: z.number().min(0).max(100).nullable(),
+    })
+    .nullable(),
+});
+
+export type RecentAdherenceResult = z.infer<typeof recentAdherenceResultSchema>;
 
 export const agentToolCallRequestSchema = z.object({
   tool: agentToolNameSchema,
@@ -406,14 +540,9 @@ export type AgentGetUserContextSliceToolResult = z.infer<
   typeof agentGetUserContextSliceToolResultSchema
 >;
 
-export const agentGetDocumentContextToolResultSchema = z.object({
-  documentContext: aiDocumentContextSummarySchema,
-  ragResults: z.array(ragContextResultSchema),
-});
-
-export type AgentGetDocumentContextToolResult = z.infer<
-  typeof agentGetDocumentContextToolResultSchema
->;
+// agentGetDocumentContextToolResultSchema removed: getDocumentContext tool removed from
+// chat pipeline (always returned empty under allowDocuments=false budget floor).
+// Document context in chat is intentionally unavailable; consent-scoped design deferred.
 
 export const agentGetWeeklyProgressContextToolResultSchema =
   weeklyProgressContextSummarySchema.nullable();
@@ -583,6 +712,8 @@ export const agentFanOutDomainDiagnosticsSchema = z.object({
   candidateProposalCount: z.number().int().min(0).max(5),
   loopIterations: z.number().int().min(0).max(20),
   toolsInvoked: z.array(agentToolNameSchema).max(15).default([]),
+  /** Tools requested by the domain LLM that were not in the allowlist. Counts only — no tool names to avoid leaking capability hints. */
+  toolsDeniedCount: z.number().int().min(0).max(15).default(0),
   hasWorkoutCalorieEstimate: z.boolean().default(false),
   /** Accumulated token + latency usage across all loop iterations for this domain. */
   usage: agentProviderUsageSchema.optional(),
@@ -605,6 +736,8 @@ export const agentFanOutResolutionDiagnosticsSchema = z.object({
   idResolutionDropCount: z.number().int().min(0).max(10).default(0),
   replyBlocked: z.boolean(),
   finalProposalCount: z.number().int().min(0).max(5),
+  /** Validation failure classes from ChatService proposal persistence. Populated post-orchestration. */
+  validationFailureClasses: z.array(z.string().min(1).max(80)).max(10).default([]),
 });
 
 export const agentFanOutDiagnosticsSchema = z.object({
@@ -612,9 +745,61 @@ export const agentFanOutDiagnosticsSchema = z.object({
   domains: z.array(agentFanOutDomainDiagnosticsSchema).max(3).default([]),
   decision: agentFanOutDecisionDiagnosticsSchema.optional(),
   resolution: agentFanOutResolutionDiagnosticsSchema.optional(),
+  /** Total turn wall-clock latency in milliseconds (from orchestrateCoachTurn entry to return). */
+  totalLatencyMs: z.number().int().nonnegative().optional(),
+  /** Context loading latency (building per-domain AgentContextPackets) in milliseconds. */
+  contextLatencyMs: z.number().int().nonnegative().optional(),
+  /** Parallel wall-clock latency for all domain LLM loops combined (Promise.all duration). */
+  domainsLatencyMs: z.number().int().nonnegative().optional(),
 });
 
 export type AgentFanOutDiagnostics = z.infer<typeof agentFanOutDiagnosticsSchema>;
+
+// ---------------------------------------------------------------------------
+// Turn-level telemetry summary — emitted as a single structured log line
+// per eligible AI turn. Safety floor: no user message text, no reply text,
+// no health data — counts/enums/durations only.
+// ---------------------------------------------------------------------------
+export const agentTurnTelemetrySchema = z.object({
+  event: z.literal("ai.turn_summary"),
+  // Timing
+  totalLatencyMs: z.number().int().nonnegative(),
+  routerLatencyMs: z.number().int().nonnegative().optional(),
+  contextLatencyMs: z.number().int().nonnegative().optional(),
+  decisionLatencyMs: z.number().int().nonnegative().optional(),
+  domainLatencies: z
+    .array(
+      z.object({
+        domain: fanOutDomainEnumSchema,
+        latencyMs: z.number().int().nonnegative(),
+      }),
+    )
+    .max(3)
+    .default([]),
+  // Routing
+  selectedDomains: z.array(fanOutDomainEnumSchema).max(3).default([]),
+  routerConfidence: z.number().min(0).max(1).optional(),
+  routerSource: z.enum(["llm", "fallback"]).optional(),
+  // Tool usage per domain (counts/names — no content)
+  toolsRequestedPerDomain: z
+    .array(
+      z.object({
+        domain: fanOutDomainEnumSchema,
+        toolsInvoked: z.array(agentToolNameSchema).max(15),
+        toolsDeniedCount: z.number().int().min(0).max(15),
+      }),
+    )
+    .max(3)
+    .default([]),
+  // Degradation
+  degradedDomains: z.array(fanOutDomainEnumSchema).max(3).default([]),
+  // Outcome
+  finalActionType: z.string().min(1).max(80).nullable(),
+  proposalCount: z.number().int().min(0).max(5),
+  validationFailureClasses: z.array(z.string().min(1).max(80)).max(10).default([]),
+});
+
+export type AgentTurnTelemetry = z.infer<typeof agentTurnTelemetrySchema>;
 
 export const agentTurnMetadataSchema = z.object({
   provider: z.literal("openai"),

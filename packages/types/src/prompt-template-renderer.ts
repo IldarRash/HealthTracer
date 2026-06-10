@@ -5,7 +5,6 @@ import {
   DOMAIN_NUTRITION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,
   FINAL_DECISION_TEMPLATE_KEY,
-  OPENAI_COACH_LOOP_TEMPLATE_KEY,
   PROMPT_TEMPLATE_KEYS,
   PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS,
   ROUTER_DECISION_TEMPLATE_KEY,
@@ -25,8 +24,7 @@ export type CompiledPromptTemplate = {
 
 export type CompiledPromptTemplates = {
   readonly templates: Readonly<Record<PromptTemplateKey, CompiledPromptTemplate>>;
-  renderCoachLoop(values: PromptTemplateRenderValues): string;
-  // Parallel-domain pipeline render helpers
+  // Parallel-domain pipeline render helpers (the live pipeline; openai_coach_loop removed)
   renderRouterDecision(values: {
     normalizedText: string;
     originalText: string;
@@ -173,18 +171,6 @@ export function compilePromptTemplates(
 
   return {
     templates,
-    renderCoachLoop(values) {
-      const rendered = templates[OPENAI_COACH_LOOP_TEMPLATE_KEY].render(values);
-
-      if (rendered != null) {
-        return rendered;
-      }
-
-      return renderPromptTemplateBody(
-        DEFAULT_PROMPT_TEMPLATE_BODIES[OPENAI_COACH_LOOP_TEMPLATE_KEY],
-        values,
-      )!;
-    },
     renderRouterDecision(values) {
       const rendered = templates[ROUTER_DECISION_TEMPLATE_KEY].render(values);
 

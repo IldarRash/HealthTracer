@@ -28,6 +28,7 @@ const basePreprocessor = {
     pain: false,
     document: false,
     attachment: false,
+    plan_request: false,
   },
   directPathCandidate: null,
 };

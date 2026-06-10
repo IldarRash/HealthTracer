@@ -64,9 +64,9 @@ describe("intent catalog", () => {
       ]),
     );
 
-    expect(getAllowedToolsForCatalogIntent("attachment_medical_document")).toEqual([
-      "getDocumentContext",
-    ]);
+    // getDocumentContext was removed: under the allowDocuments=false budget floor it always
+    // returns empty, advertising a capability chat runtime cannot deliver.
+    expect(getAllowedToolsForCatalogIntent("attachment_medical_document")).toEqual([]);
     expect(getAllowedProposalIntentsForCatalogIntent("attachment_medical_document")).toEqual([]);
   });
 

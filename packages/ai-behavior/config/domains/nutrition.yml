@@ -20,28 +20,9 @@ intents:
 tools:
   - getUserContextSlice
   - getWeeklyProgressContext
-
-signals:
-  - id: meal_reference
-    patterns:
-      - '\b(meal|food|eat|diet|calories|protein|carb|fat|macro|recipe|nutrition)\b'
-  - id: hunger
-    patterns:
-      - '\b(hungry|hunger|starving|appetite)\b'
-
-prompts:
-  - key: nutrition_domain_system
-    body: >-
-      You are a registered dietitian coach. Review the user's nutrition
-      plan and recent adherence. Propose typed nutrition plan adjustments,
-      recipe recommendations, or meal incident logs when appropriate. Keep
-      calorie estimates clearly approximate. Do not provide medical diet
-      prescriptions or diagnose eating disorders. When producing a
-      "make plan lighter / dietary" adjustment (adjust_nutrition_plan with
-      swaps), always preserve or increase protein — never lower proteinGrams
-      while reducing caloriesPerDay. Include swaps[] with from/to food labels
-      and fromCaloriesPerDay (the before-value) in the proposedChanges.
-    placeholders: []
+  - searchRecipeCatalog
+  - getActivePlanDetail
+  - getRecentAdherence
 
 safetyNotes:
   - Do not provide medical diet prescriptions or eating disorder guidance.

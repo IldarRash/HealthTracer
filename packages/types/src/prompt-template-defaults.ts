@@ -1,5 +1,3 @@
-export const OPENAI_COACH_LOOP_TEMPLATE_KEY = "openai_coach_loop" as const;
-
 // Parallel-domain pipeline template keys
 export const ROUTER_DECISION_TEMPLATE_KEY = "router" as const;
 export const DOMAIN_WORKOUT_TEMPLATE_KEY = "domain_workout" as const;
@@ -7,8 +5,12 @@ export const DOMAIN_NUTRITION_TEMPLATE_KEY = "domain_nutrition" as const;
 export const DOMAIN_HEALTH_TEMPLATE_KEY = "domain_health" as const;
 export const FINAL_DECISION_TEMPLATE_KEY = "decision" as const;
 
+// openai_coach_loop removed: the legacy single-LLM coach loop was replaced by the
+// multi-domain fan-out pipeline (router → parallel domain LLMs → decision-maker).
+// renderCoachLoop was only called in tests, not by any runtime provider.
+// All live pipeline rendering uses renderRouterDecision, renderDomainStep, renderFinalDecision.
+
 export const PROMPT_TEMPLATE_KEYS = [
-  OPENAI_COACH_LOOP_TEMPLATE_KEY,
   ROUTER_DECISION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,
   DOMAIN_NUTRITION_TEMPLATE_KEY,
@@ -19,23 +21,6 @@ export const PROMPT_TEMPLATE_KEYS = [
 export type PromptTemplateKey = (typeof PROMPT_TEMPLATE_KEYS)[number];
 
 export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, readonly string[]> = {
-  [OPENAI_COACH_LOOP_TEMPLATE_KEY]: [
-    "iteration",
-    "maxIterations",
-    "selectedIntentLabel",
-    "intentInstructions",
-    "intentSafetyGuidance",
-    "allowedTools",
-    "allowedProposalIntents",
-    "taskPurpose",
-    "taskIntent",
-    "expectedResponseMode",
-    "safetyFlags",
-    "missingContextNotes",
-    "priorToolResultsJson",
-    "safetyConstraints",
-    "coachingContextJson",
-  ],
   // Phase 2 router — first-LLM domain routing stage
   [ROUTER_DECISION_TEMPLATE_KEY]: [
     "normalizedText",
@@ -106,31 +91,6 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
 };
 
 export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> = {
-  [OPENAI_COACH_LOOP_TEMPLATE_KEY]: [
-    "You are an AI wellness coach for fitness, habits, nutrition, and recovery.",
-    "Respond in the same language as the user's latest message.",
-    "Return JSON only with one of these shapes:",
-    '{"kind":"tool_request","tool":"getUserContextSlice|getDocumentContext|getWeeklyProgressContext","input":{},"rationale":"optional short reason"}',
-    '{"kind":"final_answer","reply":"string","proposals":[]}',
-    "Iteration {{iteration}} of {{maxIterations}}. Request additional context through allowed tools only when needed.",
-    "If enough context is available, return final_answer.",
-    "Never mutate structured state directly. Plan changes must remain typed proposals requiring user approval.",
-    "Selected intent: {{selectedIntentLabel}}",
-    "Intent instructions: {{intentInstructions}}",
-    "Intent safety guidance: {{intentSafetyGuidance}}",
-    "Allowed tools: {{allowedTools}}",
-    "Allowed proposal intents: {{allowedProposalIntents}}",
-    "Task purpose: {{taskPurpose}}",
-    "Task intent: {{taskIntent}}",
-    "Expected response mode: {{expectedResponseMode}}",
-    "Safety flags: {{safetyFlags}}",
-    "Missing context notes: {{missingContextNotes}}",
-    "Prior tool results: {{priorToolResultsJson}}",
-    "Global safety constraints:",
-    "- {{safetyConstraints}}",
-    "Structured coaching context:",
-    "{{coachingContextJson}}",
-  ].join("\n"),
   // ---------------------------------------------------------------------------
   // Router — first-LLM domain routing stage
   // Returns read-only routing hints only; MUST NOT include reply or proposals.

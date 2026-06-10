@@ -9,13 +9,13 @@ import { loadDomainConfigs } from "./domain-config-loader.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Create an isolated temp directory with four YAML domain files. */
+/** Create an isolated temp directory with domain YAML files. */
 function makeTempDomainDir(
-  files: Partial<Record<"workout" | "nutrition" | "medical" | "health", string>>,
+  files: Partial<Record<"workout" | "nutrition" | "health", string>>,
 ): string {
   const dir = mkdtempSync(join(tmpdir(), "domain-config-"));
 
-  const allDomains = ["workout", "nutrition", "medical", "health"] as const;
+  const allDomains = ["workout", "nutrition", "health"] as const;
   // Write only the files provided; omit others so we can test per-domain fallback
   for (const domain of allDomains) {
     const content = files[domain];
@@ -28,6 +28,9 @@ function makeTempDomainDir(
   return dir;
 }
 
+// signals[] and prompts[] removed from all YAML fixtures: they are no longer valid fields
+// under the strict domainConfigSchema. The loader now rejects any YAML with these keys.
+
 const VALID_WORKOUT_YAML = `
 domain: workout
 llmId: workout_coach
@@ -37,13 +40,6 @@ intents:
     mapsToCapabilityId: adjust_workout
 tools:
   - getUserContextSlice
-signals:
-  - id: fatigue
-    patterns:
-      - 'tired'
-prompts:
-  - key: system
-    body: You are a coach. Never diagnose.
 safetyNotes:
   - No diagnosis.
 `.trim();
@@ -57,25 +53,8 @@ intents:
     mapsToCapabilityId: adjust_nutrition
 tools:
   - getUserContextSlice
-signals: []
-prompts: []
 safetyNotes:
   - Estimates are approximate.
-`.trim();
-
-const VALID_MEDICAL_YAML = `
-domain: medical
-llmId: health_coach
-intents:
-  - id: review_health_context
-    description: Conservative wellness coaching.
-    mapsToCapabilityId: ask_health_context
-tools:
-  - getDocumentContext
-signals: []
-prompts: []
-safetyNotes:
-  - Never diagnose.
 `.trim();
 
 const VALID_HEALTH_YAML = `
@@ -87,22 +66,19 @@ intents:
     mapsToCapabilityId: ask_health_context
 tools:
   - getUserContextSlice
-signals: []
-prompts: []
 safetyNotes:
   - Conservative language only.
 `.trim();
 
 // ---------------------------------------------------------------------------
-// (a) All four domains load from valid YAML
+// (a) All three domains load from valid YAML
 // ---------------------------------------------------------------------------
 
-describe("loadDomainConfigs — all four domains from valid YAML", () => {
-  it("loads all four domains and returns source='file'", () => {
+describe("loadDomainConfigs — all three domains from valid YAML", () => {
+  it("loads all three domains and returns source='file'", () => {
     const dir = makeTempDomainDir({
       workout: VALID_WORKOUT_YAML,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -112,11 +88,10 @@ describe("loadDomainConfigs — all four domains from valid YAML", () => {
     expect(result.errors).toEqual([]);
   });
 
-  it("merges all four domain configs into the bundle", () => {
+  it("merges all three domain configs into the bundle", () => {
     const dir = makeTempDomainDir({
       workout: VALID_WORKOUT_YAML,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -124,7 +99,6 @@ describe("loadDomainConfigs — all four domains from valid YAML", () => {
 
     expect(result.configs.workout.domain).toBe("workout");
     expect(result.configs.nutrition.domain).toBe("nutrition");
-    expect(result.configs.medical.domain).toBe("medical");
     expect(result.configs.health.domain).toBe("health");
   });
 
@@ -132,7 +106,6 @@ describe("loadDomainConfigs — all four domains from valid YAML", () => {
     const dir = makeTempDomainDir({
       workout: VALID_WORKOUT_YAML,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -145,16 +118,42 @@ describe("loadDomainConfigs — all four domains from valid YAML", () => {
     expect(workout.tools).toContain("getUserContextSlice");
   });
 
-  it("loads the shipped repo domain YAML files directly", () => {
+  it("loads the shipped repo domain YAML files directly — no errors for workout/nutrition/health", () => {
     // No configDir override — reads from the package's actual config/domains/
+    // medical.yml was deleted: the medical domain is removed from domainConfigDomainSchema.
     const result = loadDomainConfigs();
 
     expect(result.source).toBe("file");
+    // No errors at all — workout/nutrition/health YAML files all load cleanly
     expect(result.errors).toEqual([]);
     expect(result.configs.workout.llmId).toBe("workout_coach");
     expect(result.configs.nutrition.llmId).toBe("nutrition_coach");
-    expect(result.configs.medical.llmId).toBe("health_coach");
     expect(result.configs.health.llmId).toBe("health_coach");
+  });
+
+  it("shipped repo domain YAML does not contain signals or prompts fields", () => {
+    // signals[] and prompts[] are dead-weight fields that were never read by runtime.
+    // They have been removed from the schema and YAML files to prevent confusion.
+    const result = loadDomainConfigs();
+
+    for (const domain of ["workout", "nutrition", "health"] as const) {
+      const config = result.configs[domain] as Record<string, unknown>;
+      expect(config["signals"]).toBeUndefined();
+      expect(config["prompts"]).toBeUndefined();
+    }
+  });
+
+  it("no warnings are emitted on a clean load — no medical.yml expected or read", () => {
+    // After removing medical from the schema, loadDomainConfigs should produce
+    // zero errors and zero warnings on a clean load of the shipped YAML files.
+    const result = loadDomainConfigs();
+
+    expect(result.errors).toEqual([]);
+    // Catalog-intersection warnings for workout.yml tools matching review_progress
+    // should NOT appear after the review_progress allowedTools was updated to include
+    // searchExerciseCatalog and getActivePlanDetail.
+    const unexpectedWarnings = result.warnings.filter((w) => !w.includes("medical"));
+    expect(unexpectedWarnings).toEqual([]);
   });
 });
 
@@ -164,11 +163,10 @@ describe("loadDomainConfigs — all four domains from valid YAML", () => {
 
 describe("loadDomainConfigs — fail-closed per domain", () => {
   it("uses defaults for a missing file, loads others from file", () => {
-    // Provide only three valid files; the fourth (health) is missing
+    // Provide only two valid files; the third (health) is missing
     const dir = makeTempDomainDir({
       workout: VALID_WORKOUT_YAML,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       // health is absent
     });
 
@@ -191,7 +189,6 @@ describe("loadDomainConfigs — fail-closed per domain", () => {
     const dir = makeTempDomainDir({
       workout: "{ this is: not valid: yaml: ::::",
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -205,21 +202,18 @@ describe("loadDomainConfigs — fail-closed per domain", () => {
     expect(result.warnings.some((w) => w.includes("workout"))).toBe(true);
   });
 
-  it("falls back for a domain with invalid Zod content", () => {
+  it("falls back for a domain with invalid Zod content (empty llmId)", () => {
     const invalidWorkout = `
 domain: workout
 llmId: ""
 intents: []
 tools: []
-signals: []
-prompts: []
 safetyNotes: []
 `.trim();
 
     const dir = makeTempDomainDir({
       workout: invalidWorkout,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -232,13 +226,65 @@ safetyNotes: []
     expect(result.configs.nutrition.domain).toBe("nutrition");
   });
 
+  it("falls back for YAML with signals[] — now a rejected unknown key", () => {
+    // signals[] and prompts[] were removed from the schema.
+    // .strict() rejects any YAML that still includes them.
+    const yamlWithSignals = `
+domain: workout
+llmId: workout_coach
+intents: []
+tools: []
+safetyNotes: []
+signals:
+  - id: fatigue
+    patterns:
+      - tired
+`.trim();
+
+    const dir = makeTempDomainDir({
+      workout: yamlWithSignals,
+      nutrition: VALID_NUTRITION_YAML,
+      health: VALID_HEALTH_YAML,
+    });
+
+    const result = loadDomainConfigs({ configDir: dir });
+
+    // .strict() rejects signals[] → falls back to default
+    expect(result.configs.workout).toEqual(DEFAULT_DOMAIN_CONFIGS.workout);
+    expect(result.warnings.some((w) => w.includes("workout"))).toBe(true);
+  });
+
+  it("falls back for YAML with prompts[] — now a rejected unknown key", () => {
+    const yamlWithPrompts = `
+domain: workout
+llmId: workout_coach
+intents: []
+tools: []
+safetyNotes: []
+prompts:
+  - key: system
+    body: You are a coach.
+`.trim();
+
+    const dir = makeTempDomainDir({
+      workout: yamlWithPrompts,
+      nutrition: VALID_NUTRITION_YAML,
+      health: VALID_HEALTH_YAML,
+    });
+
+    const result = loadDomainConfigs({ configDir: dir });
+
+    // .strict() rejects prompts[] → falls back to default
+    expect(result.configs.workout).toEqual(DEFAULT_DOMAIN_CONFIGS.workout);
+    expect(result.warnings.some((w) => w.includes("workout"))).toBe(true);
+  });
+
   it("falls back if domain field in YAML mismatches the filename", () => {
     // A nutrition.yml file that declares domain: workout — domain mismatch
     const mismatchYaml = VALID_WORKOUT_YAML; // declares domain: workout
     const dir = makeTempDomainDir({
       workout: VALID_WORKOUT_YAML,
       nutrition: mismatchYaml, // declares 'workout' instead of 'nutrition'
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -259,10 +305,9 @@ safetyNotes: []
     expect(result.source).toBe("defaults");
     expect(result.configs.workout).toEqual(DEFAULT_DOMAIN_CONFIGS.workout);
     expect(result.configs.nutrition).toEqual(DEFAULT_DOMAIN_CONFIGS.nutrition);
-    expect(result.configs.medical).toEqual(DEFAULT_DOMAIN_CONFIGS.medical);
     expect(result.configs.health).toEqual(DEFAULT_DOMAIN_CONFIGS.health);
-    expect(result.errors.length).toBe(4); // one error per missing file
-    expect(result.warnings.length).toBe(4); // one warning per missing file
+    expect(result.errors.length).toBe(3); // one error per missing file (workout/nutrition/health)
+    expect(result.warnings.length).toBe(3); // one warning per missing file
   });
 });
 
@@ -285,15 +330,12 @@ intents:
 tools:
   - getUserContextSlice
   - notARealCatalogTool
-signals: []
-prompts: []
 safetyNotes: []
 `.trim();
 
     const dir = makeTempDomainDir({
       workout: yamlWithFakeTool,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -309,6 +351,35 @@ safetyNotes: []
     expect(result.configs.nutrition.domain).toBe("nutrition");
   });
 
+  it("rejects YAML with getDocumentContext as it is no longer a valid tool name", () => {
+    // getDocumentContext was removed from agentToolNameSchema.
+    // Any YAML still declaring it must fail Zod validation → fallback to defaults.
+    const yamlWithDocumentTool = `
+domain: workout
+llmId: workout_coach
+intents:
+  - id: create_workout
+    description: Create a workout.
+    mapsToCapabilityId: adjust_workout
+tools:
+  - getUserContextSlice
+  - getDocumentContext
+safetyNotes: []
+`.trim();
+
+    const dir = makeTempDomainDir({
+      workout: yamlWithDocumentTool,
+      nutrition: VALID_NUTRITION_YAML,
+      health: VALID_HEALTH_YAML,
+    });
+
+    const result = loadDomainConfigs({ configDir: dir });
+
+    // getDocumentContext is not in the enum → Zod rejects → fallback
+    expect(result.configs.workout).toEqual(DEFAULT_DOMAIN_CONFIGS.workout);
+    expect(result.warnings.some((w) => w.includes("workout"))).toBe(true);
+  });
+
   it("keeps only catalog-valid tools via intersectDomainConfigWithCatalog (no undeclared tools added)", () => {
     // Provide a valid YAML with only one tool; verify the loader never widens the set
     const singleToolYaml = `
@@ -320,15 +391,12 @@ intents:
     mapsToCapabilityId: adjust_workout
 tools:
   - getUserContextSlice
-signals: []
-prompts: []
 safetyNotes: []
 `.trim();
 
     const dir = makeTempDomainDir({
       workout: singleToolYaml,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -341,14 +409,8 @@ safetyNotes: []
   });
 
   it("drops a mapsToCapabilityId not in the capability catalog and records a warning", () => {
-    // We can't pass an invalid CatalogIntentId through the strict Zod schema directly,
-    // but we can test the catalog intersection with a valid CatalogIntentId that resolves
-    // to a real but non-existent catalog entry by injecting via options.defaults override.
-    // Instead, use the intersectDomainConfigWithCatalog helper directly:
-    // (This test focuses on the loader's overall warning collection)
-
-    // Use a valid schema value that IS in CatalogIntentId but points to an attachment intent
-    // that won't be in the normal capability catalog tool allowlists.
+    // Use a valid CatalogIntentId that maps to an attachment capability;
+    // the loader validates via intersectDomainConfigWithCatalog.
     const yamlWithAttachmentCapability = `
 domain: workout
 llmId: workout_coach
@@ -358,22 +420,17 @@ intents:
     mapsToCapabilityId: attachment_food_photo
 tools:
   - getUserContextSlice
-signals: []
-prompts: []
 safetyNotes: []
 `.trim();
 
     const dir = makeTempDomainDir({
       workout: yamlWithAttachmentCapability,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
     const result = loadDomainConfigs({ configDir: dir });
 
-    // attachment_food_photo is an AttachmentCatalogIntentId that may not be in
-    // AGENT_CAPABILITY_CONFIGS; if dropped, a warning is recorded.
     // The key invariant: tools list is only the intersection.
     expect(result.configs.workout.tools).toEqual(["getUserContextSlice"]);
     // Either the intent passed (it's a real CatalogIntentId) or was dropped with a warning.
@@ -387,15 +444,12 @@ domain: workout
 llmId: workout_coach
 intents: []
 tools: []
-signals: []
-prompts: []
 safetyNotes: []
 `.trim();
 
     const dir = makeTempDomainDir({
       workout: emptyToolsYaml,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -406,7 +460,7 @@ safetyNotes: []
   });
 
   it("tools declared in YAML are intersected (not widened) against the catalog", () => {
-    // All three valid tools are in the catalog; intersection must keep all of them
+    // Both valid tools are in the catalog; intersection must keep them
     const allToolsYaml = `
 domain: workout
 llmId: workout_coach
@@ -417,25 +471,20 @@ intents:
 tools:
   - getUserContextSlice
   - getWeeklyProgressContext
-  - getDocumentContext
-signals: []
-prompts: []
 safetyNotes: []
 `.trim();
 
     const dir = makeTempDomainDir({
       workout: allToolsYaml,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
     const result = loadDomainConfigs({ configDir: dir });
 
-    // All three are real catalog tools; none dropped
+    // Both are real catalog tools; none dropped
     expect(result.configs.workout.tools).toContain("getUserContextSlice");
     expect(result.configs.workout.tools).toContain("getWeeklyProgressContext");
-    expect(result.configs.workout.tools).toContain("getDocumentContext");
     expect(result.warnings.some((w) => w.includes("dropped"))).toBe(false);
   });
 });
@@ -451,8 +500,6 @@ domain: workout
 llmId: workout_coach
 intents: []
 tools: []
-signals: []
-prompts: []
 safetyNotes: []
 contextBudget:
   includeDocuments: true
@@ -461,7 +508,6 @@ contextBudget:
     const dir = makeTempDomainDir({
       workout: yamlWithUnknown,
       nutrition: VALID_NUTRITION_YAML,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -479,8 +525,6 @@ domain: nutrition
 llmId: nutrition_coach
 intents: []
 tools: []
-signals: []
-prompts: []
 safetyNotes: []
 consentRules:
   - always_ask
@@ -489,7 +533,6 @@ consentRules:
     const dir = makeTempDomainDir({
       workout: VALID_WORKOUT_YAML,
       nutrition: yamlWithUnknown,
-      medical: VALID_MEDICAL_YAML,
       health: VALID_HEALTH_YAML,
     });
 
@@ -501,14 +544,12 @@ consentRules:
     expect(result.configs.workout.llmId).toBe("workout_coach");
   });
 
-  it("falls back for YAML with an unknown key 'validationRules'", () => {
+  it("falls back for YAML with an unknown key 'validationRules' in the health domain", () => {
     const yamlWithUnknown = `
-domain: medical
+domain: health
 llmId: health_coach
 intents: []
 tools: []
-signals: []
-prompts: []
 safetyNotes: []
 validationRules:
   schema: strict
@@ -517,15 +558,14 @@ validationRules:
     const dir = makeTempDomainDir({
       workout: VALID_WORKOUT_YAML,
       nutrition: VALID_NUTRITION_YAML,
-      medical: yamlWithUnknown,
-      health: VALID_HEALTH_YAML,
+      health: yamlWithUnknown,
     });
 
     const result = loadDomainConfigs({ configDir: dir });
 
-    expect(result.configs.medical).toEqual(DEFAULT_DOMAIN_CONFIGS.medical);
-    expect(result.warnings.some((w) => w.includes("medical"))).toBe(true);
-    // health is unaffected
-    expect(result.configs.health.domain).toBe("health");
+    expect(result.configs.health).toEqual(DEFAULT_DOMAIN_CONFIGS.health);
+    expect(result.warnings.some((w) => w.includes("health"))).toBe(true);
+    // workout is unaffected
+    expect(result.configs.workout.domain).toBe("workout");
   });
 });

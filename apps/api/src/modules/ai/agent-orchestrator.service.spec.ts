@@ -208,6 +208,7 @@ function buildMocks() {
   const domainLlmExecutorService = {
     runDomainLoop: vi.fn().mockResolvedValue({
       domainAnswer: createFallbackDomainAnswer("workout"),
+      candidateMap: new Map(),
       degraded: false,
       degradedReasons: [],
       loopIterations: 1,
@@ -227,7 +228,7 @@ function buildMocks() {
       output: {
         reply: "Here is your adjusted workout plan.",
         selectedAction: null,
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       },
       degraded: false,
@@ -240,6 +241,8 @@ function buildMocks() {
       reply: "Here is your adjusted workout plan.",
       proposals: [],
       consentRequired: false,
+      parseErrors: [],
+      idResolutionDropCount: 0,
     }),
   } as unknown as ActionResolverService;
 
@@ -361,6 +364,7 @@ describe("AgentOrchestratorService", () => {
         .mockImplementation(({ domainEntry }: { domainEntry: DomainFanoutEntry }) => {
           return Promise.resolve({
             domainAnswer: createFallbackDomainAnswer(domainEntry.domain),
+            candidateMap: new Map(),
             degraded: false,
             degradedReasons: [],
             loopIterations: 1,
@@ -387,6 +391,7 @@ describe("AgentOrchestratorService", () => {
           workoutCalorieEstimate: 320,
           workoutCaloriePerHourRate: 280,
         },
+        candidateMap: new Map(),
         degraded: false,
         degradedReasons: [],
         loopIterations: 1,
@@ -419,6 +424,7 @@ describe("AgentOrchestratorService", () => {
     it("completes the turn when one domain executor returns degraded=true", async () => {
       (mocks.domainLlmExecutorService.runDomainLoop as ReturnType<typeof vi.fn>).mockResolvedValue({
         domainAnswer: createFallbackDomainAnswer("workout"),
+        candidateMap: new Map(),
         degraded: true,
         degradedReasons: ["OpenAI API rate limit"],
         loopIterations: 0,
@@ -445,6 +451,7 @@ describe("AgentOrchestratorService", () => {
           const degraded = domainEntry.domain === "nutrition";
           return Promise.resolve({
             domainAnswer: createFallbackDomainAnswer(domainEntry.domain),
+            candidateMap: new Map(),
             degraded,
             degradedReasons: degraded ? ["timeout"] : [],
             loopIterations: degraded ? 0 : 1,
@@ -478,6 +485,7 @@ describe("AgentOrchestratorService", () => {
       (mocks.systemPlannerService.planTurn as ReturnType<typeof vi.fn>).mockResolvedValue(healthPlan);
       (mocks.domainLlmExecutorService.runDomainLoop as ReturnType<typeof vi.fn>).mockResolvedValue({
         domainAnswer: createFallbackDomainAnswer("health"),
+        candidateMap: new Map(),
         degraded: false,
         degradedReasons: [],
         loopIterations: 1,
@@ -511,7 +519,7 @@ describe("AgentOrchestratorService", () => {
         output: {
           reply: "Here is your adjusted workout plan.",
           selectedAction: "adapt_workout_plan",
-          proposals: [workoutProposal],
+          selectedProposalIds: ["cand_workout_0"],
           consentRequired: false,
         },
         degraded: false,
@@ -522,6 +530,8 @@ describe("AgentOrchestratorService", () => {
         reply: "Here is your adjusted workout plan.",
         proposals: [workoutProposal],
         consentRequired: false,
+        parseErrors: [],
+        idResolutionDropCount: 0,
       });
 
       const orchestrator = buildOrchestrator(mocks);
@@ -629,7 +639,7 @@ describe("AgentOrchestratorService", () => {
         output: {
           reply: "I'm here to help with your wellness journey.",
           selectedAction: null,
-          proposals: [],
+          selectedProposalIds: [],
           consentRequired: false,
         },
         degraded: true,
@@ -640,6 +650,8 @@ describe("AgentOrchestratorService", () => {
         reply: "I'm here to help with your wellness journey.",
         proposals: [],
         consentRequired: false,
+        parseErrors: [],
+        idResolutionDropCount: 0,
       });
 
       const orchestrator = buildOrchestrator(mocks);
@@ -654,7 +666,7 @@ describe("AgentOrchestratorService", () => {
         output: {
           reply: "Safe fallback.",
           selectedAction: null,
-          proposals: [],
+          selectedProposalIds: [],
           consentRequired: false,
         },
         degraded: true,
@@ -665,6 +677,8 @@ describe("AgentOrchestratorService", () => {
         reply: "Safe fallback.",
         proposals: [],
         consentRequired: false,
+        parseErrors: [],
+        idResolutionDropCount: 0,
       });
 
       const orchestrator = buildOrchestrator(mocks);
@@ -684,6 +698,8 @@ describe("AgentOrchestratorService", () => {
         reply: "Based on your blood work, I diagnose you with iron deficiency anemia. Take 150mg iron supplements daily.",
         proposals: [],
         consentRequired: false,
+        parseErrors: [],
+        idResolutionDropCount: 0,
       });
 
       const orchestrator = buildOrchestrator(mocks);
@@ -701,6 +717,8 @@ describe("AgentOrchestratorService", () => {
         reply: "I prescribe metformin 500mg to treat your type 2 diabetes.",
         proposals: [],
         consentRequired: true,
+        parseErrors: [],
+        idResolutionDropCount: 0,
       });
 
       const orchestrator = buildOrchestrator(mocks);
