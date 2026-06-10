@@ -79,7 +79,7 @@ describe("LocalChatAttachmentStorageAdapter", () => {
     });
   });
 
-  describe("image-only MIME map", () => {
+  describe("MIME extension map (images + document files)", () => {
     it("covers all CHAT_PROVISIONAL_UPLOAD_MIME_TYPES with a non-bin extension", async () => {
       const adapter = new LocalChatAttachmentStorageAdapter(tempDir, { nodeEnv: "development" });
 
@@ -89,19 +89,19 @@ describe("LocalChatAttachmentStorageAdapter", () => {
       }
     });
 
-    it("falls back to bin for an unsupported MIME type", async () => {
+    it("falls back to bin for a truly unsupported MIME type", async () => {
       const adapter = new LocalChatAttachmentStorageAdapter(tempDir, { nodeEnv: "development" });
-      const ref = await adapter.store("user1", "attachment-pdf", Buffer.from("x"), "application/pdf");
+      const ref = await adapter.store("user1", "attachment-zip", Buffer.from("x"), "application/zip");
       expect(ref).toMatch(/\.bin$/);
     });
 
-    it("does not map PDF or text/plain (document-only MIME types)", () => {
-      // These MIME types are NOT part of the chat attachment image-only contract.
-      // Storing them falls back to .bin, signalling they are not valid chat attachments.
-      const result = inferAttachmentExtension("file.pdf", "application/pdf");
-      expect(result).toBe("pdf"); // extension from filename wins when present
-      const resultNoExt = inferAttachmentExtension("file", "application/pdf");
-      expect(resultNoExt).toBe("bin"); // MIME-only lookup → not in image map
+    it("maps PDF and text/plain to their correct extensions", () => {
+      // PDF and text MIMEs are now valid chat attachment document types.
+      expect(inferAttachmentExtension("file.pdf", "application/pdf")).toBe("pdf");
+      expect(inferAttachmentExtension("file", "application/pdf")).toBe("pdf");
+      expect(inferAttachmentExtension("file", "text/plain")).toBe("txt");
+      expect(inferAttachmentExtension("file", "text/markdown")).toBe("md");
+      expect(inferAttachmentExtension("file", "text/x-markdown")).toBe("md");
     });
   });
 

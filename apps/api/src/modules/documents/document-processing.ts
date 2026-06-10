@@ -37,7 +37,7 @@ export class LabDocumentParser implements DocumentParser {
   }
 }
 
-async function extractPdfPlainText(content: Buffer): Promise<ParsedDocumentContent> {
+export async function extractPdfPlainText(content: Buffer): Promise<ParsedDocumentContent> {
   const parser = new PDFParse({ data: content });
 
   try {

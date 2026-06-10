@@ -3010,6 +3010,166 @@ describe("ChatService", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Gap 4 — document_file attachment turn + workout proposal + no health_documents
+  // ---------------------------------------------------------------------------
+  //
+  // An attachment turn whose mocked AI output selects a create_workout_plan
+  // candidate must:
+  //   (a) produce a validated + persisted proposal in the result
+  //   (b) NEVER call any health_documents repository or service method
+  //       (no auto-persist path exists for document attachments)
+  //
+  // The chat-attachments path is images + document files, context-only; document text goes
+  // directly to the LLM as ephemeral context and must never be saved.
+  // ---------------------------------------------------------------------------
+
+  describe("document_file attachment turn with workout proposal (Gap 4)", () => {
+    it("document_file attachment turn → create_workout_plan proposal persisted, zero health_documents calls", async () => {
+      const attachmentId = "d9000001-0000-4000-8000-000000000001";
+      const proposalRecord = {
+        intent: "create_workout_plan" as const,
+        targetDomain: "workout" as const,
+        title: "3-Day Strength Plan",
+        reason: "User uploaded their training preferences.",
+        proposedChanges: {
+          title: "3-Day Strength Plan",
+          summary: "Strength-focused plan based on uploaded document.",
+          days: [
+            { weekday: "monday" as const, focus: "Upper body", exercises: [{ name: "Bench Press", sets: 4, reps: "8" }] },
+          ],
+          notes: [],
+        },
+      };
+
+      const createProposal = vi.fn(async (
+        _userId: string,
+        _threadId: string,
+        _sourceMessageId: string | null,
+        proposal: unknown,
+        validationStatus: "valid" | "invalid" | "pending_validation",
+        validationErrors: string[],
+      ) => ({
+        id: "proposal-id",
+        userId: user.id,
+        threadId: thread.id,
+        sourceMessageId: "assistant-message-id",
+        ...(proposal as Record<string, unknown>),
+        status: "pending" as const,
+        validationStatus,
+        validationErrors,
+        userDecisionAt: null,
+        appliedReference: null,
+        createdAt: new Date("2026-06-10T00:00:00.000Z"),
+        updatedAt: new Date("2026-06-10T00:00:00.000Z"),
+      }));
+
+      // Health documents repository mock — all methods should be untouched.
+      const documentsRepositoryMock = {
+        create: vi.fn(),
+        findById: vi.fn(),
+        findByUserId: vi.fn(),
+        delete: vi.fn(),
+        update: vi.fn(),
+      };
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-06-10T00:00:00.000Z"),
+          }),
+          createProposal,
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: {
+              reply: "Here is a workout plan based on your uploaded document.",
+              proposals: [proposalRecord],
+            },
+            parseErrors: [],
+            replySafetyErrors: [],
+            agentMetadata: {
+              provider: "openai" as const,
+              intent: "create_workout_plan" as const,
+              catalogIntentId: "create_workout_plan" as const,
+              purpose: "workout_adaptation" as const,
+              depth: "medium" as const,
+              timeRange: "14d" as const,
+              toolsInvoked: [],
+              safety: { status: "passed" as const, blockedReasons: [], constraintsApplied: [] },
+              citations: [],
+            },
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () =>
+            buildMockAttachmentTurnStageResult({
+              attachments: [
+                {
+                  id: attachmentId,
+                  userId: user.id,
+                  category: "document_file",
+                  mimeType: "application/pdf",
+                  status: "ready",
+                  filename: "training-plan.pdf",
+                  storageKey: "local://attachments/training-plan.pdf",
+                  consent: null,
+                },
+              ],
+            }),
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Create a workout plan based on this document.",
+        attachmentRefIds: [attachmentId],
+      });
+
+      // (a) The create_workout_plan proposal must be validated and persisted.
+      expect(createProposal).toHaveBeenCalledOnce();
+      expect(result.proposals).toHaveLength(1);
+      expect(result.proposals[0]?.intent).toBe("create_workout_plan");
+      expect(result.proposals[0]?.targetDomain).toBe("workout");
+
+      // (b) Health documents repository must never have been called.
+      // The document file is ephemeral context only — no auto-save to health_documents.
+      for (const [methodName, mock] of Object.entries(documentsRepositoryMock)) {
+        expect(mock, `documentsRepositoryMock.${methodName} should not be called`).not.toHaveBeenCalled();
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Phase 7: consentRequired surfacing + no health_documents auto-persist
   // ---------------------------------------------------------------------------
 

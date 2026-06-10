@@ -26,12 +26,12 @@ describe("ChatController", () => {
       expect(service.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("rejects a body with content exceeding 4000 chars", () => {
+    it("rejects a body with content exceeding 20 000 chars", () => {
       const service = createServiceMock();
       const controller = new ChatController(service as never);
 
       expect(() =>
-        controller.sendMessage(authA as never, "thread-1", { content: "x".repeat(4001) }),
+        controller.sendMessage(authA as never, "thread-1", { content: "x".repeat(20_001) }),
       ).toThrow(BadRequestException);
       expect(service.sendMessage).not.toHaveBeenCalled();
     });

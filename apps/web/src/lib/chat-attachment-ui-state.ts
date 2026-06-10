@@ -9,6 +9,7 @@ import type { ChatMessageAttachmentPreview } from "./chat-message-attachments.js
 import {
   getChatAttachmentMimeTypeError,
   getChatAttachmentSizeError,
+  inferProvisionalAttachmentCategory,
   isChatAttachmentPendingMessageFirstSend,
   isChatAttachmentSendEligibleStatus,
 } from "@health/types";
@@ -27,7 +28,7 @@ export const CHAT_ATTACHMENT_PRIVACY_NOTICE =
   "Attachments are shared as context for your coaching session. Food photos, wellness documents, and training files are read directly by the AI coach to help personalise your guidance.";
 
 export const CHAT_ATTACHMENT_CATEGORY_HINT =
-  "Attach an image and add a short message if helpful. The AI coach reads the attachment as context for your coaching session.";
+  "Attach an image or document file (PDF, text, markdown) and add a short message if helpful. The AI coach reads the attachment as context for your coaching session.";
 
 export const MESSAGE_FIRST_ATTACHMENT_COPY =
   "This attachment will be shared as coaching context when you send your message. Adding a short note in your message helps the coach understand it (for example, “second meal” or “leg day”).";
@@ -51,10 +52,12 @@ export const CHAT_ATTACHMENT_FAILED_COPY =
   "This attachment could not be processed. Remove it and try again, or describe what you meant in a message.";
 
 /**
- * Images only — PDF/text document flow is deferred.
- * Accepts the three image types supported by the backend.
+ * Accepted MIME types and extensions for chat attachment uploads.
+ * Images: jpeg, png, webp.
+ * Document files: PDF, plain text, markdown.
  */
-export const CHAT_ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
+export const CHAT_ATTACHMENT_ACCEPT =
+  "image/jpeg,image/png,image/webp,application/pdf,text/plain,text/markdown,.jpg,.jpeg,.png,.webp,.pdf,.txt,.md,.markdown";
 
 export type ChatComposerAttachmentDraft = {
   localId: string;
@@ -76,6 +79,7 @@ export function chatAttachmentCategoryLabel(category: ChatAttachmentCategory): s
     food_photo: "Food photo",
     medical_document: "Wellness document",
     workout_attachment: "Workout or training",
+    document_file: "Document file",
   };
 
   return LABELS[category] ?? category;
@@ -116,13 +120,27 @@ export function formatChatAttachmentFileSize(bytes: number): string {
 }
 
 export function normalizeAttachmentMimeType(file: Pick<File, "name" | "type">): string {
+  const extension = file.name.split(".").pop()?.toLowerCase();
+
+  // Extension-based normalization takes precedence for types where browsers report
+  // incorrect or empty values. Notably: .md files often arrive as "" or "text/plain".
+  if (extension === "md" || extension === "markdown") {
+    return "text/markdown";
+  }
+
+  if (extension === "pdf") {
+    return "application/pdf";
+  }
+
+  if (extension === "txt") {
+    return "text/plain";
+  }
+
   const normalizedType = file.type.trim().toLowerCase();
 
   if (normalizedType) {
     return normalizedType;
   }
-
-  const extension = file.name.split(".").pop()?.toLowerCase();
 
   if (extension === "jpg" || extension === "jpeg") {
     return "image/jpeg";
@@ -147,7 +165,11 @@ export function validateChatAttachmentFile(file: File): string | null {
     return mimeError;
   }
 
-  const sizeError = getChatAttachmentSizeError("unclassified", file.size);
+  // Use the category-inferred size cap: document_file → 5 MB, images → 10 MB.
+  // getChatAttachmentSizeError handles per-category caps in one place so there
+  // is a single source of truth for size limits (no duplicated 5 MB check here).
+  const category = inferProvisionalAttachmentCategory(mimeType);
+  const sizeError = getChatAttachmentSizeError(category, file.size);
 
   if (sizeError) {
     return sizeError;

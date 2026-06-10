@@ -204,19 +204,40 @@ domain names); they never carry user content, reply text, proposal payloads, or 
 data. This is enforced by the `chatTurnStreamEventSchema` shape: only the single `final`
 event (and only after validation) ever carries the assistant text and validated proposals.
 
-## Stage 1: Attachment Context (context-only, images only)
+## Stage 1: Attachment Context (context-only, images + document files)
 
 Attachments are **bounded context** for the same pipeline used by text-only
 messages. There is **no recognition or classification machinery** — the multimodal
-router and domain LLMs read the image content directly. The chat-attachments
-module keeps only the ownership/storage/retention perimeter.
+router and domain LLMs read the image content directly, and document files are
+extracted to plain text per-turn. The chat-attachments module keeps only the
+ownership/storage/retention perimeter.
 
-Attachments are **images only** (`image/jpeg`, `image/png`, `image/webp`); the
-PDF/text document upload flow is **deferred** (not implemented). There is **no
-upfront classification** (no food/workout/medical category picker, no
-`categorySource` "declare before upload" machinery) and **no upfront consent gate**
-— an image uploads freely and is sent to the LLM as context, and the multimodal LLM
-recognizes what it is.
+Attachments are **images + document files**, context-only. Images are
+`image/jpeg`, `image/png`, `image/webp`. Document files are the new `document_file`
+category: PDF (`application/pdf`), plain text (`text/plain`), and Markdown
+(`text/markdown`, `text/x-markdown`), capped at **5 MB**, retention
+`ephemeral_recognition` (DB enum value added in migration
+`0036_careless_pandemic.sql`). There is **no upfront classification** (no
+food/workout/medical category picker, no `categorySource` "declare before upload"
+machinery) and **no upfront consent gate** — an attachment uploads freely and is
+sent to the LLM as context, and the multimodal/text LLM reads what it is.
+
+**Category inference (`mime_inferred`).** Document-file uploads are not declared by
+the user; the category is inferred deterministically from the MIME type via a fixed
+MIME→category map (`isChatAttachmentDocumentMimeType` in `@health/types`), so a PDF
+or text/Markdown file resolves to `document_file` without a category picker.
+
+**Lazy per-turn text extraction.** `AttachmentTextExtractionService`
+(`apps/api/src/modules/chat-attachments/attachment-text-extraction.service.ts`)
+extracts plain text from `document_file` attachments **once per turn**, before the
+fan-out, reusing `extractPdfPlainText` from the documents module for PDFs and a
+UTF-8 read for text/Markdown. Extraction is capped at
+`MAX_ATTACHMENT_TEXT_CONTENT_CHARS` (**12 000 chars**, truncated beyond), wrapped in
+a ~5 s timeout, and degrades independently to a status of `ok` / `empty` / `failed`
+(it **never throws** and never blocks the turn). The extracted text is **never
+persisted to the database and never logged** (only the refId + status are logged) —
+this is a code-level safety floor. The original `filename` rides on the bounded
+attachment metadata (used as the label in the prompt; see Stage 8).
 
 > **Temporary, intentional safety relaxation (recorded so code↔doc don't drift):**
 > image content — including a photo of a medical document — now reaches the LLM
@@ -225,11 +246,13 @@ recognizes what it is.
 > The pre-upload medical/MIME consent gate and the `needs_consent` upload disposition
 > are gone (see "Removed Legacy Paths"). Floors that still hold: the context-budget
 > `allowDocuments=false` floor (about DB `health_documents` slices, **not** the
-> uploaded image) stays, there is **no** auto-persist or parsing of `health_documents`
-> from an attachment, and the legacy `recognition`/`categorySource` DB columns remain
-> readable but are not used for runtime branching. (`category` is still read to resolve
-> a retention policy — effectively constant since uploads are always `unclassified` —
-> and `status` is read for send eligibility; see "Removed Legacy Paths".)
+> uploaded attachment) stays, there is **no** auto-persist or parsing of
+> `health_documents` from an attachment, and the legacy `recognition`/`categorySource`
+> DB columns remain readable but are not used for runtime branching. (`category` is
+> still read to resolve a retention policy — `mime_inferred` resolves image uploads to
+> `unclassified` and document uploads to `document_file`, both with
+> `ephemeral_recognition` retention — and `status` is read for send eligibility; see
+> "Removed Legacy Paths".)
 
 ### `ChatTurnAttachmentStageService`
 
@@ -240,11 +263,11 @@ Runs the **plumbing stages only**:
 - `validate_refs`: checks ownership and send eligibility.
 - `link_to_message`: links attachments to the chat message and thread.
 - `apply_upload_disposition`: applies a **trivial generic retention disposition** —
-  it resolves the configured retention policy for the attachment's category and
-  passes the image through unchanged otherwise. In practice this lookup is
-  effectively constant: uploads are always created with category `unclassified`
-  (no per-category runtime branching occurs today). There is **no consent gate,
-  no medical purge, and no category reclassification** at this stage.
+  it resolves the configured retention policy for the attachment's MIME-inferred
+  category and passes the attachment through unchanged otherwise. Both image
+  (`unclassified`) and `document_file` uploads resolve to `ephemeral_recognition`
+  retention, so no per-category runtime branching occurs today. There is **no consent
+  gate, no medical purge, and no category reclassification** at this stage.
 
 The `classify`, `recognize`, and `prepare_attachment_context` stages, the removed
 `prepare_proposal_candidates` stage, and the removed pre-upload classification /
@@ -277,15 +300,22 @@ the orchestrator. `consentState` is a passive back-compat field carried on the
 only** — `RouterAttachmentHint` carries `category` and nothing else.
 An attachment goes to **all** router-selected domains — there is no per-domain
 category-relevance filter. The selected domain LLMs receive the bounded image
-content as context and produce typed proposals (nutrition calories, workout
-adjustments, etc.). No `contextSummaries` / recognition envelope is produced, and
+content and/or extracted document text as context and produce typed proposals
+(nutrition calories, workout adjustments, etc.). No `contextSummaries` / recognition
+envelope is produced, and
 there is no consent-gated medical-save proposal variant (that is deferred — see
 below).
 
 ### Document upload (LIVE) vs attachment-driven save (deferred)
 
-**PDF/text document upload + parse is implemented** — but as a separate, explicit
-**Profile Documents** feature (`apps/api/src/modules/documents/*`,
+`document_file` chat attachments are **context-only**: their text is extracted
+per-turn and fed to the domain LLMs, but **no attachment path may create or parse a
+`health_document` row** — the chat-attachments path stays context-only and this
+boundary is enforced and regression-tested. Durable, parsed document **storage** is a
+separate concern.
+
+**Durable PDF/text document upload + parse is implemented** — but as a separate,
+explicit **Profile Documents** feature (`apps/api/src/modules/documents/*`,
 `apps/web/src/components/documents/*`), **not** part of the chat-attachment pipeline.
 The user explicitly uploads a PDF/plain-text file under a five-scope, per-operation
 consent model (`upload_storage`, `parse_ocr`, `ai_summarization`,
@@ -299,7 +329,7 @@ Still **not** built (deferred), and still a hard boundary:
 - The LLM-recognized medical **special save**: a domain recognition signal → a
   consent-gated save **proposal** → on accept, with consent, persist a
   `health_document`. Document persistence is **explicit-upload only**; **no
-  attachment path may create or parse a `health_document`** (image-only/context-only,
+  attachment path may create or parse a `health_document`** (context-only,
   enforced and regression-tested).
 
 ## Stage 2: Code-Owned Pre-AI Gates
@@ -466,6 +496,18 @@ selects which domain LLMs should run. It calls `provider.generateRouterDecision`
 The router's available-domain list is exactly the **3 `RouterDomain` values**:
 `workout`, `nutrition`, and `health`. `medical.yml` has been deleted — the `health`
 domain owns all wellness/health-context intents and is not a fourth router-selectable domain.
+
+**Message-length caps (`packages/types/src/message-limits.ts`).** The API accepts a
+user message up to `MAX_CHAT_USER_MESSAGE_CHARS` (**20 000 chars**) — enough for a
+full pasted workout routine or meal plan — enforced by `sendChatMessageSchema` and
+carried at full length through the domain-step, final-decision, and agent-context
+schemas, so the **domain LLMs and the decision-maker see the full message**. The
+**router does not**: `buildRequest` applies `truncateForRouter` (cap
+`ROUTER_TEXT_MAX_CHARS = 4 000`) to the **top-level** router fields (`originalText`,
+`normalizedText`) **and** to each recent-message item **and** to the router-scoped
+copy of the serialized `preprocessorJson`, so no long paste can bloat the router
+prompt or trip its schema parse. The router only needs the head of the message to
+choose domains.
 
 Inputs:
 
@@ -712,6 +754,33 @@ timeout fires it aborts the controller, so any in-flight provider `fetch` (inclu
 its pending retries) receives an `AbortError` and stops immediately rather than running
 out the clock. The abort signal is threaded into `provider.generateDomainStep(..., {
 signal })`.
+
+**Attachment context per domain (`buildAttachmentContext`).** Before running the
+loop, each domain executor enriches the turn's attachment items for that domain:
+
+- **`textContent` + `filename` reach ALL selected domains, including workout.** The
+  text is sourced from the orchestrator's pre-extracted per-turn map (extracted once
+  by `AttachmentTextExtractionService` before the fan-out — never re-read from
+  storage here, never logged). When extraction was `empty`/`failed`, the item still
+  carries `filename` as metadata with no `textContent`.
+- **`imageDataUri` is unchanged: populated only for image-MIME attachments on the
+  multimodal (nutrition / health) domains.** The workout domain never receives image
+  bytes; non-image MIMEs never get an `imageDataUri`.
+
+**How the provider injects attachments** (`openai-coach-provider.ts`):
+
+- Extracted document text becomes labeled blocks in the **USER message content
+  only** — `ATTACHED FILE "<filename>" (user-provided context, may be truncated):`
+  followed by the text (`buildAttachmentTextBlocks`, label falls back to
+  `attachmentRefId`). Image attachments with an `imageDataUri` are appended as vision
+  content. Attachment text is **never** placed in the system prompt.
+- The **system prompt** carries only a bounded metadata **summary** per attachment
+  (`hasImage`, `hasText`, optional `filename`) — it omits both `imageDataUri` and
+  `textContent` (a code-level safety floor; raw content never enters the system
+  prompt).
+
+`domain_workout` and `domain_nutrition` static prefixes each carry one added
+instruction line telling the domain LLM how to use an attached document's text.
 
 Each `generateDomainStep` returns `ProviderCallResult` with optional `usage`; the
 executor **accumulates** that usage across loop iterations (summing `promptTokens`,
@@ -1146,8 +1215,10 @@ Config files:
 
 - `packages/ai-behavior/config/ai-behavior.json` — chat/LLM behavior (direct-path
   patterns, prompts, proposal-revision routing, context budgets).
-- `packages/ai-behavior/config/attachments.json` — attachment consent, categories,
-  retention, and plumbing stage order. (Recognition/classification config removed.)
+- `packages/ai-behavior/config/attachments.json` — attachment consent, categories
+  (incl. the `document_file` category with PDF/text/Markdown MIME types, 5 MB cap, and
+  `ephemeral_recognition` retention), retention map, and plumbing stage order.
+  (Recognition/classification config removed.)
 - `packages/ai-behavior/config/domains/*.yml` — per-domain intents/tools/signals/prompts.
 
 Loaders:
@@ -1165,14 +1236,15 @@ Schemas and defaults:
 ## Safety Boundaries
 
 - Crisis support is code-owned and bypasses all LLMs.
-- Attachments are **images only and context-only**: no upfront classification and
-  **no upfront consent gate**. **Temporary, intentional relaxation (for now):** image
-  content — including a photo of a medical document — reaches the LLM (OpenAI)
-  **before any consent**, consciously removing the previous "medical content only
-  when consent is granted" code floor. Floors that still hold: there is **no**
-  auto-persist or parsing of a `health_document` from an attachment, and the
-  context-budget `allowDocuments=false` floor (DB `health_documents` slices, not the
-  uploaded image) is unchanged.
+- Attachments are **images + document files (PDF/TXT/Markdown), context-only**: no
+  upfront classification and **no upfront consent gate**. Document text is extracted
+  per-turn (12 000-char cap) and is **never persisted or logged**. **Temporary,
+  intentional relaxation (for now):** image content — including a photo of a medical
+  document — reaches the LLM (OpenAI) **before any consent**, consciously removing the
+  previous "medical content only when consent is granted" code floor. Floors that
+  still hold: there is **no** auto-persist or parsing of a `health_document` from an
+  attachment, and the context-budget `allowDocuments=false` floor (DB
+  `health_documents` slices, not the uploaded attachment) is unchanged.
 - Context budgets deny document and sensitive health context by default, re-applied
   to every per-domain packet; config cannot relax these floors.
 - The router output is clamped to known domains, capabilities, and tools, and may
@@ -1289,9 +1361,11 @@ An **env-gated live golden eval suite** exercises the real router and decision-m
 stages against fixed cases:
 `apps/api/src/modules/ai/evals/router-golden.eval.spec.ts`. It runs only when
 `LLM_EVALS=1` **and** `OPENAI_API_KEY` is set (otherwise unconditionally skipped, so
-normal `pnpm test` / CI never incurs API cost). It covers **40 router cases + 8 decision
-cases** spanning RU and EN (single-domain, multi-domain, ambiguous, smalltalk, and
-proposal-intent-vs-plain-reply), and asserts a **≥80% pass rate over non-errored cases**.
+normal `pnpm test` / CI never incurs API cost). It covers **41 router cases + 9 decision
+cases** spanning RU and EN (single-domain, multi-domain, ambiguous, smalltalk,
+proposal-intent-vs-plain-reply, and a long-paste pair `R-RU-LONG-01` / `D-RU-LONG-01`
+exercising the 20 000-char message cap with router head-truncation), and asserts a
+**≥80% pass rate over non-errored cases**.
 A provider fallback (`source === "fallback"`, e.g. auth/network failure) is marked
 `ERROR`, excluded from the pass-rate denominator, and **fails the run explicitly** so an
 unavailable provider can't masquerade as a pass. Run command (in the spec header):
@@ -1351,8 +1425,8 @@ The following files/exports were deleted and are no longer active runtime paths:
   (`isTrustedUserSelectedChatAttachmentUpload`, `resolveProvisionalUploadCategorySource`,
   `resolveCreateAttachmentCategorySource`), the upload-time medical consent gate
   (`isMedicalAttachmentByDeclarationOrMime`), and the `needs_consent` upload
-  disposition. Uploads are now image-only; an image is sent to the LLM as context with
-  no upfront classification or consent.
+  disposition. Uploads are now images + MIME-inferred `document_file`; an attachment is
+  sent to the LLM as context with no upfront classification or consent.
 - The per-domain attachment **category-relevance filter** (an attachment now reaches
   all router-selected domains) and the consent-gated `medical_document_save`
   action-variant (dropped from `ActionVariantCatalogService`). The

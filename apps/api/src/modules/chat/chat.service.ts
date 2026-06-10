@@ -333,6 +333,7 @@ export class ChatService {
                 mimeType: meta.mimeType,
                 consentState: meta.consentState,
                 storageRef: meta.storageRef,
+                filename: meta.filename,
               })),
             } satisfies AttachmentTurnContext,
           }

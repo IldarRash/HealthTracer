@@ -143,28 +143,45 @@ describe("ChatAttachmentsService", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("rejects PDF MIME type (deferred; images only for now)", async () => {
-    const { service } = createService({});
+  it("accepts PDF upload as document_file category with mime_inferred categorySource", async () => {
+    vi.spyOn(LocalChatAttachmentStorageAdapter.prototype, "store");
+    const { service, chatAttachmentsRepository } = createService({});
 
-    await expect(
-      service.createAttachment(auth, {
-        filename: "labs.pdf",
-        mimeType: "application/pdf",
-        fileContentBase64: "dGVzdA==",
+    const record = await service.createAttachment(auth, {
+      filename: "training-program.pdf",
+      mimeType: "application/pdf",
+      fileContentBase64: "dGVzdA==",
+    });
+
+    expect(chatAttachmentsRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "document_file",
+        categorySource: "mime_inferred",
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    );
+    // linkedDocumentId is always null — no health_documents creation from attachment path
+    expect(record.linkedDocumentId).toBeNull();
+    expect(record.category).toBe("document_file");
   });
 
-  it("rejects text/plain MIME type — images only, no document upload supported", async () => {
-    const { service } = createService({});
+  it("accepts text/plain upload as document_file category, linkedDocumentId always null", async () => {
+    vi.spyOn(LocalChatAttachmentStorageAdapter.prototype, "store");
+    const { service, chatAttachmentsRepository } = createService({});
 
-    await expect(
-      service.createAttachment(auth, {
-        filename: "notes.txt",
-        mimeType: "text/plain",
-        fileContentBase64: "dGVzdA==",
+    const record = await service.createAttachment(auth, {
+      filename: "notes.txt",
+      mimeType: "text/plain",
+      fileContentBase64: "dGVzdA==",
+    });
+
+    expect(chatAttachmentsRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "document_file",
+        categorySource: "mime_inferred",
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    );
+    // linkedDocumentId is always null — attachment path never creates health_documents rows
+    expect(record.linkedDocumentId).toBeNull();
   });
 
   it("upload resolves to queued status — no upfront consent gate, no needs_consent on create", async () => {

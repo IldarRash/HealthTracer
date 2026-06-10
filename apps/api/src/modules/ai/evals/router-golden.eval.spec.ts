@@ -272,6 +272,28 @@ const ROUTER_GOLDEN_CASES: RouterCase[] = [
     message: "Помоги составить рацион на 2000 ккал",
     expectedDomains: ["nutrition"],
   },
+
+  // ── Long-message (>4000 chars) — router truncation regression guard ───────
+  {
+    id: "R-RU-LONG-01",
+    // Deterministic long RU workout program pasted by the user (>4000 chars).
+    // Built by repeating week blocks — no random/Date, fully deterministic.
+    message: (() => {
+      const weekBlock =
+        "Неделя X: Пн — Жим лёжа 4×8, Жим гантелей 3×12, Разводка 3×15, Французский жим 3×12. " +
+        "Ср — Приседания 4×8, Жим ногами 3×12, Разгибания 3×15, Подъёмы икр 4×20. " +
+        "Пт — Тяга штанги 4×6, Подтягивания 3×10, Тяга гантели 3×12, Молоток 3×12. " +
+        "Вс — отдых и лёгкая растяжка 20 минут. ";
+      const header = "Сохрани мне эту программу тренировок: ";
+      // Repeat the week block enough times to exceed 4000 chars.
+      let body = "";
+      while ((header + body).length < 4_200) {
+        body += weekBlock;
+      }
+      return header + body;
+    })(),
+    expectedDomains: ["workout"],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -508,6 +530,55 @@ const DECISION_GOLDEN_CASES: DecisionCase[] = [
         intent: "create_nutrition_plan",
         title: "Bulking Nutrition Plan",
         reason: "User wants a calorie surplus for muscle gain.",
+      },
+    ],
+    expectsProposalAction: true,
+  },
+
+  // ── Long-message (>4000 chars) — decision-maker regression guard ──────────
+  {
+    id: "D-RU-LONG-01",
+    // Same long workout program message used in R-RU-LONG-01.
+    // Verifies that the decision-maker accepts the create_workout_plan candidate
+    // when the userMessage is larger than the old 4000-char cap.
+    userMessage: (() => {
+      const weekBlock =
+        "Неделя X: Пн — Жим лёжа 4×8, Жим гантелей 3×12, Разводка 3×15, Французский жим 3×12. " +
+        "Ср — Приседания 4×8, Жим ногами 3×12, Разгибания 3×15, Подъёмы икр 4×20. " +
+        "Пт — Тяга штанги 4×6, Подтягивания 3×10, Тяга гантели 3×12, Молоток 3×12. " +
+        "Вс — отдых и лёгкая растяжка 20 минут. ";
+      const header = "Сохрани мне эту программу тренировок: ";
+      let body = "";
+      while ((header + body).length < 4_200) {
+        body += weekBlock;
+      }
+      return header + body;
+    })(),
+    domainOutputs: [
+      {
+        kind: "domain_answer",
+        domain: "workout",
+        summary: "Пользователь прислал подробную программу тренировок для сохранения.",
+        candidateProposals: [
+          {
+            intent: "create_workout_plan",
+            title: "Пользовательская программа тренировок",
+            reason: "Пользователь явно просит сохранить его программу тренировок.",
+            proposedChanges: {
+              title: "Пользовательская программа тренировок",
+              summary: "Силовая программа, 3 дня в неделю.",
+            },
+          },
+        ],
+        domainSignals: ["explicit_plan_request"],
+      },
+    ],
+    candidateProposals: [
+      {
+        id: "cand_workout_0",
+        intent: "create_workout_plan",
+        title: "Пользовательская программа тренировок",
+        reason: "Пользователь явно просит сохранить его программу тренировок.",
       },
     ],
     expectsProposalAction: true,

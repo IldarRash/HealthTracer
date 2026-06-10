@@ -7,6 +7,7 @@ import {
   CHAT_ATTACHMENT_FAILED_COPY,
   CHAT_ATTACHMENT_PRIVACY_NOTICE,
   CHAT_ATTACHMENT_UNSUPPORTED_COPY,
+  chatAttachmentCategoryLabel,
   chatAttachmentStatusLabel,
   createChatComposerAttachmentDraft,
   FOOD_PHOTO_LOW_CONFIDENCE_COPY,
@@ -69,38 +70,79 @@ describe("chat attachment UI state", () => {
     expect(draft.previewUrl).toBeNull(); // JSDOM has no URL.createObjectURL
   });
 
-  it("rejects non-image MIME types at validation", () => {
-    const pdfFile = createMockFile("lab.pdf", "application/pdf");
-    const error = validateChatAttachmentFile(pdfFile);
-    expect(error).toMatch(/Unsupported MIME/);
-
-    const txtFile = createMockFile("plan.txt", "text/plain");
-    const txtError = validateChatAttachmentFile(txtFile);
-    expect(txtError).toMatch(/Unsupported MIME/);
-  });
-
-  it("accepts image/jpeg, image/png, image/webp and rejects everything else", () => {
+  it("accepts image types and rejects unsupported types", () => {
     expect(validateChatAttachmentFile(createMockFile("a.jpg", "image/jpeg"))).toBeNull();
     expect(validateChatAttachmentFile(createMockFile("a.png", "image/png"))).toBeNull();
     expect(validateChatAttachmentFile(createMockFile("a.webp", "image/webp"))).toBeNull();
-    expect(validateChatAttachmentFile(createMockFile("a.pdf", "application/pdf"))).not.toBeNull();
-    expect(validateChatAttachmentFile(createMockFile("a.txt", "text/plain"))).not.toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.zip", "application/zip"))).not.toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.mp4", "video/mp4"))).not.toBeNull();
   });
 
-  it("CHAT_ATTACHMENT_ACCEPT contains only image types", () => {
+  it("accepts document_file MIME types (PDF, plain text, markdown)", () => {
+    expect(validateChatAttachmentFile(createMockFile("a.pdf", "application/pdf"))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.txt", "text/plain"))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.md", "text/markdown"))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.md", "text/x-markdown"))).toBeNull();
+  });
+
+  it("CHAT_ATTACHMENT_ACCEPT contains image and document types", () => {
     expect(CHAT_ATTACHMENT_ACCEPT).toContain("image/jpeg");
     expect(CHAT_ATTACHMENT_ACCEPT).toContain("image/png");
     expect(CHAT_ATTACHMENT_ACCEPT).toContain("image/webp");
-    expect(CHAT_ATTACHMENT_ACCEPT).not.toContain("application/pdf");
-    expect(CHAT_ATTACHMENT_ACCEPT).not.toContain("text/plain");
-    expect(CHAT_ATTACHMENT_ACCEPT).not.toContain(".pdf");
-    expect(CHAT_ATTACHMENT_ACCEPT).not.toContain(".txt");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain("application/pdf");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain("text/plain");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain("text/markdown");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain(".pdf");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain(".txt");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain(".md");
+    expect(CHAT_ATTACHMENT_ACCEPT).toContain(".markdown");
   });
 
-  it("normalizes file extensions when browser MIME is missing", () => {
+  it("normalizes file extensions when browser MIME is missing — images", () => {
     expect(normalizeAttachmentMimeType(createMockFile("meal.jpeg", ""))).toBe("image/jpeg");
     expect(normalizeAttachmentMimeType(createMockFile("photo.png", ""))).toBe("image/png");
     expect(normalizeAttachmentMimeType(createMockFile("img.webp", ""))).toBe("image/webp");
+  });
+
+  it("normalizes .md with empty file.type to text/markdown (extension wins)", () => {
+    expect(normalizeAttachmentMimeType(createMockFile("notes.md", ""))).toBe("text/markdown");
+    expect(normalizeAttachmentMimeType(createMockFile("readme.markdown", ""))).toBe("text/markdown");
+  });
+
+  it("normalizes .md with browser-reported text/plain to text/markdown (extension wins)", () => {
+    // Some browsers report text/plain for .md files — extension must win.
+    expect(normalizeAttachmentMimeType(createMockFile("notes.md", "text/plain"))).toBe("text/markdown");
+    expect(normalizeAttachmentMimeType(createMockFile("readme.markdown", "text/plain"))).toBe("text/markdown");
+  });
+
+  it("normalizes .pdf and .txt via extension", () => {
+    expect(normalizeAttachmentMimeType(createMockFile("doc.pdf", ""))).toBe("application/pdf");
+    expect(normalizeAttachmentMimeType(createMockFile("doc.pdf", "application/pdf"))).toBe("application/pdf");
+    expect(normalizeAttachmentMimeType(createMockFile("plan.txt", ""))).toBe("text/plain");
+  });
+
+  it("rejects 6 MB PDF with size message (m2: getChatAttachmentSizeError is the single source of truth)", () => {
+    const bigPdf = createMockFile("big.pdf", "application/pdf", 6_000_000);
+    const error = validateChatAttachmentFile(bigPdf);
+    expect(error).not.toBeNull();
+    // getChatAttachmentSizeError("document_file", ...) returns the limit in bytes.
+    expect(error).toMatch(/document_file/);
+  });
+
+  it("accepts 4 MB PDF", () => {
+    const okPdf = createMockFile("ok.pdf", "application/pdf", 4_000_000);
+    expect(validateChatAttachmentFile(okPdf)).toBeNull();
+  });
+
+  it("rejects .zip as unsupported", () => {
+    const zipFile = createMockFile("archive.zip", "application/zip");
+    const error = validateChatAttachmentFile(zipFile);
+    expect(error).not.toBeNull();
+    expect(error).toMatch(/Unsupported MIME/);
+  });
+
+  it("document_file category label returns 'Document file'", () => {
+    expect(chatAttachmentCategoryLabel("document_file")).toBe("Document file");
   });
 
   it("blocks send while attachments are local or actively processing", () => {
@@ -314,18 +356,17 @@ describe("chat attachment UI state", () => {
     expect(draft).not.toHaveProperty("recognitionStatus");
   });
 
-  it("validateChatAttachmentFile uses image-only MIME list — no PDF or text/plain slip-through", () => {
-    // Exhaustive check: every non-image type must be rejected.
-    const nonImageTypes = [
-      "application/pdf",
-      "text/plain",
+  it("validateChatAttachmentFile rejects unsupported types and accepts images + document files", () => {
+    // Unsupported types must be rejected.
+    const unsupportedTypes = [
       "application/msword",
       "application/octet-stream",
       "video/mp4",
       "audio/mpeg",
+      "application/zip",
     ];
 
-    for (const mimeType of nonImageTypes) {
+    for (const mimeType of unsupportedTypes) {
       const error = validateChatAttachmentFile(createMockFile("file", mimeType));
       expect(error, `Expected ${mimeType} to be rejected`).not.toBeNull();
       expect(error).toMatch(/Unsupported MIME/);
@@ -335,5 +376,10 @@ describe("chat attachment UI state", () => {
     expect(validateChatAttachmentFile(createMockFile("a.jpg", "image/jpeg"))).toBeNull();
     expect(validateChatAttachmentFile(createMockFile("a.png", "image/png"))).toBeNull();
     expect(validateChatAttachmentFile(createMockFile("a.webp", "image/webp"))).toBeNull();
+
+    // Document file types pass within size limits.
+    expect(validateChatAttachmentFile(createMockFile("a.pdf", "application/pdf", 1024))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.txt", "text/plain", 1024))).toBeNull();
+    expect(validateChatAttachmentFile(createMockFile("a.md", "text/markdown", 1024))).toBeNull();
   });
 });

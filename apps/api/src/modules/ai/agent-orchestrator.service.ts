@@ -33,6 +33,8 @@ import { CoachingContextService } from "../coaching-context/coaching-context.ser
 import { ContextCompressionService } from "../coaching-context/context-compression.service.js";
 import { ContextExpansionPolicyService } from "../coaching-context/context-expansion-policy.service.js";
 import { mapContextSourceRefsToAgentCitations } from "../coaching-context/agent-prompt-context.js";
+import { AttachmentTextExtractionService } from "../chat-attachments/attachment-text-extraction.service.js";
+import type { AttachmentTextExtractionResult } from "../chat-attachments/attachment-text-extraction.service.js";
 import { ActionResolverService } from "./action-resolver.service.js";
 import { ActionVariantCatalogService } from "./action-variant-catalog.service.js";
 import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
@@ -59,6 +61,8 @@ export interface AttachmentTurnContextItem {
   // "needs_consent" is never produced at runtime; retained for historical DB-row reads only.
   consentState: "granted" | "needs_consent" | "none";
   storageRef: string | null;
+  /** Original filename (e.g. "training-plan.pdf"). Used by text-extraction path for all domains. */
+  filename: string;
 }
 
 export interface AttachmentTurnContext {
@@ -131,6 +135,7 @@ export class AgentOrchestratorService {
     private readonly actionResolverService: ActionResolverService,
     private readonly decisionMakerExecutorService: DecisionMakerExecutorService,
     private readonly actionVariantCatalogService: ActionVariantCatalogService,
+    private readonly attachmentTextExtractionService: AttachmentTextExtractionService,
   ) {
     this.provider = createCoachAiProvider(
       this.aiBehaviorConfigService.getCompiledPromptTemplates(),
@@ -248,6 +253,7 @@ export class AgentOrchestratorService {
           mimeType: attachment.mimeType,
           consentState: attachment.consentState,
           storageRef: attachment.storageRef,
+          filename: attachment.filename,
         })),
       };
     }
@@ -439,6 +445,18 @@ export class AgentOrchestratorService {
       selectedDomains: selectedDomains.map((d) => d.domain),
     });
 
+    // Extract text from document_file attachments ONCE per turn, before the domain fan-out.
+    // The result map is shared across all domain executors so text is extracted only once.
+    // NEVER throws: extraction degrades gracefully per attachment.
+    // SAFETY: extracted text is NEVER persisted or logged — ephemeral context-only.
+    const attachmentTextMap = await this.attachmentTextExtractionService.extractTurnAttachmentTexts(
+      (input.attachmentTurn?.attachments ?? []).map((a) => ({
+        attachmentRefId: a.attachmentRefId,
+        mimeType: a.mimeType,
+        storageRef: a.storageRef,
+      })),
+    );
+
     // Build one bounded AgentContextPacket per selected domain.
     // Safety floors (documents/sensitive denied by default) are re-applied by
     // CoachingContextService per packet — we do not relax them here.
@@ -458,6 +476,7 @@ export class AgentOrchestratorService {
       domainContextPackets,
       primaryCoachingContext,
       responseLanguage,
+      attachmentTextMap,
     );
     const domainsLatencyMs = Date.now() - domainsStart;
 
@@ -784,6 +803,7 @@ export class AgentOrchestratorService {
     domainContextPackets: AgentContextPacket[],
     primaryCoachingContext: Record<string, unknown>,
     responseLanguage: string | null,
+    attachmentTextMap: ReadonlyMap<string, AttachmentTextExtractionResult>,
   ): Promise<Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>> {
     try {
       const results = await Promise.all(
@@ -857,6 +877,7 @@ export class AgentOrchestratorService {
             orchestratorInput: input,
             provider: this.provider,
             responseLanguage,
+            attachmentTextMap,
           });
 
           return { domain: domainEntry.domain, result: domainResult };

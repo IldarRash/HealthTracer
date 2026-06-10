@@ -166,6 +166,8 @@ function resolveAttachmentCategoryLabel(
       return "Medical document";
     case "workout_attachment":
       return "Workout attachment";
+    case "document_file":
+      return "Document file";
     case "unclassified":
     case null:
       return null;

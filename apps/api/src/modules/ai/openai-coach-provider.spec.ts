@@ -1304,4 +1304,217 @@ describe("OpenAiCoachProvider", () => {
       expect(systemPrompt).not.toMatch(/\{\{/);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Gap 2 — document_file text blocks in user content (never system prompt)
+  // -------------------------------------------------------------------------
+  //
+  // Covers:
+  //  (a) file text appears as a user-content block with the
+  //      `ATTACHED FILE "<filename>"` label
+  //  (b) the system prompt does NOT contain the file text
+  //  (c) attachment summary JSON includes hasText/filename but never textContent
+  //  (d) a no-attachment request sends text-only user content (prompt-cache
+  //      regression: system prompt must contain no attachment-block additions)
+  // -------------------------------------------------------------------------
+
+  describe("document_file text blocks (Gap 2)", () => {
+    it("file text appears as a labeled user-content block with ATTACHED FILE label", async () => {
+      const capturedBody: Array<{ messages?: Array<{ role: string; content: unknown }> }> = [];
+      const fakeFetch = vi.fn().mockImplementation((_url: string, opts: { body: string }) => {
+        capturedBody.push(JSON.parse(opts.body) as typeof capturedBody[number]);
+        return Promise.resolve(
+          makeSuccessfulFetchResponse(
+            JSON.stringify({
+              kind: "domain_answer",
+              domain: "workout",
+              summary: "Reviewed the uploaded training plan.",
+              candidateProposals: [],
+              domainSignals: [],
+            }),
+          ),
+        );
+      });
+      vi.stubGlobal("fetch", fakeFetch);
+
+      const textContent = "Day 1: Squat 4x8. Day 2: Bench Press 4x8.";
+      const filename = "training-plan.pdf";
+
+      const provider = makeProvider();
+      await provider.generateDomainStep(
+        makeDomainRequest("workout", {
+          attachmentContext: {
+            items: [
+              {
+                attachmentRefId: "d1000001-0000-4000-8000-000000000001",
+                category: "document_file",
+                mimeType: "application/pdf",
+                consentState: "none",
+                textContent,
+                filename,
+              },
+            ],
+          } as DomainLlmStepRequest["attachmentContext"],
+        }),
+      );
+
+      expect(capturedBody.length).toBe(1);
+      const messages = capturedBody[0]?.messages ?? [];
+      const userMsg = messages.find((m) => m.role === "user");
+
+      // User content must be an array (multimodal path) when text blocks present.
+      expect(Array.isArray(userMsg?.content)).toBe(true);
+      const parts = userMsg?.content as Array<{ type: string; text?: string }>;
+
+      // There must be a text part whose text contains the labeled file block.
+      const fileLabelPart = parts.find(
+        (p) => p.type === "text" && p.text?.includes(`ATTACHED FILE "${filename}"`),
+      );
+      expect(fileLabelPart).toBeDefined();
+      expect(fileLabelPart?.text).toContain(textContent);
+    });
+
+    it("file text NEVER appears in the system prompt", async () => {
+      const capturedBody: Array<{ messages?: Array<{ role: string; content: unknown }> }> = [];
+      const fakeFetch = vi.fn().mockImplementation((_url: string, opts: { body: string }) => {
+        capturedBody.push(JSON.parse(opts.body) as typeof capturedBody[number]);
+        return Promise.resolve(
+          makeSuccessfulFetchResponse(
+            JSON.stringify({
+              kind: "domain_answer",
+              domain: "nutrition",
+              summary: "Reviewed the nutrition document.",
+              candidateProposals: [],
+              domainSignals: [],
+            }),
+          ),
+        );
+      });
+      vi.stubGlobal("fetch", fakeFetch);
+
+      const textContent = "Calories: 2000. Protein: 150g.";
+
+      const provider = makeProvider();
+      await provider.generateDomainStep(
+        makeDomainRequest("nutrition", {
+          attachmentContext: {
+            items: [
+              {
+                attachmentRefId: "d2000001-0000-4000-8000-000000000001",
+                category: "document_file",
+                mimeType: "text/plain",
+                consentState: "none",
+                textContent,
+                filename: "macros.txt",
+              },
+            ],
+          } as DomainLlmStepRequest["attachmentContext"],
+        }),
+      );
+
+      expect(capturedBody.length).toBe(1);
+      const messages = capturedBody[0]?.messages ?? [];
+      const systemMsg = messages.find((m) => m.role === "system");
+
+      // System prompt must be a plain string (not an array) — it is never multimodal.
+      expect(typeof systemMsg?.content).toBe("string");
+      // The extracted file text must NOT appear in the system prompt.
+      const systemContent = systemMsg?.content as string;
+      expect(systemContent).not.toContain(textContent);
+    });
+
+    it("attachment summary JSON in system prompt has hasText and filename but never textContent", async () => {
+      const capturedBody: Array<{ messages?: Array<{ role: string; content: unknown }> }> = [];
+      const fakeFetch = vi.fn().mockImplementation((_url: string, opts: { body: string }) => {
+        capturedBody.push(JSON.parse(opts.body) as typeof capturedBody[number]);
+        return Promise.resolve(
+          makeSuccessfulFetchResponse(
+            JSON.stringify({
+              kind: "domain_answer",
+              domain: "workout",
+              summary: "Reviewed the plan.",
+              candidateProposals: [],
+              domainSignals: [],
+            }),
+          ),
+        );
+      });
+      vi.stubGlobal("fetch", fakeFetch);
+
+      const textContent = "This is a large document with sensitive health data.";
+
+      const provider = makeProvider();
+      await provider.generateDomainStep(
+        makeDomainRequest("workout", {
+          attachmentContext: {
+            items: [
+              {
+                attachmentRefId: "d3000001-0000-4000-8000-000000000001",
+                category: "document_file",
+                mimeType: "text/plain",
+                consentState: "none",
+                textContent,
+                filename: "health-data.txt",
+              },
+            ],
+          } as DomainLlmStepRequest["attachmentContext"],
+        }),
+      );
+
+      expect(capturedBody.length).toBe(1);
+      const messages = capturedBody[0]?.messages ?? [];
+      const systemMsg = messages.find((m) => m.role === "system");
+      const systemContent = systemMsg?.content as string;
+
+      // The system prompt should contain attachment summary JSON with hasText:true and filename.
+      expect(systemContent).toContain("hasText");
+      expect(systemContent).toContain("health-data.txt");
+      // The textContent itself must never appear in the system prompt.
+      expect(systemContent).not.toContain(textContent);
+    });
+
+    it("no-attachment request sends plain string user content (prompt-cache regression guard)", async () => {
+      // A request with no attachments must route through requestJsonCompletion
+      // (not requestMultimodalJsonCompletion) so the user content is a plain string.
+      // This ensures the system prompt has no attachment-related additions,
+      // preserving the static prefix for prompt-cache hits.
+      const capturedBody: Array<{ messages?: Array<{ role: string; content: unknown }> }> = [];
+      const fakeFetch = vi.fn().mockImplementation((_url: string, opts: { body: string }) => {
+        capturedBody.push(JSON.parse(opts.body) as typeof capturedBody[number]);
+        return Promise.resolve(
+          makeSuccessfulFetchResponse(
+            JSON.stringify({
+              kind: "domain_answer",
+              domain: "workout",
+              summary: "Reviewed workout.",
+              candidateProposals: [],
+              domainSignals: [],
+            }),
+          ),
+        );
+      });
+      vi.stubGlobal("fetch", fakeFetch);
+
+      const provider = makeProvider();
+      // No attachmentContext at all — pure text request.
+      await provider.generateDomainStep(makeDomainRequest("workout"));
+
+      expect(capturedBody.length).toBe(1);
+      const messages = capturedBody[0]?.messages ?? [];
+
+      const userMsg = messages.find((m) => m.role === "user");
+      // Text-only path: user content is a plain string, not an array.
+      expect(typeof userMsg?.content).toBe("string");
+
+      // System prompt must be a plain string and contain no attachment-block additions.
+      const systemMsg = messages.find((m) => m.role === "system");
+      expect(typeof systemMsg?.content).toBe("string");
+      const systemContent = systemMsg?.content as string;
+      // No "ATTACHED FILE" label in system prompt for no-attachment request.
+      expect(systemContent).not.toContain("ATTACHED FILE");
+      // No "hasText" attachment summary for no-attachment request.
+      // (The attachmentContextJson is rendered as "none" by the prompt template.)
+      expect(systemContent).not.toContain("hasText");
+    });
+  });
 });

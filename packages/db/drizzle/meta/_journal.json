@@ -253,6 +253,13 @@
       "when": 1780970000000,
       "tag": "0035_nutrition_plan_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781110200962,
+      "tag": "0036_careless_pandemic",
+      "breakpoints": true
     }
   ]
 }

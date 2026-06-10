@@ -6,6 +6,7 @@ import {
   type AgentToolName,
 } from "./agent-context.js";
 import { messagePreprocessorResultSchema } from "./message-preprocessor.js";
+import { ROUTER_TEXT_MAX_CHARS } from "./message-limits.js";
 
 // ---------------------------------------------------------------------------
 // Domain enum (only the three LLM domains; medical folds into health)
@@ -62,7 +63,7 @@ export type RouterAttachmentHint = z.infer<typeof routerAttachmentHintSchema>;
 
 export const routerRecentMessageHintSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
-  content: z.string().max(4000),
+  content: z.string().max(ROUTER_TEXT_MAX_CHARS),
 });
 
 export type RouterRecentMessageHint = z.infer<
@@ -81,8 +82,8 @@ export const routerAvailableDomainSchema = z.object({
 export type RouterAvailableDomain = z.infer<typeof routerAvailableDomainSchema>;
 
 export const routerDecisionRequestSchema = z.object({
-  originalText: z.string().min(1).max(4000),
-  normalizedText: z.string().min(1).max(4000),
+  originalText: z.string().min(1).max(ROUTER_TEXT_MAX_CHARS),
+  normalizedText: z.string().min(1).max(ROUTER_TEXT_MAX_CHARS),
   detectedLanguage: z.string().min(1).max(20).optional(),
   preprocessor: messagePreprocessorResultSchema,
   attachmentHints: z.array(routerAttachmentHintSchema).max(5).default([]),

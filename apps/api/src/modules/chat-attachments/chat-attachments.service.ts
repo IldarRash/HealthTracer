@@ -9,6 +9,7 @@ import {
   getChatAttachmentSizeError,
   isChatAttachmentExpired,
   isChatAttachmentImageMimeType,
+  inferProvisionalAttachmentCategory,
 } from "@health/types";
 import {
   BadRequestException,
@@ -60,15 +61,20 @@ export class ChatAttachmentsService {
       }
     }
 
-    // Attachments are images-only (context-only pipeline).
-    // Validate MIME and size using the "unclassified" category (image allowlist).
-    const mimeError = getChatAttachmentMimeTypeError("unclassified", input.mimeType);
+    // Infer category from MIME type (document_file for PDF/text/markdown; unclassified for images).
+    // This is MIME-based inference only — no LLM classification, no user declaration required.
+    const inferredCategory = inferProvisionalAttachmentCategory(input.mimeType);
+
+    // Validate MIME against the inferred category's allowlist (images → unclassified allowlist,
+    // documents → document_file allowlist). Returns a non-null error for unsupported MIMEs.
+    const mimeError = getChatAttachmentMimeTypeError(inferredCategory, input.mimeType);
 
     if (mimeError) {
       throw new BadRequestException(mimeError);
     }
 
-    const sizeError = getChatAttachmentSizeError("unclassified", content.byteLength);
+    // Validate size against the inferred category's cap (document_file: 5 MiB; images: 10 MiB).
+    const sizeError = getChatAttachmentSizeError(inferredCategory, content.byteLength);
 
     if (sizeError) {
       throw new BadRequestException(sizeError);
@@ -77,12 +83,15 @@ export class ChatAttachmentsService {
     const attachmentId = crypto.randomUUID();
     const storageKey = await this.storage.store(user.id, attachmentId, content, input.mimeType);
 
+    const categorySource =
+      inferredCategory === "document_file" ? "mime_inferred" : "default_unclassified";
+
     const row = await this.chatAttachmentsRepository.create({
       id: attachmentId,
       userId: user.id,
       threadId: input.threadId ?? null,
-      category: "unclassified",
-      categorySource: "default_unclassified",
+      category: inferredCategory,
+      categorySource,
       status: "queued",
       filename: input.filename,
       mimeType: input.mimeType,
@@ -90,7 +99,8 @@ export class ChatAttachmentsService {
       storageKey,
       linkedImageRefId: null,
       consent: null,
-      retentionPolicy: this.resolveRetentionPolicy("unclassified"),
+      // linkedDocumentId is always null — no health_documents creation from the attachment path.
+      retentionPolicy: this.resolveRetentionPolicy(inferredCategory),
     });
 
     return toChatAttachmentRecord(row);

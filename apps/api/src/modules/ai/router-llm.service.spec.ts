@@ -1,6 +1,7 @@
 import {
   createFallbackRouterDecision,
   DEFAULT_DOMAIN_CONFIGS,
+  ROUTER_TEXT_MAX_CHARS,
   routerDecisionOutputSchema,
   routerDecisionRequestSchema,
   routerDomainSchema,
@@ -516,5 +517,87 @@ describe("RouterLlmService", () => {
       expect(result.output.selectedDomains).toHaveLength(0);
       expect(result.output.confidence).toBe(0.9);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Long-message truncation — Slice 2 regression guard
+// A 12 000-char message must not throw; normalizedText on the built request
+// must be ≤ ROUTER_TEXT_MAX_CHARS (4000) and must preserve the head.
+// ---------------------------------------------------------------------------
+
+describe("RouterLlmService — long-message truncation (Slice 2)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("buildRequest with a 12 000-char message does not throw and normalizedText.length <= 4000", () => {
+    const service = buildService();
+    const longMessage = "Сохрани мне эту программу тренировок: " + "x".repeat(12_000);
+
+    const preprocessorResult = makePreprocessorResult({
+      originalText: longMessage,
+      normalizedText: longMessage,
+    });
+
+    // Must not throw — previously threw because schema max(4000) was exceeded
+    const request = service.buildRequest({ preprocessorResult });
+
+    expect(request.normalizedText.length).toBeLessThanOrEqual(ROUTER_TEXT_MAX_CHARS);
+    expect(request.originalText.length).toBeLessThanOrEqual(ROUTER_TEXT_MAX_CHARS);
+  });
+
+  it("request.preprocessor.normalizedText and originalText are also truncated to <= ROUTER_TEXT_MAX_CHARS (M1 — no full message leaked via preprocessorJson)", () => {
+    // Regression guard: the preprocessor object serialised into {{preprocessorJson}} must
+    // carry truncated text, not the full 12 000-char message.
+    const service = buildService();
+    const prefix = "Сохрани мне эту программу тренировок: ";
+    const longMessage = prefix + "x".repeat(12_000);
+
+    const preprocessorResult = makePreprocessorResult({
+      originalText: longMessage,
+      normalizedText: longMessage,
+    });
+
+    const request = service.buildRequest({ preprocessorResult });
+
+    expect(request.preprocessor.normalizedText.length).toBeLessThanOrEqual(ROUTER_TEXT_MAX_CHARS);
+    expect(request.preprocessor.originalText.length).toBeLessThanOrEqual(ROUTER_TEXT_MAX_CHARS);
+    // Head preserved in the preprocessor copy.
+    expect(request.preprocessor.normalizedText.startsWith(prefix)).toBe(true);
+    expect(request.preprocessor.originalText.startsWith(prefix)).toBe(true);
+  });
+
+  it("buildRequest preserves the head of the long message in normalizedText", () => {
+    const service = buildService();
+    const prefix = "Сохрани мне эту программу тренировок: ";
+    const longMessage = prefix + "y".repeat(12_000);
+
+    const preprocessorResult = makePreprocessorResult({
+      originalText: longMessage,
+      normalizedText: longMessage,
+    });
+
+    const request = service.buildRequest({ preprocessorResult });
+
+    expect(request.normalizedText.startsWith(prefix)).toBe(true);
+  });
+
+  it("route with a 12 000-char message does not throw and returns a valid result", async () => {
+    const service = buildService();
+    const longMessage = "Сохрани мне эту программу тренировок: " + "x".repeat(12_000);
+
+    const preprocessorResult = makePreprocessorResult({
+      originalText: longMessage,
+      normalizedText: longMessage,
+    });
+
+    // Must not throw or degrade from a parse error
+    const result = await service.route({ preprocessorResult });
+
+    // Provider stub returns a workout domain selection — long message must not cause fallback
+    expect(result.source).toBe("llm");
+    expect(result.output.selectedDomains).toHaveLength(1);
+    expect(result.output.selectedDomains[0]?.domain).toBe("workout");
   });
 });

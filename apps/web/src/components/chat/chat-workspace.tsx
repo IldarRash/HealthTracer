@@ -2,6 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import type { AiProposal, ChatTurnResponse, ProposalModifyResponse } from "@health/types";
+import { MAX_CHAT_USER_MESSAGE_CHARS } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
@@ -1002,6 +1003,7 @@ export function ChatWorkspace() {
                   value={draft}
                   placeholder="Message your coach…"
                   disabled={isSendPending}
+                  maxLength={MAX_CHAT_USER_MESSAGE_CHARS}
                   onChange={(event) => setDraft(event.target.value)}
                 />
                 <Button

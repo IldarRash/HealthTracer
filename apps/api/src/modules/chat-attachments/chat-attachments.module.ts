@@ -3,6 +3,7 @@ import { DatabaseModule } from "../../database/database.module.js";
 import { AiBehaviorModule } from "../ai/ai-behavior.module.js";
 import { ChatRepository } from "../chat/chat.repository.js";
 import { UsersModule } from "../users/users.module.js";
+import { AttachmentTextExtractionService } from "./attachment-text-extraction.service.js";
 import { ChatAttachmentsController } from "./chat-attachments.controller.js";
 import { ChatAttachmentsRepository } from "./chat-attachments.repository.js";
 import { ChatAttachmentsService } from "./chat-attachments.service.js";
@@ -16,11 +17,13 @@ import { ChatTurnAttachmentStageService } from "./chat-turn-attachment-stage.ser
     ChatAttachmentsRepository,
     ChatAttachmentsService,
     ChatTurnAttachmentStageService,
+    AttachmentTextExtractionService,
   ],
   exports: [
     ChatAttachmentsService,
     ChatAttachmentsRepository,
     ChatTurnAttachmentStageService,
+    AttachmentTextExtractionService,
   ],
 })
 export class ChatAttachmentsModule {}

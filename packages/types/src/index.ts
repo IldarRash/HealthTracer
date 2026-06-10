@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
+import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
 import {
   coachingNotesSchema,
   goalHorizonsStoredOnGoalsSchema,
@@ -62,6 +63,7 @@ import {
 } from "./ai-proposal.js";
 
 export { isoDateSchema, isoDateTimeSchema, isCalendarValidIsoDate, isoDateOnly } from "./dates.js";
+export { MAX_CHAT_USER_MESSAGE_CHARS, ROUTER_TEXT_MAX_CHARS, truncateForRouter } from "./message-limits.js";
 
 export const apiStatusSchema = z.enum(["ok"]);
 
@@ -258,7 +260,7 @@ export type CreateChatThreadInput = z.infer<typeof createChatThreadSchema>;
 
 export const sendChatMessageSchema = z
   .object({
-    content: z.string().max(4000).default(""),
+    content: z.string().max(MAX_CHAT_USER_MESSAGE_CHARS).default(""),
     proposalRevision: z.lazy(() => chatProposalRevisionSchema).optional(),
     attachmentRefIds: z.array(z.string().uuid()).max(5).optional(),
   })
@@ -1999,6 +2001,7 @@ export {
   domainLlmStepRequestSchema,
   domainLlmToolRequestSchema,
   validateDomainLlmStepOutputShape,
+  MAX_ATTACHMENT_TEXT_CONTENT_CHARS,
   type DomainAnswer,
   type DomainAttachmentContext,
   type DomainAttachmentItem,

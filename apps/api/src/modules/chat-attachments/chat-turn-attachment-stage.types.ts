@@ -17,6 +17,8 @@ export type BoundedAttachmentMetadata = {
   // retained in the union for historical DB-row reads only.
   consentState: "granted" | "needs_consent" | "none";
   storageRef: string | null;
+  /** Original filename (e.g. "training-plan.pdf"). Populated for all attachment types. */
+  filename: string;
 };
 
 /**

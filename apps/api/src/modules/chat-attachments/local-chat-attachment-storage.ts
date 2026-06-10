@@ -18,15 +18,17 @@ export interface ChatAttachmentStorageAdapter {
 }
 
 /**
- * MIME → extension map scoped to the image-only chat attachment contract.
- * Derived from CHAT_PROVISIONAL_UPLOAD_MIME_TYPES so there is one source of truth.
- * PDF and text are intentionally absent — document upload is a separate explicit
- * profile feature, not a chat attachment.
+ * MIME → extension map for all supported chat attachment MIMEs.
+ * Covers both image types (jpeg/png/webp) and document file types (pdf/txt/md).
  */
-const IMAGE_MIME_EXTENSION: Record<(typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number], string> = {
+const MIME_EXTENSION: Record<(typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number], string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
+  "application/pdf": "pdf",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "text/x-markdown": "md",
 };
 
 export class LocalChatAttachmentStorageAdapter implements ChatAttachmentStorageAdapter {
@@ -47,7 +49,7 @@ export class LocalChatAttachmentStorageAdapter implements ChatAttachmentStorageA
     mimeType: string,
   ): Promise<string> {
     const extension =
-      IMAGE_MIME_EXTENSION[mimeType as (typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number]] ??
+      MIME_EXTENSION[mimeType as (typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number]] ??
       "bin";
     const storageKey = join(userId, `${attachmentId}.${extension}`).replace(/\\/g, "/");
     const absolutePath = resolveSafePath(this.resolvedRoot, storageKey);
@@ -83,6 +85,6 @@ export function inferAttachmentExtension(filename: string, mimeType: string): st
   }
 
   return (
-    IMAGE_MIME_EXTENSION[mimeType as (typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number]] ?? "bin"
+    MIME_EXTENSION[mimeType as (typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number]] ?? "bin"
   );
 }

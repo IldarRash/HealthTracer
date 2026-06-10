@@ -254,6 +254,10 @@ function buildMocks() {
     }),
   };
 
+  const attachmentTextExtractionService = {
+    extractTurnAttachmentTexts: vi.fn().mockResolvedValue(new Map()),
+  };
+
   return {
     coachingContextService,
     contextCompressionService,
@@ -266,6 +270,7 @@ function buildMocks() {
     decisionMakerExecutorService,
     actionResolverService,
     aiBehaviorConfigService,
+    attachmentTextExtractionService,
     fanoutPlan,
     workoutDomainEntry,
     contextPacket,
@@ -293,6 +298,7 @@ function buildOrchestrator(mocks: ReturnType<typeof buildMocks>): AgentOrchestra
     mocks.actionResolverService,
     mocks.decisionMakerExecutorService,
     mocks.actionVariantCatalogService,
+    mocks.attachmentTextExtractionService as never,
   );
 }
 

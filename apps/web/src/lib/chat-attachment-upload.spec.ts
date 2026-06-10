@@ -53,14 +53,26 @@ describe("chat attachment upload payload", () => {
     expect("threadId" in result.payload).toBe(false);
   });
 
-  it("returns error for unsupported MIME types (PDF, text)", async () => {
+  it("builds upload payload for document_file types (PDF, text, markdown)", async () => {
     const pdfDraft = createChatComposerAttachmentDraft(createMockFile("lab.pdf", "application/pdf"));
     const pdfResult = await buildChatAttachmentUploadPayload({ draft: pdfDraft });
-    expect(pdfResult.ok).toBe(false);
+    expect(pdfResult.ok).toBe(true);
+    if (pdfResult.ok) {
+      expect(pdfResult.payload.mimeType).toBe("application/pdf");
+    }
 
     const txtDraft = createChatComposerAttachmentDraft(createMockFile("plan.txt", "text/plain"));
     const txtResult = await buildChatAttachmentUploadPayload({ draft: txtDraft });
-    expect(txtResult.ok).toBe(false);
+    expect(txtResult.ok).toBe(true);
+    if (txtResult.ok) {
+      expect(txtResult.payload.mimeType).toBe("text/plain");
+    }
+  });
+
+  it("returns error for unsupported MIME types (zip, video)", async () => {
+    const zipDraft = createChatComposerAttachmentDraft(createMockFile("archive.zip", "application/zip"));
+    const zipResult = await buildChatAttachmentUploadPayload({ draft: zipDraft });
+    expect(zipResult.ok).toBe(false);
   });
 
   it("payload has no category, categorySource, consentScopes, or documentTitle fields", async () => {
