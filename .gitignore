@@ -12,6 +12,9 @@ coverage/
 !.env.example
 !.env.*.example
 
+# MCP config contains local API keys — never commit the live file; use .cursor/mcp.json.example
+.cursor/mcp.json
+
 apps/api/.data/
 
 # transient design-audit scratch (screenshots, local server)
