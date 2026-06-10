@@ -67,6 +67,9 @@ import { canStartTodayWorkout } from "../../lib/today-ui-state";
 import { formatWeekdayLong, formatMonthShort } from "../../lib/date-format";
 import { Icon } from "../ui/icon";
 import { CheckCircle } from "../ui/check-circle";
+import { Eyebrow } from "../ui/eyebrow";
+import { Badge } from "../ui/badge";
+import { CardHead } from "../ui/card-head";
 import { SegmentRow } from "../ui/segment-row";
 import { MoodDotScale } from "./mood-dot-scale";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
@@ -124,119 +127,9 @@ function DarkCard({
   );
 }
 
-function CardHead({
-  icon,
-  color,
-  title,
-  right,
-}: {
-  icon?: React.ComponentProps<typeof Icon>["name"];
-  color: string;
-  title: string;
-  right?: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 9,
-        marginBottom: 14,
-      }}
-    >
-      {icon ? (
-        <div
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: `${color}22`,
-          }}
-        >
-          <Icon name={icon} size={15} stroke={color} />
-        </div>
-      ) : null}
-      <span
-        style={{
-          fontSize: 13.5,
-          fontWeight: 700,
-          letterSpacing: 0.2,
-          color: D.ink,
-          flex: 1,
-        }}
-      >
-        {title}
-      </span>
-      {right}
-    </div>
-  );
-}
 
-function Eyebrow({ color, children }: { color: string; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: 1.2,
-        textTransform: "uppercase",
-        color,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
 
-function Chip({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "green" | "amber" }) {
-  const tones = {
-    neutral: { bg: "rgba(255,255,255,0.06)", fg: D.ink2, bd: D.line },
-    green: { bg: M.greenDim, fg: M.green, bd: "transparent" },
-    amber: { bg: M.amberDim, fg: M.amber, bd: "transparent" },
-  };
-  const c = tones[tone];
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        padding: "4px 10px",
-        borderRadius: 999,
-        background: c.bg,
-        color: c.fg,
-        border: `1px solid ${c.bd}`,
-        fontSize: 12.5,
-        fontWeight: 600,
-        lineHeight: 1,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
 
-function ExerciseChip({ label }: { label: string }) {
-  return (
-    <span
-      style={{
-        padding: "5px 10px",
-        borderRadius: 8,
-        background: M.blueDim,
-        color: M.blue,
-        fontSize: 12.5,
-        fontWeight: 600,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </span>
-  );
-}
 
 function QuickLinkRow({
   icon,
@@ -1039,7 +932,7 @@ function MoveCard({
   if (!workout) {
     return (
       <DarkCard style={{ marginBottom: 16 }}>
-        <CardHead icon="dumbbell" color={M.blue} title="Movement" />
+        <CardHead icon="dumbbell" color={M.blue} title="Movement" dark />
         <p style={{ fontSize: 13, color: D.mut, lineHeight: 1.55 }}>
           No workout scheduled today.{" "}
           <Link href="/training" style={{ color: M.blue, fontWeight: 600 }}>
@@ -1149,10 +1042,10 @@ function MoveCard({
           {exerciseLabels.length > 0 && !showDrillDown ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 14 }}>
               {exerciseLabels.map((label) => (
-                <ExerciseChip key={label} label={label} />
+                <Badge key={label} tone="blue" dark style={{ borderRadius: 8, fontSize: 12.5, fontWeight: 600 }}>{label}</Badge>
               ))}
               {workout.exercises.length > 4 ? (
-                <ExerciseChip label={`+${workout.exercises.length - 4} more`} />
+                <Badge tone="blue" dark style={{ borderRadius: 8, fontSize: 12.5, fontWeight: 600 }}>{`+${workout.exercises.length - 4} more`}</Badge>
               ) : null}
             </div>
           ) : null}
@@ -1486,14 +1379,15 @@ function HabitsCard({ items, isBusy, onMark, updatingItemId }: HabitsCardProps) 
   return (
     <DarkCard>
       <CardHead
+        dark
         icon="spark"
         color={M.indigo}
         title="Habits today"
         right={
           total > 0 ? (
-            <Chip>
+            <Badge tone="neutral" dark style={{ fontSize: 12.5, fontWeight: 600 }}>
               {done} / {total}
-            </Chip>
+            </Badge>
           ) : null
         }
       />
@@ -1681,7 +1575,7 @@ function CheckinCard({ selectedDate, onCrisisSupportChange }: CheckinCardProps) 
 
   return (
     <DarkCard accent={M.amber} style={{ marginBottom: 16 }}>
-      <CardHead icon="heart" color={M.amber} title="Wellbeing check-in" />
+      <CardHead icon="heart" color={M.amber} title="Wellbeing check-in" dark />
 
       {showCrisisInCard && crisisDisplay.copy ? (
         <CrisisSupportPanel copy={crisisDisplay.copy} />
@@ -1898,6 +1792,7 @@ function ReflectCard({
   return (
     <DarkCard style={{ marginBottom: 16 }}>
       <CardHead
+        dark
         icon="moon"
         color={M.indigo}
         title="Reflection"
@@ -2234,12 +2129,12 @@ export function TodayWorkspace() {
     adherence.totalRequired > 0 &&
     adherence.completedRequired === adherence.totalRequired;
   const progressChip = allDone ? (
-    <Chip tone="green">
+    <Badge tone="green" dark style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 600 }}>
       <Icon name="checkSm" size={13} stroke={M.green} sw={2.4} />
       All done
-    </Chip>
+    </Badge>
   ) : (
-    <Chip>{formatTaskCountChip(adherence)}</Chip>
+    <Badge tone="neutral" dark style={{ fontSize: 12.5, fontWeight: 600 }}>{formatTaskCountChip(adherence)}</Badge>
   );
 
   return (
