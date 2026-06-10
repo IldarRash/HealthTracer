@@ -104,12 +104,21 @@ describe("TrainingWorkspace read-only contracts", () => {
     expect(workspaceSource).toContain("Adaptation pack ready to discuss");
   });
 
-  it("ExerciseVideo has back navigation, filmstrip, and honest technique empty state", () => {
+  it("ExerciseVideo has back navigation, filmstrip, and honest technique preview (no fake player)", () => {
     expect(workspaceSource).toContain("ExerciseVideo");
     expect(workspaceSource).toContain("Back to plan");
     expect(workspaceSource).not.toContain("TECHNIQUE_CUES");
-    expect(workspaceSource).toContain("Technique guidance coming soon");
-    expect(workspaceSource).toContain("PlayBadge");
+    // Honest technique preview: shows catalog content, no fake player chrome
+    expect(workspaceSource).toContain("ExerciseCatalogDetails");
+    expect(workspaceSource).toContain("Technique preview");
+    expect(workspaceSource).toContain("Demonstration coming soon");
+    // Real media rendering for when refs are present
+    expect(workspaceSource).toContain("<video");
+    expect(workspaceSource).toContain("<img");
+    // No fake player chrome
+    expect(workspaceSource).not.toContain("PlayBadge");
+    expect(workspaceSource).not.toContain("HD · no sound");
+    expect(workspaceSource).not.toContain("1:04");
     expect(workspaceSource).toContain("onSelectExercise");
     expect(workspaceSource).toContain("filmstrip");
   });
@@ -123,6 +132,26 @@ describe("TrainingWorkspace read-only contracts", () => {
     expect(workspaceSource).not.toMatch(/diagnos/i);
     expect(workspaceSource).not.toMatch(/treatment protocol/i);
     expect(workspaceSource).not.toMatch(/clinical/i);
+  });
+
+  // Slice 2: catalog threading
+  it("ExerciseCardData carries catalog metadata threaded from plan", () => {
+    expect(workspaceSource).toContain("catalog: ExerciseCatalogMetadata | null");
+    // deriveTodayExercises populates it from resolvePlanExerciseCatalogMetadata
+    expect(workspaceSource).toContain("resolvePlanExerciseCatalogMetadata");
+  });
+
+  // Slice 1: honest media rendering
+  it("ExerciseVideo renders real media refs — no hardcoded fake-player chrome", () => {
+    expect(workspaceSource).toContain("resolveFirstMediaRef");
+    expect(workspaceSource).toContain("getExerciseMediaFallbackLabel");
+    // Real media elements
+    expect(workspaceSource).toContain("<video");
+    expect(workspaceSource).toContain("<img");
+    // Fake chrome is gone
+    expect(workspaceSource).not.toContain("HD · no sound");
+    expect(workspaceSource).not.toContain("1:04");
+    expect(workspaceSource).not.toContain("PlayBadge");
   });
 });
 
