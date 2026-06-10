@@ -182,10 +182,11 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     options?: { signal?: AbortSignal },
   ): Promise<ProviderCallResult<FinalDecisionOutputInput>> {
     const systemPrompt = buildOpenAiFinalDecisionPrompt(request, this.promptTemplates);
+    const recentMessages = request.recentMessages ?? [];
     const { payload, usage } = await this.requestJsonCompletion(
       systemPrompt,
       request.userMessage,
-      [],
+      recentMessages,
       { name: FINAL_DECISION_SCHEMA_NAME, schema: finalDecisionWireSchema },
       options?.signal,
     );
@@ -532,10 +533,17 @@ function buildOpenAiFinalDecisionPrompt(
   request: FinalDecisionRequest,
   promptTemplates: CompiledPromptTemplates,
 ): string {
+  const candidateSummaries = request.candidateProposalSummaries ?? [];
+  const recentMessages = request.recentMessages ?? [];
+
   return promptTemplates.renderFinalDecision({
     userMessage: request.userMessage,
     domainOutputsJson: JSON.stringify(request.domainOutputs),
     actionVariantCatalogJson: JSON.stringify(request.actionVariantCatalog),
+    candidateProposalSummariesJson: candidateSummaries.length
+      ? JSON.stringify(candidateSummaries)
+      : "[]",
+    recentMessagesJson: recentMessages.length ? JSON.stringify(recentMessages) : "[]",
     safetyFlags: request.safetyFlags.length ? request.safetyFlags.join(", ") : "none",
     safetyConstraints: request.safetyConstraints.length
       ? request.safetyConstraints.join("\n- ")

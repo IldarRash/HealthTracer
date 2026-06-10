@@ -9,6 +9,7 @@ import type {
   AgentToolName,
   AiStructuredOutput,
   BuildAgentContextRequest,
+  CandidateProposalSummary,
   ChatAttachmentCategory,
   ContextDepth,
   ContextTimeRange,
@@ -460,20 +461,36 @@ export class AgentOrchestratorService {
     // Collect domain outputs for the decision-maker (only domain_answer entries).
     const domainOutputs = domainResults.map((r) => r.result.domainAnswer);
 
+    // Build the merged id→candidate map across all selected domains (Slice 2).
+    // Keys are cand_<domain>_<index>; ActionResolver uses this to resolve
+    // selectedProposalIds from the decision-maker into canonical payloads.
+    const mergedCandidateMap = buildMergedCandidateMap(domainResults);
+
+    // Build candidate summaries to pass to the decision-maker so it can pick
+    // IDs without seeing full payloads (intent + title + reason are enough).
+    const candidateProposalSummaries = buildCandidateProposalSummaries(domainResults);
+
     // Collect safety flags and constraints from the primary context packet.
     const safetyFlags = plan.route.safetyFlags ?? [];
     const safetyConstraints = contextPacket.safetyConstraints ?? [];
+
+    // Recent messages for the decision-maker — capped at 6 / 4000 chars each (Change 2).
+    const decisionRecentMessages = [...input.recentMessages]
+      .slice(-6)
+      .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
 
     // Run the decision-maker LLM (Stage 9).
     // DecisionMakerExecutorService always resolves — degrades to fallback on error.
     const decisionResult = await this.decisionMakerExecutorService.execute({
       userMessage: input.userMessage,
       domainOutputs,
+      candidateProposalSummaries,
       actionVariantCatalog,
       safetyFlags,
       safetyConstraints,
       provider: this.provider,
       responseLanguage,
+      recentMessages: decisionRecentMessages,
     });
 
     // Structured log: decision stage done (counts/ids/flags only — no text/health content).
@@ -482,7 +499,7 @@ export class AgentOrchestratorService {
       degraded: decisionResult.degraded,
       degradedReasonCount: decisionResult.degradedReasons.length,
       selectedAction: decisionResult.output.selectedAction ?? null,
-      proposalCount: decisionResult.output.proposals.length,
+      selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
     });
 
@@ -496,14 +513,15 @@ export class AgentOrchestratorService {
     const workoutCaloriePerHourRate = extractWorkoutCaloriePerHourRate(domainResults);
 
     // Resolve the decision-maker output through ActionResolver (Stage 10).
-    // ActionResolver filters proposals to the union of the selected domains'
-    // allowedProposalIntents. consentRequired is a forwarded LLM boolean — there
-    // is no consent-gated action variant currently in the catalog (medical-save is
-    // deferred). When a workout calorie estimate or rate is present, it is stamped
-    // onto workout proposals with provenance 'workout_llm' (R1/S8).
+    // ActionResolver resolves selectedProposalIds → canonical payloads from the
+    // merged candidate map, then filters to the union allowlist. consentRequired
+    // is a forwarded LLM boolean — no consent-gated action variant exists currently
+    // (medical-save is deferred). Workout calorie fields are scrubbed/re-stamped
+    // from the trusted workout domain answer only (R1/S8).
     const resolved = this.actionResolverService.resolveFinalDecisionOutput({
       finalDecision: decisionResult.output,
       selectedDomains,
+      candidateMap: mergedCandidateMap,
       workoutCalorieEstimate,
       workoutCaloriePerHourRate,
     });
@@ -524,11 +542,22 @@ export class AgentOrchestratorService {
       ? { reply: FAN_OUT_SAFE_FALLBACK_REPLY, proposals: [] }
       : { reply: resolved.reply, proposals: resolved.proposals };
 
-    // droppedByAllowlist = proposals the decision-maker emitted but ActionResolver filtered out.
-    // Clamped >=0 in case of unexpected shape mismatch.
-    const decisionProposalCount = decisionResult.output.proposals.length;
+    // Separate the two drop categories:
+    //  - idResolutionDropCount: ids selected by decision-maker that were unknown or duplicate
+    //    in the candidate map (from resolved.parseErrors, produced by ActionResolverService).
+    //  - droppedByAllowlist: proposals that DID resolve from the candidate map but were then
+    //    filtered by the union allowlist (defense-in-depth). Computed as the difference between
+    //    the number of resolved proposals and the final after-allowlist count.
+    // These were previously conflated as a single droppedByAllowlist count.
+    const idResolutionDropCount = resolved.idResolutionDropCount;
     const resolvedProposalCount = resolved.proposals.length;
-    const droppedByAllowlist = Math.max(0, decisionProposalCount - resolvedProposalCount);
+    // droppedByAllowlist = ids that resolved successfully but were filtered by the allowlist.
+    // decisionSelectedIdCount - idResolutionDropCount = count that reached the allowlist step.
+    const decisionSelectedIdCount = decisionResult.output.selectedProposalIds.length;
+    const droppedByAllowlist = Math.max(
+      0,
+      decisionSelectedIdCount - idResolutionDropCount - resolvedProposalCount,
+    );
     const finalProposalCount = finalOutput.proposals.length;
 
     // Structured log: resolution stage done (counts/flags only — no text/health content).
@@ -536,6 +565,7 @@ export class AgentOrchestratorService {
       stage: "resolution_done",
       resolvedProposalCount,
       droppedByAllowlist,
+      idResolutionDropCount,
       replyBlocked,
       finalProposalCount,
     });
@@ -550,6 +580,12 @@ export class AgentOrchestratorService {
       parseErrors.push(
         ...decisionResult.degradedReasons.map((r) => `Decision-maker degraded: ${r}`),
       );
+    }
+
+    // Surface resolver diagnostics: unknown/duplicate ids are a dead output channel
+    // if not appended here. Append them to parseErrors so callers (ChatService) see them.
+    if (resolved.parseErrors.length > 0) {
+      parseErrors.push(...resolved.parseErrors.map((e) => `Resolver: ${e}`));
     }
 
     const safetyStatus = replyBlocked
@@ -573,6 +609,7 @@ export class AgentOrchestratorService {
           decisionResult,
           resolvedProposalCount,
           droppedByAllowlist,
+          idResolutionDropCount,
           replyBlocked,
           finalProposalCount,
         }),
@@ -657,6 +694,7 @@ export class AgentOrchestratorService {
               domain: domainEntry.domain,
               result: {
                 domainAnswer: createFallbackDomainAnswer(domainEntry.domain),
+                candidateMap: new Map(),
                 degraded: true,
                 degradedReasons: ["No context packet available for domain."],
                 loopIterations: 0,
@@ -735,6 +773,7 @@ export class AgentOrchestratorService {
         domain: domainEntry.domain,
         result: {
           domainAnswer: createFallbackDomainAnswer(domainEntry.domain),
+          candidateMap: new Map(),
           degraded: true,
           degradedReasons: [message],
           loopIterations: 0,
@@ -795,8 +834,10 @@ function buildFanOutTurnMetadata(params: {
   decisionResult: DecisionMakerResult;
   /** Proposal count after ActionResolver (union-allowlist filtering applied). */
   resolvedProposalCount: number;
-  /** Proposals emitted by decision-maker but dropped by ActionResolver allowlist. */
+  /** Proposals dropped by ActionResolver allowlist (resolved but outside union allowlist). */
   droppedByAllowlist: number;
+  /** Proposals dropped because selectedProposalIds were unknown or duplicate in the candidate map. */
+  idResolutionDropCount: number;
   /** True when reply safety validation blocked the reply. */
   replyBlocked: boolean;
   /** Final proposal count after reply-block zeroing. */
@@ -811,6 +852,7 @@ function buildFanOutTurnMetadata(params: {
     decisionResult,
     resolvedProposalCount,
     droppedByAllowlist,
+    idResolutionDropCount,
     replyBlocked,
     finalProposalCount,
   } = params;
@@ -876,13 +918,14 @@ function buildFanOutTurnMetadata(params: {
     decision: {
       degraded: decisionResult.degraded,
       selectedAction: decisionResult.output.selectedAction ?? null,
-      proposalCount: decisionResult.output.proposals.length,
+      selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
       ...(decisionResult.usage !== undefined ? { usage: decisionResult.usage } : {}),
     },
     resolution: {
       resolvedProposalCount,
       droppedByAllowlist,
+      idResolutionDropCount,
       replyBlocked,
       finalProposalCount,
     },
@@ -978,6 +1021,66 @@ function buildDomainContextRequest(
     timeRange: CAPABILITY_TO_TIME_RANGE[cap] ?? "14d",
     includeDocuments: false,
   };
+}
+
+/**
+ * Build the merged id→candidate map across all domain results (Slice 2).
+ *
+ * Merges each domain's candidateMap into one unified map. The IDs are
+ * guaranteed unique by construction (`cand_<domain>_<index>`) — each domain
+ * produces distinct key prefixes. The merged map is passed to ActionResolverService
+ * to resolve selectedProposalIds into canonical payloads.
+ *
+ * Degraded domains contribute empty maps (no candidates available).
+ */
+function buildMergedCandidateMap(
+  domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,
+): ReadonlyMap<string, Record<string, unknown>> {
+  const merged = new Map<string, Record<string, unknown>>();
+
+  for (const { result } of domainResults) {
+    for (const [id, candidate] of result.candidateMap) {
+      merged.set(id, candidate);
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Build CandidateProposalSummary[] for the decision-maker request (Slice 2).
+ *
+ * For each domain result, builds a summary entry per candidate: id + intent + title + reason.
+ * The decision-maker picks IDs from this list without needing the full payload.
+ * Degraded domains contribute no summaries.
+ */
+function buildCandidateProposalSummaries(
+  domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,
+): CandidateProposalSummary[] {
+  const summaries: CandidateProposalSummary[] = [];
+
+  for (const { domain, result } of domainResults) {
+    if (result.degraded) {
+      continue;
+    }
+
+    result.domainAnswer.candidateProposals.forEach((candidate, index) => {
+      const id = `cand_${domain}_${index}`;
+      const intent = typeof candidate["intent"] === "string" ? candidate["intent"] : "";
+      const title = typeof candidate["title"] === "string" ? candidate["title"] : "";
+      const reason = typeof candidate["reason"] === "string" ? candidate["reason"] : "";
+
+      // Only include summaries with both title and reason non-empty — this matches
+      // candidateProposalSummarySchema which requires both fields as .min(1).
+      // A candidate missing either field would fail Zod parse in the decision-maker request;
+      // dropping it here is safer than letting it reach the decision-maker truncated or empty.
+      if (intent && title && reason) {
+        summaries.push({ id, intent, title: title.slice(0, 200), reason: reason.slice(0, 500) });
+      }
+    });
+  }
+
+  return summaries;
 }
 
 /**

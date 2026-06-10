@@ -2405,11 +2405,13 @@ export {
 } from "./domain-llm-step.js";
 export {
   actionVariantSchema,
+  candidateProposalSummarySchema,
   createFallbackFinalDecision,
   finalDecisionOutputSchema,
   finalDecisionRequestSchema,
   validateFinalDecisionOutputShape,
   type ActionVariant,
+  type CandidateProposalSummary,
   type FinalDecisionOutput,
   type FinalDecisionOutputInput,
   type FinalDecisionRequest,

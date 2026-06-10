@@ -73,7 +73,7 @@ const validToolRequestSample = {
 const validFinalDecisionSample = {
   reply: "Here is your updated coaching plan.",
   selectedAction: null,
-  proposals: [],
+  selectedProposalIds: [],
   consentRequired: false,
 };
 
@@ -171,7 +171,7 @@ describe("openai-wire-schemas — sync with Zod contracts", () => {
     expect(result.success).toBe(true);
   });
 
-  it("finalDecisionWireSchema is an object with required fields", () => {
+  it("finalDecisionWireSchema is an object with required fields (Slice 2: selectedProposalIds replaces proposals)", () => {
     const wireSchema = finalDecisionWireSchema as {
       type: string;
       required: string[];
@@ -180,8 +180,11 @@ describe("openai-wire-schemas — sync with Zod contracts", () => {
     expect(wireSchema.type).toBe("object");
     expect(wireSchema.additionalProperties).toBe(false);
     expect(wireSchema.required).toContain("reply");
-    expect(wireSchema.required).toContain("proposals");
+    expect(wireSchema.required).toContain("selectedAction");
+    expect(wireSchema.required).toContain("selectedProposalIds");
     expect(wireSchema.required).toContain("consentRequired");
+    // proposals must NOT be present — decision-maker uses selection-by-ID only
+    expect(wireSchema.required).not.toContain("proposals");
   });
 
   it("finalDecisionOutputSchema rejects payload missing 'reply'", () => {
@@ -297,7 +300,7 @@ describe("stripExplicitNulls — null-stripping edge cases", () => {
     const withNullSelectedAction = {
       reply: "Here is your plan.",
       selectedAction: null,
-      proposals: [],
+      selectedProposalIds: [],
       consentRequired: false,
     };
 

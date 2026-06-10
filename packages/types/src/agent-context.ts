@@ -591,7 +591,8 @@ export const agentFanOutDomainDiagnosticsSchema = z.object({
 export const agentFanOutDecisionDiagnosticsSchema = z.object({
   degraded: z.boolean(),
   selectedAction: z.string().min(1).max(80).nullable().default(null),
-  proposalCount: z.number().int().min(0).max(5),
+  /** Number of candidate IDs selected by the decision-maker (Slice 2: selection-by-ID). */
+  selectedProposalIdCount: z.number().int().min(0).max(5),
   consentRequired: z.boolean().default(false),
   /** Token + latency usage for the decision-maker LLM call. Absent on fallback paths. */
   usage: agentProviderUsageSchema.optional(),
@@ -600,6 +601,8 @@ export const agentFanOutDecisionDiagnosticsSchema = z.object({
 export const agentFanOutResolutionDiagnosticsSchema = z.object({
   resolvedProposalCount: z.number().int().min(0).max(5),
   droppedByAllowlist: z.number().int().min(0).max(10),
+  /** Proposals dropped because selectedProposalIds contained unknown or duplicate IDs. */
+  idResolutionDropCount: z.number().int().min(0).max(10).default(0),
   replyBlocked: z.boolean(),
   finalProposalCount: z.number().int().min(0).max(5),
 });
