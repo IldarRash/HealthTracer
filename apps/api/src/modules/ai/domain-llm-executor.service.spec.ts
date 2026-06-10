@@ -6,7 +6,7 @@ import { createCoachAiProviderMock, wrapDomainOutput } from "@health/ai/testing"
 import type { ClerkAuthContext } from "../../auth.types.js";
 import type { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
-import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
+import { buildCandidateMap, DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
 import type { OrchestrateCoachTurnInput } from "./agent-orchestrator.service.js";
 
@@ -1329,5 +1329,180 @@ describe("DomainLlmExecutorService — abort signal wiring", () => {
     // The signal captured by the provider must be aborted after the timeout.
     expect(capturedSignal).toBeDefined();
     expect(capturedSignal?.aborted).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Item 3b — candidateMap key scheme and values
+// ---------------------------------------------------------------------------
+
+describe("DomainLlmExecutorService — candidateMap key scheme (Item 3b)", () => {
+  let service: DomainLlmExecutorService;
+
+  beforeEach(() => {
+    service = new DomainLlmExecutorService(makeToolRegistry(), makeAttachmentsService());
+  });
+
+  it("assigns deterministic cand_<domain>_<index> keys matching candidateProposals order", async () => {
+    const candidate0 = {
+      intent: "adapt_workout_plan",
+      targetDomain: "workout",
+      title: "Reduce load",
+      reason: "User is fatigued.",
+      proposedChanges: {},
+    };
+    const candidate1 = {
+      intent: "create_workout_plan",
+      targetDomain: "workout",
+      title: "New plan",
+      reason: "Fresh start requested.",
+      proposedChanges: { title: "New plan", days: [], notes: [] },
+    };
+
+    const provider = makeProvider({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Two workout candidates.",
+      candidateProposals: [candidate0, candidate1],
+      domainSignals: [],
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.domainAnswer.candidateProposals).toHaveLength(2);
+
+    // Key scheme: cand_workout_0 and cand_workout_1 in order.
+    expect(result.candidateMap.size).toBe(2);
+    expect(result.candidateMap.has("cand_workout_0")).toBe(true);
+    expect(result.candidateMap.has("cand_workout_1")).toBe(true);
+
+    // Values must match the original candidate objects from the domain answer.
+    expect(result.candidateMap.get("cand_workout_0")).toMatchObject({
+      intent: "adapt_workout_plan",
+      title: "Reduce load",
+    });
+    expect(result.candidateMap.get("cand_workout_1")).toMatchObject({
+      intent: "create_workout_plan",
+      title: "New plan",
+    });
+  });
+
+  it("uses domain as the key prefix — nutrition domain uses cand_nutrition_<index>", async () => {
+    const provider = makeProvider({
+      kind: "domain_answer",
+      domain: "nutrition",
+      summary: "Nutrition candidate.",
+      candidateProposals: [
+        {
+          intent: "create_nutrition_plan",
+          targetDomain: "nutrition",
+          title: "Balanced diet",
+          reason: "Calorie deficit goal.",
+          proposedChanges: {},
+        },
+      ],
+      domainSignals: [],
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("nutrition"),
+      contextPacket: makeContextPacket("nutrition_adaptation", "adjust_nutrition"),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({ userMessage: "Adjust my nutrition." }),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.candidateMap.size).toBe(1);
+    expect(result.candidateMap.has("cand_nutrition_0")).toBe(true);
+    expect(result.candidateMap.has("cand_workout_0")).toBe(false);
+  });
+
+  it("returns an empty candidateMap when the domain answer has no candidateProposals", async () => {
+    const provider = makeProvider({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "No proposals needed.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.candidateMap.size).toBe(0);
+  });
+
+  it("returns an empty candidateMap for a degraded (fallback) result", async () => {
+    // Provider throws → degraded result → candidateMap must be empty.
+    const provider: CoachAiProvider = {
+      generateDomainStep: vi.fn().mockRejectedValue(new Error("network error")),
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(true);
+    expect(result.candidateMap.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCandidateMap pure-function tests
+// ---------------------------------------------------------------------------
+
+describe("buildCandidateMap", () => {
+  it("assigns cand_<domain>_<index> keys in candidateProposals array order", () => {
+    const proposals = [
+      { intent: "adapt_workout_plan", title: "Reduce load", reason: "Fatigue." },
+      { intent: "create_workout_plan", title: "New plan", reason: "Fresh start." },
+    ];
+
+    const map = buildCandidateMap("workout", proposals);
+
+    expect(map.size).toBe(2);
+    expect(map.get("cand_workout_0")).toBe(proposals[0]);
+    expect(map.get("cand_workout_1")).toBe(proposals[1]);
+  });
+
+  it("uses domain name as key prefix for nutrition domain", () => {
+    const proposals = [{ intent: "create_nutrition_plan", title: "Diet", reason: "Goals." }];
+
+    const map = buildCandidateMap("nutrition", proposals);
+
+    expect(map.size).toBe(1);
+    expect(map.has("cand_nutrition_0")).toBe(true);
+    expect(map.has("cand_workout_0")).toBe(false);
+  });
+
+  it("returns an empty map for an empty candidateProposals array", () => {
+    const map = buildCandidateMap("workout", []);
+    expect(map.size).toBe(0);
+  });
+
+  it("preserves the original candidate object reference as the map value", () => {
+    const candidate = { intent: "adapt_workout_plan", title: "Test", reason: "Reason." };
+    const map = buildCandidateMap("workout", [candidate]);
+    expect(map.get("cand_workout_0")).toBe(candidate);
   });
 });

@@ -114,6 +114,13 @@ export interface DomainLlmExecutorResult {
   /** Final domain answer, either from the LLM or a safe fallback. */
   domainAnswer: DomainAnswer;
   /**
+   * Deterministic id→candidate map built from domainAnswer.candidateProposals[].
+   * Key: `cand_<domain>_<index>` (e.g. "cand_workout_0").
+   * Value: the candidate proposal record (untyped, Zod-validated by ProposalValidationService).
+   * Empty on degraded/fallback results. Used by ActionResolverService for selection-by-ID.
+   */
+  candidateMap: ReadonlyMap<string, Record<string, unknown>>;
+  /**
    * True when the result is a safe fallback produced by degradation (timeout,
    * loop exhaustion, safety block, provider error). Callers (orchestrator) use
    * this to record degraded-domain metadata.
@@ -373,8 +380,14 @@ export class DomainLlmExecutorService {
           return this.buildFallbackResult(domain, replySafetyErrors, iteration, toolsInvoked, accumulatedUsage);
         }
 
+        // Build the deterministic id→candidate map for selection-by-ID (Slice 2).
+        // IDs are assigned here in code — the LLM never invents them.
+        // Pattern: cand_<domain>_<index> (e.g. "cand_workout_0", "cand_nutrition_1").
+        const candidateMap = buildCandidateMap(domain, domainAnswer.candidateProposals);
+
         return {
           domainAnswer,
+          candidateMap,
           degraded: false,
           degradedReasons: [],
           loopIterations: iteration,
@@ -533,6 +546,7 @@ export class DomainLlmExecutorService {
   ): DomainLlmExecutorResult {
     return {
       domainAnswer: createFallbackDomainAnswer(domain),
+      candidateMap: new Map(),
       degraded: true,
       degradedReasons: reasons,
       loopIterations,
@@ -545,6 +559,35 @@ export class DomainLlmExecutorService {
 // ---------------------------------------------------------------------------
 // Module-level helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Build a deterministic id→candidate map from a domain answer's candidateProposals.
+ *
+ * Keys are assigned in code — the LLM never invents them:
+ *   `cand_<domain>_<index>` (e.g. "cand_workout_0", "cand_nutrition_1")
+ *
+ * This is the source of truth for selection-by-ID (Slice 2): the orchestrator
+ * merges these maps across domains and passes the union to ActionResolverService
+ * for resolving selectedProposalIds → canonical payloads.
+ *
+ * Empty when candidateProposals is empty (degraded/fallback answers).
+ */
+export function buildCandidateMap(
+  domain: RouterDomain,
+  candidateProposals: readonly Record<string, unknown>[],
+): Map<string, Record<string, unknown>> {
+  const map = new Map<string, Record<string, unknown>>();
+
+  for (let i = 0; i < candidateProposals.length; i++) {
+    const candidate = candidateProposals[i];
+
+    if (candidate) {
+      map.set(`cand_${domain}_${i}`, candidate);
+    }
+  }
+
+  return map;
+}
 
 /**
  * Build bounded attachment context for a domain step request.

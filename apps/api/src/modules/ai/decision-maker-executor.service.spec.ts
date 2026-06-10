@@ -4,18 +4,19 @@
  * Covers:
  *  - valid provider output is returned correctly (not degraded)
  *  - Zod parse failure degrades to fallback
- *  - forbidden-key shape violation degrades to fallback
+ *  - forbidden-key shape violation degrades to fallback (including 'proposals' — Slice 2)
  *  - provider throwing degrades to fallback (never rethrows)
- *  - fallback has a safe non-empty reply
- *  - fallback has consentRequired=false and empty proposals
+ *  - fallback has a safe non-empty reply and empty selectedProposalIds
  *  - multiple domain outputs are forwarded to the provider
  *  - safety flags are forwarded
  *  - action-variant catalog is forwarded unchanged (not widened)
+ *  - candidateProposalSummaries forwarded to the provider (Slice 2)
+ *  - recentMessages forwarded to the provider (Slice 2)
  *  - workoutCalorieEstimate in domain outputs is NOT forwarded onto the decision output
  *    (decision-maker must not fabricate/re-emit a calorie estimate — Phase 6 only)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { FinalDecisionOutputInput, FinalDecisionRequest } from "@health/types";
+import type { CandidateProposalSummary, FinalDecisionOutputInput, FinalDecisionRequest } from "@health/types";
 import { createFallbackDomainAnswer } from "@health/types";
 import { DecisionMakerExecutorService } from "./decision-maker-executor.service.js";
 import type { DecisionMakerInput } from "./decision-maker-executor.service.js";
@@ -43,7 +44,7 @@ function makeInput(
   providerReturnValue: FinalDecisionOutputInput | Error = {
     reply: "Here is your coaching summary.",
     selectedAction: null,
-    proposals: [],
+    selectedProposalIds: [],
     consentRequired: false,
   },
 ): DecisionMakerInput {
@@ -54,6 +55,7 @@ function makeInput(
       { id: "plain_reply", label: "Plain reply", requiresConsent: false },
       { id: "adapt_workout_plan", label: "Adapt workout plan", requiresConsent: false },
     ],
+    candidateProposalSummaries: [],
     safetyFlags: [],
     safetyConstraints: ["Do not diagnose or prescribe treatment."],
     provider: makeProvider(providerReturnValue) as CoachAiProvider,
@@ -89,13 +91,10 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { output: { reply: "ok", selectedAction: null, proposals: [], consentRequired: false } };
+          return { output: { reply: "ok", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
         }),
       };
-      await service.execute(makeInput({}, { reply: "ok", selectedAction: null, proposals: [], consentRequired: false })
-        ?? makeInput({ provider: provider as CoachAiProvider }));
 
-      // Use a properly set provider
       await service.execute({
         ...makeInput(),
         provider: provider as CoachAiProvider,
@@ -109,7 +108,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { output: { reply: "ok", selectedAction: null, proposals: [], consentRequired: false } };
+          return { output: { reply: "ok", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
         }),
       };
       const workoutAnswer = createFallbackDomainAnswer("workout");
@@ -130,7 +129,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { output: { reply: "ok", selectedAction: null, proposals: [], consentRequired: false } };
+          return { output: { reply: "ok", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
         }),
       };
       const catalog = [
@@ -150,7 +149,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { output: { reply: "ok", selectedAction: null, proposals: [], consentRequired: false } };
+          return { output: { reply: "ok", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
         }),
       };
       await service.execute({
@@ -189,7 +188,7 @@ describe("DecisionMakerExecutorService", () => {
       const badOutput = {
         reply: "Here is your plan.",
         selectedAction: null,
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
         advice: "This is medical advice",  // FORBIDDEN
       };
@@ -203,9 +202,25 @@ describe("DecisionMakerExecutorService", () => {
       const badOutput = {
         reply: "Here is your plan.",
         selectedAction: null,
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
         tool: "getUserContextSlice",  // FORBIDDEN
+      };
+      const result = await service.execute(
+        makeInput({}, badOutput as unknown as FinalDecisionOutputInput),
+      );
+      expect(result.degraded).toBe(true);
+    });
+
+    it("degrades when the provider output contains the forbidden 'proposals' field (Slice 2)", async () => {
+      // The decision-maker must NEVER emit a 'proposals' field — selection-by-ID only.
+      // This verifies the shape guard enforces the structural prevention of payload fabrication.
+      const badOutput = {
+        reply: "Here is your plan.",
+        selectedAction: "adapt_workout_plan",
+        selectedProposalIds: [],
+        consentRequired: false,
+        proposals: [{ intent: "adapt_workout_plan", targetDomain: "workout" }],  // FORBIDDEN
       };
       const result = await service.execute(
         makeInput({}, badOutput as unknown as FinalDecisionOutputInput),
@@ -218,7 +233,7 @@ describe("DecisionMakerExecutorService", () => {
     it("degrades when reply is missing", async () => {
       const badOutput = {
         selectedAction: null,
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
         // reply is intentionally missing
       };
@@ -228,18 +243,12 @@ describe("DecisionMakerExecutorService", () => {
       expect(result.degraded).toBe(true);
     });
 
-    it("degrades when proposals exceeds max (5)", async () => {
-      const tooManyProposals = Array.from({ length: 6 }, (_, i) => ({
-        intent: `intent_${i}`,
-        targetDomain: "workout",
-        title: `Proposal ${i}`,
-        reason: "test",
-        proposedChanges: {},
-      }));
+    it("degrades when selectedProposalIds exceeds max (5)", async () => {
+      const tooManyIds = Array.from({ length: 6 }, (_, i) => `cand_workout_${i}`);
       const badOutput: FinalDecisionOutputInput = {
         reply: "Here is your plan.",
         selectedAction: null,
-        proposals: tooManyProposals,
+        selectedProposalIds: tooManyIds,
         consentRequired: false,
       };
       const result = await service.execute(makeInput({}, badOutput));
@@ -262,11 +271,11 @@ describe("DecisionMakerExecutorService", () => {
       expect(result.output.consentRequired).toBe(false);
     });
 
-    it("fallback has empty proposals", async () => {
+    it("fallback has empty selectedProposalIds", async () => {
       const result = await service.execute(
         makeInput({}, new Error("trigger fallback")),
       );
-      expect(result.output.proposals).toHaveLength(0);
+      expect(result.output.selectedProposalIds).toHaveLength(0);
     });
 
     it("fallback selectedAction is null", async () => {
@@ -293,7 +302,7 @@ describe("DecisionMakerExecutorService", () => {
       const providerOutput: FinalDecisionOutputInput = {
         reply: "Your workout plan is ready.",
         selectedAction: "adapt_workout_plan",
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
         // workoutCalorieEstimate must NOT appear here — the schema forbids extra fields
         // and ActionResolver owns the provenance copy in Phase 6.
@@ -316,7 +325,7 @@ describe("DecisionMakerExecutorService", () => {
       const providerOutput: FinalDecisionOutputInput = {
         reply: "Consent is required to save this medical document.",
         selectedAction: "synthetic_consent_variant",
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: true,
       };
       const result = await service.execute(makeInput({}, providerOutput));
@@ -328,7 +337,7 @@ describe("DecisionMakerExecutorService", () => {
       const providerOutput: FinalDecisionOutputInput = {
         reply: "Here is your workout plan.",
         selectedAction: "adapt_workout_plan",
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       };
       const result = await service.execute(makeInput({}, providerOutput));
@@ -342,7 +351,7 @@ describe("DecisionMakerExecutorService", () => {
       const providerOutput: FinalDecisionOutputInput = {
         reply: "Here is your workout plan.",
         selectedAction: "adapt_workout_plan",
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       };
       const result = await service.execute(
@@ -367,7 +376,7 @@ describe("DecisionMakerExecutorService", () => {
       const providerOutput: FinalDecisionOutputInput = {
         reply: "Here is some coaching advice.",
         selectedAction: null,
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       };
       const result = await service.execute(makeInput({}, providerOutput));
@@ -382,7 +391,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { output: { reply: "Synthesized reply.", selectedAction: null, proposals: [], consentRequired: false } };
+          return { output: { reply: "Synthesized reply.", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
         }),
       };
       const workoutAnswer = createFallbackDomainAnswer("workout");
@@ -401,6 +410,104 @@ describe("DecisionMakerExecutorService", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Slice 2 — candidateProposalSummaries forwarded to provider
+  // -------------------------------------------------------------------------
+
+  describe("Slice 2 — candidateProposalSummaries forwarded to FinalDecisionRequest", () => {
+    it("forwards candidateProposalSummaries to the provider", async () => {
+      let capturedRequest: FinalDecisionRequest | undefined;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async (req) => {
+          capturedRequest = req;
+          return { output: { reply: "ok", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
+        }),
+      };
+      const summaries: CandidateProposalSummary[] = [
+        { id: "cand_workout_0", intent: "create_workout_plan", title: "3-Day Strength Plan", reason: "User requested plan." },
+      ];
+      await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+        candidateProposalSummaries: summaries,
+      });
+      expect(capturedRequest?.candidateProposalSummaries).toHaveLength(1);
+      expect(capturedRequest?.candidateProposalSummaries[0]?.id).toBe("cand_workout_0");
+      expect(capturedRequest?.candidateProposalSummaries[0]?.intent).toBe("create_workout_plan");
+    });
+
+    it("forwards empty candidateProposalSummaries as [] when no candidates are provided", async () => {
+      let capturedRequest: FinalDecisionRequest | undefined;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async (req) => {
+          capturedRequest = req;
+          return { output: { reply: "ok", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
+        }),
+      };
+      await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+        candidateProposalSummaries: [],
+      });
+      expect(capturedRequest?.candidateProposalSummaries).toEqual([]);
+    });
+
+    it("returns selectedProposalIds from provider output unchanged", async () => {
+      const providerOutput: FinalDecisionOutputInput = {
+        reply: "Here is your plan.",
+        selectedAction: "create_workout_plan",
+        selectedProposalIds: ["cand_workout_0"],
+        consentRequired: false,
+      };
+      const result = await service.execute(makeInput({}, providerOutput));
+      expect(result.degraded).toBe(false);
+      expect(result.output.selectedProposalIds).toEqual(["cand_workout_0"]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Slice 2 — recentMessages forwarded to provider (history window)
+  // -------------------------------------------------------------------------
+
+  describe("Slice 2 — recentMessages forwarded to FinalDecisionRequest (history window)", () => {
+    it("forwards recentMessages to the provider when provided", async () => {
+      let capturedRequest: FinalDecisionRequest | undefined;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async (req) => {
+          capturedRequest = req;
+          return { output: { reply: "ok", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
+        }),
+      };
+      const recentMessages = [
+        { role: "user" as const, content: "Create me a workout plan." },
+        { role: "assistant" as const, content: "I can help with that!" },
+      ];
+      await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+        recentMessages,
+      });
+      expect(capturedRequest?.recentMessages).toHaveLength(2);
+      expect(capturedRequest?.recentMessages?.[0]?.role).toBe("user");
+    });
+
+    it("forwards [] when recentMessages is not provided", async () => {
+      let capturedRequest: FinalDecisionRequest | undefined;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async (req) => {
+          capturedRequest = req;
+          return { output: { reply: "ok", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
+        }),
+      };
+      await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+        // No recentMessages
+      });
+      expect(capturedRequest?.recentMessages).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // i18n — responseLanguage flows into the final decision request
   // -------------------------------------------------------------------------
 
@@ -410,7 +517,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { output: { reply: "Всё готово.", selectedAction: null, proposals: [], consentRequired: false } };
+          return { output: { reply: "Всё готово.", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
         }),
       };
       await service.execute({
@@ -426,7 +533,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { output: { reply: "Done.", selectedAction: null, proposals: [], consentRequired: false } };
+          return { output: { reply: "Done.", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
         }),
       };
       await service.execute({
@@ -443,7 +550,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { output: { reply: "Done.", selectedAction: null, proposals: [], consentRequired: false } };
+          return { output: { reply: "Done.", selectedAction: null, selectedProposalIds: [], consentRequired: false } };
         }),
       };
       await service.execute({
@@ -456,13 +563,13 @@ describe("DecisionMakerExecutorService", () => {
   });
 
   // -------------------------------------------------------------------------
-  // W4 — domain candidate + matching catalog action keeps the proposal
+  // W4 — domain candidate + matching catalog action keeps the proposal (Slice 2 version)
   // -------------------------------------------------------------------------
 
-  describe("W4 — domain candidate + matching action keeps proposal; fallback yields selectedAction:null", () => {
-    it("returns the proposal when provider selects the matching action and copies the domain candidate", async () => {
-      // Simulates a workout domain output with a create_workout_plan candidate.
-      // The decision-maker selects create_workout_plan and copies the candidate into proposals[].
+  describe("W4 — domain candidate selectedProposalIds pass through; fallback yields selectedAction:null", () => {
+    it("returns selectedProposalIds when provider selects the matching action", async () => {
+      // Decision-maker now picks candidate IDs (not payload objects).
+      // Provider returns selectedProposalIds:["cand_workout_0"] instead of proposals[].
       const workoutDomainAnswer = {
         kind: "domain_answer" as const,
         domain: "workout" as const,
@@ -476,9 +583,7 @@ describe("DecisionMakerExecutorService", () => {
             proposedChanges: {
               title: "3-Day Strength Plan",
               summary: "Full-body strength program.",
-              days: [
-                { weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] },
-              ],
+              days: [{ weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] }],
               notes: [],
             },
           },
@@ -486,25 +591,19 @@ describe("DecisionMakerExecutorService", () => {
         domainSignals: ["explicit_plan_request"],
       };
 
+      const summaries: CandidateProposalSummary[] = [
+        {
+          id: "cand_workout_0",
+          intent: "create_workout_plan",
+          title: "3-Day Strength Plan",
+          reason: "User requested a strength plan.",
+        },
+      ];
+
       const providerOutput: FinalDecisionOutputInput = {
         reply: "Here is your 3-day strength plan!",
         selectedAction: "create_workout_plan",
-        proposals: [
-          {
-            intent: "create_workout_plan",
-            targetDomain: "workout",
-            title: "3-Day Strength Plan",
-            reason: "User requested a strength plan.",
-            proposedChanges: {
-              title: "3-Day Strength Plan",
-              summary: "Full-body strength program.",
-              days: [
-                { weekday: "monday", focus: "Strength", exercises: [{ name: "Squat" }] },
-              ],
-              notes: [],
-            },
-          },
-        ],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       };
 
@@ -512,6 +611,7 @@ describe("DecisionMakerExecutorService", () => {
         makeInput(
           {
             domainOutputs: [workoutDomainAnswer],
+            candidateProposalSummaries: summaries,
             actionVariantCatalog: [
               { id: "plain_reply", label: "Plain reply", requiresConsent: false },
               { id: "create_workout_plan", label: "Create workout plan", requiresConsent: false },
@@ -523,12 +623,11 @@ describe("DecisionMakerExecutorService", () => {
 
       expect(result.degraded).toBe(false);
       expect(result.output.selectedAction).toBe("create_workout_plan");
-      expect(result.output.proposals).toHaveLength(1);
-      expect(result.output.proposals[0]?.intent).toBe("create_workout_plan");
+      expect(result.output.selectedProposalIds).toEqual(["cand_workout_0"]);
       expect(result.output.reply).toContain("strength plan");
     });
 
-    it("degraded fallback always yields selectedAction:null and empty proposals", async () => {
+    it("degraded fallback always yields selectedAction:null and empty selectedProposalIds", async () => {
       // Verify that the safe fallback path (provider throws) yields the correct safe state.
       const result = await service.execute(
         makeInput({}, new Error("simulate decision-maker failure")),
@@ -536,17 +635,17 @@ describe("DecisionMakerExecutorService", () => {
 
       expect(result.degraded).toBe(true);
       expect(result.output.selectedAction).toBeNull();
-      expect(result.output.proposals).toHaveLength(0);
+      expect(result.output.selectedProposalIds).toHaveLength(0);
       // Fallback reply must be non-empty safe coaching text
       expect(result.output.reply.trim().length).toBeGreaterThan(0);
     });
 
-    it("when provider picks plain_reply the proposals array is forwarded empty", async () => {
+    it("when provider picks plain_reply selectedProposalIds is forwarded empty", async () => {
       // Plain reply is the fallback — no proposal card should be returned.
       const providerOutput: FinalDecisionOutputInput = {
         reply: "Here is some general wellness advice.",
         selectedAction: "plain_reply",
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       };
 
@@ -554,7 +653,7 @@ describe("DecisionMakerExecutorService", () => {
 
       expect(result.degraded).toBe(false);
       expect(result.output.selectedAction).toBe("plain_reply");
-      expect(result.output.proposals).toHaveLength(0);
+      expect(result.output.selectedProposalIds).toHaveLength(0);
     });
   });
 });

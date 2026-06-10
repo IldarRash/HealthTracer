@@ -86,7 +86,7 @@ const validDomainOutput = {
 const validFinalOutput = {
   reply: "Here is your coaching response.",
   selectedAction: null,
-  proposals: [],
+  selectedProposalIds: [],
   consentRequired: false,
 };
 

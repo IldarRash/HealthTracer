@@ -218,18 +218,23 @@ export const domainLlmStepWireSchema: JsonSchema = {
 // Final decision output wire schema
 // ---------------------------------------------------------------------------
 
-/** Wire schema for FinalDecisionOutput (generateFinalDecision response). */
+/**
+ * Wire schema for FinalDecisionOutput (generateFinalDecision response).
+ *
+ * Selection-only design (Slice 2): the decision-maker picks candidate IDs from
+ * `selectedProposalIds`; it never writes proposal payload objects.
+ * `proposals` is intentionally removed — ActionResolverService resolves IDs to
+ * canonical payloads from the domain answers. This structurally prevents the
+ * decision-maker from fabricating calorie fields or any domain-owned data.
+ */
 export const finalDecisionWireSchema: JsonSchema = strictObject(
   {
     reply: { type: "string" },
     selectedAction: nullableString(),
-    proposals: arrayOf({
-      type: "object",
-      additionalProperties: true, // untyped records; Zod validates per-intent
-    }),
+    selectedProposalIds: arrayOf({ type: "string" }),
     consentRequired: { type: "boolean" },
   },
-  ["reply", "selectedAction", "proposals", "consentRequired"],
+  ["reply", "selectedAction", "selectedProposalIds", "consentRequired"],
 );
 
 // ---------------------------------------------------------------------------
