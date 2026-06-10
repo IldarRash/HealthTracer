@@ -335,6 +335,95 @@ describe("prompt-template-renderer — renderDomainStep and renderFinalDecision 
 // PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS unchanged (W2 added no new placeholders)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Fix 3 — Static prefix of each rendered template contains no unresolved {{}}
+// The static prefix is everything up to the first per-turn dynamic marker.
+// ---------------------------------------------------------------------------
+
+describe("prompt-template-defaults — Fix 3: static prefix has no unresolved {{}} placeholders", () => {
+  const compiled = compilePromptTemplates({ templates: {} });
+
+  it("domain_workout static prefix (before 'Write all user-facing text') has no unresolved placeholders", () => {
+    const rendered = compiled.renderDomainStep("workout", {
+      domain: "workout",
+      userMessage: "Test",
+      iteration: "1",
+      maxIterations: "3",
+      priorToolResultsJson: "[]",
+      coachingContextJson: "{}",
+      allowedTools: "getUserContextSlice",
+      allowedProposalIntents: "create_workout_plan",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      attachmentContextJson: "none",
+      responseLanguage: "en",
+    });
+    const splitMarker = "Write all user-facing text";
+    const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
+    expect(prefix.length).toBeGreaterThan(100);
+    expect(prefix).not.toMatch(/\{\{/);
+  });
+
+  it("domain_nutrition static prefix has no unresolved placeholders", () => {
+    const rendered = compiled.renderDomainStep("nutrition", {
+      domain: "nutrition",
+      userMessage: "Test",
+      iteration: "1",
+      maxIterations: "3",
+      priorToolResultsJson: "[]",
+      coachingContextJson: "{}",
+      allowedTools: "getUserContextSlice",
+      allowedProposalIntents: "create_nutrition_plan",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      attachmentContextJson: "none",
+      responseLanguage: "en",
+    });
+    const splitMarker = "Write all user-facing text";
+    const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
+    expect(prefix.length).toBeGreaterThan(100);
+    expect(prefix).not.toMatch(/\{\{/);
+  });
+
+  it("domain_health static prefix has no unresolved placeholders", () => {
+    const rendered = compiled.renderDomainStep("health", {
+      domain: "health",
+      userMessage: "Test",
+      iteration: "1",
+      maxIterations: "3",
+      priorToolResultsJson: "[]",
+      coachingContextJson: "{}",
+      allowedTools: "getUserContextSlice",
+      allowedProposalIntents: "",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      attachmentContextJson: "none",
+      responseLanguage: "en",
+    });
+    const splitMarker = "Write all user-facing text";
+    const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
+    expect(prefix.length).toBeGreaterThan(100);
+    expect(prefix).not.toMatch(/\{\{/);
+  });
+
+  it("decision static prefix (before 'Write all user-facing text') has no unresolved placeholders", () => {
+    const rendered = compiled.renderFinalDecision({
+      userMessage: "Test",
+      domainOutputsJson: "[]",
+      actionVariantCatalogJson: "[]",
+      candidateProposalSummariesJson: "[]",
+      recentMessagesJson: "[]",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      responseLanguage: "en",
+    });
+    const splitMarker = "Write all user-facing text";
+    const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
+    expect(prefix.length).toBeGreaterThan(100);
+    expect(prefix).not.toMatch(/\{\{/);
+  });
+});
+
 describe("PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS — unchanged by W2", () => {
   it("router template still requires its original 8 placeholders", () => {
     const placeholders = PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS["router"];
@@ -373,5 +462,228 @@ describe("PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS — unchanged by W2", () => {
     expect(placeholders).toContain("responseLanguage");
     // 8 placeholders — 6 original + candidateProposalSummariesJson + recentMessagesJson (Slice 2)
     expect(placeholders).toHaveLength(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice 4 — Prompt-cache-friendly ordering
+// Static prefix must be byte-identical across renders with different dynamic values.
+// Dynamic placeholders must appear AFTER static content in each template.
+// ---------------------------------------------------------------------------
+
+describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static prefix before dynamic suffix)", () => {
+  describe("domain_workout: static rules precede dynamic values", () => {
+    const body = DEFAULT_PROMPT_TEMPLATE_BODIES[DOMAIN_WORKOUT_TEMPLATE_KEY];
+
+    it("CANDIDATE EMISSION RULE appears before coachingContextJson", () => {
+      expect(body.indexOf("CANDIDATE EMISSION RULE")).toBeLessThan(body.indexOf("{{coachingContextJson}}"));
+    });
+
+    it("INTENT SELECTION RULE appears before userMessage", () => {
+      expect(body.indexOf("INTENT SELECTION RULE")).toBeLessThan(body.indexOf("{{userMessage}}"));
+    });
+
+    it("DISPLAY CONTRACT INSTRUCTIONS appear before coachingContextJson", () => {
+      expect(body.indexOf("DISPLAY CONTRACT INSTRUCTIONS")).toBeLessThan(body.indexOf("{{coachingContextJson}}"));
+    });
+
+    it("userMessage placeholder appears after coachingContextJson (largest dynamic block last)", () => {
+      expect(body.indexOf("{{userMessage}}")).toBeGreaterThan(body.indexOf("{{coachingContextJson}}"));
+    });
+  });
+
+  describe("domain_nutrition: static rules precede dynamic values", () => {
+    const body = DEFAULT_PROMPT_TEMPLATE_BODIES[DOMAIN_NUTRITION_TEMPLATE_KEY];
+
+    it("CANDIDATE EMISSION RULE appears before coachingContextJson", () => {
+      expect(body.indexOf("CANDIDATE EMISSION RULE")).toBeLessThan(body.indexOf("{{coachingContextJson}}"));
+    });
+
+    it("food photo analysis instruction appears before coachingContextJson", () => {
+      expect(body.indexOf("log_nutrition_incident proposal")).toBeLessThan(body.indexOf("{{coachingContextJson}}"));
+    });
+
+    it("userMessage placeholder appears after coachingContextJson", () => {
+      expect(body.indexOf("{{userMessage}}")).toBeGreaterThan(body.indexOf("{{coachingContextJson}}"));
+    });
+  });
+
+  describe("domain_health: static rules precede dynamic values", () => {
+    const body = DEFAULT_PROMPT_TEMPLATE_BODIES[DOMAIN_HEALTH_TEMPLATE_KEY];
+
+    it("BODY ANALYSIS RULE appears before coachingContextJson", () => {
+      expect(body.indexOf("BODY ANALYSIS RULE")).toBeLessThan(body.indexOf("{{coachingContextJson}}"));
+    });
+
+    it("health context-only wording appears before userMessage", () => {
+      expect(body.indexOf("Health domain is context-only")).toBeLessThan(body.indexOf("{{userMessage}}"));
+    });
+
+    it("userMessage placeholder appears after coachingContextJson", () => {
+      expect(body.indexOf("{{userMessage}}")).toBeGreaterThan(body.indexOf("{{coachingContextJson}}"));
+    });
+  });
+
+  describe("decision: static rules precede dynamic values", () => {
+    const body = DEFAULT_PROMPT_TEMPLATE_BODIES[FINAL_DECISION_TEMPLATE_KEY];
+
+    it("ACTION SELECTION RULE appears before domainOutputsJson", () => {
+      expect(body.indexOf("ACTION SELECTION RULE")).toBeLessThan(body.indexOf("{{domainOutputsJson}}"));
+    });
+
+    it("WORKED EXAMPLE appears before domainOutputsJson", () => {
+      expect(body.indexOf("WORKED EXAMPLE")).toBeLessThan(body.indexOf("{{domainOutputsJson}}"));
+    });
+
+    it("FORBIDDEN FIELD appears before domainOutputsJson", () => {
+      expect(body.indexOf("FORBIDDEN FIELD")).toBeLessThan(body.indexOf("{{domainOutputsJson}}"));
+    });
+
+    it("userMessage placeholder is the last or near-last dynamic field", () => {
+      const userMsgIdx = body.indexOf("{{userMessage}}");
+      const domainIdx = body.indexOf("{{domainOutputsJson}}");
+      const recentIdx = body.indexOf("{{recentMessagesJson}}");
+      // userMessage should appear after domainOutputsJson and recentMessagesJson (large per-turn data)
+      expect(userMsgIdx).toBeGreaterThan(domainIdx);
+      expect(userMsgIdx).toBeGreaterThan(recentIdx);
+    });
+  });
+
+  describe("cache-stable prefix: static content is byte-identical across renders with different dynamic values", () => {
+    const compiled = compilePromptTemplates({ templates: {} });
+
+    /**
+     * Returns the stable prefix of a rendered string — everything up to the first
+     * occurrence of a per-turn dynamic value. We use the rendered string to extract
+     * the prefix because we want to confirm the instructions are identical.
+     *
+     * We simulate two different dynamic contexts and confirm the prefix matches.
+     */
+    it("domain_workout renders the same static prefix for two different user messages", () => {
+      const baseValues = {
+        domain: "workout",
+        iteration: "1",
+        maxIterations: "3",
+        priorToolResultsJson: "none",
+        coachingContextJson: "{}",
+        allowedTools: "getUserContextSlice",
+        allowedProposalIntents: "create_workout_plan",
+        safetyFlags: "none",
+        safetyConstraints: "none",
+        attachmentContextJson: "none",
+        responseLanguage: "en",
+      };
+
+      const render1 = compiled.renderDomainStep("workout", {
+        ...baseValues,
+        userMessage: "Make me a workout plan",
+      });
+      const render2 = compiled.renderDomainStep("workout", {
+        ...baseValues,
+        userMessage: "Составь план тренировок",
+      });
+
+      // Find the position of the first per-turn dynamic value (responseLanguage comes first in suffix)
+      const splitMarker = "Write all user-facing text";
+      const prefix1 = render1.substring(0, render1.indexOf(splitMarker));
+      const prefix2 = render2.substring(0, render2.indexOf(splitMarker));
+
+      expect(prefix1).toBe(prefix2);
+      expect(prefix1.length).toBeGreaterThan(200);
+    });
+
+    it("domain_nutrition renders the same static prefix for two different user messages", () => {
+      const baseValues = {
+        domain: "nutrition",
+        iteration: "1",
+        maxIterations: "3",
+        priorToolResultsJson: "none",
+        coachingContextJson: "{}",
+        allowedTools: "getUserContextSlice",
+        allowedProposalIntents: "create_nutrition_plan",
+        safetyFlags: "none",
+        safetyConstraints: "none",
+        attachmentContextJson: "none",
+        responseLanguage: "en",
+      };
+
+      const render1 = compiled.renderDomainStep("nutrition", {
+        ...baseValues,
+        userMessage: "I want a nutrition plan",
+      });
+      const render2 = compiled.renderDomainStep("nutrition", {
+        ...baseValues,
+        userMessage: "Составь мне план питания",
+      });
+
+      const splitMarker = "Write all user-facing text";
+      const prefix1 = render1.substring(0, render1.indexOf(splitMarker));
+      const prefix2 = render2.substring(0, render2.indexOf(splitMarker));
+
+      expect(prefix1).toBe(prefix2);
+      expect(prefix1.length).toBeGreaterThan(200);
+    });
+
+    it("domain_health renders the same static prefix for two different user messages", () => {
+      const baseValues = {
+        domain: "health",
+        iteration: "1",
+        maxIterations: "3",
+        priorToolResultsJson: "none",
+        coachingContextJson: "{}",
+        allowedTools: "getUserContextSlice",
+        allowedProposalIntents: "",
+        safetyFlags: "none",
+        safetyConstraints: "none",
+        attachmentContextJson: "none",
+        responseLanguage: "en",
+      };
+
+      const render1 = compiled.renderDomainStep("health", {
+        ...baseValues,
+        userMessage: "How is my health?",
+      });
+      const render2 = compiled.renderDomainStep("health", {
+        ...baseValues,
+        userMessage: "Как мое здоровье?",
+      });
+
+      const splitMarker = "Write all user-facing text";
+      const prefix1 = render1.substring(0, render1.indexOf(splitMarker));
+      const prefix2 = render2.substring(0, render2.indexOf(splitMarker));
+
+      expect(prefix1).toBe(prefix2);
+      expect(prefix1.length).toBeGreaterThan(200);
+    });
+
+    it("decision renders the same static prefix for two different user messages", () => {
+      const baseValues = {
+        domainOutputsJson: "[]",
+        actionVariantCatalogJson: "[]",
+        candidateProposalSummariesJson: "[]",
+        recentMessagesJson: "[]",
+        safetyFlags: "none",
+        safetyConstraints: "none",
+        responseLanguage: "en",
+      };
+
+      const render1 = compiled.renderFinalDecision({
+        ...baseValues,
+        userMessage: "Give me a plan",
+      });
+      const render2 = compiled.renderFinalDecision({
+        ...baseValues,
+        userMessage: "Составь мне план",
+      });
+
+      // Static prefix ends before the dynamic suffix starts
+      // The WORKED EXAMPLE is part of the static prefix
+      const splitMarker = "Write all user-facing text";
+      const prefix1 = render1.substring(0, render1.indexOf(splitMarker));
+      const prefix2 = render2.substring(0, render2.indexOf(splitMarker));
+
+      expect(prefix1).toBe(prefix2);
+      expect(prefix1.length).toBeGreaterThan(200);
+    });
   });
 });

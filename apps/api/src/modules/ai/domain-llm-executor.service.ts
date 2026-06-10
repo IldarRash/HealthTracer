@@ -265,6 +265,8 @@ export class DomainLlmExecutorService {
               totalTokens: accumulatedUsage.totalTokens + stepUsage.totalTokens,
               latencyMs: accumulatedUsage.latencyMs + stepUsage.latencyMs,
               retries: accumulatedUsage.retries + stepUsage.retries,
+              // Preserve the model stamp from whichever iteration first set it.
+              model: accumulatedUsage.model ?? stepUsage.model,
             }
           : stepUsage;
       }

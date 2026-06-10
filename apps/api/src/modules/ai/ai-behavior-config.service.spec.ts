@@ -43,15 +43,15 @@ describe("AiBehaviorConfigService", () => {
     expect(service.getAttachmentBehavior().safetyFloors.requireMedicalConsent).toBe(true);
   });
 
-  it("compiles prompt templates with safe fallback for invalid config bodies", () => {
+  it("compiles prompt templates with safe fallback for invalid router config bodies", () => {
     const defaults = buildDefaultAiBehaviorConfig();
     const service = new AiBehaviorConfigService({
       config: {
         ...defaults,
         promptTemplates: {
           templates: {
-            openai_coach_loop: {
-              templateKey: "openai_coach_loop",
+            router: {
+              templateKey: "router",
               body: "Broken template without required placeholders",
               placeholders: [],
             },
@@ -63,26 +63,19 @@ describe("AiBehaviorConfigService", () => {
       warnings: [],
     });
 
-    expect(service.getCompiledPromptTemplates().templates.openai_coach_loop.source).toBe("default");
-    expect(
-      service.getCompiledPromptTemplates().renderCoachLoop({
-        iteration: "1",
-        maxIterations: "3",
-        selectedIntentLabel: "general",
-        intentInstructions: "Coach",
-        intentSafetyGuidance: "none",
-        allowedTools: "getUserContextSlice",
-        allowedProposalIntents: "none",
-        taskPurpose: "general_chat",
-        taskIntent: "general",
-        expectedResponseMode: "advice_only",
-        safetyFlags: "none",
-        missingContextNotes: "none",
-        priorToolResultsJson: "none",
-        safetyConstraints: "Stay conservative",
-        coachingContextJson: "{}",
-      }),
-    ).toContain("AI wellness coach");
+    expect(service.getCompiledPromptTemplates().templates.router.source).toBe("default");
+    // Render a valid router prompt to confirm the fallback to default body works.
+    const rendered = service.getCompiledPromptTemplates().renderRouterDecision({
+      normalizedText: "test",
+      originalText: "test",
+      detectedLanguage: "en",
+      preprocessorJson: "{}",
+      attachmentHintsJson: "[]",
+      recentMessageHintsJson: "[]",
+      availableDomainsJson: "[]",
+      safetyGuardrailsJson: "[]",
+    });
+    expect(rendered).toContain("domain router");
   });
 });
 

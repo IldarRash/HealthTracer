@@ -19,6 +19,12 @@ export const apiEnvSchema = z.object({
   AI_COACH_PROVIDER: z.literal("openai").default("openai"),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  /** Override model for the router (first-LLM) stage. Falls back to OPENAI_MODEL. */
+  OPENAI_MODEL_ROUTER: z.string().min(1).optional(),
+  /** Override model for the domain (parallel fan-out) stage. Falls back to OPENAI_MODEL. */
+  OPENAI_MODEL_DOMAIN: z.string().min(1).optional(),
+  /** Override model for the decision-maker (final synthesis) stage. Falls back to OPENAI_MODEL. */
+  OPENAI_MODEL_DECISION: z.string().min(1).optional(),
   CORS_ORIGINS: z.string().min(1).optional(),
   DOMAIN_CONFIG_DIR: z.string().min(1).optional(),
   STRIPE_SECRET_KEY: z.string().min(1).optional(),

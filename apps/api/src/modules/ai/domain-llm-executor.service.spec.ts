@@ -1230,6 +1230,68 @@ describe("DomainLlmExecutorService — multi-iteration usage accumulation", () =
     expect(result.usage?.retries).toBe(1);             // 1 + 0
   });
 
+  it("preserves usage.model stamp across tool_request iter1 + domain_answer iter2 (Fix 1 regression guard)", async () => {
+    const iter1Usage: ProviderUsage = {
+      promptTokens: 50,
+      completionTokens: 20,
+      totalTokens: 70,
+      latencyMs: 100,
+      retries: 0,
+      model: "gpt-4o",
+    };
+    const iter2Usage: ProviderUsage = {
+      promptTokens: 60,
+      completionTokens: 25,
+      totalTokens: 85,
+      latencyMs: 120,
+      retries: 0,
+      // No model field on iter2 — iter1 stamp should survive.
+    };
+
+    const generateDomainStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        output: {
+          kind: "tool_request",
+          tool: "getUserContextSlice",
+          input: { purpose: "workout_adaptation" },
+        },
+        usage: iter1Usage,
+      })
+      .mockResolvedValueOnce({
+        output: {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: "Reviewed after tool.",
+          candidateProposals: [],
+          domainSignals: [],
+        },
+        usage: iter2Usage,
+      });
+
+    const provider: CoachAiProvider = {
+      generateDomainStep,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.loopIterations).toBe(2);
+    // model stamp from iter1 must survive the accumulation into iter2.
+    expect(result.usage?.model).toBe("gpt-4o");
+    // Numeric fields are still summed correctly.
+    expect(result.usage?.promptTokens).toBe(110);  // 50 + 60
+    expect(result.usage?.totalTokens).toBe(155);   // 70 + 85
+  });
+
   it("threads accumulated usage into fallback result when domain degrades mid-loop", async () => {
     const iter1Usage: ProviderUsage = {
       promptTokens: 80,

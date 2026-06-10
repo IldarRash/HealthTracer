@@ -224,34 +224,27 @@ describe("ai behavior safety invariants", () => {
     it("falls back to default prompt templates when config bodies are invalid", () => {
       const compiled = compilePromptTemplates({
         templates: {
-          openai_coach_loop: {
-            templateKey: "openai_coach_loop",
+          router: {
+            templateKey: "router",
             body: "Broken template without placeholders",
             placeholders: [],
           },
         },
       });
 
-      expect(compiled.templates.openai_coach_loop.source).toBe("default");
-      expect(
-        compiled.renderCoachLoop({
-          iteration: "1",
-          maxIterations: "3",
-          selectedIntentLabel: "general",
-          intentInstructions: "Coach",
-          intentSafetyGuidance: "none",
-          allowedTools: "getUserContextSlice",
-          allowedProposalIntents: "none",
-          taskPurpose: "general_chat",
-          taskIntent: "general",
-          expectedResponseMode: "advice_only",
-          safetyFlags: "none",
-          missingContextNotes: "none",
-          priorToolResultsJson: "none",
-          safetyConstraints: "Stay conservative",
-          coachingContextJson: "{}",
-        }),
-      ).toContain("AI wellness coach");
+      expect(compiled.templates.router.source).toBe("default");
+      // Fallback renders the default router body which references wellness domains.
+      const rendered = compiled.renderRouterDecision({
+        normalizedText: "test",
+        originalText: "test",
+        detectedLanguage: "en",
+        preprocessorJson: "{}",
+        attachmentHintsJson: "[]",
+        recentMessageHintsJson: "[]",
+        availableDomainsJson: "[]",
+        safetyGuardrailsJson: "[]",
+      });
+      expect(rendered).toContain("domain router");
     });
   });
 
