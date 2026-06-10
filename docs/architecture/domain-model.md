@@ -1,8 +1,19 @@
 # Domain Model
 
-## Initial Domains
+## Domains
 
-The first model should stay small enough to support MVP 1 without locking the project into a medical-records architecture. Later domains such as recipes, device sync, and health documents should attach to the same structured-state model instead of turning chat into the source of truth.
+The model stays focused on structured wellness/coaching state without becoming a
+medical-records architecture. Later domains — recipes, device sync, health
+documents, habits, recovery, wellbeing, body composition, progress, and billing —
+attach to the same structured-state model instead of turning chat into the source
+of truth. Each domain maps to a NestJS module under
+[`apps/api/src/modules/*`](../../apps/api/src/modules) and a Drizzle schema file
+under [`packages/db/src/schema/*`](../../packages/db/src/schema); the full table
+inventory lives in [`database.md`](./database.md).
+
+The core entities below are the ones that carry the product invariants; some
+support entities (habits, body composition, progress aggregates, billing/usage)
+are summarized in [`database.md`](./database.md) rather than re-described here.
 
 ## Core Entities
 
@@ -374,8 +385,20 @@ erDiagram
   User ||--o{ WellbeingCheckIn : records
   User ||--o{ RecoveryCheckIn : records
   User ||--o{ RecoveryContextSnapshot : has
+  User ||--o{ HabitPlan : owns
+  HabitPlan ||--o{ HabitPlanRevision : versions
+  User ||--o{ HabitCompletion : logs
+  User ||--o{ BodyCompositionAnalysis : has
+  User ||--o{ WeeklyProgressSummary : accrues
+  User ||--|| Subscription : has
   User ||--o{ AIProposal : receives
 ```
+
+> Habit plans follow the same revision pattern as workout/nutrition plans. Body
+> composition analyses (visual photo estimates — never measurements/diagnoses) and
+> progress aggregates are read/summary state. Billing (`Subscription`,
+> `stripe_webhook_events`, `chat_ai_usage_daily`) gates AI-chat quota. See
+> [`database.md`](./database.md).
 
 ## Product Surface Mapping
 
