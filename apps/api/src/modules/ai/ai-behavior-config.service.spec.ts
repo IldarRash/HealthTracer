@@ -40,7 +40,7 @@ describe("AiBehaviorConfigService", () => {
     expect(service.getAttachmentLoadWarnings()).toContain(
       "Invalid attachment behavior config; using built-in defaults.",
     );
-    expect(service.getAttachmentBehavior().safetyFloors.requireMedicalConsent).toBe(true);
+    expect(service.getAttachmentBehavior().safetyFloors.enforceProviderIsolation).toBe(true);
   });
 
   it("compiles prompt templates with safe fallback for invalid config bodies", () => {

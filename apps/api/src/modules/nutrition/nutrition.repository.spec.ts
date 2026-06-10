@@ -142,3 +142,50 @@ describe("NutritionRepository.createIncident", () => {
     expect(capturedValues.date).toBe("2026-05-26");
   });
 });
+
+// ─── findActivePlanByUserId — no ambiguous ORDER BY ─────────────────────────
+
+describe("NutritionRepository.findActivePlanByUserId", () => {
+  const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+
+  it("returns null when no active plan exists for the user", async () => {
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => []),
+          })),
+        })),
+      })),
+    };
+
+    const repository = new NutritionRepository(db as never);
+    const result = await repository.findActivePlanByUserId(userId);
+    expect(result).toBeNull();
+  });
+
+  it("returns the plan row when exactly one active plan exists", async () => {
+    const planRow = {
+      id: "plan-1",
+      userId,
+      activeRevisionId: "rev-1",
+      status: "active",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => [planRow]),
+          })),
+        })),
+      })),
+    };
+
+    const repository = new NutritionRepository(db as never);
+    const result = await repository.findActivePlanByUserId(userId);
+    expect(result).toEqual(planRow);
+  });
+});

@@ -1,6 +1,8 @@
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
 import { DocumentSignalsService } from "./document-signals.service.js";
+import { LocalStorageInProductionError } from "../../common/local-storage.js";
+import { LocalDocumentStorageAdapter } from "./local-document-storage.js";
 
 const MINIMAL_LAB_PDF = Buffer.from(
   `%PDF-1.4
@@ -66,6 +68,27 @@ const documentRow = {
 };
 
 describe("DocumentSignalsService", () => {
+  describe("storage production guard (DocumentSignalsService uses LocalDocumentStorageAdapter)", () => {
+    it("throws LocalStorageInProductionError when constructed without allowInProduction in production", () => {
+      // This covers the call site that was previously unguarded in DocumentSignalsService.
+      // The service now passes allowInProduction: env.STORAGE_ALLOW_LOCAL_IN_PRODUCTION === true,
+      // so when the env var is absent/false in production the adapter must throw.
+      expect(
+        () => new LocalDocumentStorageAdapter(".data/documents", { nodeEnv: "production" }),
+      ).toThrowError(LocalStorageInProductionError);
+    });
+
+    it("does not throw when allowInProduction is explicitly true in production", () => {
+      expect(
+        () =>
+          new LocalDocumentStorageAdapter(".data/documents", {
+            nodeEnv: "production",
+            allowInProduction: true,
+          }),
+      ).not.toThrow();
+    });
+  });
+
   it("blocks extraction for revoked documents before reading storage", async () => {
     const service = new DocumentSignalsService(
       {

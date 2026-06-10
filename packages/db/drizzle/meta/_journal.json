@@ -246,6 +246,13 @@
       "when": 1780923699314,
       "tag": "0034_opposite_mystique",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1780970000000,
+      "tag": "0035_nutrition_plan_invariants",
+      "breakpoints": true
     }
   ]
 }

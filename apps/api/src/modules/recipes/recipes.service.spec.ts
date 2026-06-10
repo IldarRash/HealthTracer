@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GENERIC_RECIPE_CATALOG_CATEGORIES } from "./generic-recipe-catalog-categories.js";
 import type { ProviderRecipeDraft } from "./recipe-catalog-provider.js";
 import type { RecommendationLookupKey } from "./recipes.repository.js";
@@ -147,6 +147,7 @@ function createService({
       listActiveRecipes: async () => [],
       findActiveRecipeById: async () => null,
       findActiveRecipesByIds: async () => [],
+      countActiveProviderRecipes: async () => 1,
       listRecommendationsByUserId: async () => [],
       findRecommendationById: async () => null,
       createRecommendations: async () => [],
@@ -1165,5 +1166,206 @@ describe("RecipesService", () => {
 
     expect(findUserId).toBe(user.id);
     expect(createCalled).toBe(false);
+  });
+
+  describe("listRecipes browse hydration", () => {
+    it("triggers provider hydration when catalog has zero active provider recipes", async () => {
+      let providerFetchCalled = false;
+      let upsertCalled = false;
+      const providerDraft = createProviderDraft();
+      const service = createService({
+        recipesRepository: {
+          countActiveProviderRecipes: async () => 0,
+          listActiveRecipes: async () => [createRecipeRow()],
+          upsertProviderRecipes: async () => {
+            upsertCalled = true;
+            return [];
+          },
+        },
+        recipeCatalogProvider: {
+          fetchByGenericCategories: async () => {
+            providerFetchCalled = true;
+            return [providerDraft];
+          },
+        },
+      });
+
+      const result = await service.listRecipes({});
+
+      expect(providerFetchCalled).toBe(true);
+      expect(upsertCalled).toBe(true);
+      expect(result.recipes).toHaveLength(1);
+    });
+
+    it("skips provider hydration when catalog already has active provider recipes", async () => {
+      let providerFetchCalled = false;
+      const service = createService({
+        recipesRepository: {
+          countActiveProviderRecipes: async () => 5,
+          listActiveRecipes: async () => [createRecipeRow()],
+        },
+        recipeCatalogProvider: {
+          fetchByGenericCategories: async () => {
+            providerFetchCalled = true;
+            return [];
+          },
+        },
+      });
+
+      const result = await service.listRecipes({});
+
+      expect(providerFetchCalled).toBe(false);
+      expect(result.recipes).toHaveLength(1);
+    });
+
+    it("logs a warning and degrades to the seeded list when the provider fails during browse", async () => {
+      const warnMessages: string[] = [];
+      const service = createService({
+        recipesRepository: {
+          countActiveProviderRecipes: async () => 0,
+          listActiveRecipes: async () => [createRecipeRow()],
+          upsertProviderRecipes: async () => [],
+        },
+        recipeCatalogProvider: {
+          providerName: "themealdb",
+          fetchByGenericCategories: async () => {
+            throw new Error("provider network error");
+          },
+        },
+      });
+
+      // Capture the NestJS logger warn output
+      const originalWarn = (service as unknown as { logger: { warn: (msg: string) => void } }).logger.warn.bind(
+        (service as unknown as { logger: { warn: (msg: string) => void } }).logger,
+      );
+      (service as unknown as { logger: { warn: (msg: string) => void } }).logger.warn = (msg: string) => {
+        warnMessages.push(msg);
+        originalWarn(msg);
+      };
+
+      const result = await service.listRecipes({});
+
+      expect(result.recipes).toHaveLength(1);
+      expect(warnMessages.some((m) => m.includes("themealdb"))).toBe(true);
+      expect(warnMessages.some((m) => m.includes("provider network error"))).toBe(true);
+    });
+
+    it("deduplicates concurrent browse requests to a single provider import", async () => {
+      let fetchCallCount = 0;
+      const service = createService({
+        recipesRepository: {
+          countActiveProviderRecipes: async () => 0,
+          listActiveRecipes: async () => [createRecipeRow()],
+          upsertProviderRecipes: async () => [],
+        },
+        recipeCatalogProvider: {
+          fetchByGenericCategories: async () => {
+            fetchCallCount++;
+            return [];
+          },
+        },
+      });
+
+      // Fire two concurrent browse requests
+      await Promise.all([service.listRecipes({}), service.listRecipes({})]);
+
+      expect(fetchCallCount).toBe(1);
+    });
+
+    describe("empty-result cooldown", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("skips provider re-fetch on second sequential browse within the cooldown window after an empty hydration", async () => {
+        let fetchCallCount = 0;
+        const service = createService({
+          recipesRepository: {
+            countActiveProviderRecipes: async () => 0,
+            listActiveRecipes: async () => [createRecipeRow()],
+            upsertProviderRecipes: async () => [],
+          },
+          recipeCatalogProvider: {
+            fetchByGenericCategories: async () => {
+              fetchCallCount++;
+              // Returns empty — triggers cooldown recording
+              return [];
+            },
+          },
+        });
+
+        // First browse: provider called, returns empty, cooldown set
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+
+        // Advance time by 2 minutes — still within the 5-minute cooldown
+        vi.advanceTimersByTime(2 * 60 * 1000);
+
+        // Second sequential browse: count is still 0 but cooldown active, provider must NOT be called
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+      });
+
+      it("skips provider re-fetch on second sequential browse within the cooldown window after a failed hydration", async () => {
+        let fetchCallCount = 0;
+        const service = createService({
+          recipesRepository: {
+            countActiveProviderRecipes: async () => 0,
+            listActiveRecipes: async () => [createRecipeRow()],
+            upsertProviderRecipes: async () => [],
+          },
+          recipeCatalogProvider: {
+            providerName: "themealdb",
+            fetchByGenericCategories: async () => {
+              fetchCallCount++;
+              throw new Error("provider down");
+            },
+          },
+        });
+
+        // First browse: provider throws, cooldown set, browse still returns seeded recipes
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+
+        // Still within cooldown
+        vi.advanceTimersByTime(60 * 1000);
+
+        // Second browse: cooldown active — provider not called again
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+      });
+
+      it("retries provider fetch after the cooldown window expires", async () => {
+        let fetchCallCount = 0;
+        const service = createService({
+          recipesRepository: {
+            countActiveProviderRecipes: async () => 0,
+            listActiveRecipes: async () => [createRecipeRow()],
+            upsertProviderRecipes: async () => [],
+          },
+          recipeCatalogProvider: {
+            fetchByGenericCategories: async () => {
+              fetchCallCount++;
+              return [];
+            },
+          },
+        });
+
+        // First browse — empty fetch, cooldown set
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+
+        // Advance past the 5-minute cooldown
+        vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+
+        // Third browse after expiry — provider is called again
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(2);
+      });
+    });
   });
 });
