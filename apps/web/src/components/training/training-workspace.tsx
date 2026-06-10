@@ -4,7 +4,13 @@ import { useAuth } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
-import type { WorkoutPlanDay, WorkoutPlanRevision, WorkoutSession } from "@health/types";
+import type {
+  ExerciseCatalogMetadata,
+  ExerciseMedia,
+  WorkoutPlanDay,
+  WorkoutPlanRevision,
+  WorkoutSession,
+} from "@health/types";
 import {
   apiQueryKeys,
   getActiveWorkoutPlan,
@@ -22,6 +28,11 @@ import {
   formatPlanRevisionTimestamp,
 } from "../../lib/plan-view-ui-state";
 import {
+  resolvePlanExerciseCatalogMetadata,
+  getExerciseMediaFallbackLabel,
+} from "../../lib/exercise-catalog-ui-state";
+import { ExerciseCatalogDetails } from "../ui/exercise-catalog-details";
+import {
   ChangeBanner,
   CoachNotes,
   DailyExecCard,
@@ -30,7 +41,6 @@ import {
   IconBadge,
   LoadingScreen,
   MediaCard,
-  PlayBadge,
   RevisionFacts,
   RevisionHistoryDark,
   type RevisionHistoryRow,
@@ -46,6 +56,8 @@ type ExerciseCardData = {
   duration?: string;
   tags: string[];
   poster: number;
+  /** Full catalog metadata for the technique preview panel. */
+  catalog: ExerciseCatalogMetadata | null;
 };
 
 // ── ActivePlanHeader ──────────────────────────────────────────────
@@ -834,7 +846,24 @@ function WeeklyProgressSection(): ReactElement {
   );
 }
 
-// ── ExerciseVideo — full-screen player ────────────────────────────
+// ── ExerciseTechniquePreview — honest media or catalog content panel ──
+//
+// Rules:
+//  - When catalog media.refs contains an image ref → render <img>
+//  - When catalog media.refs contains a video ref  → render <video controls>
+//  - When refs are empty                           → show catalog details (instructions,
+//    muscles, equipment, difficulty) via ExerciseCatalogDetails; show the
+//    media.fallbackLabel only when NO useful catalog content exists either.
+//  - No fake player chrome (no progress bar, no quality overlay, no hardcoded timestamps).
+
+function resolveFirstMediaRef(
+  media: ExerciseMedia | undefined,
+): { kind: "image" | "video"; url: string; label?: string } | null {
+  const refs = media?.refs ?? [];
+  const renderable = refs.find((r) => r.url);
+  if (!renderable?.url) return null;
+  return { kind: renderable.kind, url: renderable.url, label: renderable.label };
+}
 
 type ExerciseVideoProps = {
   exercise: ExerciseCardData;
@@ -854,6 +883,12 @@ function ExerciseVideo({
   onSelectExercise,
 }: ExerciseVideoProps): ReactElement {
   const strip = allExercises.slice(0, 5);
+  const mediaRef = exercise.catalog
+    ? resolveFirstMediaRef(exercise.catalog.media)
+    : null;
+  const fallbackLabel = exercise.catalog
+    ? getExerciseMediaFallbackLabel(exercise.catalog)
+    : "Demonstration coming soon";
 
   function handleBackKey(e: KeyboardEvent<HTMLButtonElement>) {
     if (e.key === "Enter" || e.key === " ") {
@@ -913,107 +948,73 @@ function ExerciseVideo({
       </div>
 
       {/* Two-pane layout */}
-      <div
-        style={{
-          display: "flex",
-          gap: 20,
-          alignItems: "flex-start",
-        }}
-      >
-        {/* Left: poster + filmstrip */}
+      <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+        {/* Left: technique preview area + filmstrip */}
         <div style={{ flex: "1.5 1 0", minWidth: 0 }}>
-          {/* Large poster */}
+          {/* Media or honest placeholder */}
           <div
             style={{
               position: "relative",
-              height: 420,
               borderRadius: 18,
               overflow: "hidden",
+              border: "1px solid var(--color-border-default)",
               background:
                 "linear-gradient(135deg, var(--color-surface-elevated, #1c2733), #0c1114)",
+              minHeight: 280,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              border: "1px solid var(--color-border-default)",
             }}
-            role="img"
-            aria-label={`Exercise poster: ${exercise.title}`}
           >
-            <span aria-hidden="true" style={{ display: "flex", opacity: 0.22 }}>
-              <Icon name="dumbbell" size={92} stroke="var(--color-metric-blue)" sw={1.2} />
-            </span>
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <PlayBadge size={76} />
-            </div>
-            {/* Progress bar overlay */}
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                padding: "40px 22px 18px",
-                background: "linear-gradient(transparent, rgba(8,10,11,0.75))",
-              }}
-            >
+            {mediaRef?.kind === "video" ? (
+              // Real video element with browser controls — no fake chrome
+              <video
+                src={mediaRef.url}
+                controls
+                aria-label={mediaRef.label ?? `Exercise demonstration: ${exercise.title}`}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              />
+            ) : mediaRef?.kind === "image" ? (
+              // Real image — using native img for externally hosted media URLs
+              <img
+                src={mediaRef.url}
+                alt={mediaRef.label ?? `Exercise demonstration: ${exercise.title}`}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              />
+            ) : (
+              // No media — technique preview placeholder (no play affordance)
               <div
+                aria-label={`Technique preview: ${exercise.title}`}
                 style={{
-                  height: 4,
-                  borderRadius: 4,
-                  background: "rgba(255,255,255,0.2)",
-                  marginBottom: 12,
-                }}
-              >
-                <div
-                  style={{
-                    width: "32%",
-                    height: "100%",
-                    borderRadius: 4,
-                    background: "var(--color-metric-blue)",
-                  }}
-                />
-              </div>
-              <div
-                style={{
+                  width: "100%",
+                  padding: "48px 24px",
                   display: "flex",
+                  flexDirection: "column",
                   alignItems: "center",
                   gap: 14,
+                  textAlign: "center",
                 }}
               >
-                <Icon name="pause" size={18} stroke="#fff" />
-                <span
+                <span aria-hidden="true" style={{ display: "flex", opacity: 0.22 }}>
+                  <Icon name="dumbbell" size={72} stroke="var(--color-metric-blue)" sw={1.2} />
+                </span>
+                <p
                   style={{
-                    fontSize: 12.5,
-                    color: "#fff",
-                    fontVariantNumeric: "tabular-nums",
+                    fontSize: 13,
+                    color: "var(--color-text-muted)",
+                    margin: 0,
+                    lineHeight: 1.5,
+                    fontStyle: "italic",
+                    maxWidth: 320,
                   }}
                 >
-                  {exercise.duration
-                    ? `1:04 / ${exercise.duration}`
-                    : "0:00 / --:--"}
-                </span>
-                <span
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: 12.5,
-                    color: "rgba(255,255,255,0.7)",
-                  }}
-                >
-                  HD · no sound
-                </span>
+                  Technique preview
+                </p>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Filmstrip */}
+          {/* Filmstrip — exercise switcher */}
           <div
             style={{ display: "flex", gap: 10, marginTop: 14 }}
             role="list"
@@ -1042,8 +1043,7 @@ function ExerciseVideo({
                 <div
                   style={{
                     height: 52,
-                    background:
-                      "linear-gradient(135deg, #1c2733, #0f1518)",
+                    background: "linear-gradient(135deg, #1c2733, #0f1518)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -1102,18 +1102,20 @@ function ExerciseVideo({
                 flexWrap: "wrap",
               }}
             >
-              <span
-                style={{
-                  padding: "4px 11px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  background: "rgba(58,141,255,0.14)",
-                  color: "var(--color-metric-blue)",
-                }}
-              >
-                {exercise.meta}
-              </span>
+              {exercise.meta ? (
+                <span
+                  style={{
+                    padding: "4px 11px",
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    background: "rgba(58,141,255,0.14)",
+                    color: "var(--color-metric-blue)",
+                  }}
+                >
+                  {exercise.meta}
+                </span>
+              ) : null}
               {exercise.tags.map((tag) => (
                 <span
                   key={tag}
@@ -1140,18 +1142,26 @@ function ExerciseVideo({
               }}
             />
 
-            {/* Technique guidance — only shown when per-exercise data is available */}
-            <p
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-                margin: 0,
-                lineHeight: 1.5,
-                fontStyle: "italic",
-              }}
-            >
-              Technique guidance coming soon — exercise-specific coaching cues will appear here.
-            </p>
+            {/* Technique guidance — real catalog content when available */}
+            {exercise.catalog ? (
+              <ExerciseCatalogDetails
+                catalog={exercise.catalog}
+                className="technique-preview-catalog"
+              />
+            ) : (
+              /* Total fallback: no catalog at all */
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--color-text-muted)",
+                  margin: 0,
+                  lineHeight: 1.5,
+                  fontStyle: "italic",
+                }}
+              >
+                {fallbackLabel ?? "Demonstration coming soon"}
+              </p>
+            )}
           </div>
 
           {/* Ready to do it? card */}
@@ -1248,12 +1258,14 @@ function deriveTodayExercises(
   if (!todayDay || todayDay.exercises.length === 0) return null;
 
   const exercises: ExerciseCardData[] = todayDay.exercises.slice(0, 6).map((ex, i) => {
+    // Resolve name from structured (snapshot.name) or legacy (name) forms
     const name =
       "snapshot" in ex
         ? (ex as { snapshot: { name: string } }).snapshot.name
         : "name" in ex
           ? (ex as { name: string }).name
           : `Exercise ${i + 1}`;
+
     const meta =
       "sets" in ex && ex.sets && "reps" in ex && ex.reps
         ? `${ex.sets}×${ex.reps}`
@@ -1261,11 +1273,16 @@ function deriveTodayExercises(
           ? `${ex.sets} sets`
           : "";
 
+    // Thread catalog metadata — structured exercises have catalog on them via
+    // resolvePlanExerciseCatalogMetadata; legacy exercises return null.
+    const catalog = resolvePlanExerciseCatalogMetadata(ex);
+
     return {
       title: name,
       meta,
       tags: [],
       poster: i,
+      catalog,
     };
   });
 
