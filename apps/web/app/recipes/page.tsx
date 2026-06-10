@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
-import { redirect } from "next/navigation";
+import { RecipesWorkspace } from "../../src/components/recipes/recipes-workspace";
 
 export default async function RecipesPage() {
   const { isAuthenticated } = await auth();
@@ -9,5 +9,5 @@ export default async function RecipesPage() {
     redirectToAppSignIn("/recipes");
   }
 
-  redirect("/nutrition");
+  return <RecipesWorkspace />;
 }

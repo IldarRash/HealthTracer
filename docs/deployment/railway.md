@@ -129,8 +129,12 @@ DATABASE_URL="postgres://..." pnpm --dir packages/db db:migrate
 **Seeds (non-production only)**
 
 ```bash
-railway run --service health-api pnpm --dir packages/db db:seed:recipes
+# All reference data at once (exercises + recipes + habit templates):
+railway run --service health-api pnpm db:seed
+# Or individually:
 railway run --service health-api pnpm --dir packages/db db:seed:exercises
+railway run --service health-api pnpm --dir packages/db db:seed:recipes
+railway run --service health-api pnpm --dir packages/db db:seed:habit-templates
 ```
 
 Only run seeds in staging or with explicit approval. Do not seed production unless intended.
