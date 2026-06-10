@@ -135,7 +135,7 @@ When refactoring, **remove the superseded path** — dead files, exports, obsole
 
 ## MCP servers
 
-`.mcp.json` (repo root) defines `context7` (current library/framework docs — consult before using unfamiliar SDK APIs) and a read-only `postgres-dev`. Both read secrets from the environment, not the file: set `CONTEXT7_API_KEY` and `DATABASE_URL` in your shell/env (the literal Context7 key currently lives only in `.cursor/mcp.json`). Keep production DB MCP disabled unless security-reviewed.
+`.mcp.json` (repo root) defines `context7` (current library/framework docs — consult before using unfamiliar SDK APIs) and a read-only `postgres-dev`. Both read secrets from the environment, not the file: set `CONTEXT7_API_KEY` and `DATABASE_URL` in your shell/env. `.cursor/mcp.json` is untracked (gitignored); create it from `.cursor/mcp.json.example`. CI runs a gitleaks secret scan. Keep production DB MCP disabled unless security-reviewed.
 
 ## Operating layer (subagents, skills, rules)
 

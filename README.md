@@ -69,6 +69,9 @@ cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 cp packages/db/.env.example packages/db/.env
 
+# MCP config — .cursor/mcp.json is gitignored; copy the template and set your env keys
+cp .cursor/mcp.json.example .cursor/mcp.json  # then export CONTEXT7_API_KEY, DATABASE_URL, GITHUB_PERSONAL_ACCESS_TOKEN
+
 pnpm db:up        # start local Postgres (docker compose)
 pnpm db:migrate   # apply Drizzle migrations (needed before seeding; pnpm dev also applies them)
 pnpm db:seed      # seed reference data: exercises, recipes, and habit templates

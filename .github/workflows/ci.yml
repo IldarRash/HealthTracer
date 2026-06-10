@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: Validate
@@ -93,3 +96,18 @@ jobs:
         run: corepack pnpm --dir apps/api exec vitest run src/database/ownership-integration.spec.ts
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/health_tracer_test
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
