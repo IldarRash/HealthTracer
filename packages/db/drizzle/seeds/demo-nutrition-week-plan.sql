@@ -8,16 +8,31 @@
 -- Only insert if user exists (safe no-op when not found).
 DO $$
 DECLARE
-  v_plan_id   uuid := 'c2000001-0000-4000-8000-000000000001';
-  v_rev_id    uuid := 'c2000001-0000-4000-8000-000000000002';
-  v_user_id   uuid := 'b0000001-0000-4000-8000-000000000001';
+  v_plan_id        uuid := 'c2000001-0000-4000-8000-000000000001';
+  v_rev_id         uuid := 'c2000001-0000-4000-8000-000000000002';
+  v_user_id        uuid := 'b0000001-0000-4000-8000-000000000001';
+  existing_plan_id uuid;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM users WHERE id = v_user_id) THEN
     RAISE NOTICE 'Demo user % not found — skipping nutrition week-plan seed.', v_user_id;
     RETURN;
   END IF;
 
-  -- Upsert plan row.
+  -- Check whether the fixed plan ID already exists (safe re-run) or whether a
+  -- *different* active plan exists for this user (which would violate the
+  -- nutrition_plans_user_active_idx unique partial index if we inserted another
+  -- active plan with a different ID).
+  SELECT id INTO existing_plan_id
+    FROM nutrition_plans
+   WHERE user_id = v_user_id AND status = 'active'
+   LIMIT 1;
+
+  IF existing_plan_id IS NOT NULL AND existing_plan_id <> v_plan_id THEN
+    RAISE NOTICE 'Demo user % already has a different active nutrition plan (%) — skipping week-plan seed.', v_user_id, existing_plan_id;
+    RETURN;
+  END IF;
+
+  -- Upsert plan row (safe: either inserts or updates the known seed plan).
   INSERT INTO nutrition_plans (id, user_id, active_revision_id, status)
   VALUES (
     v_plan_id,
