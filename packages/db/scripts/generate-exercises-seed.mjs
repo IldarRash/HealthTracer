@@ -1,8 +1,163 @@
-import { writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+/**
+ * Generates packages/db/drizzle/seeds/exercises.sql from:
+ *   1. free-exercise-db (packages/db/scripts/data/free-exercise-db.json) — ~873 records
+ *   2. Curated system_seed rows that are folded in with the same column layout
+ *
+ * Deduplication: within this file, the first occurrence of each dedupeKey wins.
+ * The SQL uses ON CONFLICT (dedupe_key) WHERE user_id IS NULL DO NOTHING so
+ * re-running the seed against an existing DB is always safe.
+ *
+ * Validation: every mapped record is checked against createExerciseInputSchema
+ * (imported dynamically from @health/types). Any violation causes a loud error
+ * so we never emit invalid SQL.
+ *
+ * Run via: node packages/db/scripts/generate-exercises-seed.mjs
+ * Or via:  pnpm --filter @health/db exec node scripts/generate-exercises-seed.mjs
+ */
+
+/* global console, process */
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** @typedef {{
+import {
+  buildExerciseDedupeKey,
+  inferExerciseModalitiesFromMovementPatterns,
+  mapFreeExerciseDbRecord,
+  normalizeExerciseName,
+} from "./free-exercise-db.mapper.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ── Load @health/types (Zod contracts) ────────────────────────────────────────
+// Dynamically import from the workspace TS source (works when vitest/ts-node transforms it).
+// Falls back to the manual structural validator below if plain node can't load the TS source.
+let createExerciseInputSchemaRaw;
+try {
+  const typesPath = resolve(
+    __dirname,
+    "../../../packages/types/src/exercises.js",
+  );
+  const mod = await import(typesPath).catch(() => null);
+  createExerciseInputSchemaRaw = mod?.createExerciseInputSchema;
+} catch {
+  // second attempt: try .ts via ts-node shim (not available in plain node)
+}
+
+// Fallback: if we cannot load the TS source, build a minimal structural
+// validator from the enums we know.  This keeps the generator runnable
+// even without ts-node while still catching basic shape errors.
+const VALID_MUSCLES = new Set([
+  "chest","back","shoulders","biceps","triceps","forearms","quads",
+  "hamstrings","glutes","calves","core","hip_flexors","lats","traps",
+]);
+const VALID_EQUIPMENT = new Set([
+  "barbell","dumbbell","kettlebell","bodyweight","cable","machine",
+  "resistance_band","bench","pull_up_bar","medicine_ball","ez_bar",
+  "smith_machine","yoga_mat","box","foam_roller","jump_rope","none",
+]);
+const VALID_PATTERNS = new Set([
+  "push","pull","squat","hinge","lunge","carry","rotation","isolation",
+  "cardio","plyometric","mobility","flexibility","balance",
+]);
+const VALID_MODALITIES = new Set([
+  "strength","athletic_performance","plyometrics","yoga","mobility",
+  "conditioning","wellness",
+]);
+const VALID_DIFFICULTY = new Set(["beginner","intermediate","advanced"]);
+
+/**
+ * Validates a mapped exercise object and throws with a descriptive message if
+ * anything is wrong.  Uses the Zod schema when available, structural check otherwise.
+ * @param {Record<string,unknown>} obj
+ * @param {string} name  Original name for error context.
+ */
+function validateMapped(obj, name) {
+  if (createExerciseInputSchemaRaw) {
+    // Zod parse (will throw ZodError with details if invalid)
+    createExerciseInputSchemaRaw.parse({
+      ...obj,
+      // createExerciseInputSchema only allows ai_generated|user_created for source;
+      // we inject free_exercise_db at the DB level so skip source validation here
+      source: "ai_generated",
+    });
+    return;
+  }
+
+  // Manual structural check
+  const errors = [];
+  if (!obj["name"] || typeof obj["name"] !== "string") errors.push("name missing");
+  if (!Array.isArray(obj["primaryMuscles"]) || obj["primaryMuscles"].length === 0)
+    errors.push("primaryMuscles empty");
+  (/** @type {string[]} */ (obj["primaryMuscles"] ?? [])).forEach((m) => {
+    if (!VALID_MUSCLES.has(m)) errors.push(`invalid muscle: ${m}`);
+  });
+  (/** @type {string[]} */ (obj["secondaryMuscles"] ?? [])).forEach((m) => {
+    if (!VALID_MUSCLES.has(m)) errors.push(`invalid secondary muscle: ${m}`);
+  });
+  if (!Array.isArray(obj["equipment"]) || obj["equipment"].length === 0)
+    errors.push("equipment empty");
+  (/** @type {string[]} */ (obj["equipment"] ?? [])).forEach((e) => {
+    if (!VALID_EQUIPMENT.has(e)) errors.push(`invalid equipment: ${e}`);
+  });
+  if (!Array.isArray(obj["movementPatterns"]) || obj["movementPatterns"].length === 0)
+    errors.push("movementPatterns empty");
+  (/** @type {string[]} */ (obj["movementPatterns"] ?? [])).forEach((p) => {
+    if (!VALID_PATTERNS.has(p)) errors.push(`invalid pattern: ${p}`);
+  });
+  if (!Array.isArray(obj["modalities"]) || obj["modalities"].length === 0)
+    errors.push("modalities empty");
+  (/** @type {string[]} */ (obj["modalities"] ?? [])).forEach((m) => {
+    if (!VALID_MODALITIES.has(m)) errors.push(`invalid modality: ${m}`);
+  });
+  if (!VALID_DIFFICULTY.has(/** @type {string} */ (obj["difficulty"])))
+    errors.push(`invalid difficulty: ${obj["difficulty"]}`);
+  if (!Array.isArray(obj["instructions"]) || obj["instructions"].length === 0)
+    errors.push("instructions empty");
+  if (!Array.isArray(obj["safetyNotes"]) || obj["safetyNotes"].length === 0)
+    errors.push("safetyNotes empty");
+
+  if (errors.length > 0) {
+    throw new Error(`Validation failed for "${name}": ${errors.join("; ")}`);
+  }
+}
+
+// ── SQL helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Escapes a string for use as a SQL single-quoted literal.
+ * @param {string} value
+ * @returns {string}
+ */
+function sqlString(value) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
+ * Serializes an array to a JSON SQL string literal.
+ * @param {unknown[]} arr
+ * @returns {string}
+ */
+function sqlJson(arr) {
+  return sqlString(JSON.stringify(arr));
+}
+
+/**
+ * Generates a deterministic UUID-like id for a free-exercise-db row.
+ * Pattern: f0000000-0000-4000-8000-NNNNNNNNNNNN where N is a 12-digit zero-padded
+ * sequential index. These UUIDs are stable across regenerations as long as
+ * the source array order doesn't change.
+ * @param {number} index
+ * @returns {string}
+ */
+function freeExerciseDbId(index) {
+  const n = String(index).padStart(12, "0");
+  return `f0000000-0000-4000-8000-${n}`;
+}
+
+// ── Curated system_seed rows (previously hardcoded, kept verbatim) ─────────────
+// These are folded first so their dedupeKeys win over free-exercise-db duplicates.
+/** @type {Array<{
  *   id: string;
  *   name: string;
  *   aliases: string[];
@@ -13,10 +168,8 @@ import { fileURLToPath } from "node:url";
  *   difficulty: string;
  *   instructions: string[];
  *   safety: string[];
- * }} SeedExercise */
-
-/** @type {SeedExercise[]} */
-const exercises = [
+ * }>} */
+const CURATED = [
   {
     id: "b1000001-0000-4000-8000-000000000001",
     name: "Barbell Bench Press",
@@ -741,48 +894,116 @@ const exercises = [
   },
 ];
 
-function normalizeExerciseName(name) {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/[-_]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+/** Builds the dedupeKey for a curated row using the shared mapper helpers. */
+function buildCuratedDedupeKey(name, equipment, primary) {
+  return buildExerciseDedupeKey({
+    normalizedName: normalizeExerciseName(name),
+    equipment,
+    primaryMuscles: primary,
+  });
 }
 
-function buildExerciseDedupeKey(name, equipment, primary) {
-  return `${normalizeExerciseName(name)}::${[...equipment].sort().join("|")}::${[...primary].sort().join("|")}`;
-}
-
-function sqlString(value) {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-const values = exercises
-  .map(
-    (exercise) => `(
-  ${sqlString(exercise.id)},
-  ${sqlString(exercise.name)},
-  ${sqlString(normalizeExerciseName(exercise.name))},
-  ${sqlString(JSON.stringify(exercise.aliases))},
-  ${sqlString(JSON.stringify(exercise.primary))},
-  ${sqlString(JSON.stringify(exercise.secondary))},
-  ${sqlString(JSON.stringify(exercise.equipment))},
-  ${sqlString(JSON.stringify(exercise.patterns))},
-  ${sqlString(exercise.difficulty)},
-  ${sqlString(JSON.stringify(exercise.instructions))},
-  ${sqlString(JSON.stringify(exercise.safety))},
+// ── Build curated SQL rows ────────────────────────────────────────────────────
+/** @type {string[]} */
+const curatedRows = CURATED.map(
+  (ex) => `(
+  ${sqlString(ex.id)},
+  ${sqlString(ex.name)},
+  ${sqlString(normalizeExerciseName(ex.name))},
+  ${sqlJson(ex.aliases)},
+  ${sqlJson(ex.primary)},
+  ${sqlJson(ex.secondary)},
+  ${sqlJson(ex.equipment)},
+  ${sqlJson(ex.patterns)},
+  ${sqlJson(inferExerciseModalitiesFromMovementPatterns(ex.patterns).slice(0, 3))},
+  ${sqlString(ex.difficulty)},
+  ${sqlJson(ex.instructions)},
+  ${sqlJson(ex.safety)},
+  ${sqlJson({ refs: [], fallbackLabel: null })},
   'system_seed',
   'validated',
   'active',
   NULL,
-  ${sqlString(buildExerciseDedupeKey(exercise.name, exercise.equipment, exercise.primary))}
+  ${sqlString(buildCuratedDedupeKey(ex.name, ex.equipment, ex.primary))}
 )`,
-  )
-  .join(",\n");
+);
 
-const seedSql = `-- Curated starter exercise catalog for local verification and AI planning.
+// ── Load and map free-exercise-db ─────────────────────────────────────────────
+const dataPath = join(__dirname, "data/free-exercise-db.json");
+const rawData = JSON.parse(readFileSync(dataPath, "utf8"));
+
+/** @type {Map<string, true>} dedupeKeys already registered */
+const seenDedupeKeys = new Map();
+
+// Register curated keys first so they win
+for (const ex of CURATED) {
+  const key = buildCuratedDedupeKey(ex.name, ex.equipment, ex.primary);
+  seenDedupeKeys.set(key, true);
+}
+
+let mappedCount = 0;
+let skippedNull = 0;
+let skippedDupe = 0;
+/** @type {string[]} */
+const freeDbRows = [];
+
+for (let i = 0; i < rawData.length; i++) {
+  const record = rawData[i];
+  const mapped = mapFreeExerciseDbRecord(record);
+
+  if (!mapped) {
+    skippedNull++;
+    continue;
+  }
+
+  // Validate against schema (throws on error, fails the generator loudly)
+  try {
+    validateMapped(mapped, mapped.name);
+  } catch (err) {
+    console.error(`[VALIDATION ERROR] ${err.message}`);
+    process.exit(1);
+  }
+
+  const { dedupeKey } = mapped;
+  if (seenDedupeKeys.has(dedupeKey)) {
+    skippedDupe++;
+    continue;
+  }
+  seenDedupeKeys.set(dedupeKey, true);
+  mappedCount++;
+
+  const id = freeExerciseDbId(i + 1);
+  freeDbRows.push(`(
+  ${sqlString(id)},
+  ${sqlString(mapped.name)},
+  ${sqlString(mapped.normalizedName)},
+  ${sqlJson(mapped.aliases)},
+  ${sqlJson(mapped.primaryMuscles)},
+  ${sqlJson(mapped.secondaryMuscles)},
+  ${sqlJson(mapped.equipment)},
+  ${sqlJson(mapped.movementPatterns)},
+  ${sqlJson(mapped.modalities)},
+  ${sqlString(mapped.difficulty)},
+  ${sqlJson(mapped.instructions)},
+  ${sqlJson(mapped.safetyNotes)},
+  ${sqlJson(mapped.media)},
+  'free_exercise_db',
+  'validated',
+  'active',
+  NULL,
+  ${sqlString(dedupeKey)}
+)`);
+}
+
+// ── Assemble SQL ──────────────────────────────────────────────────────────────
+const allValues = [...curatedRows, ...freeDbRows].join(",\n");
+const totalRows = CURATED.length + mappedCount;
+
+const seedSql = `-- Exercise catalog seed.
+-- Sources: curated system_seed rows (${CURATED.length}) + free-exercise-db (${mappedCount} mapped).
+-- Total rows: ${totalRows}
+-- free-exercise-db: yuhonas/free-exercise-db, Unlicense / Public Domain
+-- Regenerate via: node packages/db/scripts/generate-exercises-seed.mjs
 INSERT INTO exercises (
   id,
   name,
@@ -792,20 +1013,28 @@ INSERT INTO exercises (
   secondary_muscles,
   equipment,
   movement_patterns,
+  modalities,
   difficulty,
   instructions,
   safety_notes,
+  media,
   source,
   validation_status,
   status,
   user_id,
   dedupe_key
 ) VALUES
-${values}
-ON CONFLICT (id) DO NOTHING;
+${allValues}
+ON CONFLICT (dedupe_key) WHERE user_id IS NULL DO NOTHING;
 `;
 
-const outputPath = join(dirname(fileURLToPath(import.meta.url)), "../drizzle/seeds/exercises.sql");
+const outputPath = join(__dirname, "../drizzle/seeds/exercises.sql");
 writeFileSync(outputPath, seedSql);
-// eslint-disable-next-line no-undef
-console.log(`Wrote ${exercises.length} exercises to ${outputPath}`);
+
+console.log(`\nExercise seed generation complete.`);
+console.log(`  Curated (system_seed):   ${CURATED.length}`);
+console.log(`  free-exercise-db mapped: ${mappedCount}`);
+console.log(`  free-exercise-db skipped (unmappable): ${skippedNull}`);
+console.log(`  free-exercise-db skipped (duplicate dedupeKey): ${skippedDupe}`);
+console.log(`  Total rows in SQL:       ${totalRows}`);
+console.log(`  Wrote → ${outputPath}`);

@@ -6,6 +6,7 @@ import {
   canDismissRecommendation,
   canLogRecommendation,
   formatIngredientLine,
+  formatMacroConfidenceHint,
   formatMacroEstimateSummary,
   formatMealTypeLabel,
   formatPrepTime,
@@ -13,9 +14,11 @@ import {
   formatRecipeProviderLabel,
   getLimitedReasonCopy,
   isRecommendationVisible,
+  isUserOwnedRecipe,
   RECIPE_CONFIDENCE_LABELS,
   recommendationStatusLabel,
   recipeConfidenceNotice,
+  rescaleMacros,
   sortRecommendationsByShownAt,
 } from "./recipes-ui-state.js";
 
@@ -139,5 +142,99 @@ describe("recipes UI state", () => {
     const sorted = sortRecommendationsByShownAt(recommendations);
     expect(sorted.map((entry) => entry.id)).toEqual(["2", "3", "1"]);
     expect(recommendations.filter(isRecommendationVisible)).toHaveLength(2);
+  });
+
+  describe("isUserOwnedRecipe", () => {
+    it("returns true when source is user_created", () => {
+      expect(isUserOwnedRecipe({ source: "user_created" })).toBe(true);
+    });
+
+    it("returns false for catalog and provider sources", () => {
+      expect(isUserOwnedRecipe({ source: "Curated catalog" })).toBe(false);
+      expect(isUserOwnedRecipe({ source: "external_provider" })).toBe(false);
+      expect(isUserOwnedRecipe({ source: "seed_catalog" })).toBe(false);
+    });
+  });
+
+  describe("rescaleMacros", () => {
+    const baseMacros = {
+      estimatedCalories: 400,
+      proteinGrams: 30,
+      carbsGrams: 50,
+      fatGrams: 10,
+      fiberGrams: 5,
+    };
+
+    it("doubles all macros when target is 2x base servings", () => {
+      const result = rescaleMacros(baseMacros, 1, 2);
+      expect(result.estimatedCalories).toBe(800);
+      expect(result.proteinGrams).toBe(60);
+      expect(result.carbsGrams).toBe(100);
+      expect(result.fatGrams).toBe(20);
+      expect(result.fiberGrams).toBe(10);
+    });
+
+    it("halves macros when target is 0.5x base servings", () => {
+      const result = rescaleMacros(baseMacros, 2, 1);
+      expect(result.estimatedCalories).toBe(200);
+      expect(result.proteinGrams).toBe(15);
+    });
+
+    it("returns base macros unchanged when servings are equal", () => {
+      const result = rescaleMacros(baseMacros, 4, 4);
+      expect(result.estimatedCalories).toBe(400);
+    });
+
+    it("propagates null fiberGrams without crashing", () => {
+      const noFiber = { ...baseMacros, fiberGrams: null };
+      const result = rescaleMacros(noFiber, 1, 2);
+      expect(result.fiberGrams).toBeNull();
+    });
+
+    it("returns base unchanged for zero or negative serving counts", () => {
+      const result = rescaleMacros(baseMacros, 0, 2);
+      expect(result.estimatedCalories).toBe(400);
+      const result2 = rescaleMacros(baseMacros, 1, 0);
+      expect(result2.estimatedCalories).toBe(400);
+    });
+
+    it("always returns at least 1 calorie per serving", () => {
+      const tiny = { ...baseMacros, estimatedCalories: 1 };
+      const result = rescaleMacros(tiny, 100, 1);
+      expect(result.estimatedCalories).toBeGreaterThanOrEqual(1);
+    });
+
+    it("per-serving baseline (baseServings=1) scales linearly with target servings", () => {
+      // Regression: the draft defaults portionServings=1 and calls rescaleMacros(perServing, 1, n).
+      // At target=1 (default), logged calories must equal exactly one serving.
+      const perServing = { estimatedCalories: 600, proteinGrams: 50, carbsGrams: 70, fatGrams: 15, fiberGrams: 8 };
+      expect(rescaleMacros(perServing, 1, 1).estimatedCalories).toBe(600);
+      expect(rescaleMacros(perServing, 1, 2).estimatedCalories).toBe(1200);
+      expect(rescaleMacros(perServing, 1, 3).estimatedCalories).toBe(1800);
+      expect(rescaleMacros(perServing, 1, 0.5).estimatedCalories).toBe(300);
+      // Protein/carbs/fat also scale linearly
+      expect(rescaleMacros(perServing, 1, 2).proteinGrams).toBe(100);
+      expect(rescaleMacros(perServing, 1, 2).carbsGrams).toBe(140);
+      expect(rescaleMacros(perServing, 1, 2).fatGrams).toBe(30);
+    });
+  });
+
+  describe("formatMacroConfidenceHint", () => {
+    it("returns non-empty hints for all confidence levels", () => {
+      expect(formatMacroConfidenceHint("high").length).toBeGreaterThan(0);
+      expect(formatMacroConfidenceHint("medium").length).toBeGreaterThan(0);
+      expect(formatMacroConfidenceHint("low").length).toBeGreaterThan(0);
+    });
+
+    it("low confidence copy contains edit/review language", () => {
+      const hint = formatMacroConfidenceHint("low");
+      expect(hint.toLowerCase()).toMatch(/edit|review|adjust/);
+    });
+
+    it("no confidence hint implies verified nutrition facts", () => {
+      for (const level of ["high", "medium", "low"] as const) {
+        expect(formatMacroConfidenceHint(level)).not.toMatch(/verified.*fact/i);
+      }
+    });
   });
 });

@@ -5,6 +5,10 @@ export const GENERIC_RECIPE_CATALOG_CATEGORIES = [
   "Seafood",
   "Beef",
   "Breakfast",
+  "Vegan",
+  "Side",
+  "Pork",
+  "Lamb",
 ] as const;
 
 export type GenericRecipeCatalogCategory =

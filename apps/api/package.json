@@ -16,6 +16,7 @@
     "@health/ai-behavior": "workspace:*",
     "@health/config": "workspace:*",
     "@health/db": "workspace:^",
+    "@health/nutrition-macros": "workspace:*",
     "@health/types": "workspace:*",
     "@nestjs/common": "latest",
     "@nestjs/core": "latest",

@@ -116,6 +116,10 @@ export function RecipeRecommendationCard({
         <RecipeNutritionLogDraft
           recommendationId={recommendation.id}
           recipeName={recipe?.name ?? "Recipe"}
+          recipeCalories={recipe?.macroEstimates.estimatedCalories}
+          recipeProtein={recipe?.macroEstimates.proteinGrams}
+          recipeCarbs={recipe?.macroEstimates.carbsGrams}
+          recipeFat={recipe?.macroEstimates.fatGrams}
           onClose={onCloseLog}
           onAccepted={onCloseLog}
         />

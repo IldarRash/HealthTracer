@@ -4,7 +4,9 @@ import { GENERIC_RECIPE_CATALOG_CATEGORIES } from "./generic-recipe-catalog-cate
 import type { ProviderRecipeDraft } from "./recipe-catalog-provider.js";
 import type { RecommendationLookupKey } from "./recipes.repository.js";
 import { RecipesService } from "./recipes.service.js";
-import { APPROXIMATE_MACRO_SOURCE } from "./themealdb-recipe.mapper.js";
+
+const USDA_MACRO_SOURCE =
+  "TheMealDB catalog — macros computed from USDA FoodData Central (estimates, not verified nutrition facts)";
 
 const auth = {
   clerkUserId: "user_123",
@@ -94,16 +96,16 @@ function createProviderDraft(overrides: Partial<ProviderRecipeDraft> = {}): Prov
     provider: "themealdb",
     externalId: "52772",
     name: "Vegetable curry",
-    description: "Vegetable curry from TheMealDB (Vegetarian). Macro values are approximate estimates.",
+    description: "Vegetable curry from TheMealDB (Vegetarian). Macro values computed from USDA FoodData Central (estimates, not verified nutrition facts).",
     ingredients: [{ name: "Mixed vegetables", quantity: null, unit: null }],
     preparationSteps: ["Simmer vegetables with spices."],
     servings: 1,
     macroEstimates: {
-      estimatedCalories: 550,
-      proteinGrams: 25,
-      carbsGrams: 45,
-      fatGrams: 20,
-      fiberGrams: 8,
+      estimatedCalories: 320,
+      proteinGrams: 12,
+      carbsGrams: 38,
+      fatGrams: 10,
+      fiberGrams: 6,
     },
     mealTypes: ["lunch", "dinner"],
     tags: ["vegetarian"],
@@ -111,7 +113,7 @@ function createProviderDraft(overrides: Partial<ProviderRecipeDraft> = {}): Prov
     allergenTags: [],
     prepMinutes: null,
     cookMinutes: null,
-    source: APPROXIMATE_MACRO_SOURCE,
+    source: USDA_MACRO_SOURCE,
     confidence: "low",
     provenance: {
       source: "external_provider",
@@ -153,6 +155,11 @@ function createService({
       findOpenRecommendationsByKeys: async () => [],
       upsertProviderRecipes: async () => [],
       updateRecommendationStatus: async () => null,
+      findUserRecipeByDedupeKey: async () => null,
+      findOwnedRecipeById: async () => null,
+      createUserRecipe: async () => null,
+      updateUserRecipe: async () => null,
+      softDeleteUserRecipe: async () => null,
       ...recipesRepository,
     } as never,
     {
@@ -686,7 +693,7 @@ describe("RecipesService", () => {
     expect(result.limitedReason).toBeNull();
     expect(result.recommendations).toHaveLength(1);
     expect(result.recommendations[0]?.recipeId).toBe(providerRecipeId);
-    expect(result.recommendations[0]?.recipe?.source).toBe(APPROXIMATE_MACRO_SOURCE);
+    expect(result.recommendations[0]?.recipe?.source).toBe(USDA_MACRO_SOURCE);
     expect(result.recommendations[0]?.recipe?.confidence).toBe("low");
     expect(result.recommendations[0]?.recipe?.provenance).toMatchObject({
       source: "external_provider",
@@ -720,9 +727,11 @@ describe("RecipesService", () => {
     await service.generateCurrentRecommendations(auth);
 
     expect(captured.categories).toEqual(GENERIC_RECIPE_CATALOG_CATEGORIES);
-    expect(JSON.stringify(captured.categories)).not.toMatch(
-      /peanut|vegan|user|email|2100|150|allerg/i,
-    );
+    // User health data (constraints, email, calorie goals) must never leak into
+    // provider category fetch calls.  "Vegan" is a legitimate TheMealDB catalog
+    // category; the check is scoped to the user's specific constraint value "peanuts".
+    const categoriesJson = JSON.stringify(captured.categories);
+    expect(categoriesJson).not.toMatch(/peanut|user|email|2100|150|allerg/i);
   });
 
   it("falls back to the seeded catalog when the external provider fails", async () => {
@@ -1165,5 +1174,316 @@ describe("RecipesService", () => {
 
     expect(findUserId).toBe(user.id);
     expect(createCalled).toBe(false);
+  });
+});
+
+describe("RecipesService — user-authored recipes", () => {
+  const newRecipeInput = {
+    name: "Lentil power bowl",
+    description: "A balanced bowl.",
+    ingredients: [{ name: "Lentils", quantity: 1, unit: "cup" }],
+    preparationSteps: ["Cook lentils.", "Add vegetables."],
+    servings: 2,
+    mealTypes: ["lunch" as const],
+    tags: ["high-protein"],
+    restrictionTags: ["vegan"],
+    allergenTags: [],
+  };
+
+  function createUserRecipeRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "a2000001-0000-4000-8000-000000000001",
+      name: "Lentil power bowl",
+      description: "A balanced bowl.",
+      ingredients: [{ name: "Lentils", quantity: 1, unit: "cup" }],
+      preparationSteps: ["Cook lentils.", "Add vegetables."],
+      servings: 2,
+      estimatedCalories: 180,
+      proteinGrams: 13,
+      carbsGrams: 29,
+      fatGrams: 1,
+      fiberGrams: 7,
+      mealTypes: ["lunch"],
+      tags: ["high-protein"],
+      restrictionTags: ["vegan"],
+      allergenTags: [],
+      prepMinutes: null,
+      cookMinutes: null,
+      source: "user_created",
+      provider: null,
+      externalId: null,
+      confidence: "medium",
+      provenance: null,
+      status: "active",
+      userId: user.id,
+      dedupeKey: "lentil power bowl",
+      createdAt: new Date("2026-06-09T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-09T10:00:00.000Z"),
+      ...overrides,
+    };
+  }
+
+  it("computes macros automatically when macroEstimates are omitted", async () => {
+    let createInput: unknown;
+    const service = createService({
+      recipesRepository: {
+        createUserRecipe: async (input: unknown) => {
+          createInput = input;
+          return createUserRecipeRow();
+        },
+      },
+    });
+
+    const result = await service.createRecipe(auth, newRecipeInput);
+
+    expect(result.name).toBe("Lentil power bowl");
+    expect((createInput as { confidence: string }).confidence).toMatch(/^(high|medium|low)$/);
+    // macros were computed, not provided
+    expect((createInput as { macroEstimates: { estimatedCalories: number } }).macroEstimates.estimatedCalories).toBeGreaterThan(0);
+  });
+
+  it("uses provided macroEstimates and marks confidence high", async () => {
+    let createInput: unknown;
+    const service = createService({
+      recipesRepository: {
+        createUserRecipe: async (input: unknown) => {
+          createInput = input;
+          return createUserRecipeRow({ estimatedCalories: 500, confidence: "high" });
+        },
+      },
+    });
+
+    await service.createRecipe(auth, {
+      ...newRecipeInput,
+      macroEstimates: {
+        estimatedCalories: 500,
+        proteinGrams: 30,
+        carbsGrams: 60,
+        fatGrams: 10,
+      },
+    });
+
+    expect((createInput as { confidence: string }).confidence).toBe("high");
+    expect((createInput as { macroEstimates: { estimatedCalories: number } }).macroEstimates.estimatedCalories).toBe(500);
+  });
+
+  it("returns the existing recipe on dedupe collision without creating a duplicate", async () => {
+    const existingRow = createUserRecipeRow();
+    let createCalled = false;
+    const service = createService({
+      recipesRepository: {
+        findUserRecipeByDedupeKey: async () => existingRow,
+        createUserRecipe: async () => {
+          createCalled = true;
+          return createUserRecipeRow();
+        },
+      },
+    });
+
+    const result = await service.createRecipe(auth, newRecipeInput);
+
+    expect(createCalled).toBe(false);
+    expect(result.id).toBe(existingRow.id);
+  });
+
+  it("recomputes macros on update when ingredients change without explicit macroEstimates", async () => {
+    const existingRow = createUserRecipeRow();
+    let updatedInput: unknown;
+    const service = createService({
+      recipesRepository: {
+        findOwnedRecipeById: async () => existingRow,
+        updateUserRecipe: async (_recipeId: string, _userId: string, input: unknown) => {
+          updatedInput = input;
+          return createUserRecipeRow();
+        },
+      },
+    });
+
+    await service.updateRecipe(auth, existingRow.id, {
+      ingredients: [{ name: "Chicken breast", quantity: 200, unit: "g" }],
+    });
+
+    // Macros were recomputed because ingredients changed without macroEstimates provided
+    expect((updatedInput as { macroEstimates?: { estimatedCalories: number } }).macroEstimates?.estimatedCalories).toBeGreaterThan(0);
+  });
+
+  it("does not recompute macros on update when neither ingredients nor servings change", async () => {
+    const existingRow = createUserRecipeRow();
+    let updatedInput: unknown;
+    const service = createService({
+      recipesRepository: {
+        findOwnedRecipeById: async () => existingRow,
+        updateUserRecipe: async (_recipeId: string, _userId: string, input: unknown) => {
+          updatedInput = input;
+          return createUserRecipeRow({ name: "Updated Bowl" });
+        },
+      },
+    });
+
+    await service.updateRecipe(auth, existingRow.id, { name: "Updated Bowl" });
+
+    expect((updatedInput as { macroEstimates?: unknown }).macroEstimates).toBeUndefined();
+  });
+
+  it("uses provided macroEstimates on update and marks confidence high", async () => {
+    const existingRow = createUserRecipeRow();
+    let updatedInput: unknown;
+    const service = createService({
+      recipesRepository: {
+        findOwnedRecipeById: async () => existingRow,
+        updateUserRecipe: async (_recipeId: string, _userId: string, input: unknown) => {
+          updatedInput = input;
+          return createUserRecipeRow({ estimatedCalories: 700, confidence: "high" });
+        },
+      },
+    });
+
+    await service.updateRecipe(auth, existingRow.id, {
+      macroEstimates: {
+        estimatedCalories: 700,
+        proteinGrams: 50,
+        carbsGrams: 80,
+        fatGrams: 15,
+      },
+    });
+
+    expect((updatedInput as { confidence: string }).confidence).toBe("high");
+    expect((updatedInput as { macroEstimates: { estimatedCalories: number } }).macroEstimates.estimatedCalories).toBe(700);
+  });
+
+  it("throws NotFoundException on update when recipe does not belong to the user", async () => {
+    const service = createService({
+      recipesRepository: {
+        findOwnedRecipeById: async () => null,
+      },
+    });
+
+    await expect(
+      service.updateRecipe(auth, "a2000001-0000-4000-8000-000000000001", { name: "Bad update" }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("throws NotFoundException on delete when recipe does not belong to the user", async () => {
+    const service = createService({
+      recipesRepository: {
+        findOwnedRecipeById: async () => null,
+      },
+    });
+
+    await expect(
+      service.deleteRecipe(auth, "a2000001-0000-4000-8000-000000000001"),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("soft-deletes an owned recipe", async () => {
+    const existingRow = createUserRecipeRow();
+    let softDeletedId: string | undefined;
+    const service = createService({
+      recipesRepository: {
+        findOwnedRecipeById: async () => existingRow,
+        softDeleteUserRecipe: async (recipeId: string) => {
+          softDeletedId = recipeId;
+          return createUserRecipeRow({ status: "archived" });
+        },
+      },
+    });
+
+    await service.deleteRecipe(auth, existingRow.id);
+
+    expect(softDeletedId).toBe(existingRow.id);
+  });
+
+  it("listRecipes passes userId so user recipes are included in results", async () => {
+    let capturedUserId: string | null | undefined;
+    const userRecipeRow = createUserRecipeRow();
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async (_filters: unknown, userId: string | null | undefined) => {
+          capturedUserId = userId;
+          return [createRecipeRow(), userRecipeRow];
+        },
+      },
+    });
+
+    const result = await service.listRecipes({}, auth);
+
+    expect(capturedUserId).toBe(user.id);
+    expect(result.recipes).toHaveLength(2);
+  });
+
+  it("listRecipes without auth returns only system/provider recipes (no userId passed)", async () => {
+    let capturedUserId: string | null | undefined;
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async (_filters: unknown, userId: string | null | undefined) => {
+          capturedUserId = userId;
+          return [createRecipeRow()];
+        },
+      },
+    });
+
+    const result = await service.listRecipes({});
+
+    expect(capturedUserId).toBeNull();
+    expect(result.recipes).toHaveLength(1);
+  });
+
+  describe("computeMacros", () => {
+    it("returns macro estimates for a single well-known ingredient", () => {
+      const service = createService();
+      const result = service.computeMacros({
+        ingredients: [{ name: "chicken breast", quantity: 2, unit: "fillet" }],
+        servings: 1,
+      });
+
+      expect(result.estimatedCalories).toBeGreaterThan(0);
+      expect(result.proteinGrams).toBeGreaterThanOrEqual(0);
+      expect(result.carbsGrams).toBeGreaterThanOrEqual(0);
+      expect(result.fatGrams).toBeGreaterThanOrEqual(0);
+      expect(["high", "medium", "low"]).toContain(result.confidence);
+    });
+
+    it("returns low confidence when ingredients are completely unknown", () => {
+      const service = createService();
+      const result = service.computeMacros({
+        ingredients: [{ name: "zx99fantasyfood", quantity: 1, unit: null }],
+        servings: 1,
+      });
+
+      expect(result.confidence).toBe("low");
+      expect(result.estimatedCalories).toBeGreaterThan(0);
+    });
+
+    it("scales results by servings count", () => {
+      const service = createService();
+      const oneServing = service.computeMacros({
+        ingredients: [{ name: "lentils", quantity: 1, unit: "cup" }],
+        servings: 1,
+      });
+      const twoServings = service.computeMacros({
+        ingredients: [{ name: "lentils", quantity: 1, unit: "cup" }],
+        servings: 2,
+      });
+
+      expect(twoServings.estimatedCalories).toBeLessThan(oneServing.estimatedCalories + 5);
+      expect(twoServings.estimatedCalories).toBeGreaterThanOrEqual(
+        Math.floor(oneServing.estimatedCalories / 2) - 5,
+      );
+    });
+
+    it("is pure and synchronous — no repository calls needed", () => {
+      const service = createService({
+        recipesRepository: {
+          listActiveRecipes: async () => { throw new Error("should not be called"); },
+        },
+      });
+
+      expect(() =>
+        service.computeMacros({
+          ingredients: [{ name: "oats", quantity: 0.5, unit: "cup" }],
+          servings: 1,
+        }),
+      ).not.toThrow();
+    });
   });
 });

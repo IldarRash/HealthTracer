@@ -2,6 +2,7 @@ import type {
   Recipe,
   RecipeConfidenceBand,
   RecipeIngredient,
+  RecipeMacroEstimates,
   RecipeMealType,
   RecipeProvenanceLabel,
   RecipeRecommendationLimitedReason,
@@ -30,7 +31,7 @@ export function formatRecipeProviderLabel(recipe: Pick<Recipe, "provider" | "sou
 }
 
 export function formatRecipeProvenanceMeta(recipe: Pick<Recipe, "provenance">): string {
-  const label = RECIPE_PROVENANCE_LABELS[recipe.provenance.source];
+  const label = RECIPE_PROVENANCE_LABELS[recipe.provenance.source] ?? recipe.provenance.source;
   const externalId = recipe.provenance.externalId;
 
   return externalId ? `${label} · ID ${externalId}` : label;
@@ -180,4 +181,53 @@ export function isRecommendationVisible(
   recommendation: Pick<UserRecipeRecommendation, "status">,
 ): boolean {
   return recommendation.status === "pending" || recommendation.status === "accepted";
+}
+
+/**
+ * Returns true when the recipe was authored by the current user.
+ * User-authored recipes have `source === "user_created"` in the backend DB row,
+ * which surfaces on the `Recipe` type's `source` field.
+ */
+export function isUserOwnedRecipe(recipe: Pick<Recipe, "source">): boolean {
+  return recipe.source === "user_created";
+}
+
+/**
+ * Proportionally rescale macro estimates from `baseServings` to `targetServings`.
+ * This is a pure, deterministic client-side estimate — not a verified nutrition fact.
+ * Returns rounded integer values matching `RecipeMacroEstimates`.
+ */
+export function rescaleMacros(
+  base: RecipeMacroEstimates,
+  baseServings: number,
+  targetServings: number,
+): RecipeMacroEstimates {
+  if (baseServings <= 0 || targetServings <= 0) {
+    return base;
+  }
+
+  const factor = targetServings / baseServings;
+
+  return {
+    estimatedCalories: Math.max(1, Math.round(base.estimatedCalories * factor)),
+    proteinGrams: Math.round(base.proteinGrams * factor),
+    carbsGrams: Math.round(base.carbsGrams * factor),
+    fatGrams: Math.round(base.fatGrams * factor),
+    fiberGrams:
+      base.fiberGrams != null ? Math.round(base.fiberGrams * factor) : base.fiberGrams,
+  };
+}
+
+/**
+ * Format a confidence band as a user-facing hint for macro estimates in the log draft.
+ */
+export function formatMacroConfidenceHint(confidence: RecipeConfidenceBand): string {
+  switch (confidence) {
+    case "high":
+      return "Macro values are reasonable estimates from USDA data. Edit as needed.";
+    case "medium":
+      return "These are rough estimates. Review and adjust before logging.";
+    case "low":
+      return "Low-confidence estimate — ingredient quantities may be imprecise. Edit before logging.";
+  }
 }

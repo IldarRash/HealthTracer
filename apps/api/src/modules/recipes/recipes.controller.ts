@@ -1,9 +1,12 @@
 import {
+  computeRecipeMacrosInputSchema,
+  createRecipeInputSchema,
   createRecipeNutritionIncidentProposalInputSchema,
   recipeListQuerySchema,
+  updateRecipeInputSchema,
   updateRecipeRecommendationStatusSchema,
 } from "@health/types";
-import { Controller, Get, Param, Patch, Post, Query, Body, UseGuards } from "@nestjs/common";
+import { Controller, Delete, Get, Param, Patch, Post, Query, Body, UseGuards } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { ClerkAuthGuard } from "../../auth.guard.js";
 import { parseBody } from "../../common/zod.js";
@@ -37,8 +40,13 @@ export class RecipesController {
   constructor(private readonly recipesService: RecipesService) {}
 
   @Get()
-  listRecipes(@Query() query: Record<string, unknown>) {
-    return this.recipesService.listRecipes(parseRecipeListQuery(query));
+  listRecipes(@CurrentAuth() auth: ClerkAuthContext, @Query() query: Record<string, unknown>) {
+    return this.recipesService.listRecipes(parseRecipeListQuery(query), auth);
+  }
+
+  @Post()
+  createRecipe(@CurrentAuth() auth: ClerkAuthContext, @Body() body: unknown) {
+    return this.recipesService.createRecipe(auth, parseBody(createRecipeInputSchema, body));
   }
 
   @Get("recommendations")
@@ -75,6 +83,28 @@ export class RecipesController {
       recommendationId,
       parseBody(createRecipeNutritionIncidentProposalInputSchema, body ?? {}),
     );
+  }
+
+  @Post("compute-macros")
+  computeMacros(@CurrentAuth() _auth: ClerkAuthContext, @Body() body: unknown) {
+    return this.recipesService.computeMacros(parseBody(computeRecipeMacrosInputSchema, body));
+  }
+
+  @Patch(":recipeId")
+  updateRecipe(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Param("recipeId") recipeId: string,
+    @Body() body: unknown,
+  ) {
+    return this.recipesService.updateRecipe(auth, recipeId, parseBody(updateRecipeInputSchema, body));
+  }
+
+  @Delete(":recipeId")
+  deleteRecipe(
+    @CurrentAuth() auth: ClerkAuthContext,
+    @Param("recipeId") recipeId: string,
+  ) {
+    return this.recipesService.deleteRecipe(auth, recipeId);
   }
 
   @Get(":recipeId")

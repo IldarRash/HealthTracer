@@ -79,6 +79,47 @@ describe("exercise catalog UI state", () => {
     expect(getExerciseMediaFallbackLabel(catalogExercise.catalog!)).toBe(
       "Demonstration coming soon",
     );
+    // No renderable images in the fixture → mediaImages empty, fallback shown.
+    expect(view.mediaImages).toHaveLength(0);
+    expect(view.mediaFallbackLabel).toBe("Demonstration coming soon");
+  });
+
+  it("populates mediaImages from image refs with URLs, capped at 3", () => {
+    const catalogWithMedia = {
+      ...catalogExercise.catalog!,
+      media: {
+        refs: [
+          { kind: "image" as const, url: "https://example.com/img1.gif", label: "Start" },
+          { kind: "image" as const, url: "https://example.com/img2.gif", label: "End" },
+          { kind: "video" as const, url: "https://example.com/v.mp4" },
+          { kind: "image" as const, url: "https://example.com/img3.gif" },
+          // 4th image beyond cap of 3 — should be excluded
+          { kind: "image" as const, url: "https://example.com/img4.gif" },
+        ],
+        fallbackLabel: "Demonstration coming soon",
+      },
+    };
+    const view = buildExerciseCatalogDetailView(catalogWithMedia);
+    // Only image refs with URLs, max 3
+    expect(view.mediaImages).toHaveLength(3);
+    expect(view.mediaImages[0]).toEqual({ url: "https://example.com/img1.gif", label: "Start" });
+    expect(view.mediaImages[1]).toEqual({ url: "https://example.com/img2.gif", label: "End" });
+    expect(view.mediaImages[2]).toEqual({ url: "https://example.com/img3.gif", label: undefined });
+    // fallback suppressed when images are present
+    expect(view.mediaFallbackLabel).toBeNull();
+  });
+
+  it("excludes image refs that have no URL", () => {
+    const catalogWithNoUrlRef = {
+      ...catalogExercise.catalog!,
+      media: {
+        refs: [{ kind: "image" as const, label: "No url yet" }],
+        fallbackLabel: "Demonstration coming soon",
+      },
+    };
+    const view = buildExerciseCatalogDetailView(catalogWithNoUrlRef);
+    expect(view.mediaImages).toHaveLength(0);
+    expect(view.mediaFallbackLabel).toBe("Demonstration coming soon");
   });
 
   it("formats plan prescription detail lines with rest guidance", () => {

@@ -15,7 +15,15 @@ export type ExerciseCatalogDetailSection = {
   value: string;
 };
 
+export type ExerciseCatalogMediaImage = {
+  url: string;
+  label?: string;
+};
+
 export type ExerciseCatalogDetailView = {
+  /** Renderable image refs from catalog.media (kind=image, url present), capped at 3. */
+  mediaImages: ExerciseCatalogMediaImage[];
+  /** Shown only when there are no renderable images. */
   mediaFallbackLabel: string | null;
   sections: ExerciseCatalogDetailSection[];
   instructions: readonly string[];
@@ -156,8 +164,14 @@ export function buildExerciseCatalogDetailView(
     sections.push({ label: "Movement pattern", value: movementPatterns });
   }
 
+  const mediaImages: ExerciseCatalogMediaImage[] = (catalog.media?.refs ?? [])
+    .filter((ref): ref is typeof ref & { url: string } => ref.kind === "image" && Boolean(ref.url))
+    .slice(0, 3)
+    .map((ref) => ({ url: ref.url, label: ref.label }));
+
   return {
-    mediaFallbackLabel: getExerciseMediaFallbackLabel(catalog),
+    mediaImages,
+    mediaFallbackLabel: mediaImages.length === 0 ? getExerciseMediaFallbackLabel(catalog) : null,
     sections,
     instructions: catalog.instructions ?? [],
     safetyNotes: catalog.safetyNotes ?? [],

@@ -11,8 +11,8 @@ import {
 } from "./themealdb-recipe.mapper.js";
 
 const THEMEALDB_API_BASE = "https://www.themealdb.com/api/json/v1/1";
-const MAX_CATEGORIES_PER_FETCH = 3;
-const MAX_MEALS_PER_CATEGORY = 4;
+const MAX_CATEGORIES_PER_FETCH = 5;
+const MAX_MEALS_PER_CATEGORY = 8;
 export const THEMEALDB_REQUEST_TIMEOUT_MS = 5_000;
 
 interface TheMealDbFilterResponse {

@@ -3,6 +3,7 @@ import { isoDateTimeSchema } from "./dates.js";
 
 export const exerciseSourceSchema = z.enum([
   "system_seed",
+  "free_exercise_db",
   "ai_generated",
   "user_created",
 ]);

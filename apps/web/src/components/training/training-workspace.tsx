@@ -4,7 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
-import type { WorkoutPlanDay, WorkoutPlanRevision, WorkoutSession } from "@health/types";
+import type { ExerciseCatalogMetadata, WorkoutPlanDay, WorkoutPlanRevision, WorkoutSession } from "@health/types";
 import {
   apiQueryKeys,
   getActiveWorkoutPlan,
@@ -37,6 +37,8 @@ import {
 } from "../ui";
 import { TrainingProgressPanel } from "./training-progress-panel";
 import { ErrorState } from "../ui";
+import { ExerciseCatalogDetails } from "../ui/exercise-catalog-details";
+import { resolvePlanExerciseCatalogMetadata } from "../../lib/exercise-catalog-ui-state";
 
 // ── Local type helpers ────────────────────────────────────────────
 
@@ -46,6 +48,7 @@ type ExerciseCardData = {
   duration?: string;
   tags: string[];
   poster: number;
+  catalog?: ExerciseCatalogMetadata;
 };
 
 // ── ActivePlanHeader ──────────────────────────────────────────────
@@ -1140,18 +1143,25 @@ function ExerciseVideo({
               }}
             />
 
-            {/* Technique guidance — only shown when per-exercise data is available */}
-            <p
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-                margin: 0,
-                lineHeight: 1.5,
-                fontStyle: "italic",
-              }}
-            >
-              Technique guidance coming soon — exercise-specific coaching cues will appear here.
-            </p>
+            {/* Catalog details: images, instructions, safety notes */}
+            {exercise.catalog ? (
+              <ExerciseCatalogDetails
+                catalog={exercise.catalog}
+                className="training-exercise-catalog-details"
+              />
+            ) : (
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--color-text-muted)",
+                  margin: 0,
+                  lineHeight: 1.5,
+                  fontStyle: "italic",
+                }}
+              >
+                Technique guidance coming soon — exercise-specific coaching cues will appear here.
+              </p>
+            )}
           </div>
 
           {/* Ready to do it? card */}
@@ -1266,6 +1276,7 @@ function deriveTodayExercises(
       meta,
       tags: [],
       poster: i,
+      catalog: resolvePlanExerciseCatalogMetadata(ex) ?? undefined,
     };
   });
 

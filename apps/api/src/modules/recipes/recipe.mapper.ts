@@ -36,6 +36,10 @@ function resolveRecipeProvenance(row: RecipeRow): RecipeProvenance {
     };
   }
 
+  if (row.source === "user_created") {
+    return { source: "curated" };
+  }
+
   return {
     source: row.source.includes("seed") || row.source.includes("Curated") ? "seed_catalog" : "curated",
   };
