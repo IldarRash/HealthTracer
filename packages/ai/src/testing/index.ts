@@ -1,1 +1,4 @@
-export { createCoachAiProviderMock } from "./coach-ai-provider.mock.js";
+export {
+  createCoachAiProviderMock,
+  wrapDomainOutput,
+} from "./coach-ai-provider.mock.js";
