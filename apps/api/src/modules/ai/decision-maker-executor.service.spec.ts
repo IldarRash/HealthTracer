@@ -33,7 +33,7 @@ function makeProvider(
     generateFinalDecision: vi.fn(async (req: FinalDecisionRequest) => {
       void req;
       if (returnValue instanceof Error) throw returnValue;
-      return returnValue as FinalDecisionOutputInput;
+      return { output: returnValue as FinalDecisionOutputInput };
     }),
   });
 }
@@ -89,7 +89,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { reply: "ok", selectedAction: null, proposals: [], consentRequired: false };
+          return { output: { reply: "ok", selectedAction: null, proposals: [], consentRequired: false } };
         }),
       };
       await service.execute(makeInput({}, { reply: "ok", selectedAction: null, proposals: [], consentRequired: false })
@@ -109,7 +109,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { reply: "ok", selectedAction: null, proposals: [], consentRequired: false };
+          return { output: { reply: "ok", selectedAction: null, proposals: [], consentRequired: false } };
         }),
       };
       const workoutAnswer = createFallbackDomainAnswer("workout");
@@ -130,7 +130,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { reply: "ok", selectedAction: null, proposals: [], consentRequired: false };
+          return { output: { reply: "ok", selectedAction: null, proposals: [], consentRequired: false } };
         }),
       };
       const catalog = [
@@ -150,7 +150,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { reply: "ok", selectedAction: null, proposals: [], consentRequired: false };
+          return { output: { reply: "ok", selectedAction: null, proposals: [], consentRequired: false } };
         }),
       };
       await service.execute({
@@ -382,7 +382,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { reply: "Synthesized reply.", selectedAction: null, proposals: [], consentRequired: false };
+          return { output: { reply: "Synthesized reply.", selectedAction: null, proposals: [], consentRequired: false } };
         }),
       };
       const workoutAnswer = createFallbackDomainAnswer("workout");
@@ -410,7 +410,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { reply: "Всё готово.", selectedAction: null, proposals: [], consentRequired: false };
+          return { output: { reply: "Всё готово.", selectedAction: null, proposals: [], consentRequired: false } };
         }),
       };
       await service.execute({
@@ -426,7 +426,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { reply: "Done.", selectedAction: null, proposals: [], consentRequired: false };
+          return { output: { reply: "Done.", selectedAction: null, proposals: [], consentRequired: false } };
         }),
       };
       await service.execute({
@@ -443,7 +443,7 @@ describe("DecisionMakerExecutorService", () => {
       const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
         generateFinalDecision: vi.fn(async (req) => {
           capturedRequest = req;
-          return { reply: "Done.", selectedAction: null, proposals: [], consentRequired: false };
+          return { output: { reply: "Done.", selectedAction: null, proposals: [], consentRequired: false } };
         }),
       };
       await service.execute({

@@ -541,6 +541,23 @@ export type AgentUnifiedTurnDecisionMetadata = z.infer<
 // ---------------------------------------------------------------------------
 const fanOutDomainEnumSchema = z.enum(["workout", "nutrition", "health"]);
 
+/**
+ * Per-call token and latency usage from the provider.
+ * Optional/additive — absent on fallback paths where no LLM call was made.
+ * Numbers only; never contains prompts, content, or health data.
+ */
+export const agentProviderUsageSchema = z.object({
+  promptTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  /** Wall-clock time of the provider call including retries (ms). */
+  latencyMs: z.number().int().nonnegative(),
+  /** Number of retries consumed (0 = first attempt succeeded). */
+  retries: z.number().int().nonnegative(),
+});
+
+export type AgentProviderUsage = z.infer<typeof agentProviderUsageSchema>;
+
 export const agentFanOutRouterDiagnosticsSchema = z.object({
   ran: z.boolean(),
   source: z.enum(["llm", "fallback"]).optional(),
@@ -555,6 +572,8 @@ export const agentFanOutRouterDiagnosticsSchema = z.object({
     .max(3)
     .default([]),
   blockedFallback: z.boolean().optional(),
+  /** Token + latency usage for the router LLM call. Absent on fallback paths. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutDomainDiagnosticsSchema = z.object({
@@ -565,6 +584,8 @@ export const agentFanOutDomainDiagnosticsSchema = z.object({
   loopIterations: z.number().int().min(0).max(20),
   toolsInvoked: z.array(agentToolNameSchema).max(15).default([]),
   hasWorkoutCalorieEstimate: z.boolean().default(false),
+  /** Accumulated token + latency usage across all loop iterations for this domain. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutDecisionDiagnosticsSchema = z.object({
@@ -572,6 +593,8 @@ export const agentFanOutDecisionDiagnosticsSchema = z.object({
   selectedAction: z.string().min(1).max(80).nullable().default(null),
   proposalCount: z.number().int().min(0).max(5),
   consentRequired: z.boolean().default(false),
+  /** Token + latency usage for the decision-maker LLM call. Absent on fallback paths. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutResolutionDiagnosticsSchema = z.object({

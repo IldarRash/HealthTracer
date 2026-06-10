@@ -22,7 +22,7 @@
  *    this service does not relax them.
  */
 
-import { validateReplySafety, type CoachAiProvider } from "@health/ai";
+import { validateReplySafety, type CoachAiProvider, type ProviderUsage } from "@health/ai";
 import type {
   AgentContextPacket,
   AgentToolCallResult,
@@ -121,6 +121,11 @@ export interface DomainLlmExecutorResult {
   degraded: boolean;
   /** Reason(s) for degradation when degraded=true. */
   degradedReasons: string[];
+  /**
+   * Accumulated token + latency usage across all loop iterations.
+   * Absent on timeout/fallback paths where the provider was never called.
+   */
+  usage?: ProviderUsage;
   /** Number of loop iterations executed (0 on immediate degradation). */
   loopIterations: number;
   /** Tool names invoked in order during the loop. */
@@ -146,16 +151,21 @@ export class DomainLlmExecutorService {
    * Always resolves — never rejects. Any error path degrades to a safe fallback.
    * Per-domain timeout via Promise.race ensures a slow domain never blocks
    * the turn or sibling domain executors.
+   *
+   * An AbortController is tied to the timeout so that when the timeout fires,
+   * any in-flight fetch (including retries) is cancelled via the AbortSignal.
    */
   async runDomainLoop(input: DomainLlmExecutorInput): Promise<DomainLlmExecutorResult> {
     const { domainEntry } = input;
     const domain = domainEntry.domain;
 
+    const abortController = new AbortController();
+
     // Wrap the bounded loop in Promise.race with a per-domain timeout.
     // The timeout NEVER rejects — it resolves to a fallback so the outer
     // Promise.all in the orchestrator is not poisoned by a slow domain.
-    const loopPromise = this.executeDomainLoopSafe(input);
-    const timeoutPromise = this.buildTimeoutFallback(domain);
+    const loopPromise = this.executeDomainLoopSafe(input, abortController.signal);
+    const timeoutPromise = this.buildTimeoutFallback(domain, abortController);
 
     return Promise.race([loopPromise, timeoutPromise]);
   }
@@ -166,14 +176,16 @@ export class DomainLlmExecutorService {
 
   /**
    * Safe wrapper around the bounded domain loop.
-   * Catches all thrown errors and degrades to a fallback.
+   * Catches all thrown errors (including AbortError from the timeout signal) and
+   * degrades to a fallback.
    * Never rejects.
    */
   private async executeDomainLoopSafe(
     input: DomainLlmExecutorInput,
+    signal: AbortSignal,
   ): Promise<DomainLlmExecutorResult> {
     try {
-      return await this.executeDomainLoop(input);
+      return await this.executeDomainLoop(input, signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown domain executor error.";
       return this.buildFallbackResult(input.domainEntry.domain, [message], 0, []);
@@ -182,15 +194,19 @@ export class DomainLlmExecutorService {
 
   /**
    * Core bounded domain loop — may throw; callers wrap with executeDomainLoopSafe.
+   * The signal is from the per-domain AbortController tied to the timeout so that
+   * in-flight fetch retries are cancelled when the timeout fires.
    */
   private async executeDomainLoop(
     input: DomainLlmExecutorInput,
+    signal: AbortSignal,
   ): Promise<DomainLlmExecutorResult> {
     const { domainEntry, contextPacket, orchestratorInput, provider } = input;
     const domain = domainEntry.domain;
 
     const toolsInvoked: AgentToolName[] = [];
     const priorToolResults: AgentToolCallResult[] = [];
+    let accumulatedUsage: ProviderUsage | undefined;
 
     // Build a mutable local copy of coaching context so we can append tool results
     // per iteration without mutating the shared input reference.
@@ -230,13 +246,27 @@ export class DomainLlmExecutorService {
         priorToolResults: [...priorToolResults],
       });
 
-      const rawOutput = await provider.generateDomainStep(stepRequest);
+      // Provider returns ProviderCallResult; unwrap the output and accumulate usage.
+      // Pass the abort signal so in-flight retries are cancelled when the timeout fires.
+      const { output: rawOutput, usage: stepUsage } = await provider.generateDomainStep(stepRequest, { signal });
+
+      if (stepUsage) {
+        accumulatedUsage = accumulatedUsage
+          ? {
+              promptTokens: accumulatedUsage.promptTokens + stepUsage.promptTokens,
+              completionTokens: accumulatedUsage.completionTokens + stepUsage.completionTokens,
+              totalTokens: accumulatedUsage.totalTokens + stepUsage.totalTokens,
+              latencyMs: accumulatedUsage.latencyMs + stepUsage.latencyMs,
+              retries: accumulatedUsage.retries + stepUsage.retries,
+            }
+          : stepUsage;
+      }
 
       // Shape guard: rejects forbidden user-facing fields before Zod parse.
       const shapeErrors = validateDomainLlmStepOutputShape(rawOutput);
 
       if (shapeErrors.length > 0) {
-        return this.buildFallbackResult(domain, shapeErrors, iteration, toolsInvoked);
+        return this.buildFallbackResult(domain, shapeErrors, iteration, toolsInvoked, accumulatedUsage);
       }
 
       if (!rawOutput || typeof rawOutput !== "object") {
@@ -245,6 +275,7 @@ export class DomainLlmExecutorService {
           ["Domain LLM step output was not an object."],
           iteration,
           toolsInvoked,
+          accumulatedUsage,
         );
       }
 
@@ -260,6 +291,7 @@ export class DomainLlmExecutorService {
             ["Domain LLM tool_request missing tool name."],
             iteration,
             toolsInvoked,
+            accumulatedUsage,
           );
         }
 
@@ -273,6 +305,7 @@ export class DomainLlmExecutorService {
             ],
             iteration,
             toolsInvoked,
+            accumulatedUsage,
           );
         }
 
@@ -311,6 +344,7 @@ export class DomainLlmExecutorService {
             parsed.error.issues.map((i) => i.message),
             iteration,
             toolsInvoked,
+            accumulatedUsage,
           );
         }
 
@@ -328,6 +362,7 @@ export class DomainLlmExecutorService {
             ],
             iteration,
             toolsInvoked,
+            accumulatedUsage,
           );
         }
 
@@ -335,7 +370,7 @@ export class DomainLlmExecutorService {
         const replySafetyErrors = validateReplySafety(domainAnswer.summary);
 
         if (replySafetyErrors.length > 0) {
-          return this.buildFallbackResult(domain, replySafetyErrors, iteration, toolsInvoked);
+          return this.buildFallbackResult(domain, replySafetyErrors, iteration, toolsInvoked, accumulatedUsage);
         }
 
         return {
@@ -344,6 +379,7 @@ export class DomainLlmExecutorService {
           degradedReasons: [],
           loopIterations: iteration,
           toolsInvoked,
+          ...(accumulatedUsage !== undefined ? { usage: accumulatedUsage } : {}),
         };
       }
 
@@ -353,6 +389,7 @@ export class DomainLlmExecutorService {
         [`Domain LLM returned unknown step kind: "${String(outputKind)}".`],
         iteration,
         toolsInvoked,
+        accumulatedUsage,
       );
     }
 
@@ -364,6 +401,7 @@ export class DomainLlmExecutorService {
       ],
       DOMAIN_MAX_LOOP_ITERATIONS,
       toolsInvoked,
+      accumulatedUsage,
     );
   }
 
@@ -454,10 +492,17 @@ export class DomainLlmExecutorService {
    * Returns a Promise that resolves to a fallback result after DOMAIN_LLM_TIMEOUT_MS.
    * NEVER rejects — this is intentional so Promise.race cannot propagate a rejection
    * into the orchestrator's Promise.all and crash the turn.
+   *
+   * When the timeout fires, aborts the AbortController so any in-flight fetch or
+   * retry in the loop receives an AbortError and stops immediately.
    */
-  private buildTimeoutFallback(domain: RouterDomain): Promise<DomainLlmExecutorResult> {
+  private buildTimeoutFallback(
+    domain: RouterDomain,
+    abortController: AbortController,
+  ): Promise<DomainLlmExecutorResult> {
     return new Promise<DomainLlmExecutorResult>((resolve) => {
       setTimeout(() => {
+        abortController.abort();
         resolve(
           this.buildFallbackResult(
             domain,
@@ -474,12 +519,17 @@ export class DomainLlmExecutorService {
    * Build a safe fallback result.
    * The fallback domain_answer always has empty candidateProposals so no
    * unvalidated proposals leak into the turn from a degraded domain.
+   *
+   * `accumulatedUsage` threads any usage from completed iterations into the
+   * fallback result for accurate metering (e.g. when the loop degraded mid-run
+   * after one or more successful provider calls).
    */
   private buildFallbackResult(
     domain: RouterDomain,
     reasons: string[],
     loopIterations: number,
     toolsInvoked: AgentToolName[],
+    accumulatedUsage?: ProviderUsage,
   ): DomainLlmExecutorResult {
     return {
       domainAnswer: createFallbackDomainAnswer(domain),
@@ -487,6 +537,7 @@ export class DomainLlmExecutorService {
       degradedReasons: reasons,
       loopIterations,
       toolsInvoked,
+      ...(accumulatedUsage !== undefined ? { usage: accumulatedUsage } : {}),
     };
   }
 }

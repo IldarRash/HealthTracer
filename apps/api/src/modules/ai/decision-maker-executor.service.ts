@@ -36,7 +36,7 @@
  *     It is a pure synthesis step: domain outputs in, final decision out.
  */
 
-import type { CoachAiProvider } from "@health/ai";
+import type { CoachAiProvider, ProviderUsage } from "@health/ai";
 import type {
   AgentSafetyFlag,
   DomainAnswer,
@@ -114,6 +114,12 @@ export interface DecisionMakerResult {
    * Reason(s) for degradation when degraded=true.
    */
   degradedReasons: string[];
+
+  /**
+   * Token + latency usage for the decision-maker LLM call.
+   * Absent on fallback paths where the provider was never called successfully.
+   */
+  usage?: ProviderUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,9 +169,13 @@ export class DecisionMakerExecutorService {
     };
 
     let rawOutput: unknown;
+    let providerUsage: ProviderUsage | undefined;
 
     try {
-      rawOutput = await input.provider.generateFinalDecision(request);
+      // Provider returns ProviderCallResult; unwrap the output for validation.
+      const result = await input.provider.generateFinalDecision(request);
+      rawOutput = result.output;
+      providerUsage = result.usage;
     } catch (providerError) {
       const message =
         providerError instanceof Error
@@ -205,6 +215,7 @@ export class DecisionMakerExecutorService {
       output: parsed.data,
       degraded: false,
       degradedReasons: [],
+      ...(providerUsage !== undefined ? { usage: providerUsage } : {}),
     };
   }
 

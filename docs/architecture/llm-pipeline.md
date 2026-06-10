@@ -348,6 +348,14 @@ problem:
   `plain_reply` or `null`, and `ActionResolverService` correctly returned
   `proposals: []`.
 
+Per-stage token/latency **usage** is now recorded in the optional fan-out diagnostics
+block (`agent.fanOut`, schema in `packages/types/src/agent-context.ts`): the
+`AgentProviderUsage` shape (`promptTokens`, `completionTokens`, `totalTokens`,
+`latencyMs`, `retries`) is attached as an optional `usage` field on `fanOut.router`,
+each `fanOut.domains[]` entry (accumulated across that domain's loop iterations), and
+`fanOut.decision`. It is absent on fallback paths where no provider call was made. These
+are structural numbers only — never prompts, replies, or health content.
+
 ## Stage 4: Message Normalization
 
 ### `MessagePreprocessorService`
@@ -599,8 +607,22 @@ into its final `proposals[]` output and select the matching action variant befor
 `ActionResolverService` will keep it.
 
 Failure behavior: a domain that errors, exhausts its loop, or times out degrades
-to a **safe empty output** and never blocks the other domains or the turn. Per-domain
-timeouts bound latency.
+to a **safe empty output** and never blocks the other domains or the turn. The
+per-domain timeout (`DOMAIN_LLM_TIMEOUT_MS = 30_000`) is enforced via `Promise.race`
+against a rejection-free timer, and is now tied to an `AbortController`: when the
+timeout fires it aborts the controller, so any in-flight provider `fetch` (including
+its pending retries) receives an `AbortError` and stops immediately rather than running
+out the clock. The abort signal is threaded into `provider.generateDomainStep(..., {
+signal })`.
+
+Each `generateDomainStep` returns `ProviderCallResult` with optional `usage`; the
+executor **accumulates** that usage across loop iterations (summing `promptTokens`,
+`completionTokens`, `totalTokens`, `latencyMs`, and `retries`) and threads the running
+total onto the result — including degraded/fallback results, so usage from completed
+iterations before a mid-run degradation is still metered. `usage` is absent only when no
+provider call completed (e.g. immediate timeout fallback). The accumulated usage surfaces
+as `DomainLlmExecutorResult.usage` and is published into per-domain fan-out diagnostics
+(see Stage 3 / `agent-context.ts`).
 
 Output shape (`packages/types/src/domain-llm-step.ts`) — union of
 `tool_request` or `domain_answer`, where
@@ -816,6 +838,33 @@ is simply skipped for revision/explainer turns, but the same
 `generateRouterDecision` / `generateDomainStep` / `generateFinalDecision` surface
 drives every LLM turn.
 
+**Return shape and transport reliability.** Each of the three methods now returns a
+`ProviderCallResult<T> = { output, usage? }` (`packages/ai/src/coach-ai-provider.ts`)
+and accepts an optional `{ signal?: AbortSignal }` second argument. `usage` is a
+`ProviderUsage` (`promptTokens`, `completionTokens`, `totalTokens`, `latencyMs`,
+`retries`) — numbers only, never prompt/health content. The three-method surface
+itself is unchanged; only the wrapped return type and the optional abort signal are
+new.
+
+Structured output is **strict OpenAI `json_schema` structured outputs** (not legacy
+JSON mode). Each call sends `response_format: { type: "json_schema", json_schema:
+{ name, strict: true, schema } }` using hand-authored wire schemas in
+`apps/api/src/modules/ai/openai-wire-schemas.ts`
+(`routerDecisionWireSchema`, `domainLlmStepWireSchema`, `finalDecisionWireSchema`).
+Because strict mode forces every field into `required` (optional fields are declared
+nullable-required, `type: ["T","null"]`), the provider runs a generic
+`stripExplicitNulls` normalization over the parsed payload before the Zod
+shape-validation + parse, so `.optional()` Zod fields that arrive as explicit `null`
+are dropped (and `.nullable().default(null)` fields such as `selectedAction` re-apply
+their null default). `stripExplicitNulls` must not log payload content.
+
+Transport goes through `fetchWithRetry`: up to **`MAX_RETRIES = 2`** retries (1 initial
+attempt + 2 retries) with exponential backoff (~300ms then ~1200ms), retrying **only**
+on network/transport failures (fetch rejection), HTTP 429, or HTTP 5xx. Other 4xx and
+JSON-parse failures throw immediately (no retry). The optional `AbortSignal` is
+forwarded to `fetch` and to the backoff `sleep`, so an aborted call (e.g. the domain
+timeout firing) cancels in-flight requests and pending retries.
+
 Note: context compression uses a **distinct provider/interface** (`ContextCompressionProvider`,
 injected via `CONTEXT_COMPRESSION_PROVIDER`) that is separate from this `CoachAiProvider`
 surface. `OpenAiContextCompressionProvider` implements `ContextCompressionProvider` and
@@ -824,7 +873,8 @@ for details.
 
 OpenAI prompt templates are keyed `router`, `domain_workout`, `domain_nutrition`,
 `domain_health`, and `decision`, rendered through `CompiledPromptTemplates` and the
-shared JSON-completion + shape-validation helpers.
+shared strict-`json_schema` completion + `stripExplicitNulls` normalization +
+shape-validation helpers (see "Return shape and transport reliability" above).
 
 These prompt templates come from `packages/types/src/prompt-template-defaults.ts` unless
 `packages/ai-behavior/config/ai-behavior.json` supplies valid `promptTemplates`
@@ -838,11 +888,18 @@ only in `domains/*.yml`.
 File: `packages/ai/src/coach-ai-provider.ts`
 
 Defines the `CoachAiProvider` interface. The three fan-out methods are the complete
-provider surface:
+provider surface; each returns `Promise<ProviderCallResult<T>>` and accepts an optional
+`{ signal?: AbortSignal }`:
 
 - `generateRouterDecision` — the first-LLM domain selection
 - `generateDomainStep` — one domain loop step
 - `generateFinalDecision` — the decision-maker synthesis
+
+`ProviderCallResult<T> = { output: T; usage?: ProviderUsage }` and
+`ProviderUsage = { promptTokens, completionTokens, totalTokens, latencyMs, retries }`
+are exported alongside the interface. Callers unwrap `.output` for domain logic and may
+forward `.usage` to per-stage diagnostics; `usage` is absent on paths where no provider
+call was made.
 
 `generateAgentLoopStep` and `generateCoachResponse` no longer exist (removed with
 `ResponseModeExecutorService` in C6). The stub provider has been deleted (C2 removal

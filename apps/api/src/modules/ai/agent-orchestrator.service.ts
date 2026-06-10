@@ -857,6 +857,7 @@ function buildFanOutTurnMetadata(params: {
             confidence: d.confidence,
           })),
           blockedFallback: degradedDomains.length === domainResults.length && domainResults.length > 0,
+          ...(routerResult.usage !== undefined ? { usage: routerResult.usage } : {}),
         }
       : {
           ran: false,
@@ -870,12 +871,14 @@ function buildFanOutTurnMetadata(params: {
       loopIterations: result.loopIterations,
       toolsInvoked: result.toolsInvoked,
       hasWorkoutCalorieEstimate: result.domainAnswer.workoutCalorieEstimate !== undefined,
+      ...(result.usage !== undefined ? { usage: result.usage } : {}),
     })),
     decision: {
       degraded: decisionResult.degraded,
       selectedAction: decisionResult.output.selectedAction ?? null,
       proposalCount: decisionResult.output.proposals.length,
       consentRequired: decisionResult.output.consentRequired,
+      ...(decisionResult.usage !== undefined ? { usage: decisionResult.usage } : {}),
     },
     resolution: {
       resolvedProposalCount,

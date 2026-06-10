@@ -1,8 +1,8 @@
 import { createFallbackDomainAnswer, DEFAULT_CONTEXT_BUDGET_POLICY } from "@health/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentContextPacket } from "@health/types";
-import type { CoachAiProvider } from "@health/ai";
-import { createCoachAiProviderMock } from "@health/ai/testing";
+import type { CoachAiProvider, ProviderUsage } from "@health/ai";
+import { createCoachAiProviderMock, wrapDomainOutput } from "@health/ai/testing";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import type { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
@@ -96,7 +96,9 @@ function makeOrchestratorInput(
 
 function makeProvider(domainStepOutput: unknown): CoachAiProvider {
   return createCoachAiProviderMock({
-    generateDomainStep: vi.fn().mockResolvedValue(domainStepOutput),
+    generateDomainStep: vi.fn().mockResolvedValue(
+      domainStepOutput !== null ? { output: domainStepOutput } : domainStepOutput,
+    ),
   });
 }
 
@@ -190,16 +192,20 @@ describe("DomainLlmExecutorService", () => {
     const generateDomainStep = vi
       .fn()
       .mockResolvedValueOnce({
-        kind: "tool_request",
-        tool: "getUserContextSlice",
-        input: { purpose: "workout_adaptation" },
+        output: {
+          kind: "tool_request",
+          tool: "getUserContextSlice",
+          input: { purpose: "workout_adaptation" },
+        },
       })
       .mockResolvedValueOnce({
-        kind: "domain_answer",
-        domain: "workout",
-        summary: "Context loaded and reviewed.",
-        candidateProposals: [],
-        domainSignals: [],
+        output: {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: "Context loaded and reviewed.",
+          candidateProposals: [],
+          domainSignals: [],
+        },
       });
 
     const provider = { ...makeProvider(null), generateDomainStep } as unknown as CoachAiProvider;
@@ -512,13 +518,13 @@ describe("DomainLlmExecutorService", () => {
   // -------------------------------------------------------------------------
 
   it("threads responseLanguage='ru' into the domain step request", async () => {
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "workout",
       summary: "Reviewed workout.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -541,13 +547,13 @@ describe("DomainLlmExecutorService", () => {
   });
 
   it("omits responseLanguage from the domain step request when it is null", async () => {
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "workout",
       summary: "Reviewed workout.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -658,13 +664,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
   });
 
   it("threads food_photo attachment context into the nutrition domain step request", async () => {
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "nutrition",
       summary: "Analyzed the food photo.",
       candidateProposals: [],
       domainSignals: ["food_photo_present"],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -708,13 +714,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
   it("includes food_photo in the workout domain step request (no domain-to-category filter)", async () => {
     // Attachments are context-only: all attachments flow to every selected domain.
     // The domain LLM decides relevance based on its own prompt and allowlists.
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "workout",
       summary: "Workout reviewed.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -758,13 +764,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     // Images flow to every selected domain; the domain LLM reads content directly.
     // The allowDocuments=false context-budget floor (for DB health_documents slices)
     // is still enforced upstream by CoachingContextService.
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "health",
       summary: "Context only.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -806,13 +812,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
   it("includes image attachment regardless of category or consentState in all domain steps", async () => {
     // All categories (including formerly-consent-gated medical_document) flow to all domains.
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "health",
       summary: "Reviewed the health document.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -862,13 +868,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     );
     const serviceWithImages = new DomainLlmExecutorService(toolRegistry, attachmentsService);
 
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "nutrition",
       summary: "Analyzed the food photo.",
       candidateProposals: [],
       domainSignals: ["food_photo_present"],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -922,14 +928,14 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     );
     const serviceWithImages = new DomainLlmExecutorService(toolRegistry, attachmentsService);
 
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "workout",
       summary: "Workout reviewed.",
       candidateProposals: [],
       domainSignals: [],
       workoutCalorieEstimate: 280,
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -982,13 +988,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     );
     const serviceWithFailingStorage = new DomainLlmExecutorService(toolRegistry, attachmentsService);
 
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "nutrition",
       summary: "Nutrition reviewed (no photo).",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -1030,13 +1036,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
   });
 
   it("returns an empty attachment context (absent field) when no attachments are present", async () => {
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "nutrition",
       summary: "Nutrition reviewed.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -1079,13 +1085,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     const attachmentTurn = { attachments: [sharedAttachment] };
 
     const makeCapturingProvider = (domain: "workout" | "nutrition" | "health") => {
-      const fn = vi.fn().mockResolvedValue({
+      const fn = vi.fn().mockResolvedValue(wrapDomainOutput({
         kind: "domain_answer",
         domain,
         summary: `${domain} reviewed.`,
         candidateProposals: [],
         domainSignals: [],
-      });
+      }));
 
       return {
         fn,
@@ -1146,5 +1152,182 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     expect(healthReq.attachmentContext?.items).toHaveLength(1);
     expect(healthReq.attachmentContext?.items[0]?.attachmentRefId).toBe(sharedAttachment.attachmentRefId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Usage accumulation across multiple iterations
+// ---------------------------------------------------------------------------
+
+describe("DomainLlmExecutorService — multi-iteration usage accumulation", () => {
+  let service: DomainLlmExecutorService;
+  let toolRegistry: AgentToolRegistryService;
+
+  beforeEach(() => {
+    toolRegistry = makeToolRegistry();
+    service = new DomainLlmExecutorService(toolRegistry, makeAttachmentsService());
+  });
+
+  it("accumulates token usage and retries across tool_request iter1 + domain_answer iter2", async () => {
+    const iter1Usage: ProviderUsage = {
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+      latencyMs: 200,
+      retries: 1,
+    };
+    const iter2Usage: ProviderUsage = {
+      promptTokens: 120,
+      completionTokens: 60,
+      totalTokens: 180,
+      latencyMs: 250,
+      retries: 0,
+    };
+
+    const generateDomainStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        output: {
+          kind: "tool_request",
+          tool: "getUserContextSlice",
+          input: { purpose: "workout_adaptation" },
+        },
+        usage: iter1Usage,
+      })
+      .mockResolvedValueOnce({
+        output: {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: "Context loaded and reviewed.",
+          candidateProposals: [],
+          domainSignals: [],
+        },
+        usage: iter2Usage,
+      });
+
+    const provider: CoachAiProvider = {
+      generateDomainStep,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.loopIterations).toBe(2);
+    // Usage should be summed across both iterations
+    expect(result.usage).toBeDefined();
+    expect(result.usage?.promptTokens).toBe(220);      // 100 + 120
+    expect(result.usage?.completionTokens).toBe(110);  // 50 + 60
+    expect(result.usage?.totalTokens).toBe(330);       // 150 + 180
+    expect(result.usage?.latencyMs).toBe(450);         // 200 + 250
+    expect(result.usage?.retries).toBe(1);             // 1 + 0
+  });
+
+  it("threads accumulated usage into fallback result when domain degrades mid-loop", async () => {
+    const iter1Usage: ProviderUsage = {
+      promptTokens: 80,
+      completionTokens: 40,
+      totalTokens: 120,
+      latencyMs: 180,
+      retries: 0,
+    };
+
+    // iter1 returns a tool_request (usage accumulated), iter2 returns invalid kind (degrade)
+    const generateDomainStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        output: {
+          kind: "tool_request",
+          tool: "getUserContextSlice",
+          input: { purpose: "workout_adaptation" },
+        },
+        usage: iter1Usage,
+      })
+      .mockResolvedValueOnce({
+        output: {
+          kind: "unknown_kind",
+          domain: "workout",
+        },
+        usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40, latencyMs: 90, retries: 0 },
+      });
+
+    const provider: CoachAiProvider = {
+      generateDomainStep,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(true);
+    // Usage from iter1 (tool_request) should be preserved in fallback;
+    // iter2 usage is also accumulated before we detect the unknown kind.
+    expect(result.usage).toBeDefined();
+    expect(result.usage?.promptTokens).toBe(110); // 80 + 30
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Abort signal — timeout fires and cancels in-flight fetch
+// ---------------------------------------------------------------------------
+
+describe("DomainLlmExecutorService — abort signal wiring", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("passes an AbortSignal to generateDomainStep and aborts it when the timeout fires", async () => {
+    vi.useFakeTimers();
+
+    const toolRegistry = makeToolRegistry();
+    const service = new DomainLlmExecutorService(toolRegistry, makeAttachmentsService());
+
+    let capturedSignal: AbortSignal | undefined;
+
+    // Provider that captures the signal but never resolves.
+    const hangingProvider: CoachAiProvider = {
+      generateDomainStep: vi.fn().mockImplementation(
+        (_req: unknown, opts?: { signal?: AbortSignal }) => {
+          capturedSignal = opts?.signal;
+          return new Promise<never>(() => undefined); // never resolves
+        },
+      ),
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const resultPromise = service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider: hangingProvider,
+    });
+
+    // Signal must be present after the first generateDomainStep call starts.
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    // Result degrades to fallback.
+    expect(result.degraded).toBe(true);
+    expect(result.degradedReasons.join(" ")).toContain("timed out");
+
+    // The signal captured by the provider must be aborted after the timeout.
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(true);
   });
 });
