@@ -1,4 +1,4 @@
-import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, UserLocale } from "@health/types";
+import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, ProgressReporter, UserLocale } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
@@ -22,6 +22,11 @@ export interface GenerateCoachResponseInput {
   proposalRevision?: ProposalRevisionContext;
   proposalExplainer?: ProposalExplainerTurnContext;
   attachmentTurn?: AttachmentTurnContext;
+  /**
+   * Optional progress reporter for SSE streaming. Threaded through to the
+   * orchestrator. Failures are swallowed — never breaks the turn.
+   */
+  onProgress?: ProgressReporter;
 }
 
 export interface GeneratedCoachResponse {
@@ -48,6 +53,7 @@ export class AiService {
     const orchestrated = await this.agentOrchestratorService.orchestrateCoachTurn({
       ...input,
       responseLocale: input.responseLocale,
+      onProgress: input.onProgress,
     });
 
     return {

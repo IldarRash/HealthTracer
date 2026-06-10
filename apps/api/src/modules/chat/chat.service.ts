@@ -4,6 +4,7 @@ import type {
   ChatThread,
   ChatTurnResponse,
   CreateChatThreadInput,
+  ProgressReporter,
   RawAiProposal,
   SendChatMessageInput,
 } from "@health/types";
@@ -102,6 +103,7 @@ export class ChatService {
     auth: ClerkAuthContext,
     threadId: string,
     input: SendChatMessageInput,
+    onProgress?: ProgressReporter,
   ): Promise<ChatTurnResponse> {
     const user = await this.usersService.resolveFromAuth(auth);
     const thread = await this.chatRepository.findThreadById(user.id, threadId);
@@ -299,6 +301,11 @@ export class ChatService {
       todayIsoDate,
     );
 
+    // Emit preprocessing stage before the AI pipeline runs.
+    // Pre-AI gate turns (crisis, direct-path, quota, no-proposal explainer) return
+    // early above without emitting any stage events — that is by design.
+    emitStageProgress(onProgress, "preprocessing");
+
     const generated = await this.aiService.generateCoachResponse({
       auth,
       userMessage: messageContent,
@@ -326,6 +333,7 @@ export class ChatService {
             } satisfies AttachmentTurnContext,
           }
         : {}),
+      onProgress,
     });
 
     // Record AI message usage after a successful LLM response (not on error).
@@ -387,6 +395,11 @@ export class ChatService {
         proposalsToPersist.push(recipeProposal as RawAiProposal);
       }
     }
+
+    // Emit validating stage before the proposal safety + domain validation stack.
+    // The reply text and proposals are ONLY visible to the user after this stage
+    // completes (they're in the `final` SSE event) — this is the safety floor.
+    emitStageProgress(onProgress, "validating");
 
     const assistantMessage = await this.chatRepository.createMessage(
       threadId,
@@ -527,4 +540,26 @@ function truncateTitle(content: string): string {
   const trimmed = content.trim();
 
   return trimmed.length <= 80 ? trimmed : `${trimmed.slice(0, 77)}...`;
+}
+
+/**
+ * Safely emit a coarse stage progress event.
+ *
+ * Failures are swallowed — a throwing callback must never break the turn.
+ * Privacy: stage events carry no user content, reply text, proposal payloads,
+ * or health data — only the stage name.
+ */
+function emitStageProgress(
+  onProgress: ProgressReporter | undefined,
+  stage: import("@health/types").ChatTurnStreamStage,
+): void {
+  if (!onProgress) {
+    return;
+  }
+
+  try {
+    onProgress({ kind: "stage", stage });
+  } catch {
+    // Swallow — progress reporting must never affect turn correctness.
+  }
 }
