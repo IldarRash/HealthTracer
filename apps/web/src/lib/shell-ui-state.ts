@@ -5,11 +5,12 @@ export type RouteTheme = "light" | "dark";
 
 /**
  * Deliberate two-world boundary:
- *   Dark world  — /today /longevity /training /nutrition(/**) /recipes /progress /metrics
- *   Light world — /chat /profile /billing /proposals /onboarding + auth
+ *   Dark world  — /today /longevity /training /nutrition(/**) /recipes
+ *   Light world — /chat /profile /billing /onboarding + auth
  *
  * Every route under a dark prefix inherits dark — there are no light overrides
  * (grocery-list is dark like its /nutrition parent).
+ * Deleted alias routes (/goals /documents /metrics /progress /proposals) are gone.
  */
 const DARK_ROUTE_PREFIXES = [
   "/today",
@@ -17,8 +18,6 @@ const DARK_ROUTE_PREFIXES = [
   "/training",
   "/nutrition",
   "/recipes",
-  "/progress",
-  "/metrics",
 ] as const;
 
 export function resolveRouteTheme(pathname: string): RouteTheme {

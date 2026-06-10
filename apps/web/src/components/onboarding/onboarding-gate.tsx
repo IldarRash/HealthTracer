@@ -87,18 +87,31 @@ export function OnboardingGate({ children }: OnboardingGateProps) {
             ? userStateQuery.error.message
             : "Your account state could not be loaded."
         }
+        action={
+          <button
+            type="button"
+            className="state-message__retry-btn"
+            onClick={() => void userStateQuery.refetch()}
+          >
+            Try again
+          </button>
+        }
       />
     );
   }
 
-  const onboardingCompleted = userStateQuery.data?.onboardingCompleted ?? false;
+  // Redirect dead-ends only fire when we have definitive data (isSuccess).
+  // A failed fetch must never produce a "Redirecting…" limbo — the error state above handles it.
+  if (userStateQuery.isSuccess) {
+    const onboardingCompleted = userStateQuery.data.onboardingCompleted;
 
-  if (shouldRedirectToOnboarding(pathname, onboardingCompleted)) {
-    return <LoadingState title="Redirecting to onboarding…" />;
-  }
+    if (shouldRedirectToOnboarding(pathname, onboardingCompleted)) {
+      return <LoadingState title="Redirecting to onboarding…" />;
+    }
 
-  if (shouldRedirectFromOnboarding(pathname, onboardingCompleted)) {
-    return <LoadingState title="Opening your coach…" />;
+    if (shouldRedirectFromOnboarding(pathname, onboardingCompleted)) {
+      return <LoadingState title="Opening your coach…" />;
+    }
   }
 
   return <>{children}</>;

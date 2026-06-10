@@ -9,7 +9,7 @@ import {
   hasCoachingHierarchySummary,
   isOnboardingPath,
   mergeOnboardingDraftWithUserState,
-  shouldHidePrimaryNavDuringOnboarding,
+  resolvePrimaryNavState,
   shouldRedirectFromOnboarding,
   shouldRedirectToOnboarding,
   validateOnboardingStep,
@@ -145,10 +145,17 @@ describe("onboarding UI state", () => {
     expect(payload.profile.longevityDirection?.tags).toContain("strength");
   });
 
-  it("hides primary nav until onboarding is complete", () => {
-    expect(shouldHidePrimaryNavDuringOnboarding(false)).toBe(true);
-    expect(shouldHidePrimaryNavDuringOnboarding(undefined)).toBe(true);
-    expect(shouldHidePrimaryNavDuringOnboarding(true)).toBe(false);
+  it("resolves primary nav state from query status", () => {
+    // Loading — show skeleton, not lock
+    expect(resolvePrimaryNavState({ isLoading: true, isError: false, onboardingCompleted: undefined })).toBe("loading");
+    // Error — fail open (gate owns error UX, sidebar must not lie)
+    expect(resolvePrimaryNavState({ isLoading: false, isError: true, onboardingCompleted: undefined })).toBe("ready");
+    // Definitively incomplete — locked
+    expect(resolvePrimaryNavState({ isLoading: false, isError: false, onboardingCompleted: false })).toBe("locked");
+    // Definitively complete — ready
+    expect(resolvePrimaryNavState({ isLoading: false, isError: false, onboardingCompleted: true })).toBe("ready");
+    // No data yet (not yet loaded, not error) — loading
+    expect(resolvePrimaryNavState({ isLoading: true, isError: false, onboardingCompleted: true })).toBe("loading");
   });
 
   it("computes current quarter date range", () => {

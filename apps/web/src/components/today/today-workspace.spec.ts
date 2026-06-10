@@ -31,10 +31,11 @@ describe("TodayWorkspace two-column WHOOP dashboard", () => {
     expect(componentSource).toContain("Loading your day");
   });
 
-  it("has an empty state (EmptyHero) that links to goals and chat", () => {
+  it("has an empty state (EmptyHero) that links to profile goals anchor and chat", () => {
     expect(componentSource).toContain("function EmptyHero");
     expect(componentSource).toContain("Your day will appear here");
-    expect(componentSource).toContain('href="/goals"');
+    // /goals alias route deleted — CTA now deep-links directly to /profile#goals.
+    expect(componentSource).toContain('href="/profile#goals"');
     expect(componentSource).toContain("Create your first goal");
     expect(componentSource).toContain("Ask the coach");
   });

@@ -18,8 +18,10 @@ describe("Recipes page shell and header", () => {
     expect(pageSource).toContain("<RecipesWorkspace />");
   });
 
-  it("guards the route with auth and redirects unauthenticated users", () => {
-    expect(pageSource).toContain("isAuthenticated");
-    expect(pageSource).toContain('redirectToAppSignIn("/recipes")');
+  it("delegates auth to middleware — no per-page auth boilerplate", () => {
+    // Auth protection moved to clerkMiddleware in proxy.ts.
+    // Per-page isAuthenticated + redirectToAppSignIn pattern removed.
+    expect(pageSource).not.toContain("isAuthenticated");
+    expect(pageSource).not.toContain("redirectToAppSignIn");
   });
 });

@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PRIMARY_NAV_LINKS, SECONDARY_ROUTE_LINKS } from "../lib/nav-ui-state.js";
-import { shouldHidePrimaryNavDuringOnboarding } from "../lib/onboarding-ui-state.js";
+import { resolvePrimaryNavState } from "../lib/onboarding-ui-state.js";
 
 const sidebarSource = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "app-sidebar.tsx"),
@@ -32,14 +32,17 @@ describe("AppSidebar information architecture", () => {
     expect(sidebarSource).not.toContain("Health Tracer");
   });
 
-  it("preserves the onboarding gate hint", () => {
-    expect(shouldHidePrimaryNavDuringOnboarding(false)).toBe(true);
-    expect(shouldHidePrimaryNavDuringOnboarding(undefined)).toBe(true);
-    expect(shouldHidePrimaryNavDuringOnboarding(true)).toBe(false);
-    expect(sidebarSource).toContain("shouldHidePrimaryNavDuringOnboarding");
+  it("locks nav when onboarding is incomplete, shows skeleton while loading, fails open on error", () => {
+    expect(resolvePrimaryNavState({ isLoading: true, isError: false, onboardingCompleted: undefined })).toBe("loading");
+    expect(resolvePrimaryNavState({ isLoading: false, isError: true, onboardingCompleted: undefined })).toBe("ready");
+    expect(resolvePrimaryNavState({ isLoading: false, isError: false, onboardingCompleted: false })).toBe("locked");
+    expect(resolvePrimaryNavState({ isLoading: false, isError: false, onboardingCompleted: true })).toBe("ready");
+    expect(sidebarSource).toContain("resolvePrimaryNavState");
     // Translated via Nav.completeOnboarding key — check the key reference, not the literal.
     expect(sidebarSource).toContain('Nav.completeOnboarding');
-    expect(sidebarSource).toContain("hidePrimaryNav ?");
+    expect(sidebarSource).toContain('navState === "locked"');
+    expect(sidebarSource).toContain('navState === "loading"');
+    expect(sidebarSource).toContain('navState === "ready"');
   });
 
   it("keeps Clerk UserButton for account actions", () => {
