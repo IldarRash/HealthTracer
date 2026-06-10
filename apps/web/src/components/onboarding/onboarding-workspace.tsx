@@ -34,6 +34,7 @@ import {
   type OnboardingWizardStep,
 } from "../../lib/onboarding-ui-state";
 import { Button, EmptyState, ErrorState, Icon, LoadingState, Mark } from "../ui";
+import { Eyebrow } from "../ui/eyebrow";
 
 // ── Left panel: dark branding + step progress ──────────────────────────────
 
@@ -94,9 +95,9 @@ function OnboardingPanel({ step }: { step: OnboardingWizardStep }) {
 
 function StepEyebrow({ step }: { step: OnboardingWizardStep }) {
   return (
-    <p className="onboarding-step__eyebrow" aria-hidden="true">
+    <Eyebrow className="onboarding-step__eyebrow" color="var(--color-text-muted)" aria-hidden="true">
       Step {onboardingStepIndex(step) + 1} of {ONBOARDING_WIZARD_STEPS.length}
-    </p>
+    </Eyebrow>
   );
 }
 

@@ -1324,6 +1324,14 @@ dd {
   color: var(--color-metric-indigo);
 }
 
+/* Dark-world chip — slight panel border, normal-case text (prototype dark
+   chips are not uppercased like the light-world status badges) */
+.badge--dark {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 /* ==========================================================================
    Privacy and consent primitives
    ========================================================================== */
@@ -8955,3 +8963,20 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
   line-height: 1.45;
   margin: 0;
 }
+
+/* ── Editable proposal contract — lock affordance ─────────────────────────── */
+
+.editable-contract-locked-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editable-contract-locked-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+

@@ -2,6 +2,9 @@
 
 import { type DisplayContract, computeDerivedValues } from "@health/types";
 import { useId, useMemo } from "react";
+import { Eyebrow } from "../ui/eyebrow";
+import { Stepper } from "../ui/stepper";
+import { Icon } from "../ui/icon";
 
 type EditableProposalContractProps = {
   contract: DisplayContract;
@@ -15,10 +18,12 @@ type EditableProposalContractProps = {
  * derived values.
  *
  * - slider fields render as <input type="range"> with the current value shown
- * - number fields render as numeric inputs with min/max/step bounds applied
- * - text / readonly fields render as static labels
+ * - number fields render via Stepper (bounded ± control, min/max/step preserved)
+ * - text / readonly fields render as static labels with a lock affordance
  * - derived rows are shown below; the isPrimaryTotal derived is rendered as a
  *   prominent headline that updates in real time as the user drags sliders
+ *
+ * Accept flow posts the same payload shape as before — no contract change.
  */
 export function EditableProposalContract({
   contract,
@@ -40,6 +45,10 @@ export function EditableProposalContract({
     if (!onFieldValuesChange) return;
     onFieldValuesChange({ ...fieldValues, [key]: raw });
   };
+
+  const hasEditableFields = contract.fields.some(
+    (f) => f.editable && (f.kind === "number" || f.kind === "slider"),
+  );
 
   return (
     <div className="editable-proposal-contract">
@@ -65,6 +74,10 @@ export function EditableProposalContract({
 
       {/* Editable / readonly fields */}
       <div className="editable-contract-fields">
+        {hasEditableFields && onFieldValuesChange ? (
+          <Eyebrow style={{ marginBottom: 8 }}>Edit before applying</Eyebrow>
+        ) : null}
+
         {contract.fields.map((field) => {
           const inputId = `${idBase}-field-${field.key}`;
           const currentValue = fieldValues[field.key] ?? field.value ?? 0;
@@ -102,24 +115,37 @@ export function EditableProposalContract({
           }
 
           if (field.kind === "number") {
+            if (isEditable) {
+              return (
+                <div key={field.key} className="form-field editable-contract-field">
+                  <Stepper
+                    label={field.label + (field.unit ? ` (${field.unit})` : "")}
+                    value={currentValue}
+                    min={field.min}
+                    max={field.max}
+                    step={field.step ?? 1}
+                    unit={field.unit}
+                    disabled={disabled}
+                    onChange={(v) => handleChange(field.key, v)}
+                  />
+                </div>
+              );
+            }
+
+            // non-editable number — show lock affordance
             return (
               <div key={field.key} className="form-field editable-contract-field">
-                <label htmlFor={inputId} className="proposal-meta">
-                  {field.label}
-                  {field.unit ? ` (${field.unit})` : ""}
-                </label>
-                <input
-                  id={inputId}
-                  type="number"
-                  className="form-input"
-                  min={field.min}
-                  max={field.max}
-                  step={field.step ?? 1}
-                  value={currentValue}
-                  disabled={disabled || !isEditable}
-                  inputMode="numeric"
-                  onChange={(e) => handleChange(field.key, Number(e.target.value))}
-                />
+                <span className="proposal-meta">{field.label}{field.unit ? ` (${field.unit})` : ""}</span>
+                <div className="editable-contract-locked-row">
+                  <span className="muted-text">
+                    {currentValue}
+                    {field.unit ? ` ${field.unit}` : ""}
+                  </span>
+                  <span className="editable-contract-locked-hint" aria-label="Set by your coach">
+                    <Icon name="lock" size={12} stroke="currentColor" aria-hidden />
+                    <span className="muted-text" style={{ fontSize: 11 }}>Set by your coach</span>
+                  </span>
+                </div>
               </div>
             );
           }
@@ -133,14 +159,20 @@ export function EditableProposalContract({
             );
           }
 
-          // readonly kind
+          // readonly kind — lock affordance
           return (
             <div key={field.key} className="form-field editable-contract-field">
               <span className="proposal-meta">{field.label}</span>
-              <span className="muted-text">
-                {field.value ?? "—"}
-                {field.unit ? ` ${field.unit}` : ""}
-              </span>
+              <div className="editable-contract-locked-row">
+                <span className="muted-text">
+                  {field.value ?? "—"}
+                  {field.unit ? ` ${field.unit}` : ""}
+                </span>
+                <span className="editable-contract-locked-hint" aria-label="Set by your coach">
+                  <Icon name="lock" size={12} stroke="currentColor" aria-hidden />
+                  <span className="muted-text" style={{ fontSize: 11 }}>Set by your coach</span>
+                </span>
+              </div>
             </div>
           );
         })}

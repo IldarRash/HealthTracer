@@ -19,7 +19,7 @@ import {
   getProposalNavigationRoute,
 } from "../../lib/proposal-ui-state";
 import { useInlineProposalActions } from "../../lib/use-inline-proposal-actions";
-import { Button, ProposalConfirmation } from "../ui";
+import { Button, ProposalConfirmation, Stepper } from "../ui";
 import { ProposalCardShell } from "./proposal-card-shell";
 
 type NutritionIncidentProposalCardProps = {
@@ -177,21 +177,16 @@ export function NutritionIncidentProposalCard({
                   />
                 </div>
                 <div className="form-field">
-                  <label className="proposal-meta" htmlFor={`${itemNameBaseId}-cal-${index}`}>
-                    Calories
-                  </label>
-                  <input
-                    id={`${itemNameBaseId}-cal-${index}`}
-                    className="form-input"
-                    inputMode="numeric"
-                    value={item.calories ?? ""}
+                  <Stepper
+                    label="Calories"
+                    value={item.calories ?? 0}
+                    step={10}
+                    min={0}
+                    unit="kcal"
                     disabled={isActionPending}
-                    onChange={(event) => {
-                      const value = event.target.value.trim();
-                      updateItem(index, {
-                        calories: value.length > 0 ? Number.parseInt(value, 10) : undefined,
-                      });
-                    }}
+                    onChange={(v) =>
+                      updateItem(index, { calories: v > 0 ? v : undefined })
+                    }
                   />
                 </div>
               </div>

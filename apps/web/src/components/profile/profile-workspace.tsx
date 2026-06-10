@@ -34,6 +34,8 @@ import { DocumentsWorkspace } from "../documents/documents-workspace";
 import { Toggle } from "../ui/toggle";
 import { Icon } from "../ui/icon";
 import type { IconName } from "../ui/icon";
+import { Eyebrow } from "../ui/eyebrow";
+import { CardHead } from "../ui/card-head";
 import { BodyAnalysisSection } from "./body-analysis-section";
 
 // ── Token palette (inline – light "ChatGPT" world) ───────────────
@@ -80,75 +82,6 @@ function LightCard({
         background: L.bg,
         border: `1px solid ${L.line}`,
         borderTop: accent ? `2px solid ${accent}` : `1px solid ${L.line}`,
-        ...style,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function CardHead({
-  icon,
-  color,
-  title,
-  right,
-}: {
-  icon?: IconName;
-  color?: string;
-  title: string;
-  right?: React.ReactNode;
-}) {
-  const iconColor = color ?? L.mut;
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 9,
-        marginBottom: 14,
-      }}
-    >
-      {icon ? (
-        <div
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: `${iconColor}22`,
-          }}
-        >
-          <Icon name={icon} size={15} stroke={iconColor} />
-        </div>
-      ) : null}
-      <span
-        style={{
-          fontSize: 13.5,
-          fontWeight: 700,
-          letterSpacing: 0.2,
-          color: L.ink,
-          flex: 1,
-        }}
-      >
-        {title}
-      </span>
-      {right}
-    </div>
-  );
-}
-
-function Eyebrow({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div
-      style={{
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: 1.1,
-        textTransform: "uppercase",
-        color: L.mut2,
         ...style,
       }}
     >
