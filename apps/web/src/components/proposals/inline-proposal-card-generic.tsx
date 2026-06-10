@@ -31,7 +31,7 @@ import {
   shouldShowInlineProposalIntentLabel,
 } from "../../lib/proposal-ui-state";
 import { ProposalEvidenceList } from "./proposal-evidence-list";
-import { Badge, Button, ProposalConfirmation } from "../ui";
+import { Badge, Button, ProposalFrame, ProposalFrameHeader, ProposalWhy, ProposalStateBand } from "../ui";
 
 type InlineProposalCardProps = {
   proposal: AiProposal;
@@ -169,188 +169,188 @@ export function InlineProposalCard({
   const trimmedModifyFeedback = modificationFeedback.trim();
 
   return (
-    <ProposalConfirmation
+    <ProposalFrame
       status={proposal.status}
-      title={proposal.title}
       inline
       aria-busy={isActionPending || undefined}
       aria-live="polite"
-      meta={
-        <>
-          <span
-            className={`proposal-domain-pill ${getProposalDomainPillClass(proposal.targetDomain)}`}
-          >
-            {domainLabel}
-          </span>
-          {showIntentLabel && intentLabel ? (
-            <span className="confirmation-card__meta proposal-meta">{intentLabel}</span>
-          ) : null}
-        </>
-      }
-      badges={
-        <Badge tone={getProposalStatusBadgeTone(proposal.status)}>
-          {getProposalStatusLabel(proposal.status)}
-        </Badge>
-      }
-      actions={
-        canDecide ? (
+    >
+      <ProposalFrameHeader
+        title={proposal.title}
+        meta={
           <>
-            <Button
-              type="button"
-              className="button-coach"
-              disabled={!canAccept || isActionPending || isModifyMode}
-              title={!canAccept ? (acceptDisabledReason ?? undefined) : undefined}
-              aria-describedby={
-                !canAccept && acceptDisabledReason
-                  ? `proposal-accept-hint-${proposal.id}`
-                  : undefined
-              }
-              onClick={() => decisionMutation.mutate("accept")}
+            <span
+              className={`proposal-domain-pill ${getProposalDomainPillClass(proposal.targetDomain)}`}
             >
-              {decisionMutation.isPending ? "Saving…" : "Apply"}
-            </Button>
-            {!canAccept && acceptDisabledReason ? (
-              <p id={`proposal-accept-hint-${proposal.id}`} className="sr-only">
-                {acceptDisabledReason}
-              </p>
-            ) : null}
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={isActionPending}
-              aria-expanded={isModifyMode}
-              onClick={() => {
-                setIsModifyMode((current) => !current);
-                modifyMutation.reset();
-              }}
-            >
-              Modify
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={isActionPending || isModifyMode}
-              onClick={() => decisionMutation.mutate("reject")}
-            >
-              Reject
-            </Button>
-            {domainRoute ? (
-              <Link href={domainRoute} className="confirmation-card__link">
-                {isHabitPlanProposalIntent(proposal.intent)
-                  ? "View on Today →"
-                  : `View on ${domainLabel} →`}
-              </Link>
+              {domainLabel}
+            </span>
+            {showIntentLabel && intentLabel ? (
+              <span className="proposal-frame__meta-label">{intentLabel}</span>
             ) : null}
           </>
-        ) : null
-      }
-    >
-      {proposal.reason ? <p className="proposal-meta">{proposal.reason}</p> : null}
+        }
+        badge={
+          <Badge tone={getProposalStatusBadgeTone(proposal.status)}>
+            {getProposalStatusLabel(proposal.status)}
+          </Badge>
+        }
+      />
 
-      <ProposalChangeSummaryView summary={changeSummary} />
+      <div className="proposal-frame__body">
+        {proposal.reason ? <ProposalWhy>{proposal.reason}</ProposalWhy> : null}
 
-      {proposal.evidenceRefs && proposal.evidenceRefs.length > 0 ? (
-        <ProposalEvidenceList evidenceRefs={proposal.evidenceRefs} />
-      ) : null}
+        <ProposalChangeSummaryView summary={changeSummary} />
 
-      {showValidationNotice ? (
-        <div className="notice notice-inline">
-          {acceptDisabledReason ? <p className="proposal-meta">{acceptDisabledReason}</p> : null}
-          {validationErrors.length > 0 ? (
-            <>
-              <strong>{INLINE_PROPOSAL_VALIDATION_HEADING}</strong>
-              <ul>
-                {validationErrors.map((error) => (
-                  <li key={error}>{error}</li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+        {proposal.evidenceRefs && proposal.evidenceRefs.length > 0 ? (
+          <ProposalEvidenceList evidenceRefs={proposal.evidenceRefs} />
+        ) : null}
 
-      {isModifyMode && canDecide ? (
-        <div className="proposal-modify-form">
-          <label className="proposal-meta" htmlFor={modifyFeedbackId}>
-            What would you like to change about this suggestion?
-          </label>
-          <textarea
-            id={modifyFeedbackId}
-            className="form-textarea"
-            rows={3}
-            value={modificationFeedback}
-            disabled={modifyMutation.isPending}
-            placeholder="For example: keep one strength exercise but make it shorter."
-            onChange={(event) => setModificationFeedback(event.target.value)}
-          />
-          <div className="action-row proposal-modify-actions">
-            <Button
-              type="button"
-              className="button-coach"
-              disabled={!trimmedModifyFeedback || modifyMutation.isPending}
-              onClick={() => modifyMutation.mutate(trimmedModifyFeedback)}
-            >
-              {modifyMutation.isPending ? "Sending…" : "Send revision request"}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={modifyMutation.isPending}
-              onClick={() => {
-                setIsModifyMode(false);
-                setModificationFeedback("");
-                modifyMutation.reset();
-              }}
-            >
-              Cancel
-            </Button>
+        {showValidationNotice ? (
+          <div className="notice notice-inline">
+            {acceptDisabledReason ? <p className="proposal-meta">{acceptDisabledReason}</p> : null}
+            {validationErrors.length > 0 ? (
+              <>
+                <strong>{INLINE_PROPOSAL_VALIDATION_HEADING}</strong>
+                <ul>
+                  {validationErrors.map((error) => (
+                    <li key={error}>{error}</li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {proposal.status === "accepted" ? (
-        <div className="confirmation-card__success">
-          {appliedMessage}
+        {isModifyMode && canDecide ? (
+          <div className="proposal-modify-form">
+            <label className="proposal-meta" htmlFor={modifyFeedbackId}>
+              What would you like to change about this suggestion?
+            </label>
+            <textarea
+              id={modifyFeedbackId}
+              className="form-textarea"
+              rows={3}
+              value={modificationFeedback}
+              disabled={modifyMutation.isPending}
+              placeholder="For example: keep one strength exercise but make it shorter."
+              onChange={(event) => setModificationFeedback(event.target.value)}
+            />
+            <div className="action-row proposal-modify-actions">
+              <Button
+                type="button"
+                className="button-coach"
+                disabled={!trimmedModifyFeedback || modifyMutation.isPending}
+                onClick={() => modifyMutation.mutate(trimmedModifyFeedback)}
+              >
+                {modifyMutation.isPending ? "Sending…" : "Send revision request"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={modifyMutation.isPending}
+                onClick={() => {
+                  setIsModifyMode(false);
+                  setModificationFeedback("");
+                  modifyMutation.reset();
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {proposal.status === "accepted" ? (
+          <ProposalStateBand>
+            {appliedMessage}
+            {domainRoute ? (
+              <>
+                {" "}
+                <Link href={domainRoute} className="proposal-frame__link">
+                  {isHabitPlanProposalIntent(proposal.intent)
+                    ? "Open Today →"
+                    : "View updated plan →"}
+                </Link>
+              </>
+            ) : null}
+          </ProposalStateBand>
+        ) : null}
+
+        {proposal.status === "rejected" ? (
+          <ProposalStateBand>{getProposalRejectedMessage(proposal)}</ProposalStateBand>
+        ) : null}
+
+        {proposal.status === "superseded" ? (
+          <ProposalStateBand>{getProposalSupersededMessage()}</ProposalStateBand>
+        ) : null}
+
+        {decisionMutation.isError ? (
+          <p className="form-error" role="alert">
+            {decisionMutation.error instanceof Error
+              ? decisionMutation.error.message
+              : "Could not record proposal decision."}
+          </p>
+        ) : null}
+
+        {modifyMutation.isError ? (
+          <p className="form-error" role="alert">
+            {modifyMutation.error instanceof Error
+              ? modifyMutation.error.message
+              : "Could not request a proposal revision."}
+          </p>
+        ) : null}
+      </div>
+
+      {canDecide ? (
+        <div className="proposal-frame__actions action-row">
+          <Button
+            type="button"
+            className="button-coach"
+            disabled={!canAccept || isActionPending || isModifyMode}
+            title={!canAccept ? (acceptDisabledReason ?? undefined) : undefined}
+            aria-describedby={
+              !canAccept && acceptDisabledReason
+                ? `proposal-accept-hint-${proposal.id}`
+                : undefined
+            }
+            onClick={() => decisionMutation.mutate("accept")}
+          >
+            {decisionMutation.isPending ? "Saving…" : "Apply"}
+          </Button>
+          {!canAccept && acceptDisabledReason ? (
+            <p id={`proposal-accept-hint-${proposal.id}`} className="sr-only">
+              {acceptDisabledReason}
+            </p>
+          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isActionPending}
+            aria-expanded={isModifyMode}
+            onClick={() => {
+              setIsModifyMode((current) => !current);
+              modifyMutation.reset();
+            }}
+          >
+            Modify
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isActionPending || isModifyMode}
+            onClick={() => decisionMutation.mutate("reject")}
+          >
+            Reject
+          </Button>
           {domainRoute ? (
-            <>
-              {" "}
-              <Link href={domainRoute} className="confirmation-card__link">
-                {isHabitPlanProposalIntent(proposal.intent)
-                  ? "Open Today →"
-                  : "View updated plan →"}
-              </Link>
-            </>
+            <Link href={domainRoute} className="proposal-frame__link">
+              {isHabitPlanProposalIntent(proposal.intent)
+                ? "View on Today →"
+                : `View on ${domainLabel} →`}
+            </Link>
           ) : null}
         </div>
       ) : null}
-
-      {proposal.status === "rejected" ? (
-        <div className="confirmation-card__notice" role="status">
-          {getProposalRejectedMessage(proposal)}
-        </div>
-      ) : null}
-
-      {proposal.status === "superseded" ? (
-        <div className="confirmation-card__notice" role="status">
-          {getProposalSupersededMessage()}
-        </div>
-      ) : null}
-
-      {decisionMutation.isError ? (
-        <p className="form-error" role="alert">
-          {decisionMutation.error instanceof Error
-            ? decisionMutation.error.message
-            : "Could not record proposal decision."}
-        </p>
-      ) : null}
-
-      {modifyMutation.isError ? (
-        <p className="form-error" role="alert">
-          {modifyMutation.error instanceof Error
-            ? modifyMutation.error.message
-            : "Could not request a proposal revision."}
-        </p>
-      ) : null}
-    </ProposalConfirmation>
+    </ProposalFrame>
   );
 }

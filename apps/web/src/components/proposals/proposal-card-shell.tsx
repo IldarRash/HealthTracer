@@ -16,7 +16,7 @@ import {
   getProposalSupersededMessage,
   shouldShowInlineProposalIntentLabel,
 } from "../../lib/proposal-ui-state";
-import { Badge, Button, ProposalConfirmation } from "../ui";
+import { Badge, Button, ProposalFrame, ProposalFrameHeader, ProposalWhy, ProposalStateBand } from "../ui";
 
 /**
  * Narrow structural types for the mutation handles the shell needs.
@@ -120,146 +120,146 @@ export function ProposalCardShell({
   const resolvedViewOnLabel = viewOnLinkLabel ?? `View on ${domainLabel} →`;
 
   return (
-    <ProposalConfirmation
+    <ProposalFrame
       status={proposal.status}
-      title={proposal.title}
       inline
       aria-busy={isActionPending || undefined}
       aria-live="polite"
-      meta={
-        <>
-          <span
-            className={`proposal-domain-pill ${getProposalDomainPillClass(proposal.targetDomain)}`}
-          >
-            {domainLabel}
-          </span>
-          {showIntentLabel && intentLabel ? (
-            <span className="confirmation-card__meta proposal-meta">{intentLabel}</span>
-          ) : null}
-        </>
-      }
-      badges={
-        <Badge tone={getProposalStatusBadgeTone(proposal.status)}>
-          {getProposalStatusLabel(proposal.status)}
-        </Badge>
-      }
-      actions={
-        canDecide ? (
+    >
+      <ProposalFrameHeader
+        title={proposal.title}
+        meta={
           <>
-            <Button
-              type="button"
-              className="button-coach"
-              disabled={!canAccept || isActionPending || isModifyMode}
-              title={!canAccept ? (acceptDisabledTitle ?? undefined) : undefined}
-              onClick={() => decisionMutation.mutate("accept")}
+            <span
+              className={`proposal-domain-pill ${getProposalDomainPillClass(proposal.targetDomain)}`}
             >
-              {decisionMutation.isPending ? "Saving…" : acceptLabel}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={isActionPending}
-              aria-expanded={isModifyMode}
-              onClick={() => {
-                setIsModifyMode((current) => !current);
-                modifyMutation.reset();
-              }}
-            >
-              Modify
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={isActionPending || isModifyMode}
-              onClick={() => decisionMutation.mutate("reject")}
-            >
-              Reject
-            </Button>
-            {domainRoute ? (
-              <Link href={domainRoute} className="confirmation-card__link">
-                {resolvedViewOnLabel}
-              </Link>
+              {domainLabel}
+            </span>
+            {showIntentLabel && intentLabel ? (
+              <span className="proposal-frame__meta-label">{intentLabel}</span>
             ) : null}
           </>
-        ) : null
-      }
-    >
-      {proposal.reason ? <p className="proposal-meta">{proposal.reason}</p> : null}
+        }
+        badge={
+          <Badge tone={getProposalStatusBadgeTone(proposal.status)}>
+            {getProposalStatusLabel(proposal.status)}
+          </Badge>
+        }
+      />
 
-      {children}
+      <div className="proposal-frame__body">
+        {proposal.reason ? <ProposalWhy>{proposal.reason}</ProposalWhy> : null}
 
-      {validationNoticeNode ?? null}
+        {children}
 
-      {isModifyMode && canDecide ? (
-        <div className="proposal-modify-form">
-          <label className="proposal-meta" htmlFor={modifyFeedbackId}>
-            {modifyFormLabel}
-          </label>
-          <textarea
-            id={modifyFeedbackId}
-            className="form-textarea"
-            rows={3}
-            value={modificationFeedback}
-            disabled={modifyMutation.isPending}
-            placeholder={modifyFormPlaceholder}
-            onChange={(event) => setModificationFeedback(event.target.value)}
-          />
-          <div className="action-row proposal-modify-actions">
-            <Button
-              type="button"
-              className="button-coach"
-              disabled={!trimmedModifyFeedback || modifyMutation.isPending}
-              onClick={() => modifyMutation.mutate(trimmedModifyFeedback)}
-            >
-              {modifyMutation.isPending ? "Sending…" : "Send revision request"}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
+        {validationNoticeNode ?? null}
+
+        {isModifyMode && canDecide ? (
+          <div className="proposal-modify-form">
+            <label className="proposal-meta" htmlFor={modifyFeedbackId}>
+              {modifyFormLabel}
+            </label>
+            <textarea
+              id={modifyFeedbackId}
+              className="form-textarea"
+              rows={3}
+              value={modificationFeedback}
               disabled={modifyMutation.isPending}
-              onClick={() => {
-                setIsModifyMode(false);
-                setModificationFeedback("");
-                modifyMutation.reset();
-              }}
-            >
-              Cancel
-            </Button>
+              placeholder={modifyFormPlaceholder}
+              onChange={(event) => setModificationFeedback(event.target.value)}
+            />
+            <div className="action-row proposal-modify-actions">
+              <Button
+                type="button"
+                className="button-coach"
+                disabled={!trimmedModifyFeedback || modifyMutation.isPending}
+                onClick={() => modifyMutation.mutate(trimmedModifyFeedback)}
+              >
+                {modifyMutation.isPending ? "Sending…" : "Send revision request"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={modifyMutation.isPending}
+                onClick={() => {
+                  setIsModifyMode(false);
+                  setModificationFeedback("");
+                  modifyMutation.reset();
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
+        ) : null}
+
+        {proposal.status === "accepted" ? (
+          <ProposalStateBand>{acceptedSuccessNode}</ProposalStateBand>
+        ) : null}
+
+        {proposal.status === "rejected" ? (
+          <ProposalStateBand>{getProposalRejectedMessage(proposal)}</ProposalStateBand>
+        ) : null}
+
+        {proposal.status === "superseded" ? (
+          <ProposalStateBand>{getProposalSupersededMessage()}</ProposalStateBand>
+        ) : null}
+
+        {decisionMutation.isError ? (
+          <p className="form-error" role="alert">
+            {decisionMutation.error instanceof Error
+              ? decisionMutation.error.message
+              : "Could not record proposal decision."}
+          </p>
+        ) : null}
+
+        {modifyMutation.isError ? (
+          <p className="form-error" role="alert">
+            {modifyMutation.error instanceof Error
+              ? modifyMutation.error.message
+              : "Could not request a proposal revision."}
+          </p>
+        ) : null}
+      </div>
+
+      {canDecide ? (
+        <div className="proposal-frame__actions action-row">
+          <Button
+            type="button"
+            className="button-coach"
+            disabled={!canAccept || isActionPending || isModifyMode}
+            title={!canAccept ? (acceptDisabledTitle ?? undefined) : undefined}
+            onClick={() => decisionMutation.mutate("accept")}
+          >
+            {decisionMutation.isPending ? "Saving…" : acceptLabel}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isActionPending}
+            aria-expanded={isModifyMode}
+            onClick={() => {
+              setIsModifyMode((current) => !current);
+              modifyMutation.reset();
+            }}
+          >
+            Modify
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={isActionPending || isModifyMode}
+            onClick={() => decisionMutation.mutate("reject")}
+          >
+            Reject
+          </Button>
+          {domainRoute ? (
+            <Link href={domainRoute} className="proposal-frame__link">
+              {resolvedViewOnLabel}
+            </Link>
+          ) : null}
         </div>
       ) : null}
-
-      {proposal.status === "accepted" ? (
-        <div className="confirmation-card__success">{acceptedSuccessNode}</div>
-      ) : null}
-
-      {proposal.status === "rejected" ? (
-        <div className="confirmation-card__notice" role="status">
-          {getProposalRejectedMessage(proposal)}
-        </div>
-      ) : null}
-
-      {proposal.status === "superseded" ? (
-        <div className="confirmation-card__notice" role="status">
-          {getProposalSupersededMessage()}
-        </div>
-      ) : null}
-
-      {decisionMutation.isError ? (
-        <p className="form-error" role="alert">
-          {decisionMutation.error instanceof Error
-            ? decisionMutation.error.message
-            : "Could not record proposal decision."}
-        </p>
-      ) : null}
-
-      {modifyMutation.isError ? (
-        <p className="form-error" role="alert">
-          {modifyMutation.error instanceof Error
-            ? modifyMutation.error.message
-            : "Could not request a proposal revision."}
-        </p>
-      ) : null}
-    </ProposalConfirmation>
+    </ProposalFrame>
   );
 }

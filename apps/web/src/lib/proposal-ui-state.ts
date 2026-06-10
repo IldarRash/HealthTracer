@@ -30,13 +30,13 @@ export function getProposalIntentLabel(
     case "capture_wellbeing_checkin":
       return "Wellbeing check-in";
     case "log_nutrition_incident":
-      return "Nutrition incident log";
+      return "Nutrition note";
     case "log_workout_activity":
       return "Log activity";
     case "recommend_recipes":
       return "Recipe recommendations";
     case "save_body_analysis":
-      return "Анализ тела";
+      return "Body analysis";
     default:
       return null;
   }

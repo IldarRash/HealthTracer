@@ -2,39 +2,31 @@ import { describe, expect, it } from "vitest";
 import { WELLBEING_CRISIS_SUPPORT_COPY } from "@health/types";
 import {
   createOptimisticUserMessage,
-  CHAT_EMPTY_STATE_DESCRIPTION,
-  CHAT_EMPTY_STATE_TITLE,
   isOptimisticMessage,
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
   resolveChatMessageWeeklyReview,
   resolvePrimaryThreadId,
-  SUGGESTED_CHAT_PROMPTS,
+  SUGGESTED_CHAT_PROMPT_DEFINITIONS,
 } from "./chat-ui-state.js";
 import { WEEKLY_REVIEW_CHAT_ACTION_NOTICE, WEEKLY_REVIEW_CHAT_PROMPT } from "./weekly-review-ui-state.js";
 
 const summaryId = "14a08176-64a7-4a2d-8a44-581807368394";
 
 describe("chat UI state", () => {
-  it("exposes coach-forward suggested prompt labels with stable weekly review message", () => {
-    expect(SUGGESTED_CHAT_PROMPTS).toHaveLength(4);
-    expect(SUGGESTED_CHAT_PROMPTS[0]).toEqual({
-      label: "Review my weekly progress",
+  it("exposes coach-forward suggested prompt definitions with stable weekly review message", () => {
+    expect(SUGGESTED_CHAT_PROMPT_DEFINITIONS).toHaveLength(4);
+    // The first prompt targets the weekly review — its message is the stable weekly review prompt.
+    expect(SUGGESTED_CHAT_PROMPT_DEFINITIONS[0]).toEqual({
+      labelKey: "reviewWeekly",
       message: WEEKLY_REVIEW_CHAT_PROMPT,
     });
 
-    for (const prompt of SUGGESTED_CHAT_PROMPTS) {
-      expect(prompt.label.length).toBeLessThanOrEqual(40);
+    // All definitions must have a non-empty labelKey and a non-empty message.
+    for (const prompt of SUGGESTED_CHAT_PROMPT_DEFINITIONS) {
+      expect(prompt.labelKey.length).toBeGreaterThan(0);
+      expect(prompt.message.length).toBeGreaterThan(0);
     }
-
-    expect(SUGGESTED_CHAT_PROMPTS[0]?.label.length).toBeLessThan(
-      SUGGESTED_CHAT_PROMPTS[0]?.message.length ?? 0,
-    );
-  });
-
-  it("uses concise empty state copy", () => {
-    expect(CHAT_EMPTY_STATE_TITLE).toContain("coach");
-    expect(CHAT_EMPTY_STATE_DESCRIPTION).not.toContain("typed");
   });
 
   it("selects the most recently updated thread as primary", () => {

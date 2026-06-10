@@ -1,9 +1,10 @@
 "use client";
 
+import { useTranslations, useLocale } from "next-intl";
 import { useAuth } from "@clerk/nextjs";
 import type { AiProposal, ChatTurnResponse, ProposalModifyResponse } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   apiQueryKeys,
   createChatThread,
@@ -29,15 +30,22 @@ import {
   resolveChatMessageDirectPathFeedback,
 } from "../../lib/chat-direct-path-ui-state";
 import {
+  findPrecedingUserMessage,
+  resolveChatMessageDegradedTurn,
+} from "../../lib/chat-degraded-ui-state";
+import { useChatAutoScroll } from "../../lib/use-chat-auto-scroll";
+import {
+  formatChatDateSeparator,
+  shouldShowDateSeparator,
+} from "../../lib/chat-transcript-grouping";
+import { shouldSendOnEnter } from "../../lib/chat-composer-ui-state";
+import {
   createOptimisticUserMessage,
-  formatChatTimestamp,
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
   resolveChatMessageWeeklyReview,
-  CHAT_EMPTY_STATE_DESCRIPTION,
-  CHAT_EMPTY_STATE_TITLE,
   resolvePrimaryThreadId,
-  SUGGESTED_CHAT_PROMPTS,
+  SUGGESTED_CHAT_PROMPT_DEFINITIONS,
   type OptimisticChatMessage,
 } from "../../lib/chat-ui-state";
 import {
@@ -58,6 +66,10 @@ import { ChatComposerAttachments } from "./chat-composer-attachments";
 import { ChatMessageAttachmentPreviews } from "./chat-message-attachment-previews";
 import { PhotoGuide } from "./photo-guide";
 import { PhotoStripMsg } from "./photo-strip-msg";
+import { ChatDateSeparator } from "./chat-date-separator";
+import { ChatJumpToLatest } from "./chat-jump-to-latest";
+import { ChatMessageMarkdown } from "./chat-message-markdown";
+import { ChatTurnErrorCard } from "./chat-turn-error-card";
 import { WeeklyReviewChatSummary } from "./weekly-review-chat-summary";
 import {
   BODY_ANALYSIS_THINKING_LABEL,
@@ -98,6 +110,8 @@ type ChatSendMutationInput =
     };
 
 export function ChatWorkspace() {
+  const t = useTranslations("Chat");
+  const locale = useLocale();
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
@@ -566,6 +580,11 @@ export function ChatWorkspace() {
     optimisticMessage,
   );
 
+  const { transcriptRef, isAtBottom, scrollToLatest } = useChatAutoScroll({
+    messages,
+    isSendPending,
+  });
+
   const proposalsByMessageId = useMemo(() => {
     const merged = mergeProposalsById(threadProposalsQuery.data ?? [], localProposals);
     const map = new Map<string, AiProposal[]>();
@@ -812,28 +831,34 @@ export function ChatWorkspace() {
               <span className="chat-header__status">· online</span>
             </div>
           </div>
-          <ChatTranscript>
+          <ChatTranscript ref={transcriptRef}>
             {messages.length === 0 && !isSendPending ? (
               <li className="chat-empty-state">
                 <EmptyState
-                  title={CHAT_EMPTY_STATE_TITLE}
-                  description={CHAT_EMPTY_STATE_DESCRIPTION}
+                  title={t("emptyStateTitle")}
+                  description={t("emptyStateDescription")}
                 />
                 <PromptChipList>
-                  {SUGGESTED_CHAT_PROMPTS.map((prompt) => (
+                  {SUGGESTED_CHAT_PROMPT_DEFINITIONS.map((prompt) => (
                     <PromptChip
                       key={prompt.message}
                       disabled={isSendPending}
                       onClick={() => handlePromptSelect(prompt.message)}
                     >
-                      {prompt.label}
+                      {t(`suggestedPrompts.${prompt.labelKey}`)}
                     </PromptChip>
                   ))}
                 </PromptChipList>
               </li>
             ) : null}
 
-            {messages.map((message) => {
+            {messages.map((message, messageIndex) => {
+              const prevMessage = messageIndex > 0 ? messages[messageIndex - 1] : null;
+              const showSeparator = shouldShowDateSeparator(prevMessage ?? null, message);
+              const separatorLabel = showSeparator
+                ? formatChatDateSeparator(message.createdAt, locale, t("dateToday"), t("dateYesterday"))
+                : null;
+
               const linkedProposals = proposalsByMessageId.get(message.id) ?? [];
               const isUser = message.role === "user";
               const attachmentPreviews = isUser
@@ -851,6 +876,9 @@ export function ChatWorkspace() {
               const directPathFeedback = isUser
                 ? null
                 : resolveChatMessageDirectPathFeedback(message);
+              const degradedTurn = isUser
+                ? null
+                : resolveChatMessageDegradedTurn(message);
 
               // Body-flow: show PhotoStripMsg instead of generic previews for user
               // messages that carry body-analysis photos (3 images in body flow context).
@@ -869,16 +897,18 @@ export function ChatWorkspace() {
                 bodyPhotoRequestMessage?.id === message.id;
 
               return (
-                <li key={message.id}>
+                <React.Fragment key={message.id}>
+                  {showSeparator && separatorLabel ? (
+                    <ChatDateSeparator
+                      label={separatorLabel}
+                      dateTime={message.createdAt}
+                    />
+                  ) : null}
+                <li>
                   <ChatBubble
                     role={isUser ? "user" : "assistant"}
                     variant={
                       isUser ? "default" : crisisSupportCopy ? "crisis" : "coach"
-                    }
-                    meta={
-                      <time dateTime={message.createdAt}>
-                        {formatChatTimestamp(message.createdAt)}
-                      </time>
                     }
                   >
                     {crisisSupportCopy ? (
@@ -892,12 +922,28 @@ export function ChatWorkspace() {
                         {isBodyPhotoMessage ? (
                           <PhotoStripMsg
                             previews={attachmentPreviews}
-                            caption="Вот, со всех сторон"
+                            caption={t("bodyPhotoCaption")}
                           />
                         ) : attachmentPreviews.length > 0 ? (
                           <ChatMessageAttachmentPreviews previews={attachmentPreviews} />
                         ) : null}
-                        {messageText ? <p className="chat-bubble__text">{messageText}</p> : null}
+                        {isUser && messageText ? <p className="chat-bubble__text">{messageText}</p> : null}
+                        {!isUser && degradedTurn ? (
+                          <ChatTurnErrorCard
+                            onRetry={() => {
+                              const precedingText = findPrecedingUserMessage(messages, messageIndex);
+                              if (precedingText) {
+                                void sendMessageStreaming(precedingText);
+                              }
+                            }}
+                            onEditRequest={() => {
+                              const precedingText = findPrecedingUserMessage(messages, messageIndex);
+                              if (precedingText) {
+                                setDraft(precedingText);
+                              }
+                            }}
+                          />
+                        ) : (!isUser && messageText ? <ChatMessageMarkdown>{messageText}</ChatMessageMarkdown> : null)}
                         {directPathFeedback ? (
                           <p className="notice notice-inline" role="status">
                             {directPathFeedback.message}
@@ -941,6 +987,7 @@ export function ChatWorkspace() {
                     />
                   ) : null}
                 </li>
+                </React.Fragment>
               );
             })}
 
@@ -952,6 +999,8 @@ export function ChatWorkspace() {
               </li>
             ) : null}
           </ChatTranscript>
+
+          <ChatJumpToLatest visible={!isAtBottom} onClick={scrollToLatest} />
 
           <ChatComposer onSubmit={handleSubmit}>
             <div className="chat-composer-inner">
@@ -998,11 +1047,26 @@ export function ChatWorkspace() {
                 <textarea
                   id="chat-message"
                   className="chat-composer-controls__input"
-                  rows={2}
+                  rows={1}
                   value={draft}
-                  placeholder="Message your coach…"
+                  placeholder={t("composerPlaceholder")}
                   disabled={isSendPending}
                   onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (
+                      shouldSendOnEnter({
+                        key: event.key,
+                        shiftKey: event.shiftKey,
+                        isComposing: event.nativeEvent.isComposing,
+                      })
+                    ) {
+                      event.preventDefault();
+                      const form = event.currentTarget.form;
+                      if (form) {
+                        form.requestSubmit();
+                      }
+                    }
+                  }}
                 />
                 <Button
                   type="submit"
@@ -1025,9 +1089,14 @@ export function ChatWorkspace() {
                 </p>
               ) : null}
             </div>
-            <p className="chat-composer-disclaimer">
-              Your coach suggests — the decision is always yours. This is lifestyle support, not medical advice.
-            </p>
+            <div className="chat-composer-footer">
+              <p className="chat-composer-disclaimer">
+                {t("disclaimer")}
+              </p>
+              <p className="chat-composer-enter-hint" aria-hidden="true">
+                {t("enterHint")}
+              </p>
+            </div>
           </ChatComposer>
         </>
       ) : null}

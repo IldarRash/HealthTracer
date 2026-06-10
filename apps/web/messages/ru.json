@@ -144,5 +144,50 @@
       "updateButton": "Обновить по фото",
       "disclaimer": "Оценка визуальная, по фотографиям — не замер состава тела и не диагноз."
     }
+  },
+  "Chat": {
+    "emptyStateTitle": "С чего начнём?",
+    "emptyStateDescription": "Расскажите, как прошёл день, что съели или как спали. Я предложу следующий шаг — применять или нет, решаете вы.",
+    "composerPlaceholder": "Напишите коучу или прикрепите фото…",
+    "disclaimer": "Коуч предлагает — решение всегда за вами. Это поддержка по образу жизни, не медицинская консультация.",
+    "enterHint": "Enter — отправить · Shift+Enter — новая строка",
+    "thinkingLabel": "Коуч думает…",
+    "jumpToLatest": "К последнему сообщению",
+    "attachmentUnavailable": "Больше недоступно",
+    "dateToday": "Сегодня",
+    "dateYesterday": "Вчера",
+    "suggestedPrompts": {
+      "reviewWeekly": "Обзор моей недели",
+      "reviewWorkouts": "Итоги тренировочной недели",
+      "adjustGoals": "Помоги скорректировать цели",
+      "nutritionPlan": "Что в моём плане питания?"
+    },
+    "bodyPhotoCaption": "Вот, со всех сторон",
+    "error": {
+      "title": "Не получилось ответить",
+      "body": "Соединение прервалось, пока я готовил предложение. Ваше сообщение сохранено — можно повторить.",
+      "retry": "Повторить",
+      "editRequest": "Изменить запрос"
+    }
+  },
+  "Proposals": {
+    "eyebrow": "ПРЕДЛОЖЕНИЕ КОУЧА",
+    "accept": "Принять",
+    "edit": "Изменить",
+    "decline": "Отклонить",
+    "stateBandAccepted": "Принято · план обновлён",
+    "stateBandRejected": "Отклонено · план без изменений",
+    "stateBandSuperseded": "Пересмотрено · см. обновлённое предложение",
+    "viewUpdatedPlan": "Открыть обновлённый план →",
+    "intentLabels": {
+      "adapt_workout_plan_from_progress": "Адаптация тренировок по прогрессу",
+      "create_habit_plan": "Новый план привычек",
+      "adapt_habit_plan": "Корректировка плана привычек",
+      "capture_wellbeing_checkin": "Отметка самочувствия",
+      "log_nutrition_incident": "Заметка о питании",
+      "log_workout_activity": "Записать активность",
+      "recommend_recipes": "Рекомендации рецептов",
+      "save_body_analysis": "Анализ тела"
+    }
   }
 }

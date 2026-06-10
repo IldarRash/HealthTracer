@@ -63,7 +63,9 @@ describe("Chat UI primitive contracts", () => {
       /\.chat-single \.wellbeing-crisis-panel\.chat-metadata-panel--crisis \.confirmation-card__link[\s\S]*color:\s*var\(--color-chat-crisis-link\)/,
     );
     expect(stylesSource).toContain(".chat-thinking");
-    expect(stylesSource).toContain("mask-image: linear-gradient");
+    // mask-image: linear-gradient was intentionally removed from .chat-single .chat-transcript
+    // in the UX overhaul (WP2 scroll model) to prevent text clipping at the bottom edge.
+    // The reduced-motion media query still resets mask-image to none for any remaining usages.
     expect(stylesSource).toMatch(/prefers-reduced-motion[\s\S]*\.chat-transcript/);
     expect(stylesSource).toMatch(/prefers-reduced-motion[\s\S]*\.chat-composer textarea/);
     expect(stylesSource).toMatch(/prefers-reduced-motion[\s\S]*\.chat-prompt-chip/);

@@ -71,3 +71,47 @@ export type ChatTurnResponse = z.infer<typeof chatTurnResponseSchema>;
 // Re-export AiProposal so callers that reference ChatTurnResponse don't need
 // a second import from ai-proposal.ts.
 export type { AiProposal };
+
+// ---------------------------------------------------------------------------
+// Degraded-turn metadata — stored in assistant message metadata.turnDegraded
+// ---------------------------------------------------------------------------
+
+/**
+ * Reason codes for a degraded AI turn.
+ * - reply_blocked: reply safety validation blocked the reply
+ * - parse_failed: all domain LLMs degraded (parse/output failure)
+ * - provider_error: upstream LLM provider error
+ */
+export const chatTurnDegradedReasonSchema = z.enum([
+  "reply_blocked",
+  "parse_failed",
+  "provider_error",
+]);
+
+export type ChatTurnDegradedReason = z.infer<typeof chatTurnDegradedReasonSchema>;
+
+/**
+ * Schema for the turnDegraded sub-object stored in assistant message metadata.
+ */
+export const chatMessageDegradedTurnSchema = z.object({
+  degraded: z.literal(true),
+  reason: chatTurnDegradedReasonSchema,
+});
+
+export type ChatMessageDegradedTurn = z.infer<typeof chatMessageDegradedTurnSchema>;
+
+/**
+ * Parse the degraded-turn metadata from an assistant message's metadata field.
+ * Returns the parsed object if present and valid, null otherwise.
+ * Tolerant of unknown or missing keys — never throws.
+ */
+export function parseChatMessageDegradedTurn(
+  metadata: Record<string, unknown> | null | undefined,
+): ChatMessageDegradedTurn | null {
+  if (!metadata || typeof metadata.turnDegraded !== "object" || metadata.turnDegraded === null) {
+    return null;
+  }
+
+  const parsed = chatMessageDegradedTurnSchema.safeParse(metadata.turnDegraded);
+  return parsed.success ? parsed.data : null;
+}

@@ -2140,6 +2140,159 @@ span.confirmation-card__meta {
   border-left-color: var(--color-status-pending-border);
 }
 
+/* ── ProposalFrame design-system primitives ─────────────────────────────── */
+
+.proposal-frame {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-coach-500);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 6%), 0 8px 24px rgb(0 0 0 / 4%);
+  overflow: hidden;
+  padding: var(--space-4);
+  transition: box-shadow 160ms ease;
+}
+
+.proposal-frame--inline {
+  /* Inline variant is compact inside chat bubbles */
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 6%);
+}
+
+/* Status accent colors via data attribute */
+.proposal-frame[data-proposal-status="accepted"] {
+  border-color: var(--color-status-success-border);
+}
+
+.proposal-frame[data-proposal-status="rejected"] {
+  border-color: var(--color-status-error-border);
+}
+
+.proposal-frame[data-proposal-status="superseded"] {
+  background: var(--color-surface-inset);
+  border-color: var(--color-border-default);
+  opacity: 0.95;
+}
+
+.proposal-frame[data-proposal-status="pending"] {
+  border-left-color: var(--color-status-pending-border);
+}
+
+.proposal-frame__header {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+}
+
+.proposal-frame__title-group {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.proposal-frame__title {
+  display: block;
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.proposal-frame__meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: var(--space-1) 0 0;
+}
+
+.proposal-frame__meta-label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.proposal-frame__badge-slot {
+  flex-shrink: 0;
+}
+
+.proposal-frame__body {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.proposal-frame__why {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.proposal-frame__actions {
+  margin-top: var(--space-3);
+}
+
+.proposal-frame__link {
+  color: var(--color-coach-600);
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+}
+
+.proposal-frame__link:hover {
+  text-decoration: underline;
+}
+
+/* ProposalDiffRow */
+.proposal-diff-row {
+  align-items: baseline;
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: var(--space-3);
+}
+
+.proposal-diff-row__label {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  min-width: 6rem;
+}
+
+.proposal-diff-row__before {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.proposal-diff-row__after {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+/* ProposalStateBand */
+.proposal-state-band {
+  background: var(--color-surface-inset);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  padding: var(--space-2) var(--space-3);
+}
+
+.proposal-frame[data-proposal-status="accepted"] .proposal-state-band {
+  background: var(--color-status-success-bg, #f0fdf4);
+  color: var(--color-status-success-text, #166534);
+}
+
+.proposal-frame[data-proposal-status="rejected"] .proposal-state-band {
+  background: var(--color-status-error-bg, #fef2f2);
+  color: var(--color-status-error-text, #991b1b);
+}
+
+/* ── message-proposals uses proposal-frame too ─────────────────────────── */
+.message-proposals .proposal-frame {
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.message-proposals .proposal-frame[data-proposal-status="pending"] {
+  box-shadow: 0 4px 20px rgb(0 0 0 / 6%);
+}
+
 /* ==========================================================================
    Goals, training, and domain-specific layouts
    ========================================================================== */
@@ -3772,6 +3925,7 @@ span.confirmation-card__meta {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  position: relative;
 }
 
 /* Chat header row — 56px, coach status + context chip */
@@ -3815,24 +3969,12 @@ span.confirmation-card__meta {
   flex: 1 1 auto;
   gap: var(--space-6);
   margin: 0 auto;
-  mask-image: linear-gradient(
-    to bottom,
-    #000 0%,
-    #000 calc(100% - 3rem),
-    transparent 100%
-  );
   max-height: none;
   max-width: 45rem;
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-7, 1.75rem) 1.75rem var(--space-5);
   width: 100%;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    #000 0%,
-    #000 calc(100% - 3rem),
-    transparent 100%
-  );
 }
 
 .chat-single .chat-transcript > li {
@@ -3869,18 +4011,19 @@ span.confirmation-card__meta {
 .chat-single .chat-composer-controls {
   align-items: flex-end;
   background: #ffffff;
-  border: 1px solid var(--color-border-default);
+  border: 1px solid var(--color-border-strong);
   border-radius: 1.625rem;
-  box-shadow: 0 2px 14px rgb(0 0 0 / 4%);
+  box-shadow: 0 2px 14px rgb(0 0 0 / 6%);
   display: flex;
+  flex-wrap: nowrap;
   gap: 0;
   padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .chat-single .chat-composer-controls:focus-within {
-  border-color: var(--color-border-focus);
-  box-shadow: var(--shadow-focus);
+  border-color: var(--color-border-strong);
+  box-shadow: 0 2px 14px rgb(0 0 0 / 6%);
 }
 
 .chat-single .chat-composer textarea,
@@ -3889,11 +4032,12 @@ span.confirmation-card__meta {
   border: none;
   border-radius: 0;
   box-shadow: none;
+  field-sizing: content;
   flex: 1 1 auto;
   font-size: var(--font-size-chat);
   line-height: 1.55;
   max-height: 8rem;
-  min-height: 2.5rem;
+  min-height: 1.55rem;
   min-width: 0;
   outline: none;
   padding: var(--space-2) var(--space-2) var(--space-2) 0;
@@ -3935,21 +4079,36 @@ span.confirmation-card__meta {
 .chat-single .chat-composer-controls__send:disabled {
   background: var(--color-border-strong);
   cursor: not-allowed;
-  opacity: 0.6;
 }
 
 .chat-single .chat-composer-controls__send:hover:not(:disabled) {
   background: var(--color-coach-600);
 }
 
-/* Disclaimer footer */
+/* Disclaimer / enter-hint footer */
+.chat-single .chat-composer-footer {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: center;
+  margin: var(--space-2) auto 0;
+  max-width: 45rem;
+}
+
 .chat-single .chat-composer-disclaimer {
   color: var(--color-text-muted);
   font-size: 0.71875rem;
-  margin: var(--space-2) auto 0;
-  max-width: 45rem;
   opacity: 0.8;
   text-align: center;
+}
+
+.chat-single .chat-composer-enter-hint {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  opacity: 0.6;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .chat-composer-controls {
@@ -4183,6 +4342,75 @@ span.confirmation-card__meta {
   padding: var(--space-2) var(--space-3);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* chat-attachment-card variants */
+.chat-attachment-card {
+  display: inline-flex;
+}
+
+.chat-attachment-card--image {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.chat-attachment-card__thumb {
+  border-radius: var(--radius-md);
+  display: block;
+  height: auto;
+  max-height: 12rem;
+  max-width: min(100%, 16rem);
+  object-fit: cover;
+  width: auto;
+}
+
+.chat-attachment-card--file,
+.chat-attachment-card--unavailable {
+  align-items: center;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  max-width: 16rem;
+  overflow: hidden;
+  padding: var(--space-2) var(--space-3);
+}
+
+.chat-attachment-card--unavailable {
+  border-color: var(--color-border-default);
+  opacity: 0.8;
+}
+
+.chat-attachment-card__icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.chat-attachment-card__icon--unavailable {
+  color: var(--color-text-muted);
+}
+
+.chat-attachment-card__name {
+  flex: 1 1 auto;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-card__category {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+}
+
+.chat-attachment-card__status {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  font-style: italic;
 }
 
 .chat-bubble__text {
@@ -8247,6 +8475,206 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
 .body-analysis-card__footer {
   border-top: 1px solid var(--color-border-default);
   padding-top: 12px;
+}
+
+/* ── chat-date-separator ── */
+/* Centered muted day boundary label in the transcript. */
+.chat-date-separator {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-1) 0;
+}
+
+.chat-date-separator__label {
+  color: var(--color-text-muted);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: none;
+}
+
+/* ── chat-jump-to-latest ── */
+/* Floating pill above the composer when user has scrolled away from the bottom. */
+.chat-jump-to-latest {
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  transform: translateY(-0.5rem);
+}
+
+.chat-jump-to-latest__pill {
+  align-items: center;
+  background: var(--color-surface-card, #ffffff);
+  border: 1px solid var(--color-border-default);
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 12%);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.875rem;
+  pointer-events: all;
+  transition: box-shadow 150ms ease, transform 150ms ease;
+}
+
+.chat-jump-to-latest__pill:hover {
+  box-shadow: 0 4px 16px rgb(0 0 0 / 16%);
+  transform: translateY(-1px);
+}
+
+/* ── chat-turn-error-card ── */
+/* Rendered in place of the coach reply when a turn is degraded. */
+.chat-turn-error-card {
+  background: rgba(240, 80, 106, 0.16);
+  border: 1px solid rgba(240, 80, 106, 0.35);
+  border-radius: 0.875rem;
+  padding: 0.875rem 1rem;
+}
+
+.chat-turn-error-card__header {
+  align-items: center;
+  display: flex;
+  gap: 0.5625rem;
+  margin-bottom: 0.375rem;
+}
+
+.chat-turn-error-card__title {
+  color: #b32a45;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.chat-turn-error-card__body {
+  color: var(--color-text-secondary, #3b3b38);
+  font-size: 0.84375rem;
+  line-height: 1.5;
+  margin: 0 0 0.75rem;
+}
+
+.chat-turn-error-card__footer {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat-turn-error-card__btn {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  justify-content: center;
+  line-height: 1;
+  padding: 0.5rem 0.75rem;
+}
+
+.chat-turn-error-card__btn--retry {
+  background: var(--color-surface-inset, #f3f3f1);
+  color: var(--color-text-primary);
+}
+
+.chat-turn-error-card__btn--retry:hover {
+  background: var(--color-surface-card, #ffffff);
+}
+
+.chat-turn-error-card__btn--edit {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.chat-turn-error-card__btn--edit:hover {
+  color: var(--color-text-primary);
+}
+
+/* ── chat-markdown ── */
+/* Coach reply markdown — constrained element set, ink tokens. */
+.chat-markdown {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-chat, 0.9375rem);
+  line-height: 1.6;
+  white-space: normal;
+}
+
+.chat-markdown p {
+  margin: 0 0 0.625rem;
+}
+
+.chat-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0 0 0.625rem;
+  padding-left: 1.25rem;
+}
+
+.chat-markdown li {
+  margin-bottom: 0.25rem;
+}
+
+.chat-markdown .chat-markdown__heading {
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.chat-markdown strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.chat-markdown blockquote {
+  border-left: 3px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+  margin: 0 0 0.625rem;
+  padding-left: 0.75rem;
+}
+
+.chat-markdown code {
+  background: var(--color-surface-inset, #f3f3f1);
+  border-radius: 0.25rem;
+  font-family: ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace;
+  font-size: 0.875em;
+  padding: 0.125rem 0.25rem;
+}
+
+.chat-markdown pre {
+  background: var(--color-surface-inset, #f3f3f1);
+  border-radius: 0.5rem;
+  margin: 0 0 0.625rem;
+  overflow-x: auto;
+  padding: 0.75rem 1rem;
+}
+
+.chat-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.chat-markdown a {
+  color: var(--color-accent-green, #19c37d);
+  text-underline-offset: 2px;
+}
+
+.chat-markdown hr {
+  border: none;
+  border-top: 1px solid var(--color-border-default);
+  margin: 0.75rem 0;
+}
+
+/* Coach replies: body text uses secondary color so it's not brand green */
+.chat-bubble--assistant .chat-markdown {
+  color: var(--color-text-secondary, var(--color-text-primary));
 }
 
 /* ── photo-guide ── */

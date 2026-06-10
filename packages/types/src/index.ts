@@ -1164,9 +1164,14 @@ export type ProposalChanges = z.infer<typeof proposalChangesSchema>;
 // Re-exported from chat-turn.ts (canonical home).
 export {
   chatTurnResponseSchema,
+  chatTurnDegradedReasonSchema,
+  chatMessageDegradedTurnSchema,
+  parseChatMessageDegradedTurn,
 } from "./chat-turn.js";
 export type {
   ChatTurnResponse,
+  ChatTurnDegradedReason,
+  ChatMessageDegradedTurn,
 } from "./chat-turn.js";
 
 export {

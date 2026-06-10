@@ -1,4 +1,4 @@
-import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, ProgressReporter, UserLocale } from "@health/types";
+import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, ProgressReporter, UserLocale, ChatTurnDegradedReason } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
@@ -41,6 +41,12 @@ export interface GeneratedCoachResponse {
    * Only set on fan-out turns; undefined otherwise.
    */
   consentRequired?: boolean;
+  /**
+   * Present when the AI pipeline produced a degraded/fallback reply.
+   * Maps from agentMetadata.safety.status to a presentation-safe reason code.
+   * Absent when the pipeline completed cleanly (safety.status === "passed").
+   */
+  degraded?: { reason: ChatTurnDegradedReason };
 }
 
 @Injectable()
@@ -56,6 +62,16 @@ export class AiService {
       onProgress: input.onProgress,
     });
 
+    const safetyStatus = orchestrated.agentMetadata.safety?.status;
+    const degradedReason: ChatTurnDegradedReason | undefined =
+      safetyStatus === "reply_blocked"
+        ? "reply_blocked"
+        : safetyStatus === "parse_failed"
+          ? "parse_failed"
+          : safetyStatus === "provider_error"
+            ? "provider_error"
+            : undefined;
+
     return {
       output: orchestrated.output,
       parseErrors: orchestrated.parseErrors,
@@ -64,6 +80,7 @@ export class AiService {
       ...(orchestrated.consentRequired !== undefined
         ? { consentRequired: orchestrated.consentRequired }
         : {}),
+      ...(degradedReason !== undefined ? { degraded: { reason: degradedReason } } : {}),
     };
   }
 

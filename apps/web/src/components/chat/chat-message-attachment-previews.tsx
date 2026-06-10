@@ -4,7 +4,7 @@ import {
   isImageAttachmentPreview,
   type ChatMessageAttachmentPreview,
 } from "../../lib/chat-message-attachments";
-import { AttachmentPreviewThumb } from "../ui";
+import { ChatAttachmentCard } from "./chat-attachment-card";
 
 type ChatMessageAttachmentPreviewsProps = {
   previews: readonly ChatMessageAttachmentPreview[];
@@ -47,19 +47,18 @@ export function ChatMessageAttachmentPreviews({
 function AttachmentPreviewItem({ preview }: { preview: ChatMessageAttachmentPreview }) {
   const filename = preview.filename || "Attachment";
 
-  // Case 1: image with viewable content — inline thumbnail via /content URL.
+  // Case 1: image with viewable content — inline thumbnail card.
   if (isImageAttachmentPreview(preview) && preview.previewUrl) {
     return (
-      <AttachmentPreviewThumb
+      <ChatAttachmentCard
+        variant="image"
         previewUrl={preview.previewUrl}
         fileName={filename}
-        thumbClassName="chat-message-attachments__thumb"
-        iconClassName="chat-message-attachments__file-icon"
       />
     );
   }
 
-  // Case 3: genuinely unavailable — render a non-error status chip.
+  // Case 3: genuinely unavailable — render a status card.
   // This applies when:
   //   (a) the file has a terminal unavailability status (needs_consent / failed / unsupported), OR
   //   (b) the MIME type is an image but hasViewableContent is false (purged/expired image).
@@ -72,35 +71,27 @@ function AttachmentPreviewItem({ preview }: { preview: ChatMessageAttachmentPrev
       : null;
 
     return (
-      <span
-        className="chat-message-attachments__chip chat-message-attachments__chip--unavailable"
-        aria-label={`${filename}${categoryLabel ? `, ${categoryLabel}` : ""}, ${statusLabel}`}
-      >
-        <span className="chat-message-attachments__chip-name">{filename}</span>
-        {categoryLabel ? (
-          <span className="chat-message-attachments__chip-category">{categoryLabel}</span>
-        ) : null}
-        <span className="chat-message-attachments__chip-status">{statusLabel}</span>
-      </span>
+      <ChatAttachmentCard
+        variant="unavailable"
+        fileName={filename}
+        categoryLabel={categoryLabel}
+        statusLabel={statusLabel}
+      />
     );
   }
 
   // Case 2: non-image file, or viewable content without a previewUrl
-  // (e.g. optimistic preview that cleared). Show filename + category chip only.
+  // (e.g. optimistic preview that cleared). Show filename + category chip.
   const categoryLabel = preview.category
     ? resolveAttachmentCategoryLabel(preview.category)
     : null;
 
   return (
-    <span
-      className="chat-message-attachments__chip"
-      aria-label={`${filename}${categoryLabel ? `, ${categoryLabel}` : ""}`}
-    >
-      <span className="chat-message-attachments__chip-name">{filename}</span>
-      {categoryLabel ? (
-        <span className="chat-message-attachments__chip-category">{categoryLabel}</span>
-      ) : null}
-    </span>
+    <ChatAttachmentCard
+      variant="file"
+      fileName={filename}
+      categoryLabel={categoryLabel}
+    />
   );
 }
 

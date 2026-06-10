@@ -144,5 +144,50 @@
       "updateButton": "Update from photo",
       "disclaimer": "Visual estimate from photos — not a body-composition measurement and not a diagnosis."
     }
+  },
+  "Chat": {
+    "emptyStateTitle": "What shall we start with?",
+    "emptyStateDescription": "Tell me about your day, what you ate, or how you slept. I'll suggest a next step — whether to act on it is always up to you.",
+    "composerPlaceholder": "Message your coach or attach a photo…",
+    "disclaimer": "Your coach suggests — the decision is always yours. This is lifestyle support, not medical advice.",
+    "enterHint": "Enter — send · Shift+Enter — new line",
+    "thinkingLabel": "Your coach is thinking…",
+    "jumpToLatest": "Jump to latest",
+    "attachmentUnavailable": "No longer available",
+    "dateToday": "Today",
+    "dateYesterday": "Yesterday",
+    "suggestedPrompts": {
+      "reviewWeekly": "Review my weekly progress",
+      "reviewWorkouts": "Review my workout week",
+      "adjustGoals": "Help me adjust my goals",
+      "nutritionPlan": "What's in my nutrition plan?"
+    },
+    "bodyPhotoCaption": "Here — all angles",
+    "error": {
+      "title": "Couldn't reply",
+      "body": "The connection dropped while I was preparing a response. Your message is saved — you can retry.",
+      "retry": "Retry",
+      "editRequest": "Edit request"
+    }
+  },
+  "Proposals": {
+    "eyebrow": "COACH SUGGESTION",
+    "accept": "Accept",
+    "edit": "Modify",
+    "decline": "Reject",
+    "stateBandAccepted": "Accepted · plan updated",
+    "stateBandRejected": "Rejected · no changes",
+    "stateBandSuperseded": "Revised · see updated suggestion",
+    "viewUpdatedPlan": "View updated plan →",
+    "intentLabels": {
+      "adapt_workout_plan_from_progress": "Progress-based workout adaptation",
+      "create_habit_plan": "New daily habit plan",
+      "adapt_habit_plan": "Habit plan adjustment",
+      "capture_wellbeing_checkin": "Wellbeing check-in",
+      "log_nutrition_incident": "Nutrition note",
+      "log_workout_activity": "Log activity",
+      "recommend_recipes": "Recipe recommendations",
+      "save_body_analysis": "Body analysis"
+    }
   }
 }
