@@ -554,6 +554,8 @@ export const agentProviderUsageSchema = z.object({
   latencyMs: z.number().int().nonnegative(),
   /** Number of retries consumed (0 = first attempt succeeded). */
   retries: z.number().int().nonnegative(),
+  /** Model id used for this stage call (e.g. "gpt-4o-mini"). Absent on fallback/non-LLM paths. */
+  model: z.string().min(1).optional(),
 });
 
 export type AgentProviderUsage = z.infer<typeof agentProviderUsageSchema>;

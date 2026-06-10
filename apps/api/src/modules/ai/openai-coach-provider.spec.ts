@@ -5,8 +5,10 @@
  *  1. Strict structured output: json_schema with strict:true in request body
  *  2. Bounded retries: 429 → retry → success; 5xx exhausts retries → throws;
  *     4xx (non-429) → no retry, immediate throw
- *  3. Usage parsing: token counts captured from response
+ *  3. Usage parsing: token counts captured from response (including model field)
  *  4. Schema name constants correct for all three methods
+ *  5. Per-stage model tiering: each method sends the correct per-stage model;
+ *     override ?? fallback resolution works correctly
  *
  * fetch() is replaced by vi.stubGlobal so no real HTTP calls are made.
  * Tests are purely unit-level — no NestJS container, no DB.
@@ -22,6 +24,7 @@ import {
   ROUTER_DECISION_SCHEMA_NAME,
 } from "./openai-wire-schemas.js";
 import {
+  createOpenAiCoachProvider,
   OpenAiCoachProvider,
   OpenAiCoachProviderMissingKeyError,
 } from "./openai-coach-provider.js";
@@ -33,8 +36,16 @@ import {
 const TEST_API_KEY = "sk-test-key";
 const TEST_MODEL = "gpt-4o-mini";
 
-function makeProvider(): OpenAiCoachProvider {
-  return new OpenAiCoachProvider({ apiKey: TEST_API_KEY, model: TEST_MODEL });
+function makeProvider(overrides?: { router?: string; domain?: string; decision?: string }): OpenAiCoachProvider {
+  return new OpenAiCoachProvider({
+    apiKey: TEST_API_KEY,
+    model: TEST_MODEL,
+    models: {
+      router: overrides?.router ?? TEST_MODEL,
+      domain: overrides?.domain ?? TEST_MODEL,
+      decision: overrides?.decision ?? TEST_MODEL,
+    },
+  });
 }
 
 /** Minimal valid OpenAI chat completion response body. */
@@ -380,14 +391,198 @@ describe("OpenAiCoachProvider", () => {
   describe("constructor", () => {
     it("throws OpenAiCoachProviderMissingKeyError when apiKey is empty string", () => {
       expect(
-        () => new OpenAiCoachProvider({ apiKey: "", model: TEST_MODEL }),
+        () => new OpenAiCoachProvider({
+          apiKey: "",
+          model: TEST_MODEL,
+          models: { router: TEST_MODEL, domain: TEST_MODEL, decision: TEST_MODEL },
+        }),
       ).toThrow(OpenAiCoachProviderMissingKeyError);
     });
 
     it("throws OpenAiCoachProviderMissingKeyError when apiKey is whitespace-only", () => {
       expect(
-        () => new OpenAiCoachProvider({ apiKey: "   ", model: TEST_MODEL }),
+        () => new OpenAiCoachProvider({
+          apiKey: "   ",
+          model: TEST_MODEL,
+          models: { router: TEST_MODEL, domain: TEST_MODEL, decision: TEST_MODEL },
+        }),
       ).toThrow(OpenAiCoachProviderMissingKeyError);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Per-stage model tiering (Slice 4)
+  // -------------------------------------------------------------------------
+
+  describe("per-stage model tiering", () => {
+    it("generateRouterDecision uses the router model override when set", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validRouterOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider({ router: "gpt-4o", domain: "gpt-4o-mini", decision: "gpt-4o-mini" });
+      await provider.generateRouterDecision(validRouterRequest as never);
+
+      expect(getLastBody()["model"]).toBe("gpt-4o");
+    });
+
+    it("generateDomainStep uses the domain model override when set", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider({ router: "gpt-4o-mini", domain: "gpt-4o", decision: "gpt-4o-mini" });
+      await provider.generateDomainStep(validDomainStepRequest as never);
+
+      expect(getLastBody()["model"]).toBe("gpt-4o");
+    });
+
+    it("generateFinalDecision uses the decision model override when set", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validFinalOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider({ router: "gpt-4o-mini", domain: "gpt-4o-mini", decision: "gpt-4o" });
+      await provider.generateFinalDecision(validFinalDecisionRequest as never);
+
+      expect(getLastBody()["model"]).toBe("gpt-4o");
+    });
+
+    it("router model differs from domain model when overrides set independently", async () => {
+      const bodies: Array<Record<string, unknown>> = [];
+      const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(init?.body as string ?? "{}"));
+        return makeOpenAiResponse(validRouterOutput);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider({ router: "gpt-4o", domain: "gpt-3.5-turbo", decision: "gpt-4o-mini" });
+      await provider.generateRouterDecision(validRouterRequest as never);
+
+      // Separately verify domain uses a different model
+      const fetchMock2 = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(init?.body as string ?? "{}"));
+        return makeOpenAiResponse(validDomainOutput);
+      });
+      vi.stubGlobal("fetch", fetchMock2);
+      await provider.generateDomainStep(validDomainStepRequest as never);
+
+      expect(bodies[0]?.["model"]).toBe("gpt-4o");
+      expect(bodies[1]?.["model"]).toBe("gpt-3.5-turbo");
+    });
+
+    it("falls back to OPENAI_MODEL when no per-stage override is provided", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validRouterOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      // createOpenAiCoachProvider with no overrides → all stages use TEST_MODEL
+      const provider = createOpenAiCoachProvider(TEST_API_KEY, TEST_MODEL);
+      await provider.generateRouterDecision(validRouterRequest as never);
+
+      expect(getLastBody()["model"]).toBe(TEST_MODEL);
+    });
+
+    it("stamps usage.model with the resolved stage model", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(makeOpenAiResponse(validRouterOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider({ router: "gpt-4o" });
+      const result = await provider.generateRouterDecision(validRouterRequest as never);
+
+      expect(result.usage?.model).toBe("gpt-4o");
+    });
+
+    it("stamps domain usage.model with the domain model", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(makeOpenAiResponse(validDomainOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider({ domain: "gpt-4o" });
+      const result = await provider.generateDomainStep(validDomainStepRequest as never);
+
+      expect(result.usage?.model).toBe("gpt-4o");
+    });
+
+    it("stamps decision usage.model with the decision model", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(makeOpenAiResponse(validFinalOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider({ decision: "gpt-4o" });
+      const result = await provider.generateFinalDecision(validFinalDecisionRequest as never);
+
+      expect(result.usage?.model).toBe("gpt-4o");
+    });
+
+    it("generateDomainStep with imageDataUri in attachment context uses the domain-stage model (multimodal path)", async () => {
+      // Provide an attachment with an image data URI so the multimodal path is taken.
+      const domainStepRequestWithImage = {
+        ...validDomainStepRequest,
+        attachmentContext: {
+          items: [
+            {
+              attachmentRefId: "a1000001-0000-4000-8000-000000000001",
+              category: "food_photo",
+              mimeType: "image/jpeg",
+              consentState: "none",
+              hasImage: true,
+              imageDataUri: "data:image/jpeg;base64,/9j/4A==",
+            },
+          ],
+        },
+      };
+
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider({ router: "gpt-4o-mini", domain: "gpt-4o", decision: "gpt-4o-mini" });
+      await provider.generateDomainStep(domainStepRequestWithImage as never);
+
+      // The multimodal path must still use the domain-stage model.
+      expect(getLastBody()["model"]).toBe("gpt-4o");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Static prompt prefix has no unresolved placeholders (Fix 3)
+  // -------------------------------------------------------------------------
+
+  describe("static prompt prefix contains no unresolved {{}} placeholders", () => {
+    it("generateRouterDecision system prompt has no unresolved placeholders", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validRouterOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider();
+      await provider.generateRouterDecision(validRouterRequest as never);
+
+      const body = getLastBody();
+      const messages = body["messages"] as Array<{ role: string; content: string }>;
+      const systemPrompt = messages.find((m) => m.role === "system")?.content ?? "";
+
+      expect(systemPrompt).not.toMatch(/\{\{/);
+    });
+
+    it("generateDomainStep system prompt has no unresolved placeholders", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider();
+      await provider.generateDomainStep(validDomainStepRequest as never);
+
+      const body = getLastBody();
+      const messages = body["messages"] as Array<{ role: string; content: string }>;
+      const systemPrompt = messages.find((m) => m.role === "system")?.content ?? "";
+
+      expect(systemPrompt).not.toMatch(/\{\{/);
+    });
+
+    it("generateFinalDecision system prompt has no unresolved placeholders", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validFinalOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider();
+      await provider.generateFinalDecision(validFinalDecisionRequest as never);
+
+      const body = getLastBody();
+      const messages = body["messages"] as Array<{ role: string; content: string }>;
+      const systemPrompt = messages.find((m) => m.role === "system")?.content ?? "";
+
+      expect(systemPrompt).not.toMatch(/\{\{/);
     });
   });
 });
