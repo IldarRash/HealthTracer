@@ -170,6 +170,42 @@
       "editRequest": "Изменить запрос"
     }
   },
+  "Recipes": {
+    "provenance": {
+      "seed_curated": "Проверенный базовый рецепт",
+      "external_provider": "Рецепт сообщества (приблизительная пищевая ценность)"
+    },
+    "tags": {
+      "high_protein": "Богато белком",
+      "quick": "Быстрый",
+      "plant_based": "Растительное",
+      "balanced": "Сбалансированный",
+      "omega_3": "Омега-3",
+      "vegan": "Веганский",
+      "vegetarian": "Вегетарианский",
+      "contains_dairy": "Содержит молочное",
+      "contains_gluten": "Содержит глютен",
+      "contains_soy": "Содержит сою",
+      "contains_egg": "Содержит яйца",
+      "contains_fish": "Содержит рыбу",
+      "contains_meat": "Содержит мясо",
+      "contains_shellfish": "Содержит моллюски",
+      "contains_peanuts": "Содержит арахис",
+      "contains_tree_nuts": "Содержит орехи",
+      "contains_sesame": "Содержит кунжут"
+    },
+    "allergens": {
+      "dairy": "Содержит молочное",
+      "gluten": "Содержит глютен",
+      "soy": "Содержит сою",
+      "egg": "Содержит яйца",
+      "fish": "Содержит рыбу",
+      "shellfish": "Содержит моллюски",
+      "peanuts": "Содержит арахис",
+      "tree_nuts": "Содержит орехи",
+      "sesame": "Содержит кунжут"
+    }
+  },
   "Proposals": {
     "eyebrow": "ПРЕДЛОЖЕНИЕ КОУЧА",
     "accept": "Принять",

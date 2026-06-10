@@ -274,8 +274,8 @@ describe("buildSummaryUserMessage — C3 planned vs ad-hoc narrative", () => {
     expect(message).toContain("1 of 1 planned");
     // Must never say the inflated total (3) as the numerator of planned sessions
     expect(message).not.toMatch(/3 of 1 planned/);
-    // Ad-hoc sentence must appear separately
-    expect(message).toMatch(/\bPlus 2 logged ad-hoc activities this week\b/);
+    // Ad-hoc count appears inline via formatWorkoutWeekLabel: "· +2 ad-hoc"
+    expect(message).toContain("+2 ad-hoc");
   });
 
   it("says 'Plus 1 logged ad-hoc activity' (singular) for 1 ad-hoc session", () => {
@@ -296,7 +296,8 @@ describe("buildSummaryUserMessage — C3 planned vs ad-hoc narrative", () => {
       "partial",
     );
 
-    expect(message).toContain("Plus 1 logged ad-hoc activity this week");
+    // formatWorkoutWeekLabel renders ad-hoc inline: "2 of 2 planned sessions completed · +1 ad-hoc"
+    expect(message).toContain("+1 ad-hoc");
   });
 
   it("omits the ad-hoc sentence when adHocCompletedCount is 0", () => {
@@ -338,8 +339,9 @@ describe("buildSummaryUserMessage — C3 planned vs ad-hoc narrative", () => {
       "partial",
     );
 
-    expect(message).toMatch(/\bPlus 2 logged ad-hoc activities this week\b/);
-    // No planned-completion fraction sentence when plannedCount = 0
+    // formatWorkoutWeekLabel for ad-hoc-only: "2 ad-hoc activities logged this week"
+    expect(message).toContain("2 ad-hoc activities logged this week");
+    // No planned-completion fraction when plannedCount = 0
     expect(message).not.toMatch(/\d+ of \d+ planned/);
   });
 });

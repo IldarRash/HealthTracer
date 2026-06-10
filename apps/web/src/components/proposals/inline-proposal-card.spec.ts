@@ -161,9 +161,8 @@ describe("RecommendRecipesProposalCard", () => {
     expect(recommendRecipesProposalSource).toContain("getRecipe");
     expect(recommendRecipesProposalSource).toContain("apiQueryKeys.recipeDetail");
     expect(recommendRecipesProposalSource).toContain("formatMacroEstimateSummary");
-    expect(recommendRecipesProposalSource).toContain("formatRecipeProviderLabel");
-    expect(recommendRecipesProposalSource).toContain("RECIPE_CONFIDENCE_LABELS");
-    expect(recommendRecipesProposalSource).toContain("formatRecipeProvenanceMeta");
+    // Provenance is now rendered via formatRecipeProvenanceHuman (no ID leakage)
+    expect(recommendRecipesProposalSource).toContain("formatRecipeProvenanceHuman");
     expect(recommendRecipesProposalSource).toContain("Loading recipe details");
     expect(recommendRecipesProposalSource).toContain("does not change your nutrition targets");
     expect(recommendRecipesProposalSource).not.toContain("Recipe ID:");

@@ -1,5 +1,5 @@
 import type { WorkoutSession } from "@health/types";
-import { aggregateNutritionIncidentsWeek } from "@health/types";
+import { aggregateNutritionIncidentsWeek, formatWorkoutWeekLabel } from "@health/types";
 import { describe, expect, it } from "vitest";
 import {
   aggregateWorkoutSessions,
@@ -71,7 +71,8 @@ describe("ProgressAggregateService", () => {
     expect(aggregate.completedCount).toBe(1);
     expect(aggregate.skippedCount).toBe(1);
     expect(aggregate.adherencePercent).toBe(33);
-    expect(aggregate.activeDays).toBe(2);
+    // activeDays counts distinct calendar days with at least one *completed* session only
+    expect(aggregate.activeDays).toBe(1);
     expect(aggregate.exerciseCompletedCount).toBe(0);
     expect(aggregate.partialSessionCount).toBe(0);
   });
@@ -265,7 +266,9 @@ describe("ProgressAggregateService", () => {
     );
     const message = buildSummaryUserMessage({ workout: aggregate }, "partial");
 
-    expect(message).toContain("none were marked completed");
+    // buildSummaryUserMessage delegates the workout line to formatWorkoutWeekLabel.
+    // With 2 planned sessions and 0 completed the label is "0 of 2 planned sessions completed".
+    expect(message).toContain("0 of 2 planned sessions completed");
     expect(isWellnessSafeProgressMessage(message)).toBe(true);
   });
 
@@ -274,6 +277,41 @@ describe("ProgressAggregateService", () => {
       weekStart: "2026-05-11",
       weekEnd: "2026-05-17",
     });
+  });
+
+  it("delegates the workout line in buildSummaryUserMessage to formatWorkoutWeekLabel", () => {
+    // Build an aggregate with 2 planned (1 completed) and 1 ad-hoc
+    const sessions = [
+      buildSession({ id: "1", plannedDate: "2026-05-19", status: "completed" }),
+      buildSession({ id: "2", plannedDate: "2026-05-20", status: "skipped" }),
+      buildSession({
+        id: "3",
+        plannedDate: "2026-05-21",
+        status: "completed",
+        source: "ad_hoc",
+        workoutPlanId: null,
+        workoutPlanRevisionId: null,
+      }),
+    ];
+    const aggregate = aggregateWorkoutSessions(sessions, "2026-05-18", "2026-05-24");
+
+    // Build what the shared helper produces for the same stats
+    const expectedLabel = formatWorkoutWeekLabel({
+      plannedCount: aggregate.plannedCount,
+      plannedCompletedCount: aggregate.plannedCompletedCount,
+      adHocCompletedCount: aggregate.adHocCompletedCount,
+      completedCount: aggregate.completedCount,
+      skippedCount: aggregate.skippedCount,
+      adherencePercent: aggregate.adherencePercent ?? 0,
+      activeDays: aggregate.activeDays,
+      days: [],
+    });
+
+    const message = buildSummaryUserMessage({ workout: aggregate }, "partial");
+
+    // The summary must embed the canonical label
+    expect(message).toContain(expectedLabel);
+    expect(isWellnessSafeProgressMessage(message)).toBe(true);
   });
 });
 

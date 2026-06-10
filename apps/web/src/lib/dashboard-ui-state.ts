@@ -1,4 +1,5 @@
 import type { AiProposal, Goal, WorkoutSession } from "@health/types";
+import { aggregateWorkoutWeek, formatWorkoutWeekLabel } from "@health/types";
 
 export type WeeklyConsistency = {
   percent: number;
@@ -29,31 +30,27 @@ function toIsoDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function isDateInCurrentWeek(isoDate: string, now = new Date()): boolean {
-  const weekStart = startOfWeek(now);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 7);
-  const target = new Date(`${isoDate}T12:00:00`);
-  return target >= weekStart && target < weekEnd;
-}
-
+/**
+ * Summarizes workout adherence for the current Mon–Sun week.
+ * Delegates to aggregateWorkoutWeek so ad-hoc sessions are excluded from the
+ * planned denominator (fixes the inflated count bug).
+ */
 export function summarizeWorkoutAdherence(
   sessions: readonly WorkoutSession[],
   now = new Date(),
 ): WorkoutAdherenceSummary {
-  const weekSessions = sessions.filter((session) =>
-    isDateInCurrentWeek(session.plannedDate, now),
-  );
-  const completed = weekSessions.filter((session) => session.status === "completed").length;
-  const planned = weekSessions.length;
+  const weekStart = startOfWeek(now);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+
+  const stats = aggregateWorkoutWeek(sessions, toIsoDate(weekStart), toIsoDate(weekEnd));
 
   return {
-    completed,
-    planned,
-    label:
-      planned > 0
-        ? `${completed} of ${planned} sessions completed`
-        : "No sessions scheduled this week",
+    completed: stats.plannedCompletedCount,
+    planned: stats.plannedCount,
+    label: stats.plannedCount === 0 && stats.adHocCompletedCount === 0
+      ? "No sessions scheduled this week"
+      : formatWorkoutWeekLabel(stats),
   };
 }
 

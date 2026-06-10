@@ -937,15 +937,16 @@ export const recipeIngredientSchema = z.object({
 
 export type RecipeIngredient = z.infer<typeof recipeIngredientSchema>;
 
-export const recipeMacroEstimatesSchema = z.object({
-  estimatedCalories: z.number().int().positive().max(10000),
-  proteinGrams: z.number().int().nonnegative().max(1000),
-  carbsGrams: z.number().int().nonnegative().max(1500),
-  fatGrams: z.number().int().nonnegative().max(1000),
-  fiberGrams: z.number().int().nonnegative().max(500).nullable().optional(),
+/** Per-serving macro values for a recipe. All fields represent a single serving. */
+export const recipePerServingMacrosSchema = z.object({
+  caloriesPerServing: z.number().int().positive().max(10000),
+  proteinGramsPerServing: z.number().int().nonnegative().max(1000),
+  carbsGramsPerServing: z.number().int().nonnegative().max(1500),
+  fatGramsPerServing: z.number().int().nonnegative().max(1000),
+  fiberGramsPerServing: z.number().int().nonnegative().max(500).nullable().optional(),
 });
 
-export type RecipeMacroEstimates = z.infer<typeof recipeMacroEstimatesSchema>;
+export type RecipePerServingMacros = z.infer<typeof recipePerServingMacrosSchema>;
 
 export const recipeSchema = z.object({
   id: z.string().uuid(),
@@ -954,7 +955,7 @@ export const recipeSchema = z.object({
   ingredients: z.array(recipeIngredientSchema).min(1).max(50),
   preparationSteps: z.array(z.string().min(1).max(1000)).min(1).max(30),
   servings: z.number().int().positive().max(20),
-  macroEstimates: recipeMacroEstimatesSchema,
+  perServingMacros: recipePerServingMacrosSchema,
   mealTypes: z.array(recipeMealTypeSchema).min(1).max(4),
   tags: z.array(z.string().min(1).max(80)).max(20).default([]),
   restrictionTags: z.array(z.string().min(1).max(80)).max(20).default([]),
@@ -977,10 +978,10 @@ export const recipeListQuerySchema = z.object({
   mealType: recipeMealTypeSchema.optional(),
   tags: z.array(z.string().min(1).max(80)).max(10).optional(),
   compatibleWithRestrictions: z.array(z.string().min(1).max(80)).max(20).optional(),
-  minEstimatedCalories: z.coerce.number().int().nonnegative().max(10000).optional(),
-  maxEstimatedCalories: z.coerce.number().int().positive().max(10000).optional(),
-  minProteinGrams: z.coerce.number().int().nonnegative().max(1000).optional(),
-  maxProteinGrams: z.coerce.number().int().nonnegative().max(1000).optional(),
+  minCaloriesPerServing: z.coerce.number().int().nonnegative().max(10000).optional(),
+  maxCaloriesPerServing: z.coerce.number().int().positive().max(10000).optional(),
+  minProteinGramsPerServing: z.coerce.number().int().nonnegative().max(1000).optional(),
+  maxProteinGramsPerServing: z.coerce.number().int().nonnegative().max(1000).optional(),
 });
 
 export type RecipeListQuery = z.infer<typeof recipeListQuerySchema>;
@@ -1479,6 +1480,14 @@ export {
   type WeeklyReviewLaneOutcome,
   type WeeklyReviewPackMeta,
 } from "./progress-cross-domain.js";
+
+export {
+  aggregateWorkoutWeek,
+  formatWorkoutWeekLabel,
+  type WorkoutDayState,
+  type WorkoutWeekDaySummary,
+  type WorkoutWeekStats,
+} from "./workout-week-stats.js";
 
 export const weeklyReviewResponseSchema = z.object({
   summary: weeklyProgressSummaryResponseSchema,

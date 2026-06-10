@@ -105,6 +105,14 @@ export type DsTrendStripDayData = {
   value: number;
   /** Day label (e.g. "Mon"). */
   label: string;
+  /**
+   * Temporal state of this day relative to today:
+   * - "past"   → standard threshold-based color
+   * - "today"  → today, value=0 means in-progress (neutral; not red/green)
+   * - "future" → upcoming day; dim neutral track, no value label
+   * Omitting this prop preserves the original threshold-based behavior.
+   */
+  state?: "past" | "today" | "future";
 };
 
 export type DsTrendStripProps = HTMLAttributes<HTMLDivElement> & {
@@ -137,6 +145,9 @@ export function DsTrendStrip({
 }: DsTrendStripProps): ReactElement {
   const maxVal = Math.max(...days.map((d) => d.value), 1);
 
+  const NEUTRAL_DIM = "rgba(255,255,255,0.12)";
+  const NEUTRAL_TODAY = "rgba(255,255,255,0.25)";
+
   return (
     <div
       className={cn("ds-trend-strip", className)}
@@ -145,6 +156,51 @@ export function DsTrendStrip({
       {...props}
     >
       {days.map((day, i) => {
+        const isFuture = day.state === "future";
+        const isToday = day.state === "today";
+
+        // Future days: neutral dim track at minimal height, no label
+        if (isFuture) {
+          return (
+            <div
+              key={day.label ?? i}
+              className="ds-trend-strip__col"
+              aria-label={`${day.label}: upcoming`}
+            >
+              <span className="ds-trend-strip__val" aria-hidden="true" />
+              <div
+                className="ds-trend-strip__bar-fill"
+                aria-hidden="true"
+                style={{ height: 4, background: NEUTRAL_DIM, opacity: 1 }}
+              />
+              <span className="ds-trend-strip__day" aria-hidden="true">
+                {day.label}
+              </span>
+            </div>
+          );
+        }
+
+        // Today with value=0: neutral "in progress" tone (not red, not green)
+        if (isToday && day.value === 0) {
+          return (
+            <div
+              key={day.label ?? i}
+              className="ds-trend-strip__col"
+              aria-label={`${day.label}: in progress`}
+            >
+              <span className="ds-trend-strip__val" aria-hidden="true" />
+              <div
+                className="ds-trend-strip__bar-fill"
+                aria-hidden="true"
+                style={{ height: 8, background: NEUTRAL_TODAY, opacity: 1 }}
+              />
+              <span className="ds-trend-strip__day" aria-hidden="true">
+                {day.label}
+              </span>
+            </div>
+          );
+        }
+
         const height = Math.max(4, (day.value / maxVal) * maxH);
         // When barColorOverride is set, use it uniformly at opacity 1;
         // otherwise fall back to the threshold-based color + dimming.

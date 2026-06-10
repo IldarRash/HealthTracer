@@ -50,20 +50,20 @@ export class RecipesRepository {
       }
     }
 
-    if (filters.minEstimatedCalories !== undefined) {
-      conditions.push(gte(recipes.estimatedCalories, filters.minEstimatedCalories));
+    if (filters.minCaloriesPerServing !== undefined) {
+      conditions.push(gte(recipes.caloriesPerServing, filters.minCaloriesPerServing));
     }
 
-    if (filters.maxEstimatedCalories !== undefined) {
-      conditions.push(lte(recipes.estimatedCalories, filters.maxEstimatedCalories));
+    if (filters.maxCaloriesPerServing !== undefined) {
+      conditions.push(lte(recipes.caloriesPerServing, filters.maxCaloriesPerServing));
     }
 
-    if (filters.minProteinGrams !== undefined) {
-      conditions.push(gte(recipes.proteinGrams, filters.minProteinGrams));
+    if (filters.minProteinGramsPerServing !== undefined) {
+      conditions.push(gte(recipes.proteinGramsPerServing, filters.minProteinGramsPerServing));
     }
 
-    if (filters.maxProteinGrams !== undefined) {
-      conditions.push(lte(recipes.proteinGrams, filters.maxProteinGrams));
+    if (filters.maxProteinGramsPerServing !== undefined) {
+      conditions.push(lte(recipes.proteinGramsPerServing, filters.maxProteinGramsPerServing));
     }
 
     return this.db
@@ -92,6 +92,15 @@ export class RecipesRepository {
       .select()
       .from(recipes)
       .where(and(inArray(recipes.id, recipeIds), eq(recipes.status, "active")));
+  }
+
+  async listActiveCuratedRecipeNames(): Promise<string[]> {
+    const rows = await this.db
+      .select({ name: recipes.name })
+      .from(recipes)
+      .where(and(eq(recipes.status, "active"), sql`${recipes.provider} IS NULL`));
+
+    return rows.map((row) => row.name);
   }
 
   async findActiveRecipeByProviderExternalId(provider: string, externalId: string) {
@@ -126,11 +135,11 @@ export class RecipesRepository {
         ingredients: input.ingredients,
         preparationSteps: input.preparationSteps,
         servings: input.servings,
-        estimatedCalories: input.macroEstimates.estimatedCalories,
-        proteinGrams: input.macroEstimates.proteinGrams,
-        carbsGrams: input.macroEstimates.carbsGrams,
-        fatGrams: input.macroEstimates.fatGrams,
-        fiberGrams: input.macroEstimates.fiberGrams ?? null,
+        caloriesPerServing: input.macroEstimates.caloriesPerServing,
+        proteinGramsPerServing: input.macroEstimates.proteinGramsPerServing,
+        carbsGramsPerServing: input.macroEstimates.carbsGramsPerServing,
+        fatGramsPerServing: input.macroEstimates.fatGramsPerServing,
+        fiberGramsPerServing: input.macroEstimates.fiberGramsPerServing ?? null,
         mealTypes: input.mealTypes,
         tags: input.tags,
         restrictionTags: input.restrictionTags,

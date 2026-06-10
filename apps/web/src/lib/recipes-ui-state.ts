@@ -3,7 +3,6 @@ import type {
   RecipeConfidenceBand,
   RecipeIngredient,
   RecipeMealType,
-  RecipeProvenanceLabel,
   RecipeRecommendationLimitedReason,
   UserRecipeRecommendation,
   UserRecipeRecommendationStatus,
@@ -15,25 +14,15 @@ export const RECIPE_CONFIDENCE_LABELS: Record<RecipeConfidenceBand, string> = {
   low: "Low confidence estimate",
 };
 
-export const RECIPE_PROVENANCE_LABELS: Record<RecipeProvenanceLabel, string> = {
-  seed_catalog: "Curated catalog",
-  external_provider: "External provider",
-  curated: "Curated source",
-};
-
-export function formatRecipeProviderLabel(recipe: Pick<Recipe, "provider" | "source">): string {
-  if (recipe.provider) {
-    return `${recipe.source} · ${recipe.provider}`;
+/**
+ * Human-readable provenance line — no ID leakage.
+ * "Curated starter recipe" for seed/curated; "Community recipe (approximate nutrition)" for external.
+ */
+export function formatRecipeProvenanceHuman(provenance: Pick<Recipe, "provenance">["provenance"]): string {
+  if (provenance.source === "seed_catalog" || provenance.source === "curated") {
+    return "Curated starter recipe";
   }
-
-  return recipe.source;
-}
-
-export function formatRecipeProvenanceMeta(recipe: Pick<Recipe, "provenance">): string {
-  const label = RECIPE_PROVENANCE_LABELS[recipe.provenance.source];
-  const externalId = recipe.provenance.externalId;
-
-  return externalId ? `${label} · ID ${externalId}` : label;
+  return "Community recipe (approximate nutrition)";
 }
 
 export function recipeConfidenceNotice(confidence: RecipeConfidenceBand): string | null {
@@ -42,6 +31,125 @@ export function recipeConfidenceNotice(confidence: RecipeConfidenceBand): string
   }
 
   return null;
+}
+
+// ── Tag noise lists ────────────────────────────────────────────────
+
+/** Machine-only noise tags that should never be shown to users. */
+const NOISE_RESTRICTION_TAGS = new Set(["not_vegan", "not_vegetarian"]);
+
+/**
+ * Restriction tags that duplicate an allergen — if the allergen is already in allergenTags,
+ * the restriction tag is redundant (e.g. "contains_dairy" + allergen "dairy" → ONE chip).
+ */
+const RESTRICTION_TO_ALLERGEN: Record<string, string> = {
+  contains_dairy: "dairy",
+  contains_gluten: "gluten",
+  contains_soy: "soy",
+  contains_egg: "egg",
+  contains_fish: "fish",
+  contains_shellfish: "shellfish",
+  contains_meat: "", // no 1:1 allergen counterpart — keep it
+  contains_peanuts: "peanuts",
+  contains_tree_nuts: "tree_nuts",
+  contains_sesame: "sesame",
+};
+
+export type RecipeTagChip = {
+  key: string;
+  /** i18n key under the Recipes namespace, e.g. "tags.high_protein" */
+  i18nKey: string;
+  /** Fallback label when i18n key is not found (title-cased). */
+  fallbackLabel: string;
+  /** Semantic tone used to pick a badge variant */
+  tone?: "neutral" | "amber" | "red" | "green";
+};
+
+function titleCase(value: string): string {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+const TAG_TONE: Record<string, RecipeTagChip["tone"]> = {
+  high_protein: "green",
+  plant_based: "green",
+  quick: "green",
+  balanced: "neutral",
+  omega_3: "green",
+  vegan: "green",
+  vegetarian: "green",
+  contains_dairy: "amber",
+  contains_gluten: "amber",
+  contains_soy: "amber",
+  contains_egg: "amber",
+  contains_fish: "amber",
+  contains_meat: "amber",
+  contains_shellfish: "amber",
+  contains_peanuts: "red",
+  contains_tree_nuts: "red",
+  contains_sesame: "red",
+};
+
+/**
+ * Builds deduplicated, human-visible tag chips for a recipe card.
+ *
+ * Rules:
+ * - Drop noise-only restriction tags ("not_vegan", "not_vegetarian").
+ * - Drop a `contains_X` restriction tag when the matching allergen is already in allergenTags.
+ * - Show allergen tags (always visible — safety-critical).
+ * - Show meaningful content tags (tags[]).
+ * - Unknown tags get a title-cased fallback label.
+ */
+export function buildRecipeTagChips(
+  recipe: Pick<Recipe, "tags" | "restrictionTags" | "allergenTags">,
+): RecipeTagChip[] {
+  const chips: RecipeTagChip[] = [];
+  const allergenSet = new Set(recipe.allergenTags);
+
+  // 1. Content tags (tags[])
+  for (const tag of recipe.tags) {
+    chips.push({
+      key: `tag-${tag}`,
+      i18nKey: `tags.${tag}`,
+      fallbackLabel: titleCase(tag),
+      tone: TAG_TONE[tag] ?? "neutral",
+    });
+  }
+
+  // 2. Restriction tags — drop noise, drop duplicates that allergenTags already cover
+  for (const tag of recipe.restrictionTags) {
+    if (NOISE_RESTRICTION_TAGS.has(tag)) {
+      continue;
+    }
+
+    const allergenCounterpart = RESTRICTION_TO_ALLERGEN[tag];
+    if (allergenCounterpart !== undefined && allergenCounterpart !== "" && allergenSet.has(allergenCounterpart)) {
+      // The allergen chip already conveys this; skip the restriction duplicate.
+      continue;
+    }
+
+    chips.push({
+      key: `restriction-${tag}`,
+      i18nKey: `tags.${tag}`,
+      fallbackLabel: titleCase(tag),
+      tone: TAG_TONE[tag] ?? "amber",
+    });
+  }
+
+  // 3. Allergen tags — always shown (safety)
+  for (const tag of recipe.allergenTags) {
+    chips.push({
+      key: `allergen-${tag}`,
+      i18nKey: `allergens.${tag}`,
+      fallbackLabel: titleCase(tag),
+      tone: "red",
+    });
+  }
+
+  return chips;
 }
 
 export function canLogRecommendation(
@@ -78,13 +186,20 @@ export function formatPrepTime(recipe: Pick<Recipe, "prepMinutes" | "cookMinutes
 }
 
 export function formatMacroEstimateSummary(
-  recipe: Pick<Recipe, "macroEstimates" | "servings">,
+  recipe: Pick<Recipe, "perServingMacros" | "servings">,
 ): string {
-  const { macroEstimates, servings } = recipe;
+  const { perServingMacros, servings } = recipe;
   const fiber =
-    macroEstimates.fiberGrams != null ? ` · ${macroEstimates.fiberGrams}g fiber` : "";
+    perServingMacros.fiberGramsPerServing != null ? ` · ${perServingMacros.fiberGramsPerServing}g fiber` : "";
 
-  return `Estimated per serving (${servings} total): ${macroEstimates.estimatedCalories} cal · ${macroEstimates.proteinGrams}g protein · ${macroEstimates.carbsGrams}g carbs · ${macroEstimates.fatGrams}g fat${fiber}. Values are approximate.`;
+  const perServingLine = `≈${perServingMacros.caloriesPerServing} kcal · ${perServingMacros.proteinGramsPerServing}g protein · ${perServingMacros.carbsGramsPerServing}g carbs · ${perServingMacros.fatGramsPerServing}g fat${fiber} per serving`;
+  const servingsNote = servings > 1 ? ` · Makes ${servings} servings` : "";
+
+  return `${perServingLine}${servingsNote}. Values are approximate.`;
+}
+
+export function formatServingsNote(servings: number): string | null {
+  return servings > 1 ? `Makes ${servings} servings` : null;
 }
 
 export function formatIngredientLine(ingredient: RecipeIngredient): string {

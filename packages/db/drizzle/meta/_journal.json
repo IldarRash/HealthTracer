@@ -253,6 +253,13 @@
       "when": 1780970000000,
       "tag": "0035_nutrition_plan_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781100000000,
+      "tag": "0036_recipe_per_serving_macros",
+      "breakpoints": true
     }
   ]
 }

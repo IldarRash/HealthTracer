@@ -925,20 +925,20 @@ export function buildRecipeListQueryString(query: RecipeListQuery = {}): string 
     params.set("compatibleWithRestrictions", parsed.compatibleWithRestrictions.join(","));
   }
 
-  if (parsed.minEstimatedCalories != null) {
-    params.set("minEstimatedCalories", String(parsed.minEstimatedCalories));
+  if (parsed.minCaloriesPerServing != null) {
+    params.set("minCaloriesPerServing", String(parsed.minCaloriesPerServing));
   }
 
-  if (parsed.maxEstimatedCalories != null) {
-    params.set("maxEstimatedCalories", String(parsed.maxEstimatedCalories));
+  if (parsed.maxCaloriesPerServing != null) {
+    params.set("maxCaloriesPerServing", String(parsed.maxCaloriesPerServing));
   }
 
-  if (parsed.minProteinGrams != null) {
-    params.set("minProteinGrams", String(parsed.minProteinGrams));
+  if (parsed.minProteinGramsPerServing != null) {
+    params.set("minProteinGramsPerServing", String(parsed.minProteinGramsPerServing));
   }
 
-  if (parsed.maxProteinGrams != null) {
-    params.set("maxProteinGrams", String(parsed.maxProteinGrams));
+  if (parsed.maxProteinGramsPerServing != null) {
+    params.set("maxProteinGramsPerServing", String(parsed.maxProteinGramsPerServing));
   }
 
   const queryString = params.toString();

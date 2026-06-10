@@ -50,11 +50,11 @@ function createRecipeRow(overrides: Record<string, unknown> = {}) {
     ingredients: [{ name: "Lentils", quantity: 1, unit: "cup" }],
     preparationSteps: ["Combine ingredients in a bowl."],
     servings: 1,
-    estimatedCalories: 690,
-    proteinGrams: 48,
-    carbsGrams: 82,
-    fatGrams: 18,
-    fiberGrams: 14,
+    caloriesPerServing: 690,
+    proteinGramsPerServing: 48,
+    carbsGramsPerServing: 82,
+    fatGramsPerServing: 18,
+    fiberGramsPerServing: 14,
     mealTypes: ["lunch"],
     tags: ["high-protein"],
     restrictionTags: ["vegan"],
@@ -99,11 +99,11 @@ function createProviderDraft(overrides: Partial<ProviderRecipeDraft> = {}): Prov
     preparationSteps: ["Simmer vegetables with spices."],
     servings: 1,
     macroEstimates: {
-      estimatedCalories: 550,
-      proteinGrams: 25,
-      carbsGrams: 45,
-      fatGrams: 20,
-      fiberGrams: 8,
+      caloriesPerServing: 550,
+      proteinGramsPerServing: 25,
+      carbsGramsPerServing: 45,
+      fatGramsPerServing: 20,
+      fiberGramsPerServing: 8,
     },
     mealTypes: ["lunch", "dinner"],
     tags: ["vegetarian"],
@@ -148,6 +148,7 @@ function createService({
       findActiveRecipeById: async () => null,
       findActiveRecipesByIds: async () => [],
       countActiveProviderRecipes: async () => 1,
+      listActiveCuratedRecipeNames: async () => [],
       listRecommendationsByUserId: async () => [],
       findRecommendationById: async () => null,
       createRecommendations: async () => [],
@@ -641,11 +642,11 @@ describe("RecipesService", () => {
       description: providerDraft.description,
       ingredients: providerDraft.ingredients,
       preparationSteps: providerDraft.preparationSteps,
-      estimatedCalories: providerDraft.macroEstimates.estimatedCalories,
-      proteinGrams: providerDraft.macroEstimates.proteinGrams,
-      carbsGrams: providerDraft.macroEstimates.carbsGrams,
-      fatGrams: providerDraft.macroEstimates.fatGrams,
-      fiberGrams: providerDraft.macroEstimates.fiberGrams,
+      caloriesPerServing: providerDraft.macroEstimates.caloriesPerServing,
+      proteinGramsPerServing: providerDraft.macroEstimates.proteinGramsPerServing,
+      carbsGramsPerServing: providerDraft.macroEstimates.carbsGramsPerServing,
+      fatGramsPerServing: providerDraft.macroEstimates.fatGramsPerServing,
+      fiberGramsPerServing: providerDraft.macroEstimates.fiberGramsPerServing,
       mealTypes: providerDraft.mealTypes,
       tags: providerDraft.tags,
       restrictionTags: providerDraft.restrictionTags,
@@ -1367,5 +1368,79 @@ describe("RecipesService", () => {
         expect(fetchCallCount).toBe(2);
       });
     });
+  });
+
+  it("generates recommendations with no duplicate canonical names", async () => {
+    // Two recipes that normalise to the same canonical key (repeated letter collapse)
+    const curatedRow = createRecipeRow({
+      id: compatibleRecipeId,
+      name: "Fettuccine Alfredo",
+      provider: null,
+    });
+    const providerRow = createRecipeRow({
+      id: incompatibleRecipeId,
+      name: "Fettucine alfredo",
+      provider: "themealdb",
+    });
+    let createInputs: unknown[] = [];
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async () => [providerRow, curatedRow],
+        createRecommendations: async (inputs: unknown[]) => {
+          createInputs = inputs;
+          return inputs.map((input, index) =>
+            createRecommendationRow({
+              ...(input as Record<string, unknown>),
+              id: `b200000${index + 1}-0000-4000-8000-000000000001`,
+            }),
+          );
+        },
+      },
+    });
+
+    const result = await service.generateCurrentRecommendations(auth);
+
+    // Only one of the two duplicate-canonical recipes should appear
+    expect(result.recommendations).toHaveLength(1);
+    // Curated (no provider) must win
+    expect(createInputs[0]).toMatchObject({ recipeId: compatibleRecipeId });
+  });
+
+  it("incident payload logs 1 serving with per-serving macro values", async () => {
+    const recipe = createRecipeRow({
+      caloriesPerServing: 690,
+      proteinGramsPerServing: 48,
+      carbsGramsPerServing: 82,
+      fatGramsPerServing: 18,
+      fiberGramsPerServing: 14,
+    });
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "accepted" }),
+          recipe,
+        }),
+      },
+    });
+
+    const proposal = await service.createNutritionIncidentProposalFromRecommendation(
+      auth,
+      recommendationId,
+    );
+
+    const changes = proposal.proposedChanges as {
+      estimatedCalories: number;
+      items: Array<{ quantity: string; calories: number }>;
+      estimatedMacros: { proteinGrams: number; carbsGrams: number; fatGrams: number };
+    };
+
+    // Calories match per-serving value (not total, not doubled)
+    expect(changes.estimatedCalories).toBe(690);
+    expect(changes.items).toHaveLength(1);
+    expect(changes.items[0]?.quantity).toBe("1 serving");
+    expect(changes.items[0]?.calories).toBe(690);
+    expect(changes.estimatedMacros.proteinGrams).toBe(48);
+    expect(changes.estimatedMacros.carbsGrams).toBe(82);
+    expect(changes.estimatedMacros.fatGrams).toBe(18);
   });
 });

@@ -18,10 +18,10 @@ function parseRecipeListQuery(query: Record<string, unknown>) {
       typeof query.compatibleWithRestrictions === "string"
         ? query.compatibleWithRestrictions.split(",").filter(Boolean)
         : query.compatibleWithRestrictions,
-    minEstimatedCalories: query.minEstimatedCalories,
-    maxEstimatedCalories: query.maxEstimatedCalories,
-    minProteinGrams: query.minProteinGrams,
-    maxProteinGrams: query.maxProteinGrams,
+    minCaloriesPerServing: query.minCaloriesPerServing,
+    maxCaloriesPerServing: query.maxCaloriesPerServing,
+    minProteinGramsPerServing: query.minProteinGramsPerServing,
+    maxProteinGramsPerServing: query.maxProteinGramsPerServing,
   });
 
   if (!parsed.success) {

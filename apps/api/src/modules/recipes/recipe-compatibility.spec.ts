@@ -60,11 +60,11 @@ describe("recipe compatibility", () => {
 
   it("ranks closer macro estimates higher", () => {
     const closer = scoreRecipeMacroFit(
-      { estimatedCalories: 700, proteinGrams: 45 },
+      { caloriesPerServing: 700, proteinGramsPerServing: 45 },
       { caloriesPerDay: 2100, proteinGrams: 150 },
     );
     const farther = scoreRecipeMacroFit(
-      { estimatedCalories: 1200, proteinGrams: 10 },
+      { caloriesPerServing: 1200, proteinGramsPerServing: 10 },
       { caloriesPerDay: 2100, proteinGrams: 150 },
     );
 

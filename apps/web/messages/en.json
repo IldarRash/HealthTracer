@@ -170,6 +170,42 @@
       "editRequest": "Edit request"
     }
   },
+  "Recipes": {
+    "provenance": {
+      "seed_curated": "Curated starter recipe",
+      "external_provider": "Community recipe (approximate nutrition)"
+    },
+    "tags": {
+      "high_protein": "High protein",
+      "quick": "Quick",
+      "plant_based": "Plant-based",
+      "balanced": "Balanced",
+      "omega_3": "Omega-3",
+      "vegan": "Vegan",
+      "vegetarian": "Vegetarian",
+      "contains_dairy": "Contains dairy",
+      "contains_gluten": "Contains gluten",
+      "contains_soy": "Contains soy",
+      "contains_egg": "Contains egg",
+      "contains_fish": "Contains fish",
+      "contains_meat": "Contains meat",
+      "contains_shellfish": "Contains shellfish",
+      "contains_peanuts": "Contains peanuts",
+      "contains_tree_nuts": "Contains tree nuts",
+      "contains_sesame": "Contains sesame"
+    },
+    "allergens": {
+      "dairy": "Contains dairy",
+      "gluten": "Contains gluten",
+      "soy": "Contains soy",
+      "egg": "Contains egg",
+      "fish": "Contains fish",
+      "shellfish": "Contains shellfish",
+      "peanuts": "Contains peanuts",
+      "tree_nuts": "Contains tree nuts",
+      "sesame": "Contains sesame"
+    }
+  },
   "Proposals": {
     "eyebrow": "COACH SUGGESTION",
     "accept": "Accept",
