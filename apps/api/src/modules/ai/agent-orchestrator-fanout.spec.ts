@@ -142,6 +142,7 @@ function makePresentationMetadata(): ResolvedCapabilityPresentationMetadata {
  */
 function makeFanoutPlan(
   selectedDomains: DomainFanoutEntry[],
+  opts: { lowConfidenceRoute?: boolean } = {},
 ): DomainFanoutPlan {
   return {
     route: makeRoute(),
@@ -157,6 +158,7 @@ function makeFanoutPlan(
     fanout: {
       selectedDomains,
       isMultiDomain: selectedDomains.length > 1,
+      lowConfidenceRoute: opts.lowConfidenceRoute ?? false,
     },
   } as unknown as DomainFanoutPlan;
 }
@@ -178,6 +180,8 @@ function makeOrchestrator(opts: {
   };
   /** Override to capture the generateFinalDecision call. */
   captureFinalDecisionRequest?: (req: FinalDecisionRequest) => void;
+  /** Forward lowConfidenceRoute into the fanout plan metadata. */
+  lowConfidenceRoute?: boolean;
 }): AgentOrchestratorService {
   const contextPacket = makeContextPacket();
 
@@ -194,7 +198,7 @@ function makeOrchestrator(opts: {
     createPolicySnapshot: vi.fn().mockReturnValue({}),
   } as unknown as ContextExpansionPolicyService;
 
-  const plan = makeFanoutPlan(opts.selectedDomains);
+  const plan = makeFanoutPlan(opts.selectedDomains, { lowConfidenceRoute: opts.lowConfidenceRoute });
 
   const systemPlannerService = {
     planTurn: vi.fn().mockResolvedValue(plan),
@@ -579,5 +583,78 @@ describe("AgentOrchestratorService — fan-out: recentMessages cap (Item 3a)", (
       expect(content.length).toBeGreaterThan(100); // still has the content
       expect(content.length).toBeLessThanOrEqual(4000);
     }
+  });
+});
+
+describe("AgentOrchestratorService — fan-out: lowConfidenceRoute in decision diagnostics (Slice 5)", () => {
+  it("surfaces lowConfidenceRoute=true in fanOut.decision diagnostics when planner emits it", async () => {
+    const workoutDomainResult: DomainLlmExecutorResult = {
+      domainAnswer: {
+        ...createFallbackDomainAnswer("workout"),
+        domain: "workout",
+        summary: "Workout reviewed.",
+        candidateProposals: [],
+      },
+      candidateMap: new Map(),
+      degraded: false,
+      degradedReasons: [],
+      loopIterations: 1,
+      toolsInvoked: [],
+    };
+
+    const orchestrator = makeOrchestrator({
+      domainResults: [workoutDomainResult],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "I am not sure what you mean — could you clarify?",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      lowConfidenceRoute: true,
+    });
+
+    const result = await orchestrator.orchestrateCoachTurn(makeOrchestratorInput());
+
+    // lowConfidenceRoute must be forwarded into the fanOut.decision diagnostics block.
+    const decision = result.agentMetadata.fanOut?.decision;
+    expect(decision).toBeDefined();
+    expect(decision?.lowConfidenceRoute).toBe(true);
+  });
+
+  it("omits lowConfidenceRoute from fanOut.decision diagnostics when plan has lowConfidenceRoute=false", async () => {
+    const workoutDomainResult: DomainLlmExecutorResult = {
+      domainAnswer: {
+        ...createFallbackDomainAnswer("workout"),
+        domain: "workout",
+        summary: "Workout reviewed.",
+        candidateProposals: [],
+      },
+      candidateMap: new Map(),
+      degraded: false,
+      degradedReasons: [],
+      loopIterations: 1,
+      toolsInvoked: [],
+    };
+
+    const orchestrator = makeOrchestrator({
+      domainResults: [workoutDomainResult],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "Here is your plan.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      // lowConfidenceRoute defaults to false — the field is conditionally spread only
+      // when !== undefined (falsy false is NOT spread), so decision.lowConfidenceRoute
+      // should be absent (undefined) on confident routes.
+    });
+
+    const result = await orchestrator.orchestrateCoachTurn(makeOrchestratorInput());
+
+    const decision = result.agentMetadata.fanOut?.decision;
+    expect(decision).toBeDefined();
+    expect(decision?.lowConfidenceRoute).toBeUndefined();
   });
 });

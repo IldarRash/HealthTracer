@@ -317,7 +317,15 @@ Functions:
 Location: `@health/types`, used by `ChatService`.
 
 When crisis support should be shown, the system creates a deterministic support
-reply and no proposals — before any LLM runs.
+reply and no proposals — before any LLM runs. The gate receives the **raw user
+text** and matching is **bilingual**: `containsWellbeingCrisisKeyword` checks the
+English `WELLBEING_CRISIS_KEYWORDS` substrings **and** the Russian
+`WELLBEING_CRISIS_KEYWORDS_RU` regexps (Cyrillic lookaround word boundaries,
+lowercase-normalized input, deliberate safe-side over-triggering — a false positive
+is preferred to a missed crisis signal), all in
+`packages/types/src/wellbeing-check-ins.ts`. Russian crisis phrases (e.g. "не хочу
+жить", "покончить с собой") therefore trip the gate, so crisis coverage is no longer
+EN-only.
 
 ### Proposal Explainer
 
@@ -497,7 +505,11 @@ text plus `detectedLanguage`, so Russian requests such as "сгенерируй 
 план" can route to `workout`. Deterministic signal coverage is not equivalent across
 languages: some preprocessor signals cover Cyrillic workout terms, while domain YAML
 signal examples remain mostly English. Short typo-heavy requests therefore depend more
-on router LLM confidence.
+on router LLM confidence. The **safety floors are bilingual**, though: the crisis gate
+(`WELLBEING_CRISIS_KEYWORDS_RU`) and the unsafe-medical reply/proposal screen
+(`UNSAFE_MEDICAL_PATTERNS_RU`) both cover Russian, so a weak/low-confidence route on a
+Russian turn still falls back safely and is now handled by the decision-template
+clarifying-question path (see Stage 6 `lowConfidenceRoute`).
 
 ## Stage 6: SystemPlanner — Fan-out Planner
 
@@ -540,11 +552,26 @@ Selected domains are capped at **3** (code constant). The planner never widens
 tool/proposal allowlists beyond the catalog.
 
 Router confidence directly affects proposal availability. If the router result is not
-from the LLM, has confidence below `RULE_ROUTE_CONFIDENCE_THRESHOLD`, has no selected
-domains, or cannot map the selected domain to a capability, `SystemPlannerService`
-falls back to the configured fallback capability (currently `general`). The `general`
-capability does not allow workout proposal intents, so workout cards cannot be created
-from that route even if a later LLM writes workout-like text.
+from the LLM, has confidence below `RULE_ROUTE_CONFIDENCE_THRESHOLD` (`0.75`), has no
+selected domains, or cannot map the selected domain to a capability,
+`SystemPlannerService` falls back to the configured fallback capability (currently
+`general`). The `general` capability does not allow workout proposal intents, so workout
+cards cannot be created from that route even if a later LLM writes workout-like text.
+
+**The fallback is no longer silent: `lowConfidenceRoute`.** When `buildFanoutMetadata`
+takes the single-domain fallback specifically because an **LLM-routed** turn was below
+the confidence threshold or selected zero domains, it sets
+`DomainFanoutMetadata.lowConfidenceRoute = true`. The flag is **never** set for
+proposal-revision, proposal-explainer, deterministic/rule-based routes, or capability-map
+failures (those stay `false`). The orchestrator threads
+`plan.fanout.lowConfidenceRoute` into the `FinalDecisionRequest`
+(`packages/types/src/final-decision.ts`), and the decision template renders the
+`{{lowConfidenceRouteSuffix}}` placeholder (a `LOW_CONFIDENCE_ROUTE_INSTRUCTION` in
+`openai-coach-provider.ts`, injected into the decision template's DYNAMIC suffix so the
+cacheable static prefix is unchanged) instructing the decision-maker to ask **one short
+clarifying question** in the response language rather than guess the domain. The flag is
+also surfaced in `agent.fanOut.decision` diagnostics and the `decision_done` structured
+log (boolean only).
 
 ### `CapabilityRegistryService`
 
@@ -863,6 +890,18 @@ Functions:
 - `validateReplySafety`
 - `validateProposalSafety`
 
+`containsUnsafeMedicalLanguage` (the shared check behind both) is **bilingual**: it
+tests the English `UNSAFE_MEDICAL_PATTERNS` and, on the lowercased text, the Russian
+`UNSAFE_MEDICAL_PATTERNS_RU`. The RU patterns hold the same **prescriptive-medical
+altitude** as the EN set — they block diagnosis (`диагноз` with a `не `-disclaimer
+negative-lookbehind guard, `диагностиру…`), prescribing a drug (`назначаю` only with
+a pharmaceutical word co-occurring within ~60 chars), `рецепт на` + a drug noun,
+pharmaceutical dosing (`дозировка препарата`, `принимайте по … таблетк`), treatment of
+disease (`лечени… заболеван`), and `психотерапи…`/`психотерапевт` — while deliberately
+**not** firing on wellness/nutrition phrasing (e.g. "дозировка белка", "лучшая
+терапия", "не диагноз"). Russian coach replies and proposals are no longer EN-only for
+unsafe-medical screening.
+
 ### `ProposalValidationService`
 
 File: `apps/api/src/modules/proposals/proposal-validation.service.ts`
@@ -1174,10 +1213,16 @@ flowchart TD
   `proposals.length === 0`.
 - **Router fallback blocked workout intents.** SystemPlanner only trusts router output
   that came from the LLM, has ≥1 selected domain, and meets
-  `RULE_ROUTE_CONFIDENCE_THRESHOLD`; otherwise it falls back to `general`, which does not
-  allow workout proposal intents — so `create_workout_plan` / `adapt_workout_plan` never
-  reach the catalog. Signs: `catalogIntentId` is `general`, router confidence below
-  threshold or empty selected domains.
+  `RULE_ROUTE_CONFIDENCE_THRESHOLD` (`0.75`); otherwise it falls back to `general`, which
+  does not allow workout proposal intents — so `create_workout_plan` /
+  `adapt_workout_plan` never reach the catalog. The fallback is no longer silent: for an
+  **LLM-routed** low-confidence / zero-domain turn the planner sets
+  `lowConfidenceRoute = true`, and the decision-maker is told (via the
+  `{{lowConfidenceRouteSuffix}}` instruction) to ask one short clarifying question instead
+  of guessing — so the expected outcome is a clarifying reply with `proposals: []`, not a
+  fabricated card. Signs: `catalogIntentId` is `general`, router confidence below
+  threshold or empty selected domains, and `agent.fanOut.decision.lowConfidenceRoute ===
+  true` (also on the `decision_done` log).
 - **Workout domain degraded.** A failed/timed-out/invalid domain degrades to a safe empty
   `domain_answer` with no candidates. Sign: `parseErrors` contains
   `Fan-out: domains degraded to fallback: [workout]`.
@@ -1213,7 +1258,24 @@ outcome valid where the product may expect a card:
   signals stay weak (see Stage 5). The fan-out domain and decision templates now **do**
   require the reply in `{{responseLanguage}}` (resolved `hint ?? detected`), so reply
   language is contract-enforced; the residual risk is routing/recognition, not reply
-  language.
+  language. The crisis gate and unsafe-medical screen are now **bilingual** (EN + RU
+  patterns), so a non-English turn no longer slips past those safety floors. When the
+  router is genuinely unsure on such a turn, `lowConfidenceRoute` steers the
+  decision-maker to a clarifying question rather than a wrong-domain guess.
+
+### Golden evals (router + decision)
+
+An **env-gated live golden eval suite** exercises the real router and decision-maker
+stages against fixed cases:
+`apps/api/src/modules/ai/evals/router-golden.eval.spec.ts`. It runs only when
+`LLM_EVALS=1` **and** `OPENAI_API_KEY` is set (otherwise unconditionally skipped, so
+normal `pnpm test` / CI never incurs API cost). It covers **40 router cases + 8 decision
+cases** spanning RU and EN (single-domain, multi-domain, ambiguous, smalltalk, and
+proposal-intent-vs-plain-reply), and asserts a **≥80% pass rate over non-errored cases**.
+A provider fallback (`source === "fallback"`, e.g. auth/network failure) is marked
+`ERROR`, excluded from the pass-rate denominator, and **fails the run explicitly** so an
+unavailable provider can't masquerade as a pass. Run command (in the spec header):
+`LLM_EVALS=1 corepack pnpm --dir apps/api exec vitest run src/modules/ai/evals`.
 
 ## Removed Legacy Paths
 

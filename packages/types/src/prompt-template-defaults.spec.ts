@@ -324,6 +324,7 @@ describe("prompt-template-renderer — renderDomainStep and renderFinalDecision 
       safetyFlags: "none",
       safetyConstraints: "none",
       responseLanguage: "ru",
+      lowConfidenceRouteSuffix: "",
     });
 
     expect(rendered).toContain("ru");
@@ -416,6 +417,7 @@ describe("prompt-template-defaults — Fix 3: static prefix has no unresolved {{
       safetyFlags: "none",
       safetyConstraints: "none",
       responseLanguage: "en",
+      lowConfidenceRouteSuffix: "",
     });
     const splitMarker = "Write all user-facing text";
     const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
@@ -450,7 +452,7 @@ describe("PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS — unchanged by W2", () => {
     expect(placeholders).toHaveLength(12);
   });
 
-  it("decision template requires its placeholders including responseLanguage and Slice 2 additions", () => {
+  it("decision template requires its placeholders including responseLanguage, Slice 2, and Slice 5 additions", () => {
     const placeholders = PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS["decision"];
     expect(placeholders).toContain("userMessage");
     expect(placeholders).toContain("domainOutputsJson");
@@ -460,8 +462,10 @@ describe("PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS — unchanged by W2", () => {
     expect(placeholders).toContain("safetyFlags");
     expect(placeholders).toContain("safetyConstraints");
     expect(placeholders).toContain("responseLanguage");
-    // 8 placeholders — 6 original + candidateProposalSummariesJson + recentMessagesJson (Slice 2)
-    expect(placeholders).toHaveLength(8);
+    // Slice 5: lowConfidenceRouteSuffix — injected as empty string for confident routes
+    expect(placeholders).toContain("lowConfidenceRouteSuffix");
+    // 9 placeholders: 8 (through Slice 2) + lowConfidenceRouteSuffix (Slice 5)
+    expect(placeholders).toHaveLength(9);
   });
 });
 
@@ -665,6 +669,7 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
         safetyFlags: "none",
         safetyConstraints: "none",
         responseLanguage: "en",
+        lowConfidenceRouteSuffix: "",
       };
 
       const render1 = compiled.renderFinalDecision({
@@ -684,6 +689,46 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
 
       expect(prefix1).toBe(prefix2);
       expect(prefix1.length).toBeGreaterThan(200);
+    });
+
+    it("decision lowConfidenceRouteSuffix does NOT appear in the static prefix (suffix-only placement)", () => {
+      const splitMarker = "Write all user-facing text";
+
+      const confidenceRender = compiled.renderFinalDecision({
+        userMessage: "Test",
+        domainOutputsJson: "[]",
+        actionVariantCatalogJson: "[]",
+        candidateProposalSummariesJson: "[]",
+        recentMessagesJson: "[]",
+        safetyFlags: "none",
+        safetyConstraints: "none",
+        responseLanguage: "en",
+        lowConfidenceRouteSuffix: "ROUTING NOTE: low confidence",
+      });
+
+      const emptyRender = compiled.renderFinalDecision({
+        userMessage: "Test",
+        domainOutputsJson: "[]",
+        actionVariantCatalogJson: "[]",
+        candidateProposalSummariesJson: "[]",
+        recentMessagesJson: "[]",
+        safetyFlags: "none",
+        safetyConstraints: "none",
+        responseLanguage: "en",
+        lowConfidenceRouteSuffix: "",
+      });
+
+      // Static prefix must be byte-identical regardless of the suffix flag.
+      const prefix1 = confidenceRender.substring(0, confidenceRender.indexOf(splitMarker));
+      const prefix2 = emptyRender.substring(0, emptyRender.indexOf(splitMarker));
+      expect(prefix1).toBe(prefix2);
+
+      // The routing note must appear in the suffixed render (after the split marker).
+      const suffix = confidenceRender.substring(confidenceRender.indexOf(splitMarker));
+      expect(suffix).toContain("ROUTING NOTE: low confidence");
+
+      // And must NOT appear when the suffix is empty.
+      expect(emptyRender).not.toContain("ROUTING NOTE: low confidence");
     });
   });
 });

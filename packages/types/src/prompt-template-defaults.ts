@@ -82,6 +82,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "safetyFlags",
     "safetyConstraints",
     "responseLanguage",
+    "lowConfidenceRouteSuffix",
   ],
 };
 
@@ -291,5 +292,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Recent conversation messages: {{recentMessagesJson}}",
     "Response language: {{responseLanguage}}",
     "User message: {{userMessage}}",
+    // [LOW-CONFIDENCE-SUFFIX] Marker: inserted only when routing confidence was low
+    "{{lowConfidenceRouteSuffix}}",
   ].join("\n"),
 };

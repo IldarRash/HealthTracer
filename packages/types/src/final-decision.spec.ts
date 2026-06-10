@@ -110,6 +110,34 @@ describe("FinalDecisionRequest schema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("lowConfidenceRoute defaults to false when not provided", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "Hello",
+    });
+
+    expect(parsed.lowConfidenceRoute).toBe(false);
+  });
+
+  it("lowConfidenceRoute can be set to true for low-confidence fallback turns", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "uh, hmm, I dunno",
+      lowConfidenceRoute: true,
+    });
+
+    expect(parsed.lowConfidenceRoute).toBe(true);
+  });
+
+  it("lowConfidenceRoute=true does not affect the output schema shape", () => {
+    // The flag is input-only; it must not appear on FinalDecisionOutput.
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "ambiguous question",
+      lowConfidenceRoute: true,
+    });
+
+    expect(parsed.userMessage).toBe("ambiguous question");
+    expect(parsed.lowConfidenceRoute).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
