@@ -464,8 +464,8 @@ the **merged domain YAML config + capability catalog** (`buildAvailableDomains`)
 selects which domain LLMs should run. It calls `provider.generateRouterDecision`.
 
 The router's available-domain list is exactly the **3 `RouterDomain` values**:
-`workout`, `nutrition`, and `health`. `medical.yml` folds into the `health` domain —
-it is not a fourth router-selectable domain.
+`workout`, `nutrition`, and `health`. `medical.yml` has been deleted — the `health`
+domain owns all wellness/health-context intents and is not a fourth router-selectable domain.
 
 Inputs:
 
@@ -680,7 +680,7 @@ selected domain executors concurrently (`Promise.all`, in
 
 - **workout** (`workoutCoach`)
 - **nutrition**
-- **health** (fed by `medical.yml` + `health.yml`)
+- **health** (fed by `health.yml`; `medical.yml` was removed — the health domain owns all wellness/health-context intents)
 
 Per domain executor:
 
@@ -749,8 +749,13 @@ Executes tool requests from a domain loop after executor allowlist checks.
 Tools (read-only context only):
 
 - `getUserContextSlice`
-- `getDocumentContext`
 - `getWeeklyProgressContext`
+- `searchExerciseCatalog` — exercise catalog lookup; wired to workout-domain capabilities only
+- `searchRecipeCatalog` — recipe catalog lookup; wired to nutrition-domain capabilities only
+- `getActivePlanDetail` — current active plan summary; wired to workout, nutrition, and review_progress
+- `getRecentAdherence` — 7-day workout/habit adherence counts; wired to workout, nutrition, and review_progress
+
+`getDocumentContext` has been removed: document context in chat is intentionally unavailable under the `allowDocuments=false` context-budget floor. The consent-scoped design is deferred (see "Removed Legacy Paths").
 
 A tool request not allowed by the active domain capability is rejected.
 
@@ -878,6 +883,20 @@ nested `.plan` (`adapt_workout_plan_from_progress`), and the top-level
 `log_workout_activity` calorie fields are left unset — its `.refine()` then rejects the
 proposal downstream (fail-closed). The `displayContract` itself is carried through as a
 non-authoritative render hint; the decision-maker can never fabricate the trusted rate.
+
+## Per-Turn Telemetry (`ai.turn_summary`)
+
+After each fan-out turn completes, `AgentOrchestratorService.runFanOutTurn` emits one structured
+log entry with event `"ai.turn_summary"` (`AgentTurnTelemetry`,
+`packages/types/src/agent-context.ts`). The payload contains only counts, enums, and durations —
+**no user message text, no reply text, no health data** (safety floor enforced by the Zod schema).
+The schema is runtime-validated (`agentTurnTelemetrySchema.safeParse`) before logging; a
+mismatch emits a warn and falls back to raw object logging without failing the turn.
+
+Fields: `totalLatencyMs`, `routerLatencyMs`, `contextLatencyMs`, `decisionLatencyMs`,
+`domainLatencies[]`, `selectedDomains[]`, `routerConfidence`, `routerSource`,
+`toolsRequestedPerDomain[]`, `degradedDomains[]`, `finalActionType`, `proposalCount`,
+`validationFailureClasses[]`.
 
 ## Stage 11: Proposal Validation And Persistence
 
@@ -1076,8 +1095,9 @@ intents, tools, signals, and prompts live in **per-domain YAML files**:
 
 - `packages/ai-behavior/config/domains/workout.yml`
 - `packages/ai-behavior/config/domains/nutrition.yml`
-- `packages/ai-behavior/config/domains/medical.yml`
 - `packages/ai-behavior/config/domains/health.yml`
+
+(`medical.yml` was deleted; health.yml owns the health/wellness domain.)
 
 ### Domain config schema
 

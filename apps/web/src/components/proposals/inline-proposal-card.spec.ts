@@ -119,6 +119,16 @@ describe("NutritionIncidentProposalCard", () => {
     expect(proposalCardShellSource).toContain("\n              Modify\n");
     expect(proposalCardShellSource).toContain("\n              Reject\n");
   });
+
+  it("renders per-item calories via Stepper (step=10, min=0) not a bare number input", () => {
+    expect(nutritionProposalSource).toContain("Stepper");
+    expect(nutritionProposalSource).toContain("step={10}");
+    expect(nutritionProposalSource).toContain("min={0}");
+    // name/quantity inputs remain as text inputs (not Stepper)
+    expect(nutritionProposalSource).toContain('className="form-input"');
+    // bare calories <input type="number"> must be gone
+    expect(nutritionProposalSource).not.toContain('inputMode="numeric"');
+  });
 });
 
 describe("RecommendRecipesProposalCard", () => {
@@ -307,7 +317,27 @@ describe("EditableProposalContract", () => {
     expect(editableProposalContractSource).toContain('field.kind === "number"');
     expect(editableProposalContractSource).toContain('field.kind === "text"');
     expect(editableProposalContractSource).toContain('type="range"');
-    expect(editableProposalContractSource).toContain('type="number"');
+    // number fields now render via Stepper (bounded ± control) instead of <input type="number">
+    expect(editableProposalContractSource).toContain("Stepper");
+    expect(editableProposalContractSource).toContain("<Stepper");
+  });
+
+  it("number fields use Stepper with min/max/step preserved", () => {
+    expect(editableProposalContractSource).toContain("field.min");
+    expect(editableProposalContractSource).toContain("field.max");
+    expect(editableProposalContractSource).toContain("field.step");
+  });
+
+  it("adds Eyebrow 'Edit before applying' above editable fields", () => {
+    expect(editableProposalContractSource).toContain("Edit before applying");
+    expect(editableProposalContractSource).toContain("Eyebrow");
+  });
+
+  it("readonly/non-editable fields show lock affordance with 'Set by your coach' hint", () => {
+    expect(editableProposalContractSource).toContain("Set by your coach");
+    expect(editableProposalContractSource).toContain("editable-contract-locked-row");
+    expect(editableProposalContractSource).toContain("editable-contract-locked-hint");
+    expect(editableProposalContractSource).toContain('name="lock"');
   });
 
   it("shows the primary total as a live-updating headline", () => {

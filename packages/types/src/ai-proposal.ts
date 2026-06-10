@@ -64,6 +64,69 @@ export const proposalValidationStatusSchema = z.enum([
 
 export type ProposalValidationStatus = z.infer<typeof proposalValidationStatusSchema>;
 
+/**
+ * Classifies a proposal validation failure into one of five buckets for
+ * structured logging and turn metadata. Priority: safety > schema > ownership > other.
+ *
+ * - `safety`            — unsafe medical/diagnostic wording in proposal text fields
+ * - `schema`            — Zod parse failure or domain-rule violation (validateRawProposal)
+ * - `ownership`         — referenced resource not owned by the user (provenance, evidence refs, etc.)
+ * - `unsupported-intent` — intent was not in the allowed capability catalog
+ * - `other`             — any combination that does not map to the above
+ */
+export const proposalValidationFailureClassSchema = z.enum([
+  "safety",
+  "schema",
+  "ownership",
+  "unsupported-intent",
+  "other",
+]);
+
+export type ProposalValidationFailureClass = z.infer<
+  typeof proposalValidationFailureClassSchema
+>;
+
+/**
+ * Classify a proposal validation failure from its named error buckets.
+ * Takes pre-split error arrays so the classification is deterministic and testable.
+ *
+ * @param safetyErrors         — from validateProposalSafety (unsafe language)
+ * @param schemaErrors         — from validateRawProposal / validateStoredProposal
+ * @param ownershipErrors      — from validateCorrelationEvidenceOwnership,
+ *                               validateProvenanceOwnership, validateChatAttachmentProposalRefs,
+ *                               validateNutritionIncidentImageRefOwnership, etc.
+ * @param unsupportedIntentErrors — when the intent is not in the active capability catalog
+ */
+export function classifyProposalValidationFailure({
+  safetyErrors,
+  schemaErrors,
+  ownershipErrors,
+  unsupportedIntentErrors,
+}: {
+  safetyErrors: readonly string[];
+  schemaErrors: readonly string[];
+  ownershipErrors: readonly string[];
+  unsupportedIntentErrors?: readonly string[];
+}): ProposalValidationFailureClass {
+  if (safetyErrors.length > 0) {
+    return "safety";
+  }
+
+  if (schemaErrors.length > 0) {
+    return "schema";
+  }
+
+  if (ownershipErrors.length > 0) {
+    return "ownership";
+  }
+
+  if (unsupportedIntentErrors && unsupportedIntentErrors.length > 0) {
+    return "unsupported-intent";
+  }
+
+  return "other";
+}
+
 export const proposalTargetDomainSchema = z.enum([
   "profile",
   "goal",

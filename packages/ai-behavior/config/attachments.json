@@ -1,7 +1,6 @@
 {
   "version": 1,
   "safetyFloors": {
-    "requireMedicalConsent": true,
     "enforceProviderIsolation": true,
     "requireOwnershipChecks": true,
     "suppressMedicalPlanProposals": true

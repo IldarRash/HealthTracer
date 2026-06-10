@@ -1,296 +1,54 @@
-# Handoff: Health Tracer — AI Health Coach (web)
+# HealthTracer Docs
 
-## Overview
-Health Tracer — персональный AI-коуч по самочувствию (тренировки, питание, сон,
-привычки, восстановление). Центральный паттерн продукта: **коуч предлагает —
-человек решает**. Любое изменение плана проходит цикл «чат → карточка-предложение →
-Принять / Изменить / Отклонить → новая версия плана».
+Index of the docs in this repo. Source of truth is always the code
+(`packages/db`, `packages/types`, `apps/api`) plus `package.json` and
+`.env.example`; these docs are generated from it.
 
-Это **wellness-продукт, не медицинский сервис**. В копирайтинге и UI запрещён язык
-диагнозов, лечения, дозировок и «медицинской уверенности». Тон — поддерживающий
-тренер.
+## Architecture (`architecture/`)
 
-Навигация — 4 основные вкладки (**Чат · Сегодня · Динамика · Профиль**) + 2 вторичных
-экрана только для просмотра (**Тренировки · Питание**).
+- [`overview.md`](architecture/overview.md) — system shape: monorepo, modular
+  monolith, structured-state-first principle.
+- [`llm-pipeline.md`](architecture/llm-pipeline.md) — **canonical** file-by-file
+  map of the multi-domain fan-out + synthesis chat/AI pipeline, proposal
+  lifecycle, and the "Removed Legacy Paths" list. Read before touching `ai`,
+  `chat`, `chat-attachments`, or `coaching-context`.
+- [`ai-behavior-config.md`](architecture/ai-behavior-config.md) — files-first
+  AI/chat + attachment config model, the three config surfaces, fail-closed
+  loaders, the YAML narrows-only rule, and code safety floors.
+- [`domain-model.md`](architecture/domain-model.md) — core entities, the
+  plan-vs-performed split, and modeling rules.
+- [`database.md`](architecture/database.md) — Postgres/Drizzle table inventory,
+  the revision pattern, and migration/data-access rules.
+- [`auth.md`](architecture/auth.md) — authentication decision (Clerk + JWKS).
+- [`product-surface-architecture.md`](architecture/product-surface-architecture.md)
+  — primary vs secondary surfaces and their data sources.
+- [`mcp.md`](architecture/mcp.md) — MCP server setup (`context7`, read-only
+  `postgres-dev`).
+- [`adr/`](architecture/adr) — architecture decision records
+  ([0001: monorepo + modular monolith](architecture/adr/0001-monorepo-modular-monolith.md)).
 
-## About the Design Files
-Файлы в этом пакете — **дизайн-референсы, сделанные в HTML/React (через in-browser
-Babel)**. Это прототипы, показывающие задуманный вид и поведение, **а не продакшн-код
-для копирования один в один**. Задача — **воссоздать эти экраны в вашем кодовом
-окружении** (React/Next, Vue, SwiftUI, native и т.п.), используя его готовые паттерны,
-компоненты и систему стилей. Если окружения ещё нет — выберите подходящий стек
-(рекомендация: React + TypeScript + CSS-переменные / Tailwind) и реализуйте дизайн в нём.
+## Product (`product/`)
 
-Все экраны построены на двух общих наборах токенов (`L` — светлый мир, `D` — тёмный мир)
-и общей библиотеке атомов (`app/kit.jsx`). Рекомендуется в первую очередь перенести
-**токены и атомы**, затем собирать экраны из них.
+- [`feature-roadmap.md`](product/feature-roadmap.md) — product idea, phased
+  roadmap, current implementation snapshot, and the open feature-brief index.
+- [`features/`](product/features) — feature briefs (open briefs; completed ones
+  are folded back into the roadmap and architecture docs).
+  - [`editable-proposals-performed-log.md`](product/features/editable-proposals-performed-log.md)
+    — universal editable display contract + plan-vs-performed log.
+- [`mobile-parity.md`](product/mobile-parity.md) — explicit mobile (Expo)
+  deferral, what web has that mobile lacks, and the trigger to revisit.
 
-## Fidelity
-**High-fidelity (hifi).** Финальные цвета, типографика, отступы, состояния. Воссоздавать
-пиксель-в-пиксель средствами вашего дизайн-стека. Все значения — ниже в разделе
-**Design Tokens** и продублированы в коде (`app/kit.jsx`).
+## Deployment (`deployment/`)
 
-## Концепция визуала (важно)
-Продукт намеренно смешивает два визуальных мира:
-- **Светлый мир — «как ChatGPT»**: экраны общения. Белый фон, спокойные серые,
-  крупная читабельная типографика, минимум хрома, мягкие пузыри сообщений,
-  pill-композер. Используется в: **Чат**, **Профиль**, **Онбординг**, **Согласие**,
-  **Сравнение тарифов (левая Free-карточка)**, **Лимит исчерпан**.
-- **Тёмный мир — «как WHOOP»**: экраны данных. Графитовый фон, метрик-кольца,
-  спарклайны, крупные числа с tabular-nums, uppercase микро-лейблы, семантические
-  цвета (green/amber/red). Используется в: **Сегодня**, **Динамика**,
-  **Тренировки**, **Питание**, **Pro-карточка тарифа**, левая панель онбординга.
+- [`railway.md`](deployment/railway.md) — Railway deploy + manual Drizzle
+  migration procedure.
 
-Семантические цвета метрик общие для обоих миров.
+## Design handoff
 
----
+- [`design_handoff_plan_screens/`](design_handoff_plan_screens/README.md) —
+  high-fidelity design references (tokens, atoms, screens) for the Longevity /
+  Workouts / Nutrition surfaces and all their states.
 
-## Design Tokens
-(Источник истины: `app/kit.jsx` — объекты `L`, `D`, `M`, константы `FONT`, `MONO`.)
-
-### Шрифты
-```
-FONT = "Helvetica Neue", Helvetica, "Segoe UI", system-ui, -apple-system, sans-serif
-MONO = "SF Mono", ui-monospace, "Roboto Mono", Menlo, monospace   // числа-метки, ticket #
-```
-Числовые/метрические значения: `font-variant-numeric: tabular-nums`.
-Микро-лейблы (eyebrow): `11px / 700 / letter-spacing 1.2 / uppercase`.
-
-### Светлый мир — L
-```
-bg      #ffffff   // основной фон
-panel   #f9f9f8   // сайдбар, мягкие подложки
-panel2  #f3f3f1   // чипы, вторичные подложки
-line    #ececea   // разделители
-line2   #e2e2df   // заметные бордеры/обводки полей
-ink     #0e0e0d   // основной текст / primary-кнопка
-ink2    #3b3b38   // вторичный текст
-mut     #76766f   // приглушённый текст
-mut2    #9a9a92   // самый тихий текст
-bubble  #f4f4f2   // пузырь сообщения пользователя
-```
-
-### Тёмный мир — D
-```
-bg      #0b0d0e   // основной фон контента
-panel   #131618   // карточки
-panel2  #1a1e21   // вложенные подложки
-elev    #20262a   // приподнятые элементы
-line    rgba(255,255,255,0.075)  // разделители
-line2   rgba(255,255,255,0.14)   // бордеры/обводки
-ink     #f3f5f6   // основной текст
-ink2    #cfd4d7   // вторичный текст
-mut     #878d92   // приглушённый
-mut2    #5e656a   // самый тихий
-sidebar #0e1113   // фон сайдбара/левой панели онбординга (чуть темнее bg)
-```
-
-### Семантические цвета метрик — M (общие)
-```
-green   #19c37d   dim rgba(25,195,125,0.16)   // хорошо / восстановление / выполнено / accept
-amber   #f5a524   dim rgba(245,165,36,0.16)   // внимание / частично / запас сил
-red     #f0506a   dim rgba(240,80,106,0.16)   // высокая нагрузка / пропущено / алерт
-blue    #3a8dff   dim rgba(58,141,255,0.16)   // тренировки / кардио / «сегодня»
-indigo  #7b7bff   dim rgba(123,123,255,0.16)  // сон / восстановление / привычки
-```
-Паттерн «цветной» элемент на тёмном: фон `${color}1f`–`${color}22`, иконка/текст — сам `color`.
-На светлом accept-кнопка: bg `green`, текст `#04130c` (тёмно-зелёный, не белый).
-
-### Радиусы
-```
-chip / pill        999px
-кнопки             12px
-поля / строки      10–13px
-карточки           16px
-крупные модалки    16px
-иконные бэйджи      8–14px
-```
-
-### Тени
-```
-карточка (светлая)        0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06)
-карточка-предложение      0 4px 20px rgba(0,0,0,0.06)
-композер (фокус)          0 2px 14px rgba(0,0,0,0.04)
-Pro-карточка тарифа        0 12px 40px rgba(0,0,0,0.18)
-```
-
-### Сетка/отступы
-Базовый шаг 4px. Типичные: контент-паддинг экранов `20–22px 34px`; паддинг карточек
-`16–22px`; гэпы колонок `16–18px`; гэп строк списков `8–11px`.
-
----
-
-## Общие компоненты (app/kit.jsx)
-Перенесите как переиспользуемые компоненты вашего стека:
-
-- **Icon(name, size, sw, stroke, fill)** — единый stroke-набор (24×24, `stroke-width` ~1.7,
-  `round` caps/joins). Имена: chat, today, longevity, profile, dumbbell, fork, moon, drop,
-  heart, check/checkSm, x, plus, edit, send, arrow, camera, clip, spark, shield, bolt, lock,
-  bed, flag, doc, chevR/chevD, info, star, sun. В проде — замените на вашу icon-библиотеку
-  с теми же метафорами.
-- **Mark(size, color)** — лого-марка: концентрическое кольцо с дугой и точкой (recovery-ring).
-- **Chip(tone, dark)** — pill. tone: neutral/green/amber/red/blue/indigo. 12.5px/600.
-- **Btn(kind, size, icon, full)** — kind: primary(чёрная), accept(зелёная), ghost(обводка),
-  soft, danger, quiet. radius 12, 600.
-- **Ring(value, size, sw, color, label, sub, dark)** — донат-метрика (SVG, `rotate(-90deg)`,
-  `stroke-linecap round`).
-- **MiniBars / Spark** — столбики и спарклайн (polyline) для трендов.
-- **Eyebrow** — uppercase микро-лейбл.
-- **Avatar(who: 'coach'|'user')** — coach = чёрный круг с Mark; user = градиентный круг с буквой.
-- **Card(dark, pad, accent)** — базовая карточка обоих миров; `accent` рисует верхнюю
-  2px цветную полосу.
-- **CardHead(icon, title, color, right, dark)** — шапка карточки с иконным бэйджем.
-- **Stat / MetricDonut** — крупное число + лейбл; кольцо + подпись.
-- **CheckCircle(done, color, dark)** — кружок задачи (вкл = заливка + галочка `#04130c`).
-- **Progress(value, color, dark)** — тонкий прогресс-бар.
-- **Toggle(on, color)** — переключатель (в Профиле).
-
----
-
-## Screens / Views
-
-### Навигационный каркас — `AppShell(theme, active, plan)` (app/shell.jsx)
-Левый сайдбар 244px + контент. theme: `light|dark` переключает весь набор цветов.
-Сайдбар: марка+название → 4 основные вкладки (Чат/Сегодня/Динамика/Профиль) →
-разделитель «ПЛАНЫ · ПРОСМОТР» → Тренировки/Питание → плашка тарифа (Free: «осталось N
-из 10 сообщений») → юзер-строка. `TopBar(title, sub, right, dark)` — шапка контента.
-
-### 1. Чат (главный, светлый) — app/chat.jsx
-Шапка-строка «Коуч ● на связи» + чип контекста цели. Центрированная колонка max-width 720.
-Сообщения: пользователь — пузырь справа (`bubble`, radius `18 18 4 18`), фото-вложение
-190×132; коуч — аватар + текст во всю ширину (без пузыря). Композер закреплён снизу:
-pill radius 26, иконки clip+camera, поле, круглая send-кнопка 38px (чёрная). Под композером
-дисклеймер: «Коуч предлагает — решение всегда за вами. Это поддержка по образу жизни, не
-медицинская консультация.»
-Состояния (артборды): **Пусто** (приветствие + чипы-подсказки), **Диалог + предложение**,
-**Коуч думает** (3 точки + shimmer-плейсхолдеры), **Ошибка** (красный блок + Повторить),
-**Бережная поддержка** (см. ниже).
-
-### 2. Бережная поддержка в кризисе (светлый) — ChatCrisis
-Тёплый блок (фон `linear-gradient(180deg,#fbf7f1,#ffffff)`), заголовок «Сделаем паузу
-вместе», мягкие действия (бережный режим / поговорить / дыхание), внизу — нейтральный
-не-медицинский дисклеймер про обращение к близким/службе поддержки. **Без** алертов,
-красного, медицинского языка.
-
-### 3. Карточка-предложение — `ProposalCard(variant, state, domain, title, why, changes)` (app/proposal.jsx)
-**Самый важный элемент.** domain: training(blue)/nutrition(green)/habit(indigo)/recovery(amber)
-— задаёт иконку, чип и accent. Внутри: шапка «Предложение коуча» + чип домена; заголовок
-17px/700; блок «Почему» (info-иконка, серый фон); блок изменений `from → arrow → to`
-(`from` зачёркнут серым, `to` зелёный/жирный); футер по состоянию.
-- **state**: `proposed` (Принять/Изменить/Отклонить) · `edit` (поля редактирования +
-  Применить/Отмена) · `accepted` (зелёный футер «Принято · план обновлён · v8» + Отменить) ·
-  `rejected` (серый футер «Отклонено» + Вернуть, контент приглушён).
-- **variant** (3 направления): `A` мягкая (иконный бэйдж) · `B` акцентная (левый 4px бордер
-  цвета домена) · `C` структурная (моно-шапка «ПРЕДЛОЖЕНИЕ · ДОМЕН» + ticket `#CHG-204`).
-
-### 4. Сегодня (тёмный, WHOOP) — `TodayScreen(state)` — app/today.jsx
-state: `partial | done | empty`. Шапка «Четверг · 5 июня» + чип прогресса. Две колонки:
-- Левая: **полоса состояния дня** (3 MetricDonut: Восстановление green / Сон indigo /
-  Запас сил amber + строка-подсказка) → **Движение** (blue, упражнения-чипы, чек) →
-  **Питание** (приёмы с чек-кружками + ряд воды 8 делений blue) → **Привычки** (indigo).
-- Правая: **Чек-ин самочувствия** (шкала 5 точек red→green, без эмодзи; уровень стресса
-  3 сегмента) → **Рефлексия дня** (необязательно) → **Быстрые ссылки** (планы, чат).
-- `empty`: центр-карточка «Здесь появится твой день» + CTA «Создать первую цель».
-
-### 5. Динамика (тёмный, WHOOP) — LongevityScreen — app/longevity.jsx
-Шапка с переключателем недели. **Hero консистентности**: крупно «76 %», тренд +9%, серия,
-справа 7 столбиков выполнения по дням (цвет по уровню). Ряд из 4 **TrendCard** (Тренировки/
-Питание/Сон/Самочувствие: число + спарклайн + стрелка тренда + подпись). **Цели**: квартальная
-→ недельные с прогресс-барами. **«Стоит обсудить с коучем»** — ведёт в чат.
-Тон строго wellness: **без** биологического возраста, клинических скоров и «индексов
-готовности как истины».
-
-### 6. Тренировки / Питание (тёмные, только просмотр) — app/plans.jsx
-`ViewOnlyBar`: чип «🔒 Только просмотр» + кнопка «Изменить через коуча». Баннер
-**«Что изменилось»** (accent-полоса, бэйдж v8, «Обсудить изменение →»). Ряд мини-статов.
-Список дней недели (`DayRow`: день/дата, иконный бэйдж, заголовок+мета, бэйдж статуса
-Выполнено/Сегодня/Отдых/Запланировано, бэйдж «изменено» на затронутом дне; «сегодня»
-подсвечен). Менять план нельзя — только через чат.
-
-### 7. Профиль (светлый) — ProfileScreen — app/profile.jsx
-Две колонки. Слева: шапка-аккаунт (аватар, имя, чип FREE) → **Иерархия целей**
-(квартальная star-цель → недельные) → **Личный контекст** (поля + чипы предпочтений).
-Справа: **Документы о здоровье** (amber-accent: дисклеймер про согласие/wellness, Toggle
-согласия, список файлов «видно только вам», загрузка) → **Устройства и данные** (Toggle-и)
-→ **Подписка** (Free + кнопка Pro).
-
-### 8. Онбординг (светлый, первый запуск) — `OnboardingScreen(step)` — app/onboarding.jsx
-step: `welcome | goal | done`. Сплит: **левая тёмная панель** (марка, мотивация «Один коуч
-вместо десяти приложений», вертикальный степпер 5 шагов) + правая светлая форма. welcome —
-знакомство/имя; goal — выбор главной цели (4 GoalOption с радио, выбран amber «Больше
-энергии»); done — «Первая цель готова» + сводка. Футер: Назад / точки-прогресс / Далее.
-До завершения онбординга в продукт не пускаем.
-
-### 9. Согласие на документы (светлый) — ConsentScreen
-Модаль-карточка 520px: 3 пункта (контекст образа жизни / видно только вам / отзывается в
-один тап), чек согласия, «Согласиться и продолжить» / «Не сейчас». Загрузка мед-данных —
-**только** через явное согласие и нейтральные wellness-формулировки.
-
-### 10. Подписка Free vs Pro — app/paywall.jsx
-**PricingScreen**: Free-карточка (светлая, обводка) рядом с Pro-карточкой (тёмная графитовая,
-green-обводка, чип «Популярно», цена 590 ₽/мес, «7 дней бесплатно»). `FeatureRow` — галочка
-(вкл) или крестик (выкл). Тон мягкий: «Отмена в любой момент. Без давления.»
-**LimitReachedScreen**: чат с **выключенным** композером (variant `limit`) + апселл-блок
-«На сегодня сообщения закончились» (что даёт Pro + Открыть Pro / Подождать до завтра).
-
----
-
-## Interactions & Behavior
-- **Главный цикл**: ввод/фото → коуч формирует ProposalCard(`proposed`) → пользователь
-  Принять/Изменить/Отклонить → Принять = ProposalCard(`accepted`) + новая версия плана
-  (старое не теряется, есть Отменить); Изменить = `edit` (поля) → Применить; Отклонить =
-  `rejected` + Вернуть.
-- **Версионирование планов**: каждое принятое предложение бампит версию (v8…) и оставляет
-  след «что изменилось» на экранах Тренировки/Питание со ссылкой «Обсудить изменение» в чат.
-- **Состояния асинхронных экранов** (обязательно для каждого с данными): ЗАГРУЗКА / ОШИБКА /
-  ПУСТО / УСПЕХ. Особое внимание «пусто» (онбординг не дал данных) и «загрузка» (коуч думает).
-- **Только-просмотр** на Тренировках/Питании: изменения недоступны напрямую — всегда редирект
-  в чат.
-- **Кризис**: при тревожных сигналах в сообщении — мягкий поддерживающий блок (не мед-совет).
-- Переходы: спокойные fade/slide ~150–200ms, без агрессивных анимаций. Reduced-motion —
-  показывать конечное состояние.
-
-## State Management
-- `activeTab`: chat | today | longevity | profile | training | nutrition
-- `plan`: 'Free' | 'Pro'; дневной счётчик сообщений (Free лимит 10) → при 0 показывать
-  LimitReached + апселл.
-- `chat`: список сообщений (user/coach/proposal), состояние «коуч думает», ошибки.
-- `proposals[]`: { id, domain, title, why, changes[], state, version } — статус и версия.
-- `plan versions`: история версий тренировок/питания + diff «что изменилось».
-- `today`: выполнение задач, чек-ин (mood/stress), вода, привычки, рефлексия.
-- `onboarding`: { step, name, goal, context, restrictions, completed } — гейтит вход в продукт.
-- `consents`: { documents: bool, devices{...} }, загруженные документы.
-
-## Assets
-Реальных бинарных ассетов нет. Иконки и лого-марка — inline-SVG (`Icon`, `Mark` в kit).
-Фото еды/документов — плейсхолдеры (диагональная штриховка). В проде: заменить иконки на
-вашу библиотеку, лого — на финальный бренд-mark, плейсхолдеры — на реальные изображения/
-аплоады.
-
-## Files
-Точки входа и исходники дизайна (в этом пакете, папка `design/`):
-- `design/index.html` — канвас со всеми 25 артбордами (обзор/сравнение).
-- `design/preview.html` — харнесс для просмотра одного экрана: `?s=<id>` (см. список screens
-  в коде; напр. `?s=today-partial`, `?s=prop-b`, `?s=pricing`).
-- `design/app/kit.jsx` — **токены L/D/M + общие атомы** (начните отсюда).
-- `design/app/shell.jsx` — AppShell + TopBar.
-- `design/app/proposal.jsx` — **ProposalCard** (ядро).
-- `design/app/chat.jsx` — чат и все его состояния.
-- `design/app/today.jsx` — Сегодня (3 состояния).
-- `design/app/longevity.jsx` — Динамика.
-- `design/app/plans.jsx` — Тренировки/Питание (просмотр).
-- `design/app/profile.jsx` — Профиль.
-- `design/app/onboarding.jsx` — Онбординг + Согласие.
-- `design/app/paywall.jsx` — Free/Pro + лимит.
-- `design/design-canvas.jsx` — обёртка-канвас (инструмент презентации, **не часть продукта**).
-
-### Как открыть референсы локально
-React/Babel грузятся с CDN, поэтому нужен простой статический сервер (из-за CORS на
-`file://`):
-```
-cd design && python3 -m http.server 8000
-# затем открыть http://localhost:8000/index.html  (или preview.html?s=today-partial)
-```
-> Примечание: `*.jsx` здесь компилируются in-browser через Babel (это прототип). В проде
-> используйте нормальную сборку вашего стека — код атомов/экранов переносите как
-> компоненты, а токены — как CSS-переменные / тему.
+> A newer end-to-end interactive prototype lands under
+> `docs/design_handoff_prototype/` via PR #26. If that directory is not yet
+> present on this branch, it will be once #26 merges.

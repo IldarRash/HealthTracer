@@ -68,6 +68,7 @@ cp packages/db/.env.example packages/db/.env
 
 pnpm db:up        # start local Postgres (docker compose)
 pnpm db:migrate   # apply Drizzle migrations
+pnpm db:seed      # seed reference data: exercises, recipes, and habit templates
 pnpm dev          # run the dev stack — API on :3000, Web on :3001
 
 pnpm db:down      # stop Postgres when finished
@@ -96,6 +97,8 @@ docs/         product + architecture docs (ADRs, LLM pipeline, auth, MCP)
 
 ## Documentation
 
-- `docs/architecture/` — ADRs, the LLM-pipeline spec, auth, and MCP notes.
-- `docs/product/` — phased roadmap and the current phase audit.
+Start at [`docs/README.md`](docs/README.md) for the full index.
+
+- `docs/architecture/` — the LLM-pipeline spec, AI-behavior config, domain model, database, auth, MCP, and ADRs.
+- `docs/product/` — the phased feature roadmap, open feature briefs, and the mobile-parity deferral note.
 - `CLAUDE.md` / `AGENTS.md` — engineering invariants and contributor guidance.

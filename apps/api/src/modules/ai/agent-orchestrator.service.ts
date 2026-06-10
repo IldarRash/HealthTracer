@@ -6,6 +6,7 @@ import type {
   AgentIntent,
   AgentTurnCapabilityPresentation,
   AgentTurnMetadata,
+  AgentTurnTelemetry,
   AgentToolName,
   AiStructuredOutput,
   BuildAgentContextRequest,
@@ -20,6 +21,7 @@ import type {
   UserLocale,
 } from "@health/types";
 import {
+  agentTurnTelemetrySchema,
   buildResponseModeExecutionMetadata,
   createFallbackDomainAnswer,
   isDeterministicResponseModeExecutorMode,
@@ -143,6 +145,7 @@ export class AgentOrchestratorService {
     input: OrchestrateCoachTurnInput,
   ): Promise<OrchestratedCoachTurnResult> {
     const { onProgress } = input;
+    const turnStart = Date.now();
 
     const preprocessorResult = this.messagePreprocessorService.preprocess({
       userMessage: input.userMessage,
@@ -162,6 +165,7 @@ export class AgentOrchestratorService {
       emitProgress(onProgress, { kind: "stage", stage: "routing" });
     }
 
+    const routerStart = Date.now();
     const routerResult = shouldRunRouter
       ? await this.routerLlmService.route({
           preprocessorResult,
@@ -171,6 +175,7 @@ export class AgentOrchestratorService {
           recentMessages: input.recentMessages,
         })
       : undefined;
+    const routerLatencyMs = shouldRunRouter ? Date.now() - routerStart : undefined;
 
     const plan = await this.systemPlannerService.planTurn({
       userMessage: input.userMessage,
@@ -184,6 +189,7 @@ export class AgentOrchestratorService {
 
     // Build primary context packet for the current route (used as a fallback
     // for fan-out path metadata and for domain context building).
+    const contextStart = Date.now();
     const contextPacket = await this.coachingContextService.buildAgentContext(
       input.auth,
       {
@@ -197,6 +203,7 @@ export class AgentOrchestratorService {
       route,
       { contextBudget: plan.contextBudget },
     );
+    const contextLatencyMs = Date.now() - contextStart;
 
     const coachingContext = this.coachingContextService.toAgentPromptContext(contextPacket);
     const expansionPolicy = this.contextExpansionPolicyService.createPolicySnapshot(
@@ -297,6 +304,9 @@ export class AgentOrchestratorService {
       routerResult,
       responseLanguage: preprocessorResult.responseLanguage,
       onProgress,
+      turnStart,
+      routerLatencyMs,
+      contextLatencyMs,
     });
   }
 
@@ -410,9 +420,15 @@ export class AgentOrchestratorService {
       /** Resolved response language (hint ?? detected). Null = fall back to message detection. */
       responseLanguage: string | null;
       onProgress?: ProgressReporter;
+      /** Turn entry timestamp for total latency calculation. */
+      turnStart: number;
+      /** Router LLM latency in ms. Absent when router was skipped. */
+      routerLatencyMs: number | undefined;
+      /** Context loading latency in ms. */
+      contextLatencyMs: number;
     },
   ): Promise<OrchestratedCoachTurnResult> {
-    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, onProgress } = params;
+    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
     const selectedDomains = plan.fanout.selectedDomains;
 
     // Emit domains_running stage with the selected domain names (structural info only,
@@ -435,6 +451,7 @@ export class AgentOrchestratorService {
     // Run selected domain LLMs concurrently.
     // Guard: Promise.all is wrapped so a rejected inner promise (which should never
     // happen since executeDomainLoopSafe never rejects) does not crash the turn.
+    const domainsStart = Date.now();
     const domainResults = await this.runDomainsConcurrently(
       input,
       selectedDomains,
@@ -442,6 +459,7 @@ export class AgentOrchestratorService {
       primaryCoachingContext,
       responseLanguage,
     );
+    const domainsLatencyMs = Date.now() - domainsStart;
 
     // Structured log: router stage done (counts/ids/flags only — no message text).
     if (routerResult !== undefined) {
@@ -510,6 +528,7 @@ export class AgentOrchestratorService {
 
     // Run the decision-maker LLM (Stage 9).
     // DecisionMakerExecutorService always resolves — degrades to fallback on error.
+    const decisionStart = Date.now();
     const decisionResult = await this.decisionMakerExecutorService.execute({
       userMessage: input.userMessage,
       domainOutputs,
@@ -524,6 +543,7 @@ export class AgentOrchestratorService {
       // ask a clarifying question rather than guess the domain (Change 2 / Slice 5).
       lowConfidenceRoute: plan.fanout.lowConfidenceRoute,
     });
+    const decisionLatencyMs = Date.now() - decisionStart;
 
     // Structured log: decision stage done (counts/ids/flags only — no text/health content).
     this.logger.log({
@@ -627,25 +647,73 @@ export class AgentOrchestratorService {
         ? ("parse_failed" as const)
         : ("passed" as const);
 
+    const totalLatencyMs = Date.now() - turnStart;
+
+    const fanOutMetadata = buildFanOutTurnMetadata({
+      plan,
+      contextPacket,
+      capabilityTurnMetadata,
+      routerResult,
+      domainResults,
+      decisionResult,
+      resolvedProposalCount,
+      droppedByAllowlist,
+      idResolutionDropCount,
+      replyBlocked,
+      finalProposalCount,
+      contextLatencyMs,
+      domainsLatencyMs,
+      totalLatencyMs,
+    });
+
+    // ---------------------------------------------------------------------------
+    // Slice D: per-turn telemetry — one structured log per eligible turn.
+    // Safety floor: no user message text, no reply text, no health data.
+    // Counts, enums, and durations only.
+    // ---------------------------------------------------------------------------
+    const telemetry: AgentTurnTelemetry = {
+      event: "ai.turn_summary",
+      totalLatencyMs,
+      routerLatencyMs,
+      contextLatencyMs,
+      decisionLatencyMs,
+      domainLatencies: domainResults.map(({ domain, result }) => ({
+        domain,
+        latencyMs: result.usage?.latencyMs ?? 0,
+      })),
+      selectedDomains: selectedDomains.map((d) => d.domain),
+      routerConfidence: routerResult?.output.confidence,
+      routerSource: routerResult?.source,
+      toolsRequestedPerDomain: domainResults.map(({ domain, result }) => ({
+        domain,
+        toolsInvoked: result.toolsInvoked,
+        toolsDeniedCount: 0,
+      })),
+      degradedDomains,
+      finalActionType: decisionResult.output.selectedAction ?? null,
+      proposalCount: finalProposalCount,
+      validationFailureClasses: [],
+    };
+    // Runtime-validate telemetry before logging to catch schema drift early.
+    // safeParse: a mismatch emits a warning but never fails the turn.
+    const telemetryValidation = agentTurnTelemetrySchema.safeParse(telemetry);
+    if (!telemetryValidation.success) {
+      this.logger.warn({
+        stage: "telemetry_validation_failed",
+        issues: telemetryValidation.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
+      });
+      this.logger.log(telemetry);
+    } else {
+      this.logger.log(telemetryValidation.data);
+    }
+
     return {
       output: finalOutput,
       parseErrors,
       replySafetyErrors,
       consentRequired,
       agentMetadata: {
-        ...buildFanOutTurnMetadata({
-          plan,
-          contextPacket,
-          capabilityTurnMetadata,
-          routerResult,
-          domainResults,
-          decisionResult,
-          resolvedProposalCount,
-          droppedByAllowlist,
-          idResolutionDropCount,
-          replyBlocked,
-          finalProposalCount,
-        }),
+        ...fanOutMetadata,
         safety: {
           status: safetyStatus,
           blockedReasons: replyBlocked ? replySafetyErrors : [],
@@ -875,6 +943,12 @@ function buildFanOutTurnMetadata(params: {
   replyBlocked: boolean;
   /** Final proposal count after reply-block zeroing. */
   finalProposalCount: number;
+  /** Context loading latency in ms. */
+  contextLatencyMs: number;
+  /** Combined domain LLMs latency in ms (parallel wall-clock time). */
+  domainsLatencyMs: number;
+  /** Total turn wall-clock latency in ms. */
+  totalLatencyMs: number;
 }): AgentTurnMetadata {
   const {
     plan,
@@ -888,6 +962,9 @@ function buildFanOutTurnMetadata(params: {
     idResolutionDropCount,
     replyBlocked,
     finalProposalCount,
+    contextLatencyMs,
+    domainsLatencyMs,
+    totalLatencyMs,
   } = params;
   const { route } = plan;
 
@@ -945,6 +1022,7 @@ function buildFanOutTurnMetadata(params: {
       candidateProposalCount: result.domainAnswer.candidateProposals.length,
       loopIterations: result.loopIterations,
       toolsInvoked: result.toolsInvoked,
+      toolsDeniedCount: 0,
       hasWorkoutCalorieEstimate: result.domainAnswer.workoutCalorieEstimate !== undefined,
       ...(result.usage !== undefined ? { usage: result.usage } : {}),
     })),
@@ -964,7 +1042,11 @@ function buildFanOutTurnMetadata(params: {
       idResolutionDropCount,
       replyBlocked,
       finalProposalCount,
+      validationFailureClasses: [],
     },
+    totalLatencyMs,
+    contextLatencyMs,
+    domainsLatencyMs,
   };
 
   return {

@@ -32,7 +32,6 @@ export const DEFAULT_ATTACHMENT_TURN_STAGE_ORDER: readonly AttachmentTurnStage[]
 ] as const;
 
 export const attachmentSafetyFloorsConfigSchema = z.object({
-  requireMedicalConsent: z.boolean().default(true),
   enforceProviderIsolation: z.boolean().default(true),
   requireOwnershipChecks: z.boolean().default(true),
   suppressMedicalPlanProposals: z.boolean().default(true),
@@ -41,7 +40,6 @@ export const attachmentSafetyFloorsConfigSchema = z.object({
 export type AttachmentSafetyFloorsConfig = z.infer<typeof attachmentSafetyFloorsConfigSchema>;
 
 export const DEFAULT_ATTACHMENT_SAFETY_FLOORS: AttachmentSafetyFloorsConfig = {
-  requireMedicalConsent: true,
   enforceProviderIsolation: true,
   requireOwnershipChecks: true,
   suppressMedicalPlanProposals: true,

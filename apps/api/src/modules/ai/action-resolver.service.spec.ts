@@ -396,6 +396,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
       expect(result.reply).toBe("A plain reply.");
     });
   });
+
 });
 
 // ---------------------------------------------------------------------------

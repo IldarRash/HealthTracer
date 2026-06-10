@@ -5,6 +5,11 @@ export const DOMAIN_NUTRITION_TEMPLATE_KEY = "domain_nutrition" as const;
 export const DOMAIN_HEALTH_TEMPLATE_KEY = "domain_health" as const;
 export const FINAL_DECISION_TEMPLATE_KEY = "decision" as const;
 
+// openai_coach_loop removed: the legacy single-LLM coach loop was replaced by the
+// multi-domain fan-out pipeline (router → parallel domain LLMs → decision-maker).
+// renderCoachLoop was only called in tests, not by any runtime provider.
+// All live pipeline rendering uses renderRouterDecision, renderDomainStep, renderFinalDecision.
+
 export const PROMPT_TEMPLATE_KEYS = [
   ROUTER_DECISION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,

@@ -1,6 +1,10 @@
 import { Module } from "@nestjs/common";
 import { ChatAttachmentsModule } from "../chat-attachments/chat-attachments.module.js";
 import { CoachingContextModule } from "../coaching-context/coaching-context.module.js";
+import { ExercisesModule } from "../exercises/exercises.module.js";
+import { NutritionModule } from "../nutrition/nutrition.module.js";
+import { RecipesModule } from "../recipes/recipes.module.js";
+import { WorkoutsModule } from "../workouts/workouts.module.js";
 import { ActionResolverService } from "./action-resolver.service.js";
 import { ActionVariantCatalogService } from "./action-variant-catalog.service.js";
 import { AgentOrchestratorService } from "./agent-orchestrator.service.js";
@@ -18,7 +22,15 @@ import { ResponseModePolicyService } from "./response-mode-policy.service.js";
 import { SystemPlannerService } from "./system-planner.service.js";
 
 @Module({
-  imports: [AiBehaviorModule, ChatAttachmentsModule, CoachingContextModule],
+  imports: [
+    AiBehaviorModule,
+    ChatAttachmentsModule,
+    CoachingContextModule,
+    ExercisesModule,
+    NutritionModule,
+    RecipesModule,
+    WorkoutsModule,
+  ],
   providers: [
     ActionResolverService,
     ActionVariantCatalogService,

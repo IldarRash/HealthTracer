@@ -146,4 +146,37 @@ describe("drizzle migrations", () => {
     expect(content).toContain('CREATE TABLE "nutrition_incidents"');
     expect(content).toContain('CREATE INDEX "nutrition_incidents_user_date_idx"');
   });
+
+  it("adds nutrition plan invariant indexes mirroring the workout pattern", () => {
+    const content = readFileSync(
+      join(drizzleDir, "0035_nutrition_plan_invariants.sql"),
+      "utf8",
+    );
+
+    // One active nutrition plan per user (partial unique index).
+    expect(content).toContain('CREATE UNIQUE INDEX IF NOT EXISTS "nutrition_plans_user_active_idx"');
+    expect(content).toContain('ON "nutrition_plans" USING btree ("user_id")');
+    expect(content).toContain(`WHERE "status" = 'active'`);
+
+    // Revision uniqueness: plan + revision_number must be unique.
+    expect(content).toContain('"nutrition_plan_revisions_plan_revision_idx"');
+    expect(content).toContain('"nutrition_plan_id", "revision_number"');
+
+    // Composite (plan_id, id) index — prerequisite for same-plan FK.
+    expect(content).toContain('"nutrition_plan_revisions_plan_id_id_idx"');
+    expect(content).toContain('"nutrition_plan_id", "id"');
+
+    // Same-plan composite FK enforcement.
+    expect(content).toContain('"nutrition_plans_active_revision_same_plan_fk"');
+    expect(content).toContain('REFERENCES "public"."nutrition_plan_revisions" ("nutrition_plan_id", "id")');
+
+    // Safety guards check for duplicate data before adding constraints.
+    expect(content).toContain("IF duplicate_active_plan_users > 0 THEN");
+    expect(content).toContain("IF duplicate_revision_groups > 0 THEN");
+    expect(content).toContain("IF cross_plan_active_revision_count > 0 THEN");
+
+    // Additive-only: no DROP TABLE, no ALTER COLUMN, no CREATE TABLE.
+    expect(content).not.toContain("DROP TABLE");
+    expect(content).not.toContain("CREATE TABLE");
+  });
 });

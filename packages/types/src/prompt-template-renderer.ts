@@ -24,7 +24,7 @@ export type CompiledPromptTemplate = {
 
 export type CompiledPromptTemplates = {
   readonly templates: Readonly<Record<PromptTemplateKey, CompiledPromptTemplate>>;
-  // Fan-out pipeline render helpers
+  // Parallel-domain pipeline render helpers (the live pipeline; openai_coach_loop removed)
   renderRouterDecision(values: {
     normalizedText: string;
     originalText: string;

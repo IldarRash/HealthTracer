@@ -9,25 +9,25 @@ importers:
   .:
     devDependencies:
       '@eslint/js':
-        specifier: latest
+        specifier: ^10.0.1
         version: 10.0.1(eslint@10.4.1(jiti@1.21.7))
       '@types/node':
-        specifier: latest
+        specifier: ^25.9.2
         version: 25.9.2
       eslint:
-        specifier: latest
+        specifier: ^10.4.1
         version: 10.4.1(jiti@1.21.7)
       turbo:
-        specifier: latest
+        specifier: ^2.9.16
         version: 2.9.16
       typescript:
-        specifier: latest
+        specifier: ^6.0.3
         version: 6.0.3
       typescript-eslint:
-        specifier: latest
+        specifier: ^8.60.1
         version: 8.60.1(eslint@10.4.1(jiti@1.21.7))(typescript@6.0.3)
       vitest:
-        specifier: latest
+        specifier: ^4.1.8
         version: 4.1.8(@types/node@25.9.2)(vite@8.0.14(@types/node@25.9.2)(esbuild@0.28.0)(jiti@1.21.7)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
 
   apps/api:
@@ -48,13 +48,13 @@ importers:
         specifier: workspace:*
         version: link:../../packages/types
       '@nestjs/common':
-        specifier: latest
+        specifier: ^11.1.25
         version: 11.1.25(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core':
-        specifier: latest
+        specifier: ^11.1.25
         version: 11.1.25(@nestjs/common@11.1.25(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.25)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/platform-express':
-        specifier: latest
+        specifier: ^11.1.25
         version: 11.1.25(@nestjs/common@11.1.25(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.25)
       dotenv:
         specifier: ^17.4.2
@@ -72,16 +72,16 @@ importers:
         specifier: ^3.4.9
         version: 3.4.9
       reflect-metadata:
-        specifier: latest
+        specifier: ^0.2.2
         version: 0.2.2
       rxjs:
-        specifier: latest
+        specifier: ^7.8.2
         version: 7.8.2
       stripe:
         specifier: ^22.2.0
         version: 22.2.0(@types/node@25.9.2)
       zod:
-        specifier: latest
+        specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
       '@swc-node/register':
@@ -94,44 +94,44 @@ importers:
         specifier: ^1.1.5
         version: 1.1.5
       tsx:
-        specifier: latest
+        specifier: ^4.22.4
         version: 4.22.4
 
   apps/mobile:
     dependencies:
       '@clerk/clerk-expo':
-        specifier: latest
+        specifier: ^2.19.31
         version: 2.19.31(90c560fe6f6981753e4120d8e715ee19)
       '@health/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@health/types':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../packages/types
       '@tanstack/react-query':
-        specifier: latest
+        specifier: ^5.101.0
         version: 5.101.0(react@19.2.7)
       expo:
-        specifier: latest
+        specifier: ^56.0.9
         version: 56.0.9(@babel/core@7.29.0)(@expo/dom-webview@56.0.5)(@expo/metro-runtime@56.0.11)(bufferutil@4.1.0)(expo-router@56.2.9)(react-dom@19.2.7(react@19.2.7))(react-native-worklets@0.8.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.7)(utf-8-validate@6.0.6))(react@19.2.7))(react-native@0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.7)(utf-8-validate@6.0.6))(react@19.2.7)(typescript@6.0.3)(utf-8-validate@6.0.6)
       expo-router:
-        specifier: latest
+        specifier: ^56.2.9
         version: 56.2.9(dc2941bc658f01360e37b285067ecd35)
       nativewind:
-        specifier: latest
+        specifier: ^4.2.5
         version: 4.2.5(4eea6022a04536a251fea0ac58468bd1)
       react:
-        specifier: latest
+        specifier: ^19.2.7
         version: 19.2.7
       react-native:
-        specifier: latest
+        specifier: ^0.85.3
         version: 0.85.3(@babel/core@7.29.0)(@react-native/metro-config@0.85.3(@babel/core@7.29.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.17)(bufferutil@4.1.0)(react@19.2.7)(utf-8-validate@6.0.6)
       zod:
-        specifier: latest
+        specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
       '@types/react':
-        specifier: latest
+        specifier: ^19.2.17
         version: 19.2.17
       tailwindcss:
         specifier: ^3.4.19
@@ -155,38 +155,38 @@ importers:
         specifier: workspace:*
         version: link:../../packages/ui
       '@tanstack/react-query':
-        specifier: latest
+        specifier: ^5.101.0
         version: 5.101.0(react@19.2.7)
       class-variance-authority:
-        specifier: latest
+        specifier: ^0.7.1
         version: 0.7.1
       clsx:
-        specifier: latest
+        specifier: ^2.1.1
         version: 2.1.1
       next:
-        specifier: latest
+        specifier: ^16.2.7
         version: 16.2.7(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       next-intl:
         specifier: ^4.13.0
         version: 4.13.0(@swc/helpers@0.5.21)(next@16.2.7(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(typescript@6.0.3)
       react:
-        specifier: latest
+        specifier: ^19.2.7
         version: 19.2.7
       react-dom:
-        specifier: latest
+        specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       tailwind-merge:
-        specifier: latest
+        specifier: ^3.6.0
         version: 3.6.0
       zod:
-        specifier: latest
+        specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
       '@types/react':
-        specifier: latest
+        specifier: ^19.2.17
         version: 19.2.17
       '@types/react-dom':
-        specifier: latest
+        specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.17)
       tailwindcss:
         specifier: ^3.4.19
@@ -210,13 +210,13 @@ importers:
   packages/config:
     dependencies:
       zod:
-        specifier: latest
+        specifier: ^4.4.3
         version: 4.4.3
 
   packages/db:
     dependencies:
       drizzle-orm:
-        specifier: latest
+        specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
       postgres:
         specifier: ^3.4.9
@@ -226,13 +226,13 @@ importers:
         specifier: ^17.4.2
         version: 17.4.2
       drizzle-kit:
-        specifier: latest
+        specifier: ^0.31.10
         version: 0.31.10
 
   packages/types:
     dependencies:
       zod:
-        specifier: latest
+        specifier: ^4.4.3
         version: 4.4.3
 
   packages/ui: {}
@@ -11209,7 +11209,7 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@6.0.3)(zod@4.4.3)
+      abitype: 1.2.4(typescript@6.0.3)(zod@4.4.3)
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 6.0.3

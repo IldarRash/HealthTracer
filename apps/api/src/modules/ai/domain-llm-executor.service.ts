@@ -319,8 +319,9 @@ export class DomainLlmExecutorService {
         }
 
         // Execute the allowed tool via AgentToolRegistryService (read-only context tools only).
-        // Pass the per-domain context budget so getDocumentContext re-applies the
-        // deny-by-default document floor (the budget is the code-level safety floor).
+        // Tools: getUserContextSlice, getWeeklyProgressContext, searchExerciseCatalog,
+        // searchRecipeCatalog, getActivePlanDetail, getRecentAdherence.
+        // getDocumentContext is excluded: always returns empty under the allowDocuments=false floor.
         const toolInput = ((rawOutput as Record<string, unknown>)["input"] as Record<string, unknown> | undefined) ?? {};
         const toolResult = await this.agentToolRegistryService.executeTool(
           orchestratorInput.auth,
@@ -328,7 +329,6 @@ export class DomainLlmExecutorService {
             tool: toolName,
             input: toolInput,
           },
-          domainEntry.contextBudget,
         );
 
         priorToolResults.push(toolResult);

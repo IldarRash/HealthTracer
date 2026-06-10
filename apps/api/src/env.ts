@@ -26,6 +26,10 @@ export const apiEnvSchema = z.object({
   /** Override model for the decision-maker (final synthesis) stage. Falls back to OPENAI_MODEL. */
   OPENAI_MODEL_DECISION: z.string().min(1).optional(),
   CORS_ORIGINS: z.string().min(1).optional(),
+  STORAGE_ALLOW_LOCAL_IN_PRODUCTION: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
   DOMAIN_CONFIG_DIR: z.string().min(1).optional(),
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),

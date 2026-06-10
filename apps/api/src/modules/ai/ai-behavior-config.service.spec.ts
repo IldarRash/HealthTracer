@@ -40,10 +40,11 @@ describe("AiBehaviorConfigService", () => {
     expect(service.getAttachmentLoadWarnings()).toContain(
       "Invalid attachment behavior config; using built-in defaults.",
     );
-    expect(service.getAttachmentBehavior().safetyFloors.requireMedicalConsent).toBe(true);
+    expect(service.getAttachmentBehavior().safetyFloors.enforceProviderIsolation).toBe(true);
   });
 
-  it("compiles prompt templates with safe fallback for invalid router config bodies", () => {
+  it("compiles live pipeline router template with safe fallback for invalid config bodies", () => {
+    // openai_coach_loop was removed; the live pipeline uses router/domain_*/decision keys.
     const defaults = buildDefaultAiBehaviorConfig();
     const service = new AiBehaviorConfigService({
       config: {
@@ -63,6 +64,7 @@ describe("AiBehaviorConfigService", () => {
       warnings: [],
     });
 
+    // Invalid body → falls back to default
     expect(service.getCompiledPromptTemplates().templates.router.source).toBe("default");
     // Render a valid router prompt to confirm the fallback to default body works.
     const rendered = service.getCompiledPromptTemplates().renderRouterDecision({
@@ -77,5 +79,15 @@ describe("AiBehaviorConfigService", () => {
     });
     expect(rendered).toContain("domain router");
   });
-});
 
+  it("openai_coach_loop is not a live template key in compiled templates", () => {
+    const service = new AiBehaviorConfigService(
+      resolveLoadedAiBehaviorConfig({ defaults: buildDefaultAiBehaviorConfig() }),
+      resolveLoadedAttachmentBehaviorConfig({ defaults: buildDefaultAttachmentBehaviorConfig() }),
+    );
+
+    // The old single-LLM coach loop was removed; only fan-out pipeline keys should exist
+    expect("openai_coach_loop" in service.getCompiledPromptTemplates().templates).toBe(false);
+    expect("renderCoachLoop" in service.getCompiledPromptTemplates()).toBe(false);
+  });
+});

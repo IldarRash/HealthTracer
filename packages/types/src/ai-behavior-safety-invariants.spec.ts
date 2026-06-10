@@ -56,6 +56,10 @@ import {
   type DomainConfig,
 } from "./domain-config.js";
 import { medicalDocumentPersistenceStatusSchema } from "./chat-attachments.js";
+import {
+  classifyProposalValidationFailure,
+  proposalValidationFailureClassSchema,
+} from "./index.js";
 
 describe("ai behavior safety invariants", () => {
   describe("invalid config fail-closed loading", () => {
@@ -221,7 +225,7 @@ describe("ai behavior safety invariants", () => {
       expect(detectProposalExplainerRequestFromConfig(config, "Why this proposal?")).toBe(false);
     });
 
-    it("falls back to default prompt templates when config bodies are invalid", () => {
+    it("falls back to default prompt templates when config body for router is invalid", () => {
       const compiled = compilePromptTemplates({
         templates: {
           router: {
@@ -679,8 +683,6 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
         llmId: "workout_coach",
         intents: [],
         tools: ["getUserContextSlice", "dangerousWriteTool" as never],
-        signals: [],
-        prompts: [],
         safetyNotes: [],
       };
 
@@ -708,8 +710,6 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
           },
         ],
         tools: ["getUserContextSlice"],
-        signals: [],
-        prompts: [],
         safetyNotes: [],
       };
 
@@ -726,8 +726,6 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
         llmId: "workout_coach",
         intents: [],
         tools: [],
-        signals: [],
-        prompts: [],
         safetyNotes: [],
       };
 
@@ -1004,6 +1002,101 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
       expect(clamped.maxSlices).toBe(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxSlices);
       expect(clamped.maxRawItems).toBe(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxRawItems);
       expect(clamped.maxLookbackDays).toBe(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxLookbackDays);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Slice C6 — proposal validation failure classification
+  // ---------------------------------------------------------------------------
+
+  describe("proposal validation failure classification (Slice C6)", () => {
+    it("proposalValidationFailureClassSchema accepts all five classes", () => {
+      for (const cls of ["safety", "schema", "ownership", "unsupported-intent", "other"] as const) {
+        expect(proposalValidationFailureClassSchema.parse(cls)).toBe(cls);
+      }
+    });
+
+    it("classifies safety errors with highest priority", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: ["Unsafe medical wording detected"],
+          schemaErrors: ["Field missing"],
+          ownershipErrors: ["Resource not owned"],
+        }),
+      ).toBe("safety");
+    });
+
+    it("classifies schema errors when safety is clean", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: ["proposedChanges: Required"],
+          ownershipErrors: [],
+        }),
+      ).toBe("schema");
+    });
+
+    it("classifies ownership errors when safety and schema are clean", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: [],
+          ownershipErrors: ["sourceSummaryId: Weekly progress summary was not found"],
+        }),
+      ).toBe("ownership");
+    });
+
+    it("classifies unsupported-intent errors when safety, schema, and ownership are clean", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: [],
+          ownershipErrors: [],
+          unsupportedIntentErrors: ["Intent not supported in active catalog"],
+        }),
+      ).toBe("unsupported-intent");
+    });
+
+    it("classifies as 'other' when all buckets are empty (defensive)", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: [],
+          ownershipErrors: [],
+        }),
+      ).toBe("other");
+    });
+
+    it("safety takes priority over schema even when both have errors", () => {
+      const result = classifyProposalValidationFailure({
+        safetyErrors: ["unsafe"],
+        schemaErrors: ["malformed"],
+        ownershipErrors: ["missing resource"],
+        unsupportedIntentErrors: ["unsupported"],
+      });
+
+      expect(result).toBe("safety");
+    });
+
+    it("schema takes priority over ownership", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: ["parse error"],
+          ownershipErrors: ["not owned"],
+        }),
+      ).toBe("schema");
+    });
+
+    it("ownership takes priority over unsupported-intent", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: [],
+          ownershipErrors: ["not found"],
+          unsupportedIntentErrors: ["unsupported"],
+        }),
+      ).toBe("ownership");
     });
   });
 });
