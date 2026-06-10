@@ -174,9 +174,9 @@ describe("OpenAiCoachProvider", () => {
       const provider = makeProvider();
       const result = await provider.generateRouterDecision(makeRouterRequest());
 
-      expect(result.selectedDomains ?? []).toHaveLength(1);
-      expect((result.selectedDomains ?? [])[0]?.domain).toBe("workout");
-      expect(result.confidence).toBe(0.85);
+      expect(result.output.selectedDomains ?? []).toHaveLength(1);
+      expect((result.output.selectedDomains ?? [])[0]?.domain).toBe("workout");
+      expect(result.output.confidence).toBe(0.85);
     });
 
     it("throws when the API returns malformed JSON (truncated) — non-JSON content is not silently absorbed", async () => {
@@ -222,7 +222,7 @@ describe("OpenAiCoachProvider", () => {
       const result = await provider.generateRouterDecision(makeRouterRequest());
 
       const fallback = createFallbackRouterDecision();
-      expect(result.selectedDomains).toHaveLength(fallback.selectedDomains.length);
+      expect(result.output.selectedDomains).toHaveLength(fallback.selectedDomains.length);
     });
 
     it("clamps unknown domain names to empty selectedDomains", async () => {
@@ -243,7 +243,7 @@ describe("OpenAiCoachProvider", () => {
 
       // Unknown domain must be clamped out
       const knownDomains = ["workout", "nutrition", "health"];
-      for (const d of result.selectedDomains ?? []) {
+      for (const d of result.output.selectedDomains ?? []) {
         expect(knownDomains).toContain(d.domain);
       }
     });
@@ -314,11 +314,11 @@ describe("OpenAiCoachProvider", () => {
       const provider = makeProvider();
       const result = await provider.generateDomainStep(makeDomainRequest());
 
-      expect(result.kind).toBe("domain_answer");
-      if (result.kind === "domain_answer") {
-        expect(result.domain).toBe("workout");
-        expect(result.candidateProposals).toHaveLength(1);
-        expect(result.workoutCalorieEstimate).toBe(300);
+      expect(result.output.kind).toBe("domain_answer");
+      if (result.output.kind === "domain_answer") {
+        expect(result.output.domain).toBe("workout");
+        expect(result.output.candidateProposals).toHaveLength(1);
+        expect(result.output.workoutCalorieEstimate).toBe(300);
       }
     });
 
@@ -334,7 +334,7 @@ describe("OpenAiCoachProvider", () => {
       const provider = makeProvider();
       const result = await provider.generateDomainStep(makeDomainRequest());
 
-      expect(result.kind).toBe("tool_request");
+      expect(result.output.kind).toBe("tool_request");
     });
 
     it("throws when the output contains forbidden shape (reply field)", async () => {
@@ -408,7 +408,7 @@ describe("OpenAiCoachProvider", () => {
       const validFinal = JSON.stringify({
         reply: "Here is your coaching summary.",
         selectedAction: "adapt_workout_plan",
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       });
 
@@ -417,8 +417,8 @@ describe("OpenAiCoachProvider", () => {
       const provider = makeProvider();
       const result = await provider.generateFinalDecision(makeFinalDecisionRequest());
 
-      expect(result.reply).toBe("Here is your coaching summary.");
-      expect(result.selectedAction).toBe("adapt_workout_plan");
+      expect(result.output.reply).toBe("Here is your coaching summary.");
+      expect(result.output.selectedAction).toBe("adapt_workout_plan");
     });
 
     it("returns fallback when the output contains forbidden shape (direct_reply field)", async () => {
@@ -436,8 +436,8 @@ describe("OpenAiCoachProvider", () => {
       const result = await provider.generateFinalDecision(makeFinalDecisionRequest());
 
       const fallback = createFallbackFinalDecision();
-      expect(result.selectedAction).toBe(fallback.selectedAction);
-      expect(result.proposals).toHaveLength(0);
+      expect(result.output.selectedAction).toBe(fallback.selectedAction);
+      expect(result.output.selectedProposalIds).toHaveLength(0);
     });
 
     it("throws when JSON is malformed (truncated) — non-JSON content propagates up to executor for degradation", async () => {
@@ -467,7 +467,7 @@ describe("OpenAiCoachProvider", () => {
       const result = await provider.generateFinalDecision(makeFinalDecisionRequest());
 
       const fallback = createFallbackFinalDecision();
-      expect(result.proposals).toHaveLength(fallback.proposals.length);
+      expect(result.output.selectedProposalIds).toHaveLength(fallback.selectedProposalIds.length);
     });
 
     it("throws when the API returns a 4xx error", async () => {
@@ -726,7 +726,7 @@ describe("OpenAiCoachProvider", () => {
       expect(capturedHeaders[0]?.["Authorization"]).toBe("Bearer sk-secret-key-123");
     });
 
-    it("sets response_format to json_object", async () => {
+    it("sets response_format to json_schema", async () => {
       const capturedBodies: Array<{ response_format?: { type: string } }> = [];
       const fakeFetch = vi.fn().mockImplementation(
         (_url: string, opts: { body: string }) => {
@@ -736,7 +736,7 @@ describe("OpenAiCoachProvider", () => {
               JSON.stringify({
                 reply: "OK",
                 selectedAction: null,
-                proposals: [],
+                selectedProposalIds: [],
                 consentRequired: false,
               }),
             ),
@@ -748,7 +748,7 @@ describe("OpenAiCoachProvider", () => {
       const provider = makeProvider();
       await provider.generateFinalDecision(makeFinalDecisionRequest());
 
-      expect(capturedBodies[0]?.response_format?.type).toBe("json_object");
+      expect(capturedBodies[0]?.response_format?.type).toBe("json_schema");
     });
 
     it("sends requests to the OpenAI chat completions endpoint", async () => {
