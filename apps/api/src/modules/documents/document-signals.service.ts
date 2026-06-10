@@ -12,7 +12,6 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { resolve } from "node:path";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { env } from "../../env.js";
 import { UsersService } from "../users/users.service.js";
@@ -46,8 +45,9 @@ export class DocumentSignalsService {
     private readonly documentSignalsRepository: DocumentSignalsRepository,
     private readonly usersService: UsersService,
   ) {
-    const storageRoot = resolve(process.cwd(), env.DOCUMENT_STORAGE_PATH);
-    this.storage = new LocalDocumentStorageAdapter(storageRoot);
+    this.storage = new LocalDocumentStorageAdapter(env.DOCUMENT_STORAGE_PATH, {
+      allowInProduction: env.STORAGE_ALLOW_LOCAL_IN_PRODUCTION === true,
+    });
     this.parser = new LabDocumentParser();
     this.extractor = new DevLabSignalExtractor();
   }

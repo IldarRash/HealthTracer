@@ -20,6 +20,10 @@ export const apiEnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
   CORS_ORIGINS: z.string().min(1).optional(),
+  STORAGE_ALLOW_LOCAL_IN_PRODUCTION: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
   DOMAIN_CONFIG_DIR: z.string().min(1).optional(),
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
