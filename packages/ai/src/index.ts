@@ -10,4 +10,6 @@ export {
 } from "./safety.js";
 export {
   type CoachAiProvider,
+  type ProviderCallResult,
+  type ProviderUsage,
 } from "./coach-ai-provider.js";

@@ -9,8 +9,8 @@
  * in telemetry payloads — only counts, enums, durations. Tests verify this.
  *
  * Scenarios covered:
- *  S1   EN create workout plan — router selects workout, plan-request guard fires
- *  S2   EN adapt workout plan — planRequestSignal=true guard → proposal wins over plain_reply
+ *  S1   EN create workout plan — router selects workout, decision-maker selects proposal via candidateMap
+ *  S2   EN adapt workout plan — decision-maker selection-by-ID resolves candidate to proposal
  *  S3   RU "составь мне план тренировок" — detected as ru, same invariant as S1
  *  S4   RU "скорректируй питание" — detected as ru, nutrition domain selected
  *  S5   Recipe request — nutrition domain, searchRecipeCatalog in allowlist
@@ -121,92 +121,91 @@ describe("S1: EN create workout plan", () => {
     expect(result.simpleSignals.workout).toBe(true);
   });
 
-  it("plan_request=true + valid workout proposal → ActionResolver promotes proposal over plain_reply", () => {
+  it("decision-maker selects a workout proposal → ActionResolver resolves it via candidateMap", () => {
+    // INVARIANT: when the decision-maker selects a proposal id, ActionResolver must
+    // resolve it from the candidateMap and return it in proposals[].
     const service = new ActionResolverService();
-    const preprocessorResult = makePreprocessorResult("Create a workout plan for me");
-
-    // Use hardcoded domain entry matching the adjust_workout capability.
     const selectedDomains = [makeDomainEntry("workout", ["create_workout_plan"])];
+    const candidateProposal = {
+      intent: "create_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "3-Day Strength Program",
+      reason: "User requested a new program.",
+      proposedChanges: {
+        title: "3-Day Strength",
+        summary: "Balanced strength training",
+        days: [{ weekday: "monday" as const, focus: "Chest", exercises: [{ name: "Bench Press" }] }],
+        notes: [],
+      },
+    };
+    const candidateMap = new Map([
+      ["cand_workout_0", candidateProposal as unknown as Record<string, unknown>],
+    ]);
 
     const resolved = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Here is your plan.",
-        selectedAction: "plain_reply",
-        proposals: [
-          {
-            intent: "create_workout_plan" as const,
-            targetDomain: "workout" as const,
-            title: "3-Day Strength Program",
-            reason: "User requested a new program.",
-            proposedChanges: {
-              title: "3-Day Strength",
-              summary: "Balanced strength training",
-              days: [{ weekday: "monday" as const, focus: "Chest", exercises: [{ name: "Bench Press" }] }],
-              notes: [],
-            },
-          },
-        ],
+        selectedAction: "create_workout_plan",
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains,
-      planRequestSignal: preprocessorResult.simpleSignals.plan_request,
+      candidateMap,
     });
 
-    // INVARIANT: plan request with valid candidate must end in a proposal action, not plain_reply.
     expect(resolved.proposals).toHaveLength(1);
     expect(resolved.proposals[0]?.intent).toBe("create_workout_plan");
   });
 });
 
 // ---------------------------------------------------------------------------
-// S2: EN adapt workout plan — planRequestSignal=true guard overrides plain_reply
+// S2: EN adapt workout plan — selection-by-ID design (candidateMap)
 // ---------------------------------------------------------------------------
 
-describe("S2: EN adapt workout plan — planRequestSignal guard", () => {
+describe("S2: EN adapt workout plan — candidateMap selection design", () => {
   it("preprocessor detects workout signal for adaptation messages", () => {
     const result = makePreprocessorResult("Make my workouts lighter this week, I'm sore");
 
     expect(result.simpleSignals.workout).toBe(true);
   });
 
-  it("planRequestSignal=true: ActionResolver promotes proposal over plain_reply from decision-maker", () => {
-    // INVARIANT: when planRequestSignal=true and there is a valid workout proposal candidate,
-    // ActionResolver must select the proposal even if the decision-maker chose plain_reply.
+  it("decision-maker selecting adapt_workout_plan id resolves the candidate via candidateMap", () => {
+    // INVARIANT: when decision-maker selects a candidateMap id, ActionResolver must
+    // resolve it to the proposal payload and return it in proposals[].
     const service = new ActionResolverService();
     const selectedDomains = [makeDomainEntry("workout", ["adapt_workout_plan"])];
+    const adaptProposal = {
+      intent: "adapt_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "Lighter This Week",
+      reason: "User requested lighter week.",
+      proposedChanges: {
+        title: "Recovery Week",
+        summary: "Reduced volume",
+        days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
+        notes: [],
+      },
+    };
+    const candidateMap = new Map([
+      ["cand_workout_0", adaptProposal as unknown as Record<string, unknown>],
+    ]);
 
     const resolved = service.resolveFinalDecisionOutput({
       finalDecision: {
-        // Decision-maker selected plain_reply, but a valid proposal candidate is present.
         reply: "Here is your adjusted plan.",
-        selectedAction: "plain_reply",
-        proposals: [
-          {
-            intent: "adapt_workout_plan" as const,
-            targetDomain: "workout" as const,
-            title: "Lighter This Week",
-            reason: "User requested lighter week.",
-            proposedChanges: {
-              title: "Recovery Week",
-              summary: "Reduced volume",
-              days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
-              notes: [],
-            },
-          },
-        ],
+        selectedAction: "adapt_workout_plan",
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains,
-      // planRequestSignal=true: the user explicitly requested a plan — guard fires.
-      planRequestSignal: true,
+      candidateMap,
     });
 
-    // INVARIANT: planRequestSignal=true with a valid candidate must promote the proposal.
     expect(resolved.proposals).toHaveLength(1);
     expect(resolved.proposals[0]?.intent).toBe("adapt_workout_plan");
   });
 
-  it("planRequestSignal=false: decision-maker plain_reply is preserved when no strong candidate", () => {
+  it("plain_reply with empty selectedProposalIds produces no proposals (no fabrication)", () => {
     const service = new ActionResolverService();
     const selectedDomains = [makeDomainEntry("workout", ["adapt_workout_plan"])];
 
@@ -214,14 +213,14 @@ describe("S2: EN adapt workout plan — planRequestSignal guard", () => {
       finalDecision: {
         reply: "Try reducing intensity this week.",
         selectedAction: "plain_reply",
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       },
       selectedDomains,
-      planRequestSignal: false,
+      candidateMap: new Map(),
     });
 
-    // Without a plan-request signal and without proposals, plain_reply stands.
+    // plain_reply + no selectedProposalIds → no proposals, no fabrication.
     expect(resolved.proposals).toHaveLength(0);
   });
 });
@@ -641,6 +640,7 @@ describe("Crisis boundary — pre-AI gate behavior", () => {
     const result = await service.execute({
       userMessage: "Help me with my workout",
       domainOutputs: [fallback("workout")],
+      candidateProposalSummaries: [],
       actionVariantCatalog: [{ id: "plain_reply", label: "Plain reply", requiresConsent: false }],
       safetyFlags: [],
       safetyConstraints: [],
@@ -650,7 +650,7 @@ describe("Crisis boundary — pre-AI gate behavior", () => {
     // INVARIANT: decision-maker never rethrows — it always degrades to a safe fallback.
     expect(result.degraded).toBe(true);
     expect(result.output.reply.length).toBeGreaterThan(0);
-    expect(result.output.proposals).toHaveLength(0);
+    expect(result.output.selectedProposalIds).toHaveLength(0);
   });
 });
 
@@ -715,6 +715,12 @@ function makeStubContextExpansionPolicyService() {
 function makeWorkoutDomainResult(
   candidateProposals: unknown[],
 ): DomainLlmExecutorResult {
+  // Build candidateMap from candidateProposals using the same keying scheme as
+  // DomainLlmExecutorService: `cand_<domain>_<index>`.
+  const candidateMap = new Map<string, Record<string, unknown>>(
+    candidateProposals.map((p, i) => [`cand_workout_${i}`, p as Record<string, unknown>]),
+  );
+
   return {
     domainAnswer: {
       kind: "domain_answer" as const,
@@ -723,12 +729,11 @@ function makeWorkoutDomainResult(
       candidateProposals: candidateProposals as DomainLlmExecutorResult["domainAnswer"]["candidateProposals"],
       domainSignals: [],
     },
+    candidateMap,
     degraded: false,
     degradedReasons: [],
     loopIterations: 1,
     toolsInvoked: ["getUserContextSlice" as const],
-    toolsDeniedCount: 0,
-    latencyMs: 100,
   };
 }
 
@@ -808,8 +813,8 @@ describe("SE1: E2E — RU plan request + valid proposal → proposal action wins
 
   it("orchestrateCoachTurn: RU plan request with valid workout proposal → final action is the proposal", async () => {
     // Scenario: user sends "составь мне план тренировок" (make me a workout plan).
-    // Domain LLM returns a create_workout_plan candidate.
-    // Decision-maker returns plain_reply but planRequestSignal=true → guard promotes proposal.
+    // Domain LLM returns a create_workout_plan candidate in its candidateMap.
+    // Decision-maker selects it by ID → ActionResolver resolves it to the full proposal.
     const candidateProposal = {
       intent: "create_workout_plan" as const,
       targetDomain: "workout" as const,
@@ -825,13 +830,12 @@ describe("SE1: E2E — RU plan request + valid proposal → proposal action wins
 
     const domainResult = makeWorkoutDomainResult([candidateProposal]);
 
-    // Decision-maker returns plain_reply even though there is a valid proposal.
-    // The plan-request guard in ActionResolver should override this.
+    // Decision-maker selects the candidate by ID. ActionResolver resolves it via candidateMap.
     const decisionOutput: DecisionMakerResult = {
       output: {
         reply: "Вот ваш план тренировок.",
-        selectedAction: "plain_reply",
-        proposals: [candidateProposal],
+        selectedAction: "create_workout_plan",
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       degraded: false,
@@ -846,7 +850,7 @@ describe("SE1: E2E — RU plan request + valid proposal → proposal action wins
       recentMessages: [],
     });
 
-    // INVARIANT: plan request with valid workout proposal → proposal must be in the final output.
+    // INVARIANT: when the decision-maker selects a valid proposal id, it must appear in the output.
     expect(result.output.proposals).toHaveLength(1);
     expect(result.output.proposals[0]?.intent).toBe("create_workout_plan");
     // Reply must not be blocked.
@@ -877,20 +881,7 @@ describe("SE1: E2E — RU plan request + valid proposal → proposal action wins
       output: {
         reply: "Here is your plan.",
         selectedAction: "create_workout_plan",
-        proposals: [
-          {
-            intent: "create_workout_plan" as const,
-            targetDomain: "workout" as const,
-            title: "Plan",
-            reason: "User asked.",
-            proposedChanges: {
-              title: "Plan",
-              summary: "Summary",
-              days: [{ weekday: "monday" as const, focus: "Strength", exercises: [{ name: "Squat" }] }],
-              notes: [],
-            },
-          },
-        ],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       degraded: false,
@@ -942,14 +933,14 @@ describe("SE2: E2E — RU plan request + zero candidates → plain_reply stands"
 
   it("orchestrateCoachTurn: plan request with no proposal candidates → plain_reply stands, telemetry proposalCount=0", async () => {
     // Scenario: user sends RU plan request but domain LLM returns no candidate proposals.
-    // Decision-maker returns plain_reply. The guard has nothing to promote — plain_reply stands.
+    // Decision-maker returns plain_reply with empty selectedProposalIds — plain_reply stands.
     const domainResult = makeWorkoutDomainResult([]); // zero candidates
 
     const decisionOutput: DecisionMakerResult = {
       output: {
         reply: "I couldn't build a plan right now. Please try again.",
         selectedAction: "plain_reply",
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       },
       degraded: false,

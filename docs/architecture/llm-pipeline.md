@@ -348,6 +348,14 @@ problem:
   `plain_reply` or `null`, and `ActionResolverService` correctly returned
   `proposals: []`.
 
+Per-stage token/latency **usage** is now recorded in the optional fan-out diagnostics
+block (`agent.fanOut`, schema in `packages/types/src/agent-context.ts`): the
+`AgentProviderUsage` shape (`promptTokens`, `completionTokens`, `totalTokens`,
+`latencyMs`, `retries`) is attached as an optional `usage` field on `fanOut.router`,
+each `fanOut.domains[]` entry (accumulated across that domain's loop iterations), and
+`fanOut.decision`. It is absent on fallback paths where no provider call was made. These
+are structural numbers only — never prompts, replies, or health content.
+
 ## Stage 4: Message Normalization
 
 ### `MessagePreprocessorService`
@@ -594,13 +602,34 @@ Per domain executor:
 - emit a typed `domain_answer`
 
 The `domain_answer.candidateProposals[]` array is advisory. It is not persisted directly
-and does not render a card by itself. The decision-maker must copy the selected candidate
-into its final `proposals[]` output and select the matching action variant before
-`ActionResolverService` will keep it.
+and does not render a card by itself. After a domain answer is accepted, `buildCandidateMap`
+assigns each candidate a **deterministic, code-owned id** (`cand_<domain>_<index>`, e.g.
+`cand_workout_0`) and returns it on `DomainLlmExecutorResult.candidateMap` — the LLM never
+invents these ids. The orchestrator merges every domain's `candidateMap` into one union map
+(`buildMergedCandidateMap`) and derives lightweight `CandidateProposalSummary` entries
+(`buildCandidateProposalSummaries`: `id + intent + title + reason`) for the decision-maker.
+The decision-maker then **selects candidate ids** (it never copies or re-emits payloads);
+`ActionResolverService` resolves the selected ids back to canonical payloads from the merged
+candidate map and keeps them only when a matching non-`plain_reply` action was also selected
+(see Stage 9 / Stage 10).
 
 Failure behavior: a domain that errors, exhausts its loop, or times out degrades
-to a **safe empty output** and never blocks the other domains or the turn. Per-domain
-timeouts bound latency.
+to a **safe empty output** and never blocks the other domains or the turn. The
+per-domain timeout (`DOMAIN_LLM_TIMEOUT_MS = 30_000`) is enforced via `Promise.race`
+against a rejection-free timer, and is now tied to an `AbortController`: when the
+timeout fires it aborts the controller, so any in-flight provider `fetch` (including
+its pending retries) receives an `AbortError` and stops immediately rather than running
+out the clock. The abort signal is threaded into `provider.generateDomainStep(..., {
+signal })`.
+
+Each `generateDomainStep` returns `ProviderCallResult` with optional `usage`; the
+executor **accumulates** that usage across loop iterations (summing `promptTokens`,
+`completionTokens`, `totalTokens`, `latencyMs`, and `retries`) and threads the running
+total onto the result — including degraded/fallback results, so usage from completed
+iterations before a mid-run degradation is still metered. `usage` is absent only when no
+provider call completed (e.g. immediate timeout fallback). The accumulated usage surfaces
+as `DomainLlmExecutorResult.usage` and is published into per-domain fan-out diagnostics
+(see Stage 3 / `agent-context.ts`).
 
 Output shape (`packages/types/src/domain-llm-step.ts`) — union of
 `tool_request` or `domain_answer`, where
@@ -651,24 +680,38 @@ Receives the selected domains' outputs plus the **action-variant catalog**
 decision in a single LLM call (`execute` → `provider.generateFinalDecision`). It
 always resolves, degrading to a safe fallback on any provider error.
 
-Request (`packages/types/src/final-decision.ts`):
-`{ userMessage, domainOutputs[], actionVariantCatalog, safetyFlags[], safetyConstraints[] }`.
+Request (`finalDecisionRequestSchema`, `packages/types/src/final-decision.ts`):
+`{ userMessage, domainOutputs[] (≤3), candidateProposalSummaries[] (≤15),
+actionVariantCatalog, safetyFlags[], safetyConstraints[], responseLanguage?, recentMessages[] }`.
+`candidateProposalSummaries[]` are the `id + intent + title + reason` descriptors built by
+the orchestrator (Stage 8); the decision-maker selects from these ids and never sees the
+full candidate payloads. `recentMessages[]` is capped at **6 messages / 4000 chars each**
+(assembled in `AgentOrchestratorService.runFanOutTurn`). `responseLanguage` is input-only —
+all four fan-out templates require the reply in `{{responseLanguage}}`.
 
-Output: `{ reply, selectedAction, proposals[], consentRequired }`.
+Output (`finalDecisionOutputSchema`, **selection-only**):
+`{ reply, selectedAction, selectedProposalIds[] (≤5), consentRequired }`.
 
-The decision-maker emits **typed proposals only**; it never writes domain state and
-never fabricates a workout calorie estimate or the trusted `workoutCaloriePerHourRate`
-(those may only come from the workout domain LLM).
+This is a **selection-by-id** contract — the decision-maker picks `selectedProposalIds`
+from `candidateProposalSummaries` and **never writes proposal payload objects**. The legacy
+`proposals[]` payload channel was **deleted in slice 2** and `"proposals"` is now a
+**forbidden key** in `FINAL_DECISION_FORBIDDEN_KEYS` (`validateFinalDecisionOutputShape`
+rejects any output containing it). `ActionResolverService` resolves the selected ids back to
+canonical payloads from the merged candidate map (Stage 10). This structurally prevents the
+decision-maker from fabricating a workout calorie estimate, the trusted
+`workoutCaloriePerHourRate`, or any other domain-owned payload field — those may only come
+from the workout domain LLM.
 
 `selectedAction` is part of the proposal contract, not only presentation metadata. For
 a proposal to survive, `selectedAction` must be a non-`plain_reply` action id from the
-catalog and must correspond to the proposal intent being persisted. If the decision-maker
-chooses `null` or `plain_reply`, the action resolver returns a text-only response even
-when the reply describes a full plan.
+catalog, and the matching candidate id(s) must appear in `selectedProposalIds`. If the
+decision-maker chooses `null` or `plain_reply`, the action resolver returns a text-only
+response even when the reply describes a full plan.
 
 Decision-maker degradation is observable through orchestrator `parseErrors` entries that
-start with `Decision-maker degraded:`. The fallback final decision always has
-`selectedAction: null` and `proposals: []`.
+start with `Decision-maker degraded:`. The fallback final decision
+(`createFallbackFinalDecision`) always has `selectedAction: null`,
+`selectedProposalIds: []`, and `consentRequired: false`.
 
 ### `ActionVariantCatalogService`
 
@@ -692,9 +735,20 @@ catalog.
 
 File: `apps/api/src/modules/ai/action-resolver.service.ts`
 
-Filters the decision-maker's proposals to the **union allowlist** of the selected
-domains' `allowedProposalIntents`, then forwards the result. The proposal intents
-that may pass through are:
+Resolves the decision-maker's `selectedProposalIds` into canonical payloads from the
+merged candidate map (`buildMergedCandidateMap`, keyed `cand_<domain>_<index>`), then
+filters those resolved proposals to the **union allowlist** of the selected domains'
+`allowedProposalIntents`. The decision-maker no longer supplies payloads — it selects ids,
+and `resolveFinalDecisionOutput` looks each id up in `candidateMap`. **Unknown or duplicate
+ids degrade safely**: each is recorded as a diagnostic string in `result.parseErrors` and
+skipped (never thrown, never blocking the turn), and their count is surfaced as
+`result.idResolutionDropCount` (equal to `parseErrors.length`). The orchestrator appends
+these diagnostics to the turn's `parseErrors` with a `Resolver: ` prefix and logs
+`idResolutionDropCount` on the `resolution_done` structured log; `droppedByAllowlist` now
+counts **only** proposals that resolved successfully but were then dropped by the union
+allowlist (the two drop categories are no longer conflated).
+
+The proposal intents that may pass through the allowlist are:
 
 - workout-plan intents (`create_workout_plan`, `adapt_workout_plan`,
   `adapt_workout_plan_from_progress`)
@@ -721,9 +775,11 @@ returned proposals under an allowed intent.
 
 **Trusted calorie-rate stamping (`scrubAndStampWorkoutCalorieEstimate`).** For every
 workout-plan and `log_workout_activity` proposal, ActionResolver **always scrubs** the
-calorie fields from the decision-maker output and re-stamps only from values passed by the
-orchestrator (`AgentOrchestratorService`, sourced exclusively from the workout
-`domain_answer`):
+calorie fields from the **resolved candidate payload** and re-stamps only from values passed
+by the orchestrator (`AgentOrchestratorService`, sourced exclusively from the workout
+`domain_answer`). Since slice 2 removed the decision-maker `proposals[]` channel, the
+decision-maker can no longer inject calorie data at all; the scrub step now stands as
+**defense-in-depth** against any future code path that re-introduces a payload channel:
 
 - `workoutCalorieEstimate` → `estimatedSessionCalorieBurn` (plan) /
   `estimatedCalories` (log activity), with provenance `workout_llm`.
@@ -835,6 +891,33 @@ is simply skipped for revision/explainer turns, but the same
 `generateRouterDecision` / `generateDomainStep` / `generateFinalDecision` surface
 drives every LLM turn.
 
+**Return shape and transport reliability.** Each of the three methods now returns a
+`ProviderCallResult<T> = { output, usage? }` (`packages/ai/src/coach-ai-provider.ts`)
+and accepts an optional `{ signal?: AbortSignal }` second argument. `usage` is a
+`ProviderUsage` (`promptTokens`, `completionTokens`, `totalTokens`, `latencyMs`,
+`retries`) — numbers only, never prompt/health content. The three-method surface
+itself is unchanged; only the wrapped return type and the optional abort signal are
+new.
+
+Structured output is **strict OpenAI `json_schema` structured outputs** (not legacy
+JSON mode). Each call sends `response_format: { type: "json_schema", json_schema:
+{ name, strict: true, schema } }` using hand-authored wire schemas in
+`apps/api/src/modules/ai/openai-wire-schemas.ts`
+(`routerDecisionWireSchema`, `domainLlmStepWireSchema`, `finalDecisionWireSchema`).
+Because strict mode forces every field into `required` (optional fields are declared
+nullable-required, `type: ["T","null"]`), the provider runs a generic
+`stripExplicitNulls` normalization over the parsed payload before the Zod
+shape-validation + parse, so `.optional()` Zod fields that arrive as explicit `null`
+are dropped (and `.nullable().default(null)` fields such as `selectedAction` re-apply
+their null default). `stripExplicitNulls` must not log payload content.
+
+Transport goes through `fetchWithRetry`: up to **`MAX_RETRIES = 2`** retries (1 initial
+attempt + 2 retries) with exponential backoff (~300ms then ~1200ms), retrying **only**
+on network/transport failures (fetch rejection), HTTP 429, or HTTP 5xx. Other 4xx and
+JSON-parse failures throw immediately (no retry). The optional `AbortSignal` is
+forwarded to `fetch` and to the backoff `sleep`, so an aborted call (e.g. the domain
+timeout firing) cancels in-flight requests and pending retries.
+
 Note: context compression uses a **distinct provider/interface** (`ContextCompressionProvider`,
 injected via `CONTEXT_COMPRESSION_PROVIDER`) that is separate from this `CoachAiProvider`
 surface. `OpenAiContextCompressionProvider` implements `ContextCompressionProvider` and
@@ -843,7 +926,8 @@ for details.
 
 OpenAI prompt templates are keyed `router`, `domain_workout`, `domain_nutrition`,
 `domain_health`, and `decision`, rendered through `CompiledPromptTemplates` and the
-shared JSON-completion + shape-validation helpers.
+shared strict-`json_schema` completion + `stripExplicitNulls` normalization +
+shape-validation helpers (see "Return shape and transport reliability" above).
 
 These prompt templates come from `packages/types/src/prompt-template-defaults.ts` unless
 `packages/ai-behavior/config/ai-behavior.json` supplies valid `promptTemplates`
@@ -857,11 +941,18 @@ only in `domains/*.yml`.
 File: `packages/ai/src/coach-ai-provider.ts`
 
 Defines the `CoachAiProvider` interface. The three fan-out methods are the complete
-provider surface:
+provider surface; each returns `Promise<ProviderCallResult<T>>` and accepts an optional
+`{ signal?: AbortSignal }`:
 
 - `generateRouterDecision` — the first-LLM domain selection
 - `generateDomainStep` — one domain loop step
 - `generateFinalDecision` — the decision-maker synthesis
+
+`ProviderCallResult<T> = { output: T; usage?: ProviderUsage }` and
+`ProviderUsage = { promptTokens, completionTokens, totalTokens, latencyMs, retries }`
+are exported alongside the interface. Callers unwrap `.output` for domain logic and may
+forward `.usage` to per-stage diagnostics; `usage` is absent on paths where no provider
+call was made.
 
 `generateAgentLoopStep` and `generateCoachResponse` no longer exist (removed with
 `ResponseModeExecutorService` in C6). The stub provider has been deleted (C2 removal
@@ -987,19 +1078,20 @@ confidence/selected domains), `metadata.parseErrors`, `metadata.replySafetyError
 proposal rows with `source_message_id = assistantMessage.id`.
 
 A workout-plan proposal passes through **two LLM handoffs** before persistence; a card
-appears only when the decision-maker copies a candidate into `proposals[]`, selects a
-matching non-`plain_reply` action, and the action resolver keeps it under the active
-allowlist:
+appears only when the decision-maker **selects a candidate id** (`selectedProposalIds`)
+plus a matching non-`plain_reply` action, and the action resolver resolves that id to a
+canonical payload and keeps it under the active allowlist:
 
 ```mermaid
 flowchart TD
   userTurn["User asks for plan"] --> router["RouterLlmService"]
   router --> planner["SystemPlannerService"]
   planner --> domain["DomainLlmExecutorService"]
-  domain --> candidates["domain_answer.candidateProposals (advisory)"]
-  candidates --> decision["DecisionMakerExecutorService"]
-  decision --> selected["selectedAction + proposals[]"]
-  selected --> resolver["ActionResolverService"]
+  domain --> candidates["domain_answer.candidateProposals → buildCandidateMap (cand_<domain>_<index>)"]
+  candidates --> summaries["candidateProposalSummaries (id+intent+title+reason)"]
+  summaries --> decision["DecisionMakerExecutorService"]
+  decision --> selected["selectedAction + selectedProposalIds[]"]
+  selected --> resolver["ActionResolverService (resolve ids → payloads from candidateMap)"]
   resolver --> validation["ProposalValidationService"]
   validation --> cards["Chat proposal cards"]
 ```
@@ -1020,10 +1112,17 @@ flowchart TD
 - **Workout domain degraded.** A failed/timed-out/invalid domain degrades to a safe empty
   `domain_answer` with no candidates. Sign: `parseErrors` contains
   `Fan-out: domains degraded to fallback: [workout]`.
-- **Decision-maker degraded.** If the final-decision provider throws or fails Zod,
-  `createFallbackFinalDecision()` returns `selectedAction: null` and no proposals. Sign:
-  `parseErrors` contains `Decision-maker degraded: ...` and the reply is the generic safe
-  fallback.
+- **Decision-maker degraded.** If the final-decision provider throws or fails Zod (including
+  the shape guard rejecting a forbidden `"proposals"` key), `createFallbackFinalDecision()`
+  returns `selectedAction: null`, `selectedProposalIds: []`, and `consentRequired: false`.
+  Sign: `parseErrors` contains `Decision-maker degraded: ...` and the reply is the generic
+  safe fallback.
+- **Selected id did not resolve.** The decision-maker selected an action and ids, but a
+  `selectedProposalId` was unknown or duplicate in the merged candidate map (e.g. it
+  referenced a degraded domain's candidate, or hallucinated an id). ActionResolver drops it
+  with a diagnostic. Signs: `parseErrors` contains a `Resolver: Unknown selectedProposalId
+  "..."` or `Resolver: Duplicate selectedProposalId "..."` entry, and
+  `agent.fanOut.resolution.idResolutionDropCount > 0`.
 - **Reply safety blocked everything.** If final reply safety fails, the orchestrator
   swaps in a safe fallback and drops all proposals. Signs: `replySafetyErrors` non-empty,
   `agent.safety.status === "reply_blocked"`.
@@ -1042,8 +1141,10 @@ outcome valid where the product may expect a card:
   the prompt-template config/defaults (see "Coach AI Provider Surface").
 - Multilingual turns add risk: short/typo-heavy non-English requests
   (e.g. `впиши мне сего сразу в план`) may be understood semantically while deterministic
-  signals stay weak and prompts do not require the reply to match `detectedLanguage`
-  (see Stage 5).
+  signals stay weak (see Stage 5). The fan-out domain and decision templates now **do**
+  require the reply in `{{responseLanguage}}` (resolved `hint ?? detected`), so reply
+  language is contract-enforced; the residual risk is routing/recognition, not reply
+  language.
 
 ## Removed Legacy Paths
 

@@ -1,4 +1,4 @@
-import type { CoachAiProvider } from "@health/ai";
+import type { CoachAiProvider, ProviderUsage } from "@health/ai";
 import type {
   MessagePreprocessorResult,
   RouterDecisionOutput,
@@ -41,6 +41,11 @@ export interface RouterLlmResult {
   readonly output: RouterDecisionOutput;
   readonly source: "llm" | "fallback";
   readonly validationErrors: readonly string[];
+  /**
+   * Token + latency usage for the router LLM call.
+   * Absent on fallback paths where the provider was never called successfully.
+   */
+  readonly usage?: ProviderUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +91,11 @@ export class RouterLlmService {
     const request = this.buildRequest(input);
 
     try {
-      const rawOutput = await this.provider.generateRouterDecision(request);
+      // Provider now returns ProviderCallResult<RouterDecisionOutputInput>.
+      // The OpenAiCoachProvider already validates shape + clamps before returning;
+      // we still do a secondary clamp here for safety when a non-OpenAI provider
+      // or a mocked provider returns a bare (unclipped) output.
+      const { output: rawOutput, usage } = await this.provider.generateRouterDecision(request);
       const shapeErrors = validateRouterDecisionOutputShape(rawOutput);
 
       if (shapeErrors.length > 0) {
@@ -94,13 +103,12 @@ export class RouterLlmService {
           output: createFallbackRouterDecision(),
           source: "fallback",
           validationErrors: shapeErrors,
+          ...(usage !== undefined ? { usage } : {}),
         };
       }
 
       // Parse FIRST so .default([]) transforms are applied to the raw provider output
-      // before clampRouterDecisionOutput filters them. Without this step the clamp
-      // receives un-defaulted values (e.g. missing selectedDomains) and only survives
-      // via the outer try/catch. Carry-forward nit #1.
+      // before clampRouterDecisionOutput filters them.
       const parsedOutput = routerDecisionOutputSchema.parse(rawOutput);
       const clampedOutput = clampRouterDecisionOutput(parsedOutput);
 
@@ -108,6 +116,7 @@ export class RouterLlmService {
         output: clampedOutput,
         source: "llm",
         validationErrors: [],
+        ...(usage !== undefined ? { usage } : {}),
       };
     } catch (error) {
       const message =

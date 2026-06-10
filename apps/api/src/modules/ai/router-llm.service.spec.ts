@@ -7,6 +7,7 @@ import {
   type RouterDecisionOutput,
 } from "@health/types";
 import { createCoachAiProviderMock } from "@health/ai/testing";
+import type { ProviderCallResult } from "@health/ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import type { CapabilityRegistryService } from "./capability-registry.service.js";
@@ -69,7 +70,7 @@ function makeCapabilityRegistryService(): Pick<CapabilityRegistryService, "getCo
 }
 
 function buildService(providerOverrides: Partial<{
-  generateRouterDecision: (req: unknown) => Promise<RouterDecisionOutput>;
+  generateRouterDecision: (req: unknown) => Promise<ProviderCallResult<RouterDecisionOutput>>;
 }> = {}): RouterLlmService {
   // Spy on createCoachAiProvider so the RouterLlmService constructor does not
   // attempt to instantiate the real OpenAI provider (which requires a live key).
@@ -87,8 +88,8 @@ function buildService(providerOverrides: Partial<{
   const provider = {
     generateRouterDecision:
       providerOverrides.generateRouterDecision ??
-      vi.fn().mockResolvedValue(
-        routerDecisionOutputSchema.parse({
+      vi.fn().mockResolvedValue({
+        output: routerDecisionOutputSchema.parse({
           selectedDomains: [
             { domain: "workout", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
           ],
@@ -96,7 +97,7 @@ function buildService(providerOverrides: Partial<{
           safetyFlags: [],
           confidence: 0.8,
         }),
-      ),
+      }),
     generateDomainStep: vi.fn(),
     generateFinalDecision: vi.fn(),
   };
@@ -292,11 +293,13 @@ describe("RouterLlmService", () => {
     it("returns a fallback when the provider output contains forbidden keys (reply)", async () => {
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          reply: "Here is my coaching advice",
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            reply: "Here is my coaching advice",
+            selectedDomains: [],
+            contextNeeds: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -309,11 +312,13 @@ describe("RouterLlmService", () => {
     it("returns a fallback when the provider output contains forbidden keys (proposals)", async () => {
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          proposals: [{ intent: "create_workout_plan" }],
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            proposals: [{ intent: "create_workout_plan" }],
+            selectedDomains: [],
+            contextNeeds: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -340,7 +345,7 @@ describe("RouterLlmService", () => {
       };
 
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue(tooManyDomainsOutput),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: tooManyDomainsOutput }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -357,7 +362,7 @@ describe("RouterLlmService", () => {
       };
 
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue(outputWithUnknownFlag),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: outputWithUnknownFlag }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -379,7 +384,7 @@ describe("RouterLlmService", () => {
 
     it("falls back gracefully when provider returns a non-object", async () => {
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue(null),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: null }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -390,7 +395,7 @@ describe("RouterLlmService", () => {
 
     it("falls back gracefully when provider returns a string", async () => {
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue("not an object"),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: "not an object" }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -403,11 +408,13 @@ describe("RouterLlmService", () => {
       // tool call in the router output — explicitly forbidden by the safety contract.
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          tool: "getDocumentContext",
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            tool: "getDocumentContext",
+            selectedDomains: [],
+            contextNeeds: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -422,11 +429,13 @@ describe("RouterLlmService", () => {
       // into the router output the output is treated as unsafe and rejected.
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          kind: "final_answer",
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            kind: "final_answer",
+            selectedDomains: [],
+            contextNeeds: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -439,11 +448,13 @@ describe("RouterLlmService", () => {
     it("returns a fallback when the provider output contains forbidden key 'advice' (unsafe coaching text)", async () => {
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          advice: "You should eat more protein.",
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            advice: "You should eat more protein.",
+            selectedDomains: [],
+            contextNeeds: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -474,7 +485,7 @@ describe("RouterLlmService", () => {
       };
 
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue(outputWithUnknownTool),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: outputWithUnknownTool }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -490,10 +501,12 @@ describe("RouterLlmService", () => {
       // clamped output has empty selectedDomains and the orchestrator handles it.
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.9,
+          output: {
+            selectedDomains: [],
+            contextNeeds: [],
+            safetyFlags: [],
+            confidence: 0.9,
+          },
         }),
       });
 

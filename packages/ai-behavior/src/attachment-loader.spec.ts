@@ -85,7 +85,6 @@ describe("attachment behavior config loader", () => {
       JSON.stringify({
         ...defaults,
         safetyFloors: {
-          requireMedicalConsent: false,
           enforceProviderIsolation: false,
           requireOwnershipChecks: false,
           suppressMedicalPlanProposals: false,

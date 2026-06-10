@@ -670,6 +670,23 @@ export type AgentUnifiedTurnDecisionMetadata = z.infer<
 // ---------------------------------------------------------------------------
 const fanOutDomainEnumSchema = z.enum(["workout", "nutrition", "health"]);
 
+/**
+ * Per-call token and latency usage from the provider.
+ * Optional/additive — absent on fallback paths where no LLM call was made.
+ * Numbers only; never contains prompts, content, or health data.
+ */
+export const agentProviderUsageSchema = z.object({
+  promptTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  /** Wall-clock time of the provider call including retries (ms). */
+  latencyMs: z.number().int().nonnegative(),
+  /** Number of retries consumed (0 = first attempt succeeded). */
+  retries: z.number().int().nonnegative(),
+});
+
+export type AgentProviderUsage = z.infer<typeof agentProviderUsageSchema>;
+
 export const agentFanOutRouterDiagnosticsSchema = z.object({
   ran: z.boolean(),
   source: z.enum(["llm", "fallback"]).optional(),
@@ -684,8 +701,8 @@ export const agentFanOutRouterDiagnosticsSchema = z.object({
     .max(3)
     .default([]),
   blockedFallback: z.boolean().optional(),
-  /** Latency of the router LLM call in milliseconds. Absent when router was skipped. */
-  latencyMs: z.number().int().nonnegative().optional(),
+  /** Token + latency usage for the router LLM call. Absent on fallback paths. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutDomainDiagnosticsSchema = z.object({
@@ -698,22 +715,25 @@ export const agentFanOutDomainDiagnosticsSchema = z.object({
   /** Tools requested by the domain LLM that were not in the allowlist. Counts only — no tool names to avoid leaking capability hints. */
   toolsDeniedCount: z.number().int().min(0).max(15).default(0),
   hasWorkoutCalorieEstimate: z.boolean().default(false),
-  /** Latency of the domain LLM loop in milliseconds. */
-  latencyMs: z.number().int().nonnegative().optional(),
+  /** Accumulated token + latency usage across all loop iterations for this domain. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutDecisionDiagnosticsSchema = z.object({
   degraded: z.boolean(),
   selectedAction: z.string().min(1).max(80).nullable().default(null),
-  proposalCount: z.number().int().min(0).max(5),
+  /** Number of candidate IDs selected by the decision-maker (Slice 2: selection-by-ID). */
+  selectedProposalIdCount: z.number().int().min(0).max(5),
   consentRequired: z.boolean().default(false),
-  /** Latency of the decision-maker LLM call in milliseconds. */
-  latencyMs: z.number().int().nonnegative().optional(),
+  /** Token + latency usage for the decision-maker LLM call. Absent on fallback paths. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutResolutionDiagnosticsSchema = z.object({
   resolvedProposalCount: z.number().int().min(0).max(5),
   droppedByAllowlist: z.number().int().min(0).max(10),
+  /** Proposals dropped because selectedProposalIds contained unknown or duplicate IDs. */
+  idResolutionDropCount: z.number().int().min(0).max(10).default(0),
   replyBlocked: z.boolean(),
   finalProposalCount: z.number().int().min(0).max(5),
   /** Validation failure classes from ChatService proposal persistence. Populated post-orchestration. */

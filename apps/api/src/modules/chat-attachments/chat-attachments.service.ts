@@ -16,7 +16,6 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { resolve } from "node:path";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { env } from "../../env.js";
 import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
@@ -41,8 +40,9 @@ export class ChatAttachmentsService {
     private readonly usersService: UsersService,
     private readonly aiBehaviorConfigService: AiBehaviorConfigService,
   ) {
-    const storageRoot = resolve(process.cwd(), env.CHAT_ATTACHMENT_STORAGE_PATH);
-    this.storage = new LocalChatAttachmentStorageAdapter(storageRoot);
+    this.storage = new LocalChatAttachmentStorageAdapter(env.CHAT_ATTACHMENT_STORAGE_PATH, {
+      allowInProduction: env.STORAGE_ALLOW_LOCAL_IN_PRODUCTION === true,
+    });
   }
 
   async createAttachment(

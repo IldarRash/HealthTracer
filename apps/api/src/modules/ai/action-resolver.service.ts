@@ -19,6 +19,7 @@ import type { DomainFanoutEntry } from "./system-planner.service.js";
 export type ActionResolverFinalDecisionInput = {
   /**
    * The validated output from DecisionMakerExecutorService.
+   * Contains selectedProposalIds (not payload objects) in the new selection-by-ID design.
    */
   finalDecision: FinalDecisionOutput;
   /**
@@ -29,17 +30,12 @@ export type ActionResolverFinalDecisionInput = {
    */
   selectedDomains: readonly DomainFanoutEntry[];
   /**
-   * Whether the preprocessor detected an explicit plan-creation/modification request
-   * (the `plan_request` signal from MessagePreprocessorSimpleSignals).
-   *
-   * When true AND the decision-maker returned plain_reply AND at least one valid
-   * domain proposal candidate exists in the final decision's proposals array,
-   * ActionResolver overrides plain_reply with the best matching proposal action.
-   *
-   * This is a deterministic code-level guard — it never fabricates proposals.
-   * It only re-orders/prefers existing valid candidates.
+   * Merged id→candidate map from all domain results (Slice 2).
+   * Keys: `cand_<domain>_<index>` assigned deterministically by DomainLlmExecutorService.
+   * Used to resolve selectedProposalIds → canonical payloads from the domain answers.
+   * Unknown or duplicate ids are ignored (degraded safely with a diagnostic record).
    */
-  planRequestSignal?: boolean;
+  candidateMap: ReadonlyMap<string, Record<string, unknown>>;
   /**
    * Calorie-burn estimate (kcal, integer) from the workout domain LLM's
    * domain_answer.workoutCalorieEstimate.
@@ -70,8 +66,9 @@ export type ActionResolverFinalDecisionResult = {
    */
   reply: string;
   /**
-   * The final typed proposal set, filtered to the active capability allowlist.
-   * Empty if the decision-maker selected "plain_reply" or produced no proposals.
+   * The final typed proposal set, resolved from selectedProposalIds via the
+   * candidate map and filtered to the active capability allowlist.
+   * Empty if the decision-maker selected "plain_reply" or produced no valid ids.
    */
   proposals: AiStructuredOutput["proposals"];
   /**
@@ -86,6 +83,17 @@ export type ActionResolverFinalDecisionResult = {
    * Do not remove the plumbing; add enforcement when the deferred flow is implemented.
    */
   consentRequired: boolean;
+  /**
+   * Diagnostic entries for unknown or duplicate candidate IDs (safe degradation).
+   * Unknown ids are logged here and ignored — they never throw or block the turn.
+   */
+  parseErrors: string[];
+  /**
+   * Number of selectedProposalIds that were dropped because they were unknown or
+   * duplicate (i.e. not found in the candidate map). Equal to parseErrors.length.
+   * Separate from droppedByAllowlist (allowlist-filtered proposals that did resolve).
+   */
+  idResolutionDropCount: number;
 };
 
 /**
@@ -96,55 +104,31 @@ export type ActionResolverFinalDecisionResult = {
 export class ActionResolverService {
   /**
    * Resolve a FinalDecisionOutput (from DecisionMakerExecutorService) into a
-   * typed proposal set filtered to the active capability allowlist.
+   * typed proposal set resolved from candidate IDs and filtered to the active
+   * capability allowlist.
    *
    * Safety invariants (must not be weakened):
-   *  - proposals are filtered to the UNION of the selected domains' allowedProposalIntents.
+   *  - proposals are resolved from selectedProposalIds via the candidate map, then
+   *    filtered to the UNION of the selected domains' allowedProposalIntents.
    *  - "plain_reply" produces no proposals.
+   *  - Unknown or duplicate ids are ignored with a diagnostic entry (safe degradation).
    *  - estimatedSessionCalorieBurn is ONLY stamped from workoutCalorieEstimate, which
    *    must have been sourced exclusively from the workout domain LLM by the caller.
-   *    The decision-maker LLM and non-workout domains must never set this.
+   *    The decision-maker LLM and non-workout domains can no longer fabricate payload
+   *    data — the channel is structurally gone (selection-by-ID, Slice 2).
    *  - This method never mutates domain state or persists anything.
    */
   resolveFinalDecisionOutput(
     input: ActionResolverFinalDecisionInput,
   ): ActionResolverFinalDecisionResult {
-    const {
-      finalDecision,
-      selectedDomains,
-      planRequestSignal,
-      workoutCalorieEstimate,
-      workoutCaloriePerHourRate,
-    } = input;
+    const { finalDecision, selectedDomains, candidateMap, workoutCalorieEstimate, workoutCaloriePerHourRate } = input;
 
     // Build the union of all domains' allowedProposalIntents for filtering.
     // This is the same allowlist floor that ActionVariantCatalogService used to build
     // the catalog — the decision-maker cannot select outside this set.
     const unionAllowedIntents = buildUnionAllowedIntents(selectedDomains);
 
-    let selectedAction = finalDecision.selectedAction;
-
-    // Plain-reply guard (Slice C5):
-    // When (a) the user message matches an explicit plan-request signal AND
-    // (b) the decision-maker returned plain_reply BUT domain outputs produced at
-    // least one valid proposal candidate, prefer the first valid candidate action
-    // over plain_reply. We never fabricate proposals — only reorder existing ones.
-    if (
-      planRequestSignal &&
-      (!selectedAction || selectedAction === PLAIN_REPLY_ACTION_VARIANT_ID) &&
-      finalDecision.proposals.length > 0
-    ) {
-      const candidates = filterProposalsToAllowedIntents(
-        [...unionAllowedIntents] as CatalogProposalIntent[],
-        finalDecision.proposals as AiStructuredOutput["proposals"],
-      );
-
-      if (candidates.length > 0 && candidates[0] != null) {
-        // Override selectedAction to the first valid candidate's intent.
-        // The candidate already passed the allowlist filter — no fabrication.
-        selectedAction = candidates[0].intent;
-      }
-    }
+    const selectedAction = finalDecision.selectedAction;
 
     // Plain reply: no proposals, no consent required.
     if (!selectedAction || selectedAction === PLAIN_REPLY_ACTION_VARIANT_ID) {
@@ -152,21 +136,45 @@ export class ActionResolverService {
         reply: finalDecision.reply,
         proposals: [],
         consentRequired: false,
+        parseErrors: [],
+        idResolutionDropCount: 0,
       };
     }
 
-    // Filter proposals to the union allowlist, then stamp
-    // the workout calorie estimate onto any workout-plan proposals.
-    // The decision-maker's proposals come from domain LLMs; re-filtering here is
-    // a defense-in-depth measure — the allowlist is the code-level floor.
+    // Resolve selectedProposalIds → canonical payloads from the candidate map.
+    // Unknown ids are ignored with a diagnostic entry (never throw or block).
+    const resolvedProposals: AiStructuredOutput["proposals"] = [];
+    const resolveParseErrors: string[] = [];
+    const seenIds = new Set<string>();
+
+    for (const id of finalDecision.selectedProposalIds) {
+      if (seenIds.has(id)) {
+        resolveParseErrors.push(`Duplicate selectedProposalId "${id}" — ignored.`);
+        continue;
+      }
+
+      seenIds.add(id);
+      const candidate = candidateMap.get(id);
+
+      if (!candidate) {
+        resolveParseErrors.push(`Unknown selectedProposalId "${id}" — no matching candidate in map.`);
+        continue;
+      }
+
+      resolvedProposals.push(candidate as AiStructuredOutput["proposals"][number]);
+    }
+
+    // Filter resolved proposals to the union allowlist (defense-in-depth: the allowlist
+    // is the code-level floor even though the decision-maker selected IDs from a bounded list).
     const filteredProposals = filterProposalsToAllowedIntents(
       [...unionAllowedIntents] as CatalogProposalIntent[],
-      finalDecision.proposals as AiStructuredOutput["proposals"],
+      resolvedProposals,
     );
 
-    // Always scrub then conditionally re-stamp, so fabricated calorie fields from
-    // the decision-maker or non-workout domain LLMs are removed regardless of
-    // whether a trusted estimate is present.
+    // Always scrub then conditionally re-stamp workout calorie fields.
+    // Structurally, the decision-maker can no longer inject calorie data via proposals
+    // (the proposals[] channel is gone). The scrub step remains as a defense-in-depth
+    // measure in case a future code path re-introduces a channel we haven't anticipated.
     const proposals = scrubAndStampWorkoutCalorieEstimate(
       filteredProposals,
       workoutCalorieEstimate,
@@ -177,6 +185,8 @@ export class ActionResolverService {
       reply: finalDecision.reply,
       proposals,
       consentRequired: finalDecision.consentRequired,
+      parseErrors: resolveParseErrors,
+      idResolutionDropCount: resolveParseErrors.length,
     };
   }
 

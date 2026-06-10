@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   date,
   index,
@@ -13,6 +14,9 @@ import {
 import { aiProposals } from "./proposals.js";
 import { users } from "./users.js";
 
+// Same-plan active revision integrity is enforced in migration
+// 0035_nutrition_plan_invariants via composite FK (id, active_revision_id).
+
 export const nutritionPlans = pgTable(
   "nutrition_plans",
   {
@@ -27,6 +31,9 @@ export const nutritionPlans = pgTable(
   },
   (table) => ({
     userIdIdx: index("nutrition_plans_user_id_idx").on(table.userId),
+    userActiveIdx: uniqueIndex("nutrition_plans_user_active_idx")
+      .on(table.userId)
+      .where(sql`${table.status} = 'active'`),
   }),
 );
 
@@ -46,6 +53,14 @@ export const nutritionPlanRevisions = pgTable(
   (table) => ({
     nutritionPlanIdIdx: index("nutrition_plan_revisions_plan_id_idx").on(
       table.nutritionPlanId,
+    ),
+    planRevisionNumberIdx: uniqueIndex("nutrition_plan_revisions_plan_revision_idx").on(
+      table.nutritionPlanId,
+      table.revisionNumber,
+    ),
+    planIdRevisionIdIdx: uniqueIndex("nutrition_plan_revisions_plan_id_id_idx").on(
+      table.nutritionPlanId,
+      table.id,
     ),
   }),
 );

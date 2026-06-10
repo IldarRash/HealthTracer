@@ -22,7 +22,7 @@
  *    this service does not relax them.
  */
 
-import { validateReplySafety, type CoachAiProvider } from "@health/ai";
+import { validateReplySafety, type CoachAiProvider, type ProviderUsage } from "@health/ai";
 import type {
   AgentContextPacket,
   AgentToolCallResult,
@@ -114,6 +114,13 @@ export interface DomainLlmExecutorResult {
   /** Final domain answer, either from the LLM or a safe fallback. */
   domainAnswer: DomainAnswer;
   /**
+   * Deterministic id→candidate map built from domainAnswer.candidateProposals[].
+   * Key: `cand_<domain>_<index>` (e.g. "cand_workout_0").
+   * Value: the candidate proposal record (untyped, Zod-validated by ProposalValidationService).
+   * Empty on degraded/fallback results. Used by ActionResolverService for selection-by-ID.
+   */
+  candidateMap: ReadonlyMap<string, Record<string, unknown>>;
+  /**
    * True when the result is a safe fallback produced by degradation (timeout,
    * loop exhaustion, safety block, provider error). Callers (orchestrator) use
    * this to record degraded-domain metadata.
@@ -121,14 +128,15 @@ export interface DomainLlmExecutorResult {
   degraded: boolean;
   /** Reason(s) for degradation when degraded=true. */
   degradedReasons: string[];
+  /**
+   * Accumulated token + latency usage across all loop iterations.
+   * Absent on timeout/fallback paths where the provider was never called.
+   */
+  usage?: ProviderUsage;
   /** Number of loop iterations executed (0 on immediate degradation). */
   loopIterations: number;
   /** Tool names invoked in order during the loop. */
   toolsInvoked: AgentToolName[];
-  /** Number of tool requests that were denied by the capability allowlist. */
-  toolsDeniedCount: number;
-  /** Wall-clock latency of the domain loop in milliseconds. */
-  latencyMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,20 +158,23 @@ export class DomainLlmExecutorService {
    * Always resolves — never rejects. Any error path degrades to a safe fallback.
    * Per-domain timeout via Promise.race ensures a slow domain never blocks
    * the turn or sibling domain executors.
+   *
+   * An AbortController is tied to the timeout so that when the timeout fires,
+   * any in-flight fetch (including retries) is cancelled via the AbortSignal.
    */
   async runDomainLoop(input: DomainLlmExecutorInput): Promise<DomainLlmExecutorResult> {
     const { domainEntry } = input;
     const domain = domainEntry.domain;
-    const start = Date.now();
+
+    const abortController = new AbortController();
 
     // Wrap the bounded loop in Promise.race with a per-domain timeout.
     // The timeout NEVER rejects — it resolves to a fallback so the outer
     // Promise.all in the orchestrator is not poisoned by a slow domain.
-    const loopPromise = this.executeDomainLoopSafe(input);
-    const timeoutPromise = this.buildTimeoutFallback(domain);
+    const loopPromise = this.executeDomainLoopSafe(input, abortController.signal);
+    const timeoutPromise = this.buildTimeoutFallback(domain, abortController);
 
-    const result = await Promise.race([loopPromise, timeoutPromise]);
-    return { ...result, latencyMs: Date.now() - start };
+    return Promise.race([loopPromise, timeoutPromise]);
   }
 
   // ---------------------------------------------------------------------------
@@ -172,31 +183,37 @@ export class DomainLlmExecutorService {
 
   /**
    * Safe wrapper around the bounded domain loop.
-   * Catches all thrown errors and degrades to a fallback.
+   * Catches all thrown errors (including AbortError from the timeout signal) and
+   * degrades to a fallback.
    * Never rejects.
    */
   private async executeDomainLoopSafe(
     input: DomainLlmExecutorInput,
+    signal: AbortSignal,
   ): Promise<DomainLlmExecutorResult> {
     try {
-      return await this.executeDomainLoop(input);
+      return await this.executeDomainLoop(input, signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown domain executor error.";
-      return this.buildFallbackResult(input.domainEntry.domain, [message], 0, [], 0);
+      return this.buildFallbackResult(input.domainEntry.domain, [message], 0, []);
     }
   }
 
   /**
    * Core bounded domain loop — may throw; callers wrap with executeDomainLoopSafe.
+   * The signal is from the per-domain AbortController tied to the timeout so that
+   * in-flight fetch retries are cancelled when the timeout fires.
    */
   private async executeDomainLoop(
     input: DomainLlmExecutorInput,
+    signal: AbortSignal,
   ): Promise<DomainLlmExecutorResult> {
     const { domainEntry, contextPacket, orchestratorInput, provider } = input;
     const domain = domainEntry.domain;
 
     const toolsInvoked: AgentToolName[] = [];
     const priorToolResults: AgentToolCallResult[] = [];
+    let accumulatedUsage: ProviderUsage | undefined;
 
     // Build a mutable local copy of coaching context so we can append tool results
     // per iteration without mutating the shared input reference.
@@ -236,13 +253,27 @@ export class DomainLlmExecutorService {
         priorToolResults: [...priorToolResults],
       });
 
-      const rawOutput = await provider.generateDomainStep(stepRequest);
+      // Provider returns ProviderCallResult; unwrap the output and accumulate usage.
+      // Pass the abort signal so in-flight retries are cancelled when the timeout fires.
+      const { output: rawOutput, usage: stepUsage } = await provider.generateDomainStep(stepRequest, { signal });
+
+      if (stepUsage) {
+        accumulatedUsage = accumulatedUsage
+          ? {
+              promptTokens: accumulatedUsage.promptTokens + stepUsage.promptTokens,
+              completionTokens: accumulatedUsage.completionTokens + stepUsage.completionTokens,
+              totalTokens: accumulatedUsage.totalTokens + stepUsage.totalTokens,
+              latencyMs: accumulatedUsage.latencyMs + stepUsage.latencyMs,
+              retries: accumulatedUsage.retries + stepUsage.retries,
+            }
+          : stepUsage;
+      }
 
       // Shape guard: rejects forbidden user-facing fields before Zod parse.
       const shapeErrors = validateDomainLlmStepOutputShape(rawOutput);
 
       if (shapeErrors.length > 0) {
-        return this.buildFallbackResult(domain, shapeErrors, iteration, toolsInvoked);
+        return this.buildFallbackResult(domain, shapeErrors, iteration, toolsInvoked, accumulatedUsage);
       }
 
       if (!rawOutput || typeof rawOutput !== "object") {
@@ -251,6 +282,7 @@ export class DomainLlmExecutorService {
           ["Domain LLM step output was not an object."],
           iteration,
           toolsInvoked,
+          accumulatedUsage,
         );
       }
 
@@ -266,6 +298,7 @@ export class DomainLlmExecutorService {
             ["Domain LLM tool_request missing tool name."],
             iteration,
             toolsInvoked,
+            accumulatedUsage,
           );
         }
 
@@ -279,13 +312,14 @@ export class DomainLlmExecutorService {
             ],
             iteration,
             toolsInvoked,
-            1, // toolsDeniedCount: this tool request was denied
+            accumulatedUsage,
           );
         }
 
         // Execute the allowed tool via AgentToolRegistryService (read-only context tools only).
-        // The registry advertises only getUserContextSlice and getWeeklyProgressContext;
-        // getDocumentContext was removed (always empty under the allowDocuments=false floor).
+        // Tools: getUserContextSlice, getWeeklyProgressContext, searchExerciseCatalog,
+        // searchRecipeCatalog, getActivePlanDetail, getRecentAdherence.
+        // getDocumentContext is excluded: always returns empty under the allowDocuments=false floor.
         const toolInput = ((rawOutput as Record<string, unknown>)["input"] as Record<string, unknown> | undefined) ?? {};
         const toolResult = await this.agentToolRegistryService.executeTool(
           orchestratorInput.auth,
@@ -317,6 +351,7 @@ export class DomainLlmExecutorService {
             parsed.error.issues.map((i) => i.message),
             iteration,
             toolsInvoked,
+            accumulatedUsage,
           );
         }
 
@@ -334,6 +369,7 @@ export class DomainLlmExecutorService {
             ],
             iteration,
             toolsInvoked,
+            accumulatedUsage,
           );
         }
 
@@ -341,16 +377,22 @@ export class DomainLlmExecutorService {
         const replySafetyErrors = validateReplySafety(domainAnswer.summary);
 
         if (replySafetyErrors.length > 0) {
-          return this.buildFallbackResult(domain, replySafetyErrors, iteration, toolsInvoked);
+          return this.buildFallbackResult(domain, replySafetyErrors, iteration, toolsInvoked, accumulatedUsage);
         }
+
+        // Build the deterministic id→candidate map for selection-by-ID (Slice 2).
+        // IDs are assigned here in code — the LLM never invents them.
+        // Pattern: cand_<domain>_<index> (e.g. "cand_workout_0", "cand_nutrition_1").
+        const candidateMap = buildCandidateMap(domain, domainAnswer.candidateProposals);
 
         return {
           domainAnswer,
+          candidateMap,
           degraded: false,
           degradedReasons: [],
           loopIterations: iteration,
           toolsInvoked,
-          toolsDeniedCount: 0,
+          ...(accumulatedUsage !== undefined ? { usage: accumulatedUsage } : {}),
         };
       }
 
@@ -360,6 +402,7 @@ export class DomainLlmExecutorService {
         [`Domain LLM returned unknown step kind: "${String(outputKind)}".`],
         iteration,
         toolsInvoked,
+        accumulatedUsage,
       );
     }
 
@@ -371,6 +414,7 @@ export class DomainLlmExecutorService {
       ],
       DOMAIN_MAX_LOOP_ITERATIONS,
       toolsInvoked,
+      accumulatedUsage,
     );
   }
 
@@ -461,10 +505,17 @@ export class DomainLlmExecutorService {
    * Returns a Promise that resolves to a fallback result after DOMAIN_LLM_TIMEOUT_MS.
    * NEVER rejects — this is intentional so Promise.race cannot propagate a rejection
    * into the orchestrator's Promise.all and crash the turn.
+   *
+   * When the timeout fires, aborts the AbortController so any in-flight fetch or
+   * retry in the loop receives an AbortError and stops immediately.
    */
-  private buildTimeoutFallback(domain: RouterDomain): Promise<DomainLlmExecutorResult> {
+  private buildTimeoutFallback(
+    domain: RouterDomain,
+    abortController: AbortController,
+  ): Promise<DomainLlmExecutorResult> {
     return new Promise<DomainLlmExecutorResult>((resolve) => {
       setTimeout(() => {
+        abortController.abort();
         resolve(
           this.buildFallbackResult(
             domain,
@@ -481,21 +532,26 @@ export class DomainLlmExecutorService {
    * Build a safe fallback result.
    * The fallback domain_answer always has empty candidateProposals so no
    * unvalidated proposals leak into the turn from a degraded domain.
+   *
+   * `accumulatedUsage` threads any usage from completed iterations into the
+   * fallback result for accurate metering (e.g. when the loop degraded mid-run
+   * after one or more successful provider calls).
    */
   private buildFallbackResult(
     domain: RouterDomain,
     reasons: string[],
     loopIterations: number,
     toolsInvoked: AgentToolName[],
-    toolsDeniedCount = 0,
+    accumulatedUsage?: ProviderUsage,
   ): DomainLlmExecutorResult {
     return {
       domainAnswer: createFallbackDomainAnswer(domain),
+      candidateMap: new Map(),
       degraded: true,
       degradedReasons: reasons,
       loopIterations,
       toolsInvoked,
-      toolsDeniedCount,
+      ...(accumulatedUsage !== undefined ? { usage: accumulatedUsage } : {}),
     };
   }
 }
@@ -503,6 +559,35 @@ export class DomainLlmExecutorService {
 // ---------------------------------------------------------------------------
 // Module-level helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Build a deterministic id→candidate map from a domain answer's candidateProposals.
+ *
+ * Keys are assigned in code — the LLM never invents them:
+ *   `cand_<domain>_<index>` (e.g. "cand_workout_0", "cand_nutrition_1")
+ *
+ * This is the source of truth for selection-by-ID (Slice 2): the orchestrator
+ * merges these maps across domains and passes the union to ActionResolverService
+ * for resolving selectedProposalIds → canonical payloads.
+ *
+ * Empty when candidateProposals is empty (degraded/fallback answers).
+ */
+export function buildCandidateMap(
+  domain: RouterDomain,
+  candidateProposals: readonly Record<string, unknown>[],
+): Map<string, Record<string, unknown>> {
+  const map = new Map<string, Record<string, unknown>>();
+
+  for (let i = 0; i < candidateProposals.length; i++) {
+    const candidate = candidateProposals[i];
+
+    if (candidate) {
+      map.set(`cand_${domain}_${i}`, candidate);
+    }
+  }
+
+  return map;
+}
 
 /**
  * Build bounded attachment context for a domain step request.

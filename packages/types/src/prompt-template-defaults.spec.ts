@@ -184,6 +184,39 @@ describe("prompt-template-defaults — decision action-selection rule (W2 [ACTIO
   });
 });
 
+describe("prompt-template-defaults — decision Slice 2: selection-by-ID (candidateProposalSummariesJson + selectedProposalIds)", () => {
+  const body = DEFAULT_PROMPT_TEMPLATE_BODIES[FINAL_DECISION_TEMPLATE_KEY];
+
+  it("references selectedProposalIds in the JSON shape instruction", () => {
+    expect(body).toContain("selectedProposalIds");
+  });
+
+  it("instructs the model to pick candidate ids from the list (SELECTION-BY-ID)", () => {
+    expect(body).toContain("candidateProposalSummariesJson");
+    expect(body).toContain("{{candidateProposalSummariesJson}}");
+  });
+
+  it("includes recentMessagesJson placeholder for conversation history", () => {
+    expect(body).toContain("{{recentMessagesJson}}");
+  });
+
+  it("explicitly forbids 'proposals' in output (FORBIDDEN FIELD)", () => {
+    expect(body).toContain("FORBIDDEN FIELD");
+    expect(body).toContain("proposals");
+  });
+
+  it("worked example shows selectedProposalIds array with a cand_ id, not a proposals array", () => {
+    // The correct output example must use selectedProposalIds (not proposals)
+    expect(body).toContain('"selectedProposalIds":["cand_workout_0"]');
+    // Wrong output example for the FORBIDDEN proposals field must be present
+    expect(body).toContain("FORBIDDEN");
+  });
+
+  it("instructs the model to NEVER include proposal payload objects", () => {
+    expect(body).toContain("NEVER include proposal payload objects");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // i18n — responseLanguage placeholder in REQUIRED_PLACEHOLDERS + rendering
 // ---------------------------------------------------------------------------
@@ -286,6 +319,8 @@ describe("prompt-template-renderer — renderDomainStep and renderFinalDecision 
       userMessage: "Составь план",
       domainOutputsJson: "[]",
       actionVariantCatalogJson: "[]",
+      candidateProposalSummariesJson: "[]",
+      recentMessagesJson: "[]",
       safetyFlags: "none",
       safetyConstraints: "none",
       responseLanguage: "ru",
@@ -326,15 +361,17 @@ describe("PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS — unchanged by W2", () => {
     expect(placeholders).toHaveLength(12);
   });
 
-  it("decision template requires its placeholders including responseLanguage", () => {
+  it("decision template requires its placeholders including responseLanguage and Slice 2 additions", () => {
     const placeholders = PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS["decision"];
     expect(placeholders).toContain("userMessage");
     expect(placeholders).toContain("domainOutputsJson");
     expect(placeholders).toContain("actionVariantCatalogJson");
+    expect(placeholders).toContain("candidateProposalSummariesJson");
+    expect(placeholders).toContain("recentMessagesJson");
     expect(placeholders).toContain("safetyFlags");
     expect(placeholders).toContain("safetyConstraints");
     expect(placeholders).toContain("responseLanguage");
-    // 6 placeholders — 5 original + responseLanguage (i18n feature)
-    expect(placeholders).toHaveLength(6);
+    // 8 placeholders — 6 original + candidateProposalSummariesJson + recentMessagesJson (Slice 2)
+    expect(placeholders).toHaveLength(8);
   });
 });

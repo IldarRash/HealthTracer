@@ -84,6 +84,8 @@ describe("prompt template renderer", () => {
       userMessage: "Create a plan",
       domainOutputsJson: "{}",
       actionVariantCatalogJson: "[]",
+      candidateProposalSummariesJson: "[]",
+      recentMessagesJson: "[]",
       safetyFlags: "none",
       safetyConstraints: "Stay conservative",
       responseLanguage: "en",

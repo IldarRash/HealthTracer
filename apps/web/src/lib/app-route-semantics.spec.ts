@@ -14,8 +14,13 @@ describe("app route semantics", () => {
     expect(readAppPage("goals")).toContain('redirect("/profile#goals")');
     expect(readAppPage("documents")).toContain('redirect("/profile#documents")');
     expect(readAppPage("metrics")).toContain('redirect("/profile#data-consent")');
-    expect(readAppPage("recipes")).toContain('redirect("/nutrition")');
     expect(readAppPage("progress")).toContain('redirect("/training#progress")');
+  });
+
+  it("renders /recipes as a real surface (RecipesWorkspace) — not a redirect to /nutrition", () => {
+    const recipesPage = readAppPage("recipes");
+    expect(recipesPage).toContain("RecipesWorkspace");
+    expect(recipesPage).not.toContain('redirect("/nutrition")');
   });
 
   it("keeps profile hash anchors for goals, documents, and data consent routes", () => {

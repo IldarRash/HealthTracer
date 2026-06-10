@@ -334,7 +334,7 @@ describe("agentFanOutDiagnosticsSchema (W1 — optional fan-out block)", () => {
       decision: {
         degraded: false,
         selectedAction: "create_workout_plan",
-        proposalCount: 1,
+        selectedProposalIdCount: 1,
         consentRequired: false,
       },
       resolution: {
@@ -385,7 +385,7 @@ describe("agentFanOutDiagnosticsSchema (W1 — optional fan-out block)", () => {
         decision: {
           degraded: false,
           selectedAction: "create_workout_plan",
-          proposalCount: 1,
+          selectedProposalIdCount: 1,
           consentRequired: false,
         },
         resolution: {
@@ -431,7 +431,7 @@ describe("agentFanOutDiagnosticsSchema (W1 — optional fan-out block)", () => {
       decision: {
         degraded: true,
         selectedAction: null,
-        proposalCount: 0,
+        selectedProposalIdCount: 0,
         consentRequired: false,
       },
       resolution: {

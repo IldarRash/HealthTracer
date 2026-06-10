@@ -4,6 +4,7 @@ import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { ProposalsModule } from "../proposals/proposals.module.js";
 import { ProfilesModule } from "../profiles/profiles.module.js";
 import { UsersModule } from "../users/users.module.js";
+import { CatalogDiagnosticsService } from "./catalog-diagnostics.service.js";
 import {
   resolveRecipeCatalogProviderMode,
   SeededOnlyRecipeCatalogProvider,
@@ -26,6 +27,7 @@ import { TheMealDbCatalogProvider } from "./themealdb-catalog-provider.js";
   providers: [
     RecipesRepository,
     RecipesService,
+    CatalogDiagnosticsService,
     TheMealDbCatalogProvider,
     SeededOnlyRecipeCatalogProvider,
     {

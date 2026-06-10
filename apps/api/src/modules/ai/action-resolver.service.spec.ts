@@ -60,21 +60,38 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
     };
   }
 
+  /**
+   * Helper: build a candidate map with the given proposals keyed by
+   * `cand_<domain>_<index>` — same scheme DomainLlmExecutorService.buildCandidateMap uses.
+   */
+  function makeCandidateMap(
+    proposals: Array<{ domain: string; proposal: Record<string, unknown> }>,
+  ): ReadonlyMap<string, Record<string, unknown>> {
+    const map = new Map<string, Record<string, unknown>>();
+    const counters: Record<string, number> = {};
+    for (const { domain, proposal } of proposals) {
+      const idx = counters[domain] ?? 0;
+      map.set(`cand_${domain}_${idx}`, proposal);
+      counters[domain] = idx + 1;
+    }
+    return map;
+  }
+
   function resolveDecision(
     finalDecision: Partial<FinalDecisionOutput>,
     selectedDomains: DomainFanoutEntry[],
-    planRequestSignal?: boolean,
+    candidateMap: ReadonlyMap<string, Record<string, unknown>> = new Map(),
   ) {
     const input: ActionResolverFinalDecisionInput = {
       finalDecision: {
         reply: "Coach reply.",
         selectedAction: null,
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
         ...finalDecision,
       },
       selectedDomains,
-      planRequestSignal,
+      candidateMap,
     };
 
     return service.resolveFinalDecisionOutput(input);
@@ -82,17 +99,21 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
 
   describe("plain reply path", () => {
     it("returns empty proposals when selectedAction is null", () => {
+      const map = makeCandidateMap([{ domain: "workout", proposal: WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
       const result = resolveDecision(
-        { selectedAction: null, proposals: [WORKOUT_PROPOSAL] },
+        { selectedAction: null, selectedProposalIds: ["cand_workout_0"] },
         [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        map,
       );
       expect(result.proposals).toHaveLength(0);
     });
 
     it("returns empty proposals when selectedAction is plain_reply", () => {
+      const map = makeCandidateMap([{ domain: "workout", proposal: WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
       const result = resolveDecision(
-        { selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID, proposals: [WORKOUT_PROPOSAL] },
+        { selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID, selectedProposalIds: ["cand_workout_0"] },
         [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        map,
       );
       expect(result.proposals).toHaveLength(0);
       expect(result.consentRequired).toBe(false);
@@ -105,28 +126,75 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
       );
       expect(result.reply).toBe("Custom reply from decision-maker.");
     });
+
+    it("returns empty parseErrors on plain reply path", () => {
+      const result = resolveDecision(
+        { selectedAction: null, selectedProposalIds: [] },
+        [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      );
+      expect(result.parseErrors).toEqual([]);
+    });
   });
 
-  describe("proposal action path", () => {
-    it("passes allowed proposals through unchanged", () => {
+  describe("proposal action path — selection-by-ID (Slice 2)", () => {
+    it("resolves selectedProposalId to the canonical candidate payload", () => {
+      const map = makeCandidateMap([{ domain: "workout", proposal: WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
       const result = resolveDecision(
         {
           selectedAction: "adapt_workout_plan",
-          proposals: [WORKOUT_PROPOSAL],
+          selectedProposalIds: ["cand_workout_0"],
         },
         [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        map,
       );
       expect(result.proposals).toHaveLength(1);
       expect(result.proposals[0]?.intent).toBe("adapt_workout_plan");
     });
 
-    it("filters proposals outside the union allowlist", () => {
+    it("ignores an unknown selectedProposalId and records a parseError", () => {
+      const map = makeCandidateMap([{ domain: "workout", proposal: WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
       const result = resolveDecision(
         {
           selectedAction: "adapt_workout_plan",
-          proposals: [WORKOUT_PROPOSAL, NUTRITION_PROPOSAL],
+          selectedProposalIds: ["cand_workout_0", "cand_workout_99"],
         },
         [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        map,
+      );
+      // cand_workout_0 resolves; cand_workout_99 is unknown
+      expect(result.proposals).toHaveLength(1);
+      expect(result.parseErrors).toHaveLength(1);
+      expect(result.parseErrors[0]).toContain("cand_workout_99");
+    });
+
+    it("ignores a duplicate selectedProposalId and records a parseError", () => {
+      const map = makeCandidateMap([{ domain: "workout", proposal: WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
+      const result = resolveDecision(
+        {
+          selectedAction: "adapt_workout_plan",
+          selectedProposalIds: ["cand_workout_0", "cand_workout_0"],
+        },
+        [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        map,
+      );
+      // Deduplicated — only one proposal
+      expect(result.proposals).toHaveLength(1);
+      expect(result.parseErrors).toHaveLength(1);
+      expect(result.parseErrors[0]).toContain("Duplicate");
+    });
+
+    it("filters proposals outside the union allowlist", () => {
+      const map = new Map<string, Record<string, unknown>>([
+        ["cand_workout_0", WORKOUT_PROPOSAL as unknown as Record<string, unknown>],
+        ["cand_nutrition_0", NUTRITION_PROPOSAL as unknown as Record<string, unknown>],
+      ]);
+      const result = resolveDecision(
+        {
+          selectedAction: "adapt_workout_plan",
+          selectedProposalIds: ["cand_workout_0", "cand_nutrition_0"],
+        },
+        [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        map,
       );
       // Only workout proposal passes; nutrition is out of the workout domain allowlist.
       expect(result.proposals).toHaveLength(1);
@@ -134,27 +202,47 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
     });
 
     it("builds the union from all selected domains' allowedProposalIntents", () => {
+      const map = new Map<string, Record<string, unknown>>([
+        ["cand_workout_0", WORKOUT_PROPOSAL as unknown as Record<string, unknown>],
+        ["cand_nutrition_0", NUTRITION_PROPOSAL as unknown as Record<string, unknown>],
+      ]);
       const result = resolveDecision(
         {
           selectedAction: "adapt_workout_plan",
-          proposals: [WORKOUT_PROPOSAL, NUTRITION_PROPOSAL],
+          selectedProposalIds: ["cand_workout_0", "cand_nutrition_0"],
         },
         [
           makeDomainEntry("workout", ["adapt_workout_plan"]),
           makeDomainEntry("nutrition", ["log_nutrition_incident"]),
         ],
+        map,
       );
       // Both proposals are in the union allowlist (workout + nutrition domains).
       expect(result.proposals).toHaveLength(2);
     });
 
     it("returns no proposals when selectedDomains is empty", () => {
+      const map = makeCandidateMap([{ domain: "workout", proposal: WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
       const result = resolveDecision(
         {
           selectedAction: "adapt_workout_plan",
-          proposals: [WORKOUT_PROPOSAL],
+          selectedProposalIds: ["cand_workout_0"],
         },
         [],
+        map,
+      );
+      expect(result.proposals).toHaveLength(0);
+    });
+
+    it("returns no proposals when selectedProposalIds is empty", () => {
+      const map = makeCandidateMap([{ domain: "workout", proposal: WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
+      const result = resolveDecision(
+        {
+          selectedAction: "adapt_workout_plan",
+          selectedProposalIds: [],
+        },
+        [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        map,
       );
       expect(result.proposals).toHaveLength(0);
     });
@@ -192,16 +280,17 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
     };
 
     it("create_workout_plan candidate + matching allowlist + selectedAction produces non-empty proposals[]", () => {
-      // This is the core end-to-end happy path: workout domain emits a create_workout_plan
-      // candidate, the decision-maker selects create_workout_plan, and ActionResolver
-      // must NOT drop it. The result must have proposals.length >= 1.
+      // Core end-to-end happy path: workout domain emits a create_workout_plan
+      // candidate; decision-maker selects its id; ActionResolver must NOT drop it.
+      const map = makeCandidateMap([{ domain: "workout", proposal: CREATE_WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
       const result = resolveDecision(
         {
           selectedAction: "create_workout_plan",
-          proposals: [CREATE_WORKOUT_PROPOSAL],
+          selectedProposalIds: ["cand_workout_0"],
           reply: "Here is your 3-day strength plan!",
         },
         [makeDomainEntry("workout", ["create_workout_plan"])],
+        map,
       );
 
       // The key invariant: proposals must NOT be empty.
@@ -214,13 +303,15 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
     it("create_workout_plan proposal is filtered when it is NOT in the domain allowlist", () => {
       // Even if the decision-maker selects it, if the planner did NOT include
       // create_workout_plan in allowedProposalIntents, it must be dropped.
+      const map = makeCandidateMap([{ domain: "workout", proposal: CREATE_WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
       const result = resolveDecision(
         {
           selectedAction: "create_workout_plan",
-          proposals: [CREATE_WORKOUT_PROPOSAL],
+          selectedProposalIds: ["cand_workout_0"],
         },
         // allowlist is empty — no workout proposal intents allowed
         [makeDomainEntry("workout", [])],
+        map,
       );
 
       expect(result.proposals).toHaveLength(0);
@@ -229,14 +320,16 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
     it("workoutCalorieEstimate from the trusted workout LLM source is stamped onto the create_workout_plan proposal", () => {
       // End-to-end: trusted calorie estimate flows from the workout domain answer
       // through ActionResolver into the final proposal's proposedChanges.
+      const map = makeCandidateMap([{ domain: "workout", proposal: CREATE_WORKOUT_PROPOSAL as unknown as Record<string, unknown> }]);
       const result = service.resolveFinalDecisionOutput({
         finalDecision: {
           reply: "Here is your strength plan.",
           selectedAction: "create_workout_plan",
-          proposals: [CREATE_WORKOUT_PROPOSAL],
+          selectedProposalIds: ["cand_workout_0"],
           consentRequired: false,
         },
         selectedDomains: [makeDomainEntry("workout", ["create_workout_plan"])],
+        candidateMap: map,
         workoutCalorieEstimate: 420,
         workoutCaloriePerHourRate: 300,
       });
@@ -252,19 +345,25 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
   });
 
   describe("mutation safety", () => {
-    it("does not mutate the input proposals array", () => {
-      const proposals = [WORKOUT_PROPOSAL, NUTRITION_PROPOSAL];
-      const decision: FinalDecisionOutput = {
-        reply: "Reply.",
-        selectedAction: "adapt_workout_plan",
-        proposals,
-        consentRequired: false,
-      };
+    it("does not mutate the candidateMap entries (resolved proposal is a new object)", () => {
+      const originalProposal = { ...WORKOUT_PROPOSAL } as unknown as Record<string, unknown>;
+      const map = new Map<string, Record<string, unknown>>([["cand_workout_0", originalProposal]]);
+
       service.resolveFinalDecisionOutput({
-        finalDecision: decision,
+        finalDecision: {
+          reply: "Reply.",
+          selectedAction: "adapt_workout_plan",
+          selectedProposalIds: ["cand_workout_0"],
+          consentRequired: false,
+        },
         selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        candidateMap: map,
+        workoutCalorieEstimate: 200,
       });
-      expect(decision.proposals).toHaveLength(2);
+
+      // Original candidate in the map must not carry calorie fields — new object was created
+      const changes = (originalProposal["proposedChanges"] as Record<string, unknown>);
+      expect(changes["estimatedSessionCalorieBurn"]).toBeUndefined();
     });
   });
 
@@ -283,10 +382,11 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
         finalDecision: {
           reply: "A plain reply.",
           selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-          proposals: [],
+          selectedProposalIds: [],
           consentRequired: false,
         },
         selectedDomains: [makeDomainEntry("workout", [])],
+        candidateMap: new Map(),
       });
 
       // plain_reply produces no proposals — the result is a plain value object
@@ -297,151 +397,6 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Slice C5 — plain_reply guard (plan_request signal)
-  // ---------------------------------------------------------------------------
-
-  describe("plain_reply guard (Slice C5 — plan_request signal)", () => {
-    const CREATE_WORKOUT_PLAN_PROPOSAL = {
-      intent: "create_workout_plan" as const,
-      targetDomain: "workout" as const,
-      title: "3-Day Strength Plan",
-      reason: "User requested a plan.",
-      proposedChanges: {
-        title: "3-Day Strength Plan",
-        summary: "Full-body strength program.",
-        days: [
-          {
-            weekday: "monday" as const,
-            focus: "Upper body",
-            exercises: [{ name: "Bench Press", sets: 3, reps: "10" }],
-          },
-        ],
-        notes: [],
-      },
-    };
-
-    const ADAPT_WORKOUT_PLAN_PROPOSAL = {
-      intent: "adapt_workout_plan" as const,
-      targetDomain: "workout" as const,
-      title: "Updated plan",
-      reason: "User asked to update plan.",
-      proposedChanges: {
-        title: "Updated Strength Plan",
-        summary: "Slightly modified.",
-        days: [{ weekday: "tuesday" as const, focus: "Legs", exercises: [{ name: "Squat" }] }],
-        notes: [],
-      },
-    };
-
-    it("plan_request=true + plain_reply + valid candidate → overrides plain_reply with proposal action", () => {
-      const result = resolveDecision(
-        {
-          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
-          reply: "Here is your plan!",
-        },
-        [makeDomainEntry("workout", ["create_workout_plan"])],
-        true,
-      );
-
-      // Guard must fire: plain_reply overridden → proposal must appear in output
-      expect(result.proposals).toHaveLength(1);
-      expect(result.proposals[0]?.intent).toBe("create_workout_plan");
-    });
-
-    it("plan_request=true + selectedAction=null + valid candidate → overrides null with proposal action", () => {
-      const result = resolveDecision(
-        {
-          selectedAction: null,
-          proposals: [ADAPT_WORKOUT_PLAN_PROPOSAL],
-          reply: "Here is your updated plan.",
-        },
-        [makeDomainEntry("workout", ["adapt_workout_plan"])],
-        true,
-      );
-
-      expect(result.proposals).toHaveLength(1);
-      expect(result.proposals[0]?.intent).toBe("adapt_workout_plan");
-    });
-
-    it("plan_request=false + plain_reply + valid candidates → plain_reply is NOT overridden", () => {
-      // Guard must NOT fire when no plan_request signal. plain_reply still returns no proposals.
-      const result = resolveDecision(
-        {
-          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
-        },
-        [makeDomainEntry("workout", ["create_workout_plan"])],
-        false,
-      );
-
-      expect(result.proposals).toHaveLength(0);
-    });
-
-    it("plan_request undefined + plain_reply + valid candidates → plain_reply is NOT overridden", () => {
-      // Absence of the signal = false; guard must not fire.
-      const result = resolveDecision(
-        {
-          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
-        },
-        [makeDomainEntry("workout", ["create_workout_plan"])],
-        // planRequestSignal not passed
-      );
-
-      expect(result.proposals).toHaveLength(0);
-    });
-
-    it("plan_request=true + plain_reply + NO valid candidate → plain_reply is preserved (no fabrication)", () => {
-      // Guard fires but finds no valid candidates → plain_reply stays. No fabrication.
-      const result = resolveDecision(
-        {
-          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-          proposals: [],
-          reply: "I could not find a plan to propose.",
-        },
-        [makeDomainEntry("workout", ["create_workout_plan"])],
-        true,
-      );
-
-      expect(result.proposals).toHaveLength(0);
-      expect(result.reply).toBe("I could not find a plan to propose.");
-    });
-
-    it("plan_request=true + plain_reply + proposal not in allowlist → plain_reply is preserved", () => {
-      // Candidate exists but its intent is not in selectedDomains allowedProposalIntents.
-      // The guard must NOT fabricate by promoting a disallowed candidate.
-      const result = resolveDecision(
-        {
-          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
-        },
-        // allowedProposalIntents is empty → no intent is allowed
-        [makeDomainEntry("workout", [])],
-        true,
-      );
-
-      expect(result.proposals).toHaveLength(0);
-    });
-
-    it("plan_request=true + non-plain_reply action → guard is skipped (already a real action)", () => {
-      // Guard only activates when decision-maker returned plain_reply. When there is
-      // already a real selectedAction, the guard must not interfere.
-      const result = resolveDecision(
-        {
-          selectedAction: "create_workout_plan",
-          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
-        },
-        [makeDomainEntry("workout", ["create_workout_plan"])],
-        true,
-      );
-
-      // Normal path — proposals still pass through
-      expect(result.proposals).toHaveLength(1);
-      expect(result.proposals[0]?.intent).toBe("create_workout_plan");
-    });
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -479,14 +434,18 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
   };
 
   it("stamps estimatedSessionCalorieBurn and provenance=workout_llm onto workout proposals when workoutCalorieEstimate is provided", () => {
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", WORKOUT_PLAN_PROPOSAL as unknown as Record<string, unknown>],
+    ]);
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Here is your adjusted plan.",
         selectedAction: "adapt_workout_plan",
-        proposals: [WORKOUT_PLAN_PROPOSAL],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      candidateMap: map,
       workoutCalorieEstimate: 280,
     });
 
@@ -497,14 +456,18 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
   });
 
   it("does not stamp calorie fields when workoutCalorieEstimate is absent", () => {
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", WORKOUT_PLAN_PROPOSAL as unknown as Record<string, unknown>],
+    ]);
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Here is your adjusted plan.",
         selectedAction: "adapt_workout_plan",
-        proposals: [WORKOUT_PLAN_PROPOSAL],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      candidateMap: map,
       // No workoutCalorieEstimate passed
     });
 
@@ -515,17 +478,37 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
   });
 
   it("does not stamp calorie fields on non-workout proposals (nutrition proposal)", () => {
+    const NUTRITION_PROPOSAL_RECORD = {
+      intent: "log_nutrition_incident" as const,
+      targetDomain: "nutrition" as const,
+      title: "Log post-workout meal",
+      reason: "Nutrition logging is outside this workout turn.",
+      proposedChanges: {
+        incidentDateTime: "2026-05-26T18:00:00.000Z",
+        items: [{ name: "Protein shake", quantity: "1 serving", calories: 220 }],
+        estimatedCalories: 220,
+        estimatedMacros: { proteinGrams: 30, carbsGrams: 10, fatGrams: 4 },
+        confidence: "medium" as const,
+        provenance: { source: "text_estimate" as const, providerId: "chat_trigger" },
+        imageRefs: [],
+      },
+    };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", WORKOUT_PLAN_PROPOSAL as unknown as Record<string, unknown>],
+      ["cand_nutrition_0", NUTRITION_PROPOSAL_RECORD as unknown as Record<string, unknown>],
+    ]);
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Here is nutrition info.",
         selectedAction: "adapt_workout_plan",
-        proposals: [WORKOUT_PLAN_PROPOSAL, NUTRITION_PROPOSAL],
+        selectedProposalIds: ["cand_workout_0", "cand_nutrition_0"],
         consentRequired: false,
       },
       selectedDomains: [
         makeDomainEntry("workout", ["adapt_workout_plan"]),
         makeDomainEntry("nutrition", ["log_nutrition_incident"]),
       ],
+      candidateMap: map,
       workoutCalorieEstimate: 350,
     });
 
@@ -553,15 +536,18 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         notes: [],
       },
     };
-
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", createProposal as unknown as Record<string, unknown>],
+    ]);
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Here is a new plan.",
         selectedAction: "create_workout_plan",
-        proposals: [createProposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["create_workout_plan"])],
+      candidateMap: map,
       workoutCalorieEstimate: 420,
     });
 
@@ -581,15 +567,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
       ...WORKOUT_PLAN_PROPOSAL,
       proposedChanges: originalChanges,
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", proposal as unknown as Record<string, unknown>],
+    ]);
 
     service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Reply.",
         selectedAction: "adapt_workout_plan",
-        proposals: [proposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      candidateMap: map,
       workoutCalorieEstimate: 200,
     });
 
@@ -598,14 +588,18 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
   });
 
   it("plain_reply path never stamps calorie even when workoutCalorieEstimate is provided", () => {
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", WORKOUT_PLAN_PROPOSAL as unknown as Record<string, unknown>],
+    ]);
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Just a reply.",
         selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-        proposals: [WORKOUT_PLAN_PROPOSAL],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      candidateMap: map,
       workoutCalorieEstimate: 280,
     });
 
@@ -618,10 +612,11 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
       finalDecision: {
         reply: "Just a reply.",
         selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-        proposals: [],
+        selectedProposalIds: [],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", [])],
+      candidateMap: new Map(),
       workoutCalorieEstimate: 280,
     });
 
@@ -654,15 +649,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         sourceTrendObservationIds: [],
       },
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", fromProgressProposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Here is your adapted plan.",
         selectedAction: "adapt_workout_plan_from_progress",
-        proposals: [fromProgressProposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan_from_progress"])],
+      candidateMap: map,
       workoutCalorieEstimate: 310,
     });
 
@@ -698,15 +697,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         sourceTrendObservationIds: [],
       },
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", fromProgressProposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Adapted.",
         selectedAction: "adapt_workout_plan_from_progress",
-        proposals: [fromProgressProposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan_from_progress"])],
+      candidateMap: map,
       // No workoutCalorieEstimate
     });
 
@@ -726,7 +729,8 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
   it("scrubs fabricated calorie fields injected by the decision-maker into flat workout proposals", () => {
     // If the decision-maker (or a non-workout LLM) places calorie fields directly into
     // proposedChanges, ActionResolver must strip them unconditionally before returning.
-    // This ensures the source-exclusivity floor is enforced in code.
+    // In the selection-by-ID design, the decision-maker can no longer inject calorie data
+    // via proposals[], but the scrub step remains as a defense-in-depth measure.
     const fabricatedProposal = {
       intent: "adapt_workout_plan" as const,
       targetDomain: "workout" as const,
@@ -737,19 +741,23 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         summary: "Lighter session.",
         days: [{ weekday: "monday" as const, focus: "Recovery", exercises: [{ name: "Walk" }] }],
         notes: [],
-        estimatedSessionCalorieBurn: 9999,         // Injected by decision-maker — must be stripped
-        calorieEstimateProvenance: "workout_llm",  // Injected by decision-maker — must be stripped
+        estimatedSessionCalorieBurn: 9999,         // Injected by domain LLM — must be stripped
+        calorieEstimateProvenance: "workout_llm",  // Injected by domain LLM — must be stripped
       } as Record<string, unknown>,
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", fabricatedProposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Here is your plan.",
         selectedAction: "adapt_workout_plan",
-        proposals: [fabricatedProposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      candidateMap: map,
       // No trusted workoutCalorieEstimate — so the scrubbed fields must NOT be re-stamped.
     });
 
@@ -778,15 +786,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         sourceTrendObservationIds: [],
       } as Record<string, unknown>,
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", fabricatedFromProgressProposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Adapted.",
         selectedAction: "adapt_workout_plan_from_progress",
-        proposals: [fabricatedFromProgressProposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan_from_progress"])],
+      candidateMap: map,
       // No trusted workoutCalorieEstimate — fabricated fields must be removed.
     });
 
@@ -799,7 +811,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
   });
 
   it("trusted estimate replaces (not appends to) previously scrubbed fabricated value", () => {
-    // Even if the decision-maker injected a value, the trusted workout LLM estimate
+    // Even if the domain LLM injected a value, the trusted workout LLM estimate
     // must be the one that appears in the output — not both values.
     const fabricatedProposal = {
       intent: "adapt_workout_plan" as const,
@@ -815,15 +827,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — workout calorie e
         calorieEstimateProvenance: "workout_llm",
       } as Record<string, unknown>,
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", fabricatedProposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Plan updated.",
         selectedAction: "adapt_workout_plan",
-        proposals: [fabricatedProposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      candidateMap: map,
       workoutCalorieEstimate: 400, // Trusted value from workout domain LLM
     });
 
@@ -870,14 +886,18 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
   };
 
   it("stamps caloriePerHourRate from workoutCaloriePerHourRate onto flat workout proposals", () => {
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", FLAT_WORKOUT_PROPOSAL as unknown as Record<string, unknown>],
+    ]);
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Here is your adjusted plan.",
         selectedAction: "adapt_workout_plan",
-        proposals: [FLAT_WORKOUT_PROPOSAL],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      candidateMap: map,
       workoutCalorieEstimate: 300,
       workoutCaloriePerHourRate: 280,
     });
@@ -906,15 +926,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
         caloriePerHourRate: 450, // Valid-range fabricated value — must be scrubbed when no trusted rate
       } as Record<string, unknown>,
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", fabricatedProposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Plan.",
         selectedAction: "adapt_workout_plan",
-        proposals: [fabricatedProposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan"])],
+      candidateMap: map,
       // No workoutCaloriePerHourRate — fabricated value must be removed
     });
 
@@ -940,15 +964,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
         sourceTrendObservationIds: [],
       },
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", fromProgressProposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Adapted.",
         selectedAction: "adapt_workout_plan_from_progress",
-        proposals: [fromProgressProposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan_from_progress"])],
+      candidateMap: map,
       workoutCalorieEstimate: 310,
       workoutCaloriePerHourRate: 280,
     });
@@ -983,15 +1011,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — caloriePerHourRat
         sourceTrendObservationIds: [],
       } as Record<string, unknown>,
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", fabricatedFromProgress as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Adapted.",
         selectedAction: "adapt_workout_plan_from_progress",
-        proposals: [fabricatedFromProgress],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["adapt_workout_plan_from_progress"])],
+      candidateMap: map,
       // No workoutCaloriePerHourRate — fabricated value must be removed
     });
 
@@ -1043,15 +1075,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — log_workout_activ
         ratePerHour: 200,         // will be replaced by trusted rate
       },
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", proposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Logged!",
         selectedAction: "log_workout_activity",
-        proposals: [proposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      candidateMap: map,
       workoutCalorieEstimate: 450,
       workoutCaloriePerHourRate: 300,
     });
@@ -1076,15 +1112,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — log_workout_activ
         ratePerHour: 450, // Valid-range fabricated rate — must be scrubbed when no trusted rate
       },
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", proposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Logged!",
         selectedAction: "log_workout_activity",
-        proposals: [proposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      candidateMap: map,
       // No trusted rate or estimate — fabricated ratePerHour must be stripped;
       // the payload .refine() will reject the proposal downstream (fail-closed).
     });
@@ -1108,15 +1148,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — log_workout_activ
         ratePerHour: 450, // Valid-range fabricated rate — must be scrubbed
       },
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", proposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Logged!",
         selectedAction: "log_workout_activity",
-        proposals: [proposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      candidateMap: map,
       workoutCalorieEstimate: 405, // Only trusted estimate, no rate
     });
 
@@ -1139,15 +1183,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — log_workout_activ
         ratePerHour: 450,       // will be scrubbed; trusted rate re-stamped
       },
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", proposal as unknown as Record<string, unknown>],
+    ]);
 
     const result = service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Logged!",
         selectedAction: "log_workout_activity",
-        proposals: [proposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      candidateMap: map,
       workoutCaloriePerHourRate: 280, // Only trusted rate, no estimate
     });
 
@@ -1170,15 +1218,19 @@ describe("ActionResolverService.resolveFinalDecisionOutput — log_workout_activ
       reason: "User reported activity.",
       proposedChanges: originalChanges,
     };
+    const map = new Map<string, Record<string, unknown>>([
+      ["cand_workout_0", proposal as unknown as Record<string, unknown>],
+    ]);
 
     service.resolveFinalDecisionOutput({
       finalDecision: {
         reply: "Logged!",
         selectedAction: "log_workout_activity",
-        proposals: [proposal],
+        selectedProposalIds: ["cand_workout_0"],
         consentRequired: false,
       },
       selectedDomains: [makeDomainEntry("workout", ["log_workout_activity"])],
+      candidateMap: map,
       workoutCalorieEstimate: 500,
       workoutCaloriePerHourRate: 333,
     });

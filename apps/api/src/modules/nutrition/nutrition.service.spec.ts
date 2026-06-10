@@ -964,6 +964,99 @@ describe("NutritionService — adjust_nutrition_plan with swaps (C4)", () => {
   });
 });
 
+// ─── DB invariant parity: active-plan uniqueness + cross-plan revision ────────
+
+describe("NutritionService — DB invariant parity", () => {
+  it("routes to appendRevision when an active plan already exists (prevents duplicate active plan at service layer)", async () => {
+    // The DB unique partial index enforces this at the DB level;
+    // the service must route to appendRevision (not createPlanWithRevision)
+    // when findActivePlanByUserId returns an existing plan — avoiding the constraint entirely.
+    let createCalled = false;
+    let appendCalled = false;
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({ id: "plan-existing" }),
+        appendRevision: async () => {
+          appendCalled = true;
+          return { id: "rev-append-guard" };
+        },
+        createPlanWithRevision: async () => {
+          createCalled = true;
+          return { revision: { id: "rev-create-guard" } };
+        },
+      }) as never,
+      usersService as never,
+      groceryDerivationService,
+    );
+
+    await service.applyNutritionPlanProposal(
+      userId,
+      payload,
+      "Adjust existing plan.",
+      "create_nutrition_plan",
+    );
+
+    // Service found an existing plan → must use appendRevision, never createPlanWithRevision.
+    expect(appendCalled).toBe(true);
+    expect(createCalled).toBe(false);
+  });
+
+  it("propagates a DB unique-violation error from createPlanWithRevision when the DB constraint fires (race condition path)", async () => {
+    // Simulate the scenario where two concurrent requests both see no active plan,
+    // then one of them hits the DB unique constraint when inserting.
+    const dbUniqueError = Object.assign(new Error("duplicate key"), { code: "23505" });
+
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => null,
+        createPlanWithRevision: async () => {
+          throw dbUniqueError;
+        },
+      }) as never,
+      usersService as never,
+      groceryDerivationService,
+    );
+
+    await expect(
+      service.applyNutritionPlanProposal(
+        userId,
+        payload,
+        "Race condition plan.",
+        "create_nutrition_plan",
+      ),
+    ).rejects.toThrow("duplicate key");
+  });
+
+  it("rejects an attempt to set activeRevisionId to a revision belonging to a different plan at the service layer (findActiveRevisionByPlanId returns null)", async () => {
+    // The composite FK (id, active_revision_id) enforces this at the DB level.
+    // At the service layer, findActiveRevisionByPlanId scopes the lookup to the
+    // same plan — so cross-plan revision IDs are simply not found and treated as absent.
+    const service = new NutritionService(
+      createRepositoryMock({
+        findActivePlanByUserId: async () => ({
+          id: "plan-A",
+          userId,
+          activeRevisionId: "rev-from-plan-B",
+          status: "active",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+        // Cross-plan: revision belongs to plan-B, not plan-A — returns null.
+        findActiveRevisionByPlanId: async () => null,
+      }) as never,
+      usersService as never,
+      groceryDerivationService,
+    );
+
+    const response = await service.getCurrentActivePlan(auth as never);
+
+    // Plan exists but the active revision is not found for this plan.
+    expect(response.plan?.id).toBe("plan-A");
+    expect(response.activeRevision).toBeNull();
+  });
+});
+
 // ─── C1: getMealCaloriesBreakdown ──────────────────────────────────────────
 
 const mealPayloadWithCalories = {

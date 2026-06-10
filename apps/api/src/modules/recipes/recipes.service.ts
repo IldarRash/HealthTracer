@@ -25,6 +25,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
@@ -49,9 +50,17 @@ import type { RecipeCatalogProvider } from "./recipe-catalog-provider.js";
 import { RECIPE_CATALOG_PROVIDER } from "./recipe-catalog.tokens.js";
 
 const GENERATED_RECOMMENDATION_LIMIT = 5;
+/** After an empty or failed provider fetch, skip re-hydration on browse for this window. */
+const BROWSE_HYDRATION_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 @Injectable()
 export class RecipesService {
+  private readonly logger = new Logger(RecipesService.name);
+  /** In-flight provider hydration promise, used as a single-entry latch. */
+  private catalogHydrationPromise: Promise<void> | null = null;
+  /** Timestamp of the last hydration attempt that imported zero rows (or failed). */
+  private lastEmptyHydrationAt: number | null = null;
+
   constructor(
     private readonly recipesRepository: RecipesRepository,
     private readonly nutritionRepository: NutritionRepository,
@@ -64,6 +73,16 @@ export class RecipesService {
   ) {}
 
   async listRecipes(filters: RecipeListQuery): Promise<RecipeListResponse> {
+    // Hydrate provider catalog on browse when the catalog appears empty (zero
+    // active provider recipes). This keeps the browse path consistent with the
+    // recommendations path. Lazy + idempotent: the in-flight latch prevents
+    // concurrent browse requests from issuing duplicate imports.
+    const providerRows = await this.recipesRepository.countActiveProviderRecipes();
+
+    if (providerRows === 0 && !this.isWithinBrowseHydrationCooldown()) {
+      await this.ensureProviderCatalogLoaded();
+    }
+
     const rows = await this.recipesRepository.listActiveRecipes(filters);
     let recipes = rows.map(toRecipe);
 
@@ -479,7 +498,19 @@ export class RecipesService {
     });
   }
 
-  private async ensureProviderCatalogLoaded(): Promise<void> {
+  private ensureProviderCatalogLoaded(): Promise<void> {
+    if (this.catalogHydrationPromise) {
+      return this.catalogHydrationPromise;
+    }
+
+    this.catalogHydrationPromise = this.runProviderCatalogHydration().finally(() => {
+      this.catalogHydrationPromise = null;
+    });
+
+    return this.catalogHydrationPromise;
+  }
+
+  private async runProviderCatalogHydration(): Promise<void> {
     try {
       const drafts = await this.recipeCatalogProvider.fetchByGenericCategories(
         GENERIC_RECIPE_CATALOG_CATEGORIES,
@@ -487,10 +518,26 @@ export class RecipesService {
 
       if (drafts.length > 0) {
         await this.recipesRepository.upsertProviderRecipes(drafts);
+      } else {
+        // Provider returned no rows — record cooldown so sequential browses skip re-fetch.
+        this.lastEmptyHydrationAt = Date.now();
       }
-    } catch {
-      // Fall back to the local seeded catalog when the external provider is unavailable.
+    } catch (error) {
+      // Degrade gracefully to the seeded-only catalog; log provider name + message only.
+      this.logger.warn(
+        `Recipe catalog provider "${this.recipeCatalogProvider.providerName}" hydration failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // Record cooldown so sequential browses skip re-fetch while the provider is down.
+      this.lastEmptyHydrationAt = Date.now();
     }
+  }
+
+  private isWithinBrowseHydrationCooldown(): boolean {
+    if (this.lastEmptyHydrationAt === null) {
+      return false;
+    }
+
+    return Date.now() - this.lastEmptyHydrationAt < BROWSE_HYDRATION_COOLDOWN_MS;
   }
 
   private async resolveActiveNutritionContext(userId: string) {

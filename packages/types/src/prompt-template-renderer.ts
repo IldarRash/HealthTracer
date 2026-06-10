@@ -63,6 +63,16 @@ export type CompiledPromptTemplates = {
     userMessage: string;
     domainOutputsJson: string;
     actionVariantCatalogJson: string;
+    /**
+     * JSON array of CandidateProposalSummary objects (id + intent + title + reason)
+     * that the decision-maker can pick IDs from. "[]" when no candidates are available.
+     */
+    candidateProposalSummariesJson: string;
+    /**
+     * JSON array of recent messages (role + content) for conversation context.
+     * Capped at 6 messages / 4000 chars each by the orchestrator. "[]" when absent.
+     */
+    recentMessagesJson: string;
     safetyFlags: string;
     safetyConstraints: string;
     /** Resolved response language (e.g. "en", "ru"). Empty string = fall back to message detection. */

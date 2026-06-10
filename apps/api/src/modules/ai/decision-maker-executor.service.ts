@@ -36,9 +36,10 @@
  *     It is a pure synthesis step: domain outputs in, final decision out.
  */
 
-import type { CoachAiProvider } from "@health/ai";
+import type { CoachAiProvider, ProviderUsage } from "@health/ai";
 import type {
   AgentSafetyFlag,
+  CandidateProposalSummary,
   DomainAnswer,
   FinalDecisionOutput,
   FinalDecisionRequest,
@@ -76,6 +77,13 @@ export interface DecisionMakerInput {
   actionVariantCatalog: readonly ActionVariant[];
 
   /**
+   * Candidate proposal summaries (id + intent + title + reason) for the
+   * decision-maker to select from. Built by the orchestrator from domain results.
+   * The decision-maker picks IDs from this list — it never fabricates payloads.
+   */
+  candidateProposalSummaries: readonly CandidateProposalSummary[];
+
+  /**
    * Safety flags from the router and domain steps, forwarded to the LLM as
    * safety context. The decision-maker must not emit diagnosis or treatment.
    */
@@ -95,6 +103,14 @@ export interface DecisionMakerInput {
    * Threaded into the final decision request so the decision-maker writes in the correct language.
    */
   responseLanguage?: string | null;
+  /**
+   * Recent messages from the conversation, capped at 6 / 4000 chars each (Change 2).
+   * Gives the decision-maker conversation history context.
+   */
+  recentMessages?: ReadonlyArray<{
+    role: "user" | "assistant" | "system";
+    content: string;
+  }>;
 }
 
 export interface DecisionMakerResult {
@@ -114,6 +130,12 @@ export interface DecisionMakerResult {
    * Reason(s) for degradation when degraded=true.
    */
   degradedReasons: string[];
+
+  /**
+   * Token + latency usage for the decision-maker LLM call.
+   * Absent on fallback paths where the provider was never called successfully.
+   */
+  usage?: ProviderUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,18 +176,24 @@ export class DecisionMakerExecutorService {
     const request: FinalDecisionRequest = {
       userMessage: input.userMessage,
       domainOutputs: [...input.domainOutputs],
+      candidateProposalSummaries: [...input.candidateProposalSummaries],
       // ActionVariant satisfies the finalDecisionRequestSchema.actionVariantCatalog
       // element shape; the cast resolves the readonly-array type mismatch.
       actionVariantCatalog: input.actionVariantCatalog as ActionVariant[],
       safetyFlags: [...input.safetyFlags],
       safetyConstraints: [...input.safetyConstraints],
+      recentMessages: input.recentMessages != null ? [...input.recentMessages] : [],
       ...(input.responseLanguage != null ? { responseLanguage: input.responseLanguage } : {}),
     };
 
     let rawOutput: unknown;
+    let providerUsage: ProviderUsage | undefined;
 
     try {
-      rawOutput = await input.provider.generateFinalDecision(request);
+      // Provider returns ProviderCallResult; unwrap the output for validation.
+      const result = await input.provider.generateFinalDecision(request);
+      rawOutput = result.output;
+      providerUsage = result.usage;
     } catch (providerError) {
       const message =
         providerError instanceof Error
@@ -205,6 +233,7 @@ export class DecisionMakerExecutorService {
       output: parsed.data,
       degraded: false,
       degradedReasons: [],
+      ...(providerUsage !== undefined ? { usage: providerUsage } : {}),
     };
   }
 
