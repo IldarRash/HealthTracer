@@ -70,7 +70,8 @@ Create a new service from the GitHub repo (or empty service + connect repo).
 | `OPENAI_API_KEY`         | Railway secret                                      | Required when `AI_COACH_PROVIDER=openai`   |
 | `OPENAI_MODEL`           | `gpt-4o-mini` (or chosen model)                     | Optional; defaults in code                 |
 | `DOCUMENT_STORAGE_PATH`  | `/app/.data/documents`                              | Local container path; see storage note     |
-| `CORS_ORIGINS`           | `https://<web-service-public-domain>`               | Optional; Safari needs explicit origins for Bearer auth |
+| `CORS_ORIGINS`           | `https://<web-service-public-domain>`               | **Required in production.** API startup fails closed (no CORS) when unset. Safari also requires explicit origins for Bearer auth. |
+| `STORAGE_ALLOW_LOCAL_IN_PRODUCTION` | `true`                               | **Required** when using local-volume document/attachment storage on Railway. Omit or set to `false` when object storage is used instead. |
 | `STRIPE_SECRET_KEY`      | Stripe → Developers → API keys → **Secret key**     | Billing. `sk_live_...` (prod) / `sk_test_...` (test). Without it checkout/portal fail closed |
 | `STRIPE_PRICE_PRO`       | Stripe → Products → Pro price → **Price ID**        | Billing. `price_...` (the recurring price, **not** the `prod_...` id) |
 | `STRIPE_WEBHOOK_SECRET`  | Stripe → Developers → Webhooks → endpoint signing secret | Billing. `whsec_...`; see "Stripe billing setup" below |
@@ -175,8 +176,8 @@ The Web Dockerfile uses Next.js `output: "standalone"`. The container runs `node
 
 - Assign Railway public domains (or custom domains) to both services.
 - Set `NEXT_PUBLIC_API_BASE_URL` on `health-web` to the API public URL (no trailing slash), then **rebuild** the web service. The web app calls the API through a same-origin `/api-proxy` route handler proxy, which avoids Safari cross-origin `Authorization` issues.
-- Set `CORS_ORIGINS` on `health-api` to the web public URL (comma-separated if you have staging + production).
-- The API reflects the request `Origin` by default instead of returning `Access-Control-Allow-Origin: *`. This is required for Safari on iOS, which blocks cross-origin `fetch()` calls that send `Authorization: Bearer ...` when the API responds with a wildcard origin.
+- Set `CORS_ORIGINS` on `health-api` to the web public URL (comma-separated if you have staging + production). This variable is **required in production** — the API fails closed (no CORS at all) when it is unset.
+- The API allows only the origins listed in `CORS_ORIGINS`. This is required for Safari on iOS, which blocks cross-origin `fetch()` calls that send `Authorization: Bearer ...` when the API responds with a wildcard origin.
 - If mobile shows `... could not be loaded` while `GET /health` works in the phone browser, check both `NEXT_PUBLIC_API_BASE_URL` (web rebuild) and `CORS_ORIGINS` (api redeploy).
 
 ## Document storage caveat
@@ -274,6 +275,8 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 - [ ] Web env vars set (`NEXT_PUBLIC_API_BASE_URL`, Clerk keys)
 - [ ] Web app loads on public URL
 - [ ] Authenticated flows reach API; request ids appear in both `health-web` and `health-api` logs
+- [ ] `CORS_ORIGINS` set on `health-api` to the web public URL (required — API fails closed without it)
+- [ ] `STORAGE_ALLOW_LOCAL_IN_PRODUCTION=true` set on `health-api` when using Railway local-volume storage
 - [ ] Document upload expectations documented (ephemeral storage unless volume added)
 
 ## Troubleshooting
@@ -282,7 +285,7 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 |---------------------------------|---------------------------------------------------|
 | API crash on start              | Missing `DATABASE_URL` or invalid Clerk JWKS URL  |
 | Web shows wrong API             | Stale build; `NEXT_PUBLIC_API_BASE_URL` needs rebuild |
-| Mobile Safari: content unavailable, desktop OK | API CORS wildcard or stale web build; set `CORS_ORIGINS`, rebuild web |
+| Mobile Safari: content unavailable, desktop OK | `CORS_ORIGINS` unset or missing the web origin; set `CORS_ORIGINS` on `health-api` and rebuild web |
 | 502 / connection refused        | Service not listening on `PORT` or health check mismatch |
 | `/health` OK, `/health/ready` fails | API process is live, but DB or required config is not ready |
 | UI shows `Request ID: ...`      | Search web and API logs for the id to trace the failing request |
