@@ -63,6 +63,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
   function resolveDecision(
     finalDecision: Partial<FinalDecisionOutput>,
     selectedDomains: DomainFanoutEntry[],
+    planRequestSignal?: boolean,
   ) {
     const input: ActionResolverFinalDecisionInput = {
       finalDecision: {
@@ -73,6 +74,7 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
         ...finalDecision,
       },
       selectedDomains,
+      planRequestSignal,
     };
 
     return service.resolveFinalDecisionOutput(input);
@@ -292,6 +294,152 @@ describe("ActionResolverService.resolveFinalDecisionOutput", () => {
       expect(result.consentRequired).toBe(false);
       expect(result.proposals).toHaveLength(0);
       expect(result.reply).toBe("A plain reply.");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Slice C5 — plain_reply guard (plan_request signal)
+  // ---------------------------------------------------------------------------
+
+  describe("plain_reply guard (Slice C5 — plan_request signal)", () => {
+    const CREATE_WORKOUT_PLAN_PROPOSAL = {
+      intent: "create_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "3-Day Strength Plan",
+      reason: "User requested a plan.",
+      proposedChanges: {
+        title: "3-Day Strength Plan",
+        summary: "Full-body strength program.",
+        days: [
+          {
+            weekday: "monday" as const,
+            focus: "Upper body",
+            exercises: [{ name: "Bench Press", sets: 3, reps: "10" }],
+          },
+        ],
+        notes: [],
+      },
+    };
+
+    const ADAPT_WORKOUT_PLAN_PROPOSAL = {
+      intent: "adapt_workout_plan" as const,
+      targetDomain: "workout" as const,
+      title: "Updated plan",
+      reason: "User asked to update plan.",
+      proposedChanges: {
+        title: "Updated Strength Plan",
+        summary: "Slightly modified.",
+        days: [{ weekday: "tuesday" as const, focus: "Legs", exercises: [{ name: "Squat" }] }],
+        notes: [],
+      },
+    };
+
+    it("plan_request=true + plain_reply + valid candidate → overrides plain_reply with proposal action", () => {
+      const result = resolveDecision(
+        {
+          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
+          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
+          reply: "Here is your plan!",
+        },
+        [makeDomainEntry("workout", ["create_workout_plan"])],
+        true,
+      );
+
+      // Guard must fire: plain_reply overridden → proposal must appear in output
+      expect(result.proposals).toHaveLength(1);
+      expect(result.proposals[0]?.intent).toBe("create_workout_plan");
+    });
+
+    it("plan_request=true + selectedAction=null + valid candidate → overrides null with proposal action", () => {
+      const result = resolveDecision(
+        {
+          selectedAction: null,
+          proposals: [ADAPT_WORKOUT_PLAN_PROPOSAL],
+          reply: "Here is your updated plan.",
+        },
+        [makeDomainEntry("workout", ["adapt_workout_plan"])],
+        true,
+      );
+
+      expect(result.proposals).toHaveLength(1);
+      expect(result.proposals[0]?.intent).toBe("adapt_workout_plan");
+    });
+
+    it("plan_request=false + plain_reply + valid candidates → plain_reply is NOT overridden", () => {
+      // Guard must NOT fire when no plan_request signal. plain_reply still returns no proposals.
+      const result = resolveDecision(
+        {
+          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
+          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
+        },
+        [makeDomainEntry("workout", ["create_workout_plan"])],
+        false,
+      );
+
+      expect(result.proposals).toHaveLength(0);
+    });
+
+    it("plan_request undefined + plain_reply + valid candidates → plain_reply is NOT overridden", () => {
+      // Absence of the signal = false; guard must not fire.
+      const result = resolveDecision(
+        {
+          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
+          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
+        },
+        [makeDomainEntry("workout", ["create_workout_plan"])],
+        // planRequestSignal not passed
+      );
+
+      expect(result.proposals).toHaveLength(0);
+    });
+
+    it("plan_request=true + plain_reply + NO valid candidate → plain_reply is preserved (no fabrication)", () => {
+      // Guard fires but finds no valid candidates → plain_reply stays. No fabrication.
+      const result = resolveDecision(
+        {
+          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
+          proposals: [],
+          reply: "I could not find a plan to propose.",
+        },
+        [makeDomainEntry("workout", ["create_workout_plan"])],
+        true,
+      );
+
+      expect(result.proposals).toHaveLength(0);
+      expect(result.reply).toBe("I could not find a plan to propose.");
+    });
+
+    it("plan_request=true + plain_reply + proposal not in allowlist → plain_reply is preserved", () => {
+      // Candidate exists but its intent is not in selectedDomains allowedProposalIntents.
+      // The guard must NOT fabricate by promoting a disallowed candidate.
+      const result = resolveDecision(
+        {
+          selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
+          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
+        },
+        // allowedProposalIntents is empty → no intent is allowed
+        [makeDomainEntry("workout", [])],
+        true,
+      );
+
+      expect(result.proposals).toHaveLength(0);
+    });
+
+    it("plan_request=true + non-plain_reply action → guard is skipped (already a real action)", () => {
+      // Guard only activates when decision-maker returned plain_reply. When there is
+      // already a real selectedAction, the guard must not interfere.
+      const result = resolveDecision(
+        {
+          selectedAction: "create_workout_plan",
+          proposals: [CREATE_WORKOUT_PLAN_PROPOSAL],
+        },
+        [makeDomainEntry("workout", ["create_workout_plan"])],
+        true,
+      );
+
+      // Normal path — proposals still pass through
+      expect(result.proposals).toHaveLength(1);
+      expect(result.proposals[0]?.intent).toBe("create_workout_plan");
     });
   });
 });

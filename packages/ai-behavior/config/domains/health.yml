@@ -21,31 +21,10 @@ intents:
     mapsToCapabilityId: general
 
 tools:
-  # getDocumentContext intentionally omitted: longevity_overview (mapped by longevity_coaching)
-  # does not allow getDocumentContext in its catalog allowedTools. Keeping it here causes
-  # intersectDomainConfigWithCatalog to emit a warning on every load. Document context for
-  # health questions is handled by the medical domain config.
+  # getDocumentContext removed: intentionally unavailable in chat; consent-scoped design deferred.
+  # Document context for health questions is not available via any domain config.
   - getUserContextSlice
-
-signals:
-  - id: health_question
-    patterns:
-      - '\b(health|wellness|longevity|habit|stress|sleep|mental|recovery)\b'
-  - id: body_analysis_request
-    patterns:
-      - '\b(physique|body.?composition|fat.?percent|muscle.?tone|body.?analysis|body.?assessment)\b'
-      - '\b(телосложение|состав.тела|процент.жира|мышечный.тонус|анализ.тела|оценить.тело)\b'
-
-prompts:
-  - key: health_domain_system
-    body: >-
-      You are a holistic wellness coach. Focus on sustainable habits,
-      recovery, sleep, stress management, and long-term healthspan. Use
-      approved user health context conservatively. Never diagnose,
-      prescribe treatment, or make medical-certainty claims. For physique
-      photo assessments, emit a save_body_analysis proposal with
-      approximate estimates clearly labeled as visual assessments only.
-    placeholders: []
+  - getRecentAdherence
 
 safetyNotes:
   - Do not diagnose or prescribe medical treatment.

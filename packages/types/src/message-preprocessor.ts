@@ -36,6 +36,12 @@ export const messagePreprocessorSimpleSignalsSchema = z.object({
   pain: z.boolean(),
   document: z.boolean(),
   attachment: z.boolean(),
+  /**
+   * True when the user explicitly requests creation or modification of a workout
+   * or nutrition plan (EN + RU). Used by ActionResolver to guard against the
+   * decision-maker returning plain_reply when a valid proposal candidate exists.
+   */
+  plan_request: z.boolean(),
 });
 
 export type MessagePreprocessorSimpleSignals = z.infer<
@@ -51,6 +57,7 @@ export const EMPTY_MESSAGE_PREPROCESSOR_SIMPLE_SIGNALS: MessagePreprocessorSimpl
   pain: false,
   document: false,
   attachment: false,
+  plan_request: false,
 };
 
 export const messagePreprocessorLanguageCodeSchema = z
@@ -207,6 +214,33 @@ const SIGNAL_PATTERNS: ReadonlyArray<{
       /загруз/i,
       /\bфото\b/i,
       /\bфайл\b/i,
+    ],
+  },
+  {
+    // Explicit plan creation or modification request (EN + RU).
+    // Used by ActionResolver to guard against plain_reply when a valid proposal
+    // candidate exists. Deliberately narrow — only clear create/adapt/modify verbs
+    // paired with plan/program/workout/nutrition/training nouns.
+    key: "plan_request",
+    patterns: [
+      // English: create/make/build/generate a plan/program
+      /\b(?:create|make|build|generate|write|give me|make me)\s+(?:a\s+|my\s+|me\s+a\s+)?(?:workout|training|nutrition|meal|fitness|diet)\s+plan\b/i,
+      /\b(?:create|make|build|generate)\s+(?:a\s+)?(?:workout|training|nutrition|meal|fitness)\s+program\b/i,
+      /\b(?:create|make|build|give me)\s+(?:a\s+)?plan\b/i,
+      // English: update/change/modify/adjust/adapt existing plan
+      /\b(?:update|change|modify|adjust|adapt|revise|redo)\s+(?:my\s+)?(?:workout|training|nutrition|meal|fitness|diet)?\s*plan\b/i,
+      /\b(?:update|change|modify|adjust|adapt)\s+(?:my\s+)?(?:workout|training|nutrition)\b/i,
+      // Russian: составь/сделай/создай план/программу
+      /составь\s+(?:мне\s+)?(?:план|программу|тренировк|питани|рацион)/i,
+      /сделай\s+(?:мне\s+)?(?:план|программу|тренировк|питани|рацион)/i,
+      /создай\s+(?:мне\s+)?(?:план|программу|тренировк|питани|рацион)/i,
+      /напиши\s+(?:мне\s+)?(?:план|программу|тренировк|питани|рацион)/i,
+      // Russian: обнови/измени/поменяй/скорректируй план/тренировку/питание
+      /обнови\s+(?:мой\s+|мою\s+)?(?:план|программу|тренировк|питани|рацион)/i,
+      /измени\s+(?:мой\s+|мою\s+)?(?:план|программу|тренировк|питани|рацион)/i,
+      /поменяй\s+(?:мою\s+|мой\s+)?(?:план|программу|тренировк|питани|рацион)/i,
+      /скорректируй\s+(?:мою\s+|мой\s+)?(?:план|программу|тренировк|питани|рацион)/i,
+      /подправь\s+(?:мой\s+|мою\s+)?(?:план|программу|тренировк|питани|рацион)/i,
     ],
   },
 ];

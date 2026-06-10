@@ -22,8 +22,6 @@ function makeMinimalWorkoutConfig(overrides?: Partial<DomainConfig>): DomainConf
       },
     ],
     tools: ["getUserContextSlice"],
-    signals: [{ id: "fatigue", patterns: ["tired"] }],
-    prompts: [{ key: "system", body: "You are a coach. Never diagnose." }],
     safetyNotes: ["No diagnosis."],
     ...overrides,
   };
@@ -46,7 +44,7 @@ describe("domainConfigSchema", () => {
   });
 
   it("parses a valid nutrition config", () => {
-    const raw: DomainConfig = {
+    const raw = {
       domain: "nutrition",
       llmId: "nutrition_coach",
       intents: [
@@ -57,8 +55,6 @@ describe("domainConfigSchema", () => {
         },
       ],
       tools: ["getUserContextSlice", "getWeeklyProgressContext"],
-      signals: [],
-      prompts: [],
       safetyNotes: ["Estimates are approximate."],
     };
 
@@ -67,30 +63,8 @@ describe("domainConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("parses a valid medical config", () => {
-    const raw: DomainConfig = {
-      domain: "medical",
-      llmId: "health_coach",
-      intents: [
-        {
-          id: "review_health_context",
-          description: "Wellness coaching from consent-approved summaries.",
-          mapsToCapabilityId: "ask_health_context",
-        },
-      ],
-      tools: ["getDocumentContext"],
-      signals: [],
-      prompts: [],
-      safetyNotes: ["Never diagnose."],
-    };
-
-    const result = domainConfigSchema.safeParse(raw);
-
-    expect(result.success).toBe(true);
-  });
-
   it("parses a valid health config", () => {
-    const raw: DomainConfig = {
+    const raw = {
       domain: "health",
       llmId: "health_coach",
       intents: [
@@ -101,8 +75,6 @@ describe("domainConfigSchema", () => {
         },
       ],
       tools: ["getUserContextSlice"],
-      signals: [],
-      prompts: [],
       safetyNotes: ["Conservative language only."],
     };
 
@@ -111,11 +83,11 @@ describe("domainConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("applies array defaults when arrays are missing", () => {
+  it("applies array defaults when optional arrays are missing", () => {
     const raw = {
       domain: "workout",
       llmId: "workout_coach",
-      // intents/tools/signals/prompts/safetyNotes omitted — all have defaults
+      // intents/tools/safetyNotes omitted — all have defaults
     };
 
     const result = domainConfigSchema.safeParse(raw);
@@ -124,10 +96,30 @@ describe("domainConfigSchema", () => {
     if (result.success) {
       expect(result.data.intents).toEqual([]);
       expect(result.data.tools).toEqual([]);
-      expect(result.data.signals).toEqual([]);
-      expect(result.data.prompts).toEqual([]);
       expect(result.data.safetyNotes).toEqual([]);
     }
+  });
+
+  it("rejects signals[] as an unknown key (.strict())", () => {
+    const raw = {
+      ...makeMinimalWorkoutConfig(),
+      signals: [{ id: "fatigue", patterns: ["tired"] }],
+    };
+
+    const result = domainConfigSchema.safeParse(raw);
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects prompts[] as an unknown key (.strict())", () => {
+    const raw = {
+      ...makeMinimalWorkoutConfig(),
+      prompts: [{ key: "system", body: "You are a coach." }],
+    };
+
+    const result = domainConfigSchema.safeParse(raw);
+
+    expect(result.success).toBe(false);
   });
 
   // -------------------------------------------------------------------------
@@ -228,6 +220,15 @@ describe("domainConfigSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("rejects getDocumentContext as an invalid tool name (removed from enum)", () => {
+    const result = domainConfigSchema.safeParse({
+      ...makeMinimalWorkoutConfig(),
+      tools: ["getDocumentContext"],
+    });
+
+    expect(result.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -235,7 +236,7 @@ describe("domainConfigSchema", () => {
 // ---------------------------------------------------------------------------
 
 describe("DEFAULT_DOMAIN_CONFIGS", () => {
-  const domains = ["workout", "nutrition", "medical", "health"] as const;
+  const domains = ["workout", "nutrition", "health"] as const;
 
   for (const domain of domains) {
     it(`default config for '${domain}' passes the schema`, () => {
@@ -256,6 +257,27 @@ describe("DEFAULT_DOMAIN_CONFIGS", () => {
       expect(DEFAULT_DOMAIN_CONFIGS[domain].safetyNotes.length).toBeGreaterThan(0);
     });
   }
+
+  it("no domain default config contains getDocumentContext", () => {
+    for (const domain of domains) {
+      const config = DEFAULT_DOMAIN_CONFIGS[domain];
+      expect(config.tools).not.toContain("getDocumentContext");
+    }
+  });
+
+  it("'medical' domain no longer exists in DEFAULT_DOMAIN_CONFIGS or domainConfigDomainSchema", () => {
+    // After removal: medical was merged into health. No medical key should be present.
+    expect(Object.keys(DEFAULT_DOMAIN_CONFIGS)).not.toContain("medical");
+
+    const parsed = domainConfigSchema.safeParse({
+      domain: "medical",
+      llmId: "health_coach",
+      intents: [],
+      tools: [],
+      safetyNotes: [],
+    });
+    expect(parsed.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -300,26 +322,9 @@ describe("intersectDomainConfigWithCatalog", () => {
 
   it("drops an intent whose mapsToCapabilityId is NOT in the catalog and records a warning", () => {
     const warnings: string[] = [];
-    const config: DomainConfig = {
-      ...makeMinimalWorkoutConfig(),
-      intents: [
-        {
-          id: "bad_intent",
-          description: "This maps to a fake capability.",
-          // Cast to get past TS; tests the runtime catalog check
-          mapsToCapabilityId: "adjust_workout",
-        },
-        {
-          id: "also_bad",
-          description: "Another fake capability.",
-          mapsToCapabilityId: "ask_health_context",
-        },
-      ],
-    };
-
     // Manually corrupt a mapsToCapabilityId post-schema-parse to test runtime drop
     const hacked = {
-      ...config,
+      ...makeMinimalWorkoutConfig(),
       intents: [
         { id: "bad_intent", description: "Fake.", mapsToCapabilityId: "FAKE_CAP" as never },
         { id: "ok_intent", description: "Good.", mapsToCapabilityId: "adjust_workout" as const },
@@ -333,13 +338,11 @@ describe("intersectDomainConfigWithCatalog", () => {
     expect(warnings.some((w) => w.includes("dropped"))).toBe(true);
   });
 
-  it("passes through signals and prompts unchanged", () => {
+  it("passes through safetyNotes unchanged", () => {
     const warnings: string[] = [];
-    const config = makeMinimalWorkoutConfig();
+    const config = makeMinimalWorkoutConfig({ safetyNotes: ["No diagnosis.", "Be conservative."] });
     const result = intersectDomainConfigWithCatalog(config, warnings);
 
-    expect(result.signals).toEqual(config.signals);
-    expect(result.prompts).toEqual(config.prompts);
     expect(result.safetyNotes).toEqual(config.safetyNotes);
   });
 

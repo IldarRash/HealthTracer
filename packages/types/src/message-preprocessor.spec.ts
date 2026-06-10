@@ -34,6 +34,7 @@ describe("message preprocessor contracts", () => {
         pain: false,
         document: false,
         attachment: false,
+        plan_request: false,
       },
       directPathCandidate: null,
     });
@@ -196,5 +197,135 @@ describe("responseLanguage — hint precedence and detection", () => {
 
     expect(result.detectedLanguage).toBe("ru");
     expect(result.responseLanguage).toBe("en");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice C5 — plan_request signal detection (EN + RU)
+// ---------------------------------------------------------------------------
+
+describe("plan_request signal detection (Slice C5)", () => {
+  function signals(userMessage: string) {
+    return detectPreprocessorSimpleSignals(userMessage, false);
+  }
+
+  describe("English plan-creation phrases", () => {
+    it.each([
+      "Create a workout plan for me",
+      "Make me a training plan",
+      "Build a fitness plan",
+      "Generate a workout plan",
+      "Write me a nutrition plan",
+      "Give me a meal plan",
+      "Create a workout program",
+      "Make a training program",
+      "Give me a plan",
+      "create a plan",
+    ])("detects plan_request for: %s", (msg) => {
+      expect(signals(msg).plan_request).toBe(true);
+    });
+  });
+
+  describe("English plan-modification phrases", () => {
+    it.each([
+      "Update my workout plan",
+      "Change my training plan",
+      "Modify my nutrition plan",
+      "Adjust my meal plan",
+      "Adapt my fitness plan",
+      "Revise my diet plan",
+      "Redo my workout plan",
+      "update my workout",
+      "change my nutrition",
+      "modify my training",
+    ])("detects plan_request for: %s", (msg) => {
+      expect(signals(msg).plan_request).toBe(true);
+    });
+  });
+
+  describe("Russian plan-creation phrases", () => {
+    it.each([
+      "составь мне план тренировок",
+      "Составь план питания",
+      "сделай мне программу тренировок",
+      "Сделай план питания на неделю",
+      "создай программу тренировок",
+      "напиши мне план тренировок",
+      "напиши рацион питания",
+    ])("detects plan_request for: %s", (msg) => {
+      expect(signals(msg).plan_request).toBe(true);
+    });
+  });
+
+  describe("Russian plan-modification phrases", () => {
+    it.each([
+      "обнови мой план тренировок",
+      "Обнови план питания",
+      "измени мою программу",
+      "поменяй мой план тренировок",
+      "скорректируй питание",
+      "подправь мою программу",
+      "Измени план тренировок",
+    ])("detects plan_request for: %s", (msg) => {
+      expect(signals(msg).plan_request).toBe(true);
+    });
+  });
+
+  describe("plain chat messages that must NOT trigger plan_request", () => {
+    it.each([
+      "How many calories did I eat today?",
+      "Should I train today?",
+      "What is today?",
+      "Я плохо спал сегодня",
+      "Hello, how are you?",
+      "Tell me about my progress",
+      "What exercises can I do for back pain?",
+    ])("does NOT detect plan_request for: %s", (msg) => {
+      expect(signals(msg).plan_request).toBe(false);
+    });
+  });
+
+  it("plan_request is false in EMPTY_MESSAGE_PREPROCESSOR_SIMPLE_SIGNALS", () => {
+    // Regression: empty/fallback signals must not fire plan_request.
+    const fallback = createFallbackPreprocessorResult({
+      userMessage: "   ",
+      hasAttachments: false,
+    });
+
+    expect(fallback.simpleSignals.plan_request).toBe(false);
+  });
+
+  it("preprocessMessage includes plan_request in the result", () => {
+    const result = preprocessMessage({
+      userMessage: "Create a workout plan",
+      hasAttachments: false,
+    });
+
+    expect(result.simpleSignals.plan_request).toBe(true);
+  });
+
+  it("messagePreprocessorResultSchema accepts plan_request field", () => {
+    const parsed = messagePreprocessorResultSchema.parse({
+      originalText: "составь план",
+      normalizedText: "составь план",
+      detectedLanguage: "ru",
+      responseLanguage: "ru",
+      hasAttachments: false,
+      mentionedDates: [],
+      simpleSignals: {
+        workout: false,
+        nutrition: false,
+        today: false,
+        sleep: false,
+        fatigue: false,
+        pain: false,
+        document: false,
+        attachment: false,
+        plan_request: true,
+      },
+      directPathCandidate: null,
+    });
+
+    expect(parsed.simpleSignals.plan_request).toBe(true);
   });
 });

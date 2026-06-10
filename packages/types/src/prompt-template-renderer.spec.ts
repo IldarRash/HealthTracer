@@ -5,94 +5,128 @@ import {
   validatePromptTemplateBody,
 } from "./prompt-template-renderer.js";
 
+// openai_coach_loop / renderCoachLoop removed: the legacy single-LLM coach loop was
+// replaced by the multi-domain fan-out pipeline. All live rendering goes through
+// renderRouterDecision, renderDomainStep, renderFinalDecision.
+
 describe("prompt template renderer", () => {
-  it("uses config template overrides without code changes", () => {
+  it("renderRouterDecision uses config override when valid", () => {
+    const routerBody = [
+      "Custom router {{normalizedText}} {{originalText}}",
+      "{{detectedLanguage}} {{preprocessorJson}} {{attachmentHintsJson}}",
+      "{{recentMessageHintsJson}} {{availableDomainsJson}} {{safetyGuardrailsJson}}",
+    ].join(" ");
+
     const compiled = compilePromptTemplates({
       templates: {
-        openai_coach_loop: {
-          templateKey: "openai_coach_loop",
-          body: [
-            "Coach override {{iteration}}/{{maxIterations}}",
-            "{{selectedIntentLabel}} {{intentInstructions}} {{intentSafetyGuidance}}",
-            "{{allowedTools}} {{allowedProposalIntents}} {{taskPurpose}} {{taskIntent}}",
-            "{{expectedResponseMode}} {{safetyFlags}} {{missingContextNotes}}",
-            "{{priorToolResultsJson}} {{safetyConstraints}} {{coachingContextJson}}",
-          ].join(" "),
+        router: {
+          templateKey: "router",
+          body: routerBody,
           placeholders: [
-            "iteration",
-            "maxIterations",
-            "selectedIntentLabel",
-            "intentInstructions",
-            "intentSafetyGuidance",
-            "allowedTools",
-            "allowedProposalIntents",
-            "taskPurpose",
-            "taskIntent",
-            "expectedResponseMode",
-            "safetyFlags",
-            "missingContextNotes",
-            "priorToolResultsJson",
-            "safetyConstraints",
-            "coachingContextJson",
+            "normalizedText",
+            "originalText",
+            "detectedLanguage",
+            "preprocessorJson",
+            "attachmentHintsJson",
+            "recentMessageHintsJson",
+            "availableDomainsJson",
+            "safetyGuardrailsJson",
           ],
         },
       },
     });
 
-    expect(
-      compiled.renderCoachLoop({
-        iteration: "1",
-        maxIterations: "3",
-        selectedIntentLabel: "general",
-        intentInstructions: "Coach",
-        intentSafetyGuidance: "none",
-        allowedTools: "getUserContextSlice",
-        allowedProposalIntents: "none",
-        taskPurpose: "general_chat",
-        taskIntent: "general",
-        expectedResponseMode: "advice_only",
-        safetyFlags: "none",
-        missingContextNotes: "none",
-        priorToolResultsJson: "none",
-        safetyConstraints: "Stay conservative",
-        coachingContextJson: '{"focus":"recovery"}',
-      }),
-    ).toContain('{"focus":"recovery"}');
-    expect(compiled.templates.openai_coach_loop.source).toBe("config");
+    const rendered = compiled.renderRouterDecision({
+      normalizedText: "create a plan",
+      originalText: "Create a plan",
+      detectedLanguage: "en",
+      preprocessorJson: "{}",
+      attachmentHintsJson: "[]",
+      recentMessageHintsJson: "[]",
+      availableDomainsJson: "[]",
+      safetyGuardrailsJson: "[]",
+    });
+
+    expect(rendered).toContain("Custom router");
+    expect(compiled.templates.router.source).toBe("config");
   });
 
-  it("falls back safely when config coach template is invalid", () => {
+  it("renderRouterDecision falls back to default when config body is invalid", () => {
     const compiled = compilePromptTemplates({
       templates: {
-        openai_coach_loop: {
-          templateKey: "openai_coach_loop",
-          body: "Missing placeholder",
+        router: {
+          templateKey: "router",
+          body: "Missing all required placeholders",
           placeholders: [],
         },
       },
     });
-    const rendered = compiled.renderCoachLoop({
-      iteration: "1",
-      maxIterations: "3",
-      selectedIntentLabel: "general",
-      intentInstructions: "Coach",
-      intentSafetyGuidance: "none",
-      allowedTools: "getUserContextSlice",
-      allowedProposalIntents: "none",
-      taskPurpose: "general_chat",
-      taskIntent: "general",
-      expectedResponseMode: "advice_only",
-      safetyFlags: "none",
-      missingContextNotes: "none",
-      priorToolResultsJson: "none",
-      safetyConstraints: "Stay conservative",
-      coachingContextJson: "{}",
+
+    const rendered = compiled.renderRouterDecision({
+      normalizedText: "test",
+      originalText: "test",
+      detectedLanguage: "en",
+      preprocessorJson: "{}",
+      attachmentHintsJson: "[]",
+      recentMessageHintsJson: "[]",
+      availableDomainsJson: "[]",
+      safetyGuardrailsJson: "[]",
     });
 
-    expect(rendered).toContain("AI wellness coach");
-    expect(validatePromptTemplateBody("openai_coach_loop", "Missing placeholder").length).toBeGreaterThan(
-      0,
-    );
+    expect(rendered).toContain("domain router");
+    expect(compiled.templates.router.source).toBe("default");
+  });
+
+  it("renderFinalDecision uses default template", () => {
+    const compiled = compilePromptTemplates({ templates: {} });
+
+    const rendered = compiled.renderFinalDecision({
+      userMessage: "Create a plan",
+      domainOutputsJson: "{}",
+      actionVariantCatalogJson: "[]",
+      safetyFlags: "none",
+      safetyConstraints: "Stay conservative",
+      responseLanguage: "en",
+    });
+
+    expect(rendered).toContain("wellness coach");
+    expect(rendered).toContain("Create a plan");
+  });
+
+  it("renderDomainStep uses default workout template", () => {
+    const compiled = compilePromptTemplates({ templates: {} });
+
+    const rendered = compiled.renderDomainStep("workout", {
+      domain: "workout",
+      userMessage: "Build me a plan",
+      iteration: "1",
+      maxIterations: "3",
+      priorToolResultsJson: "[]",
+      coachingContextJson: "{}",
+      allowedTools: "getUserContextSlice",
+      allowedProposalIntents: "create_workout_plan",
+      safetyFlags: "none",
+      safetyConstraints: "Never diagnose.",
+      attachmentContextJson: "none",
+      responseLanguage: "en",
+    });
+
+    expect(rendered).toContain("workout");
+    expect(rendered).toContain("Build me a plan");
+  });
+
+  it("openai_coach_loop is not a recognized template key", () => {
+    const compiled = compilePromptTemplates({ templates: {} });
+
+    // The templates record only contains the live pipeline keys
+    expect("openai_coach_loop" in compiled.templates).toBe(false);
+  });
+
+  it("renderCoachLoop is not a method on CompiledPromptTemplates", () => {
+    const compiled = compilePromptTemplates({ templates: {} });
+
+    // renderCoachLoop was removed with the legacy single-LLM coach loop
+    expect("renderCoachLoop" in compiled).toBe(false);
   });
 
   it("returns null when render values are incomplete", () => {
@@ -101,4 +135,10 @@ describe("prompt template renderer", () => {
     expect(rendered).toBeNull();
   });
 
+  it("validatePromptTemplateBody detects missing required placeholder", () => {
+    const errors = validatePromptTemplateBody("router", "No placeholders here");
+
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.includes("normalizedText"))).toBe(true);
+  });
 });

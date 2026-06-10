@@ -47,6 +47,7 @@ function makePreprocessorResult(overrides: Partial<{
       pain: overrides.simpleSignals?.["pain"] ?? false,
       document: overrides.simpleSignals?.["document"] ?? false,
       attachment: overrides.simpleSignals?.["attachment"] ?? false,
+      plan_request: overrides.simpleSignals?.["plan_request"] ?? false,
       ...overrides.simpleSignals,
     },
     directPathCandidate: null,

@@ -59,7 +59,10 @@ describe("capability config", () => {
   });
 
   it("matches catalog allowlists for representative capabilities", () => {
-    expect(getAllowedToolsForCapability("general")).toEqual(["getUserContextSlice"]);
+    expect(getAllowedToolsForCapability("general")).toEqual([
+      "getUserContextSlice",
+      "getRecentAdherence",
+    ]);
     expect(getAllowedProposalsForCapability("general")).toEqual([
       "update_profile",
       "create_goal",
@@ -70,6 +73,9 @@ describe("capability config", () => {
     expect(getAllowedToolsForCapability("adjust_workout")).toEqual([
       "getUserContextSlice",
       "getWeeklyProgressContext",
+      "searchExerciseCatalog",
+      "getActivePlanDetail",
+      "getRecentAdherence",
     ]);
     expect(getAllowedProposalsForCapability("adjust_workout")).toEqual([
       "create_workout_plan",
@@ -78,9 +84,9 @@ describe("capability config", () => {
       "log_workout_activity",
     ]);
 
-    expect(getAllowedToolsForCapability("attachment_medical_document")).toEqual([
-      "getDocumentContext",
-    ]);
+    // getDocumentContext removed: under the allowDocuments=false budget floor it always
+    // returns empty, advertising a capability chat runtime cannot deliver.
+    expect(getAllowedToolsForCapability("attachment_medical_document")).toEqual([]);
     expect(getAllowedProposalsForCapability("attachment_medical_document")).toEqual([]);
   });
 

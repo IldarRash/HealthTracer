@@ -29,6 +29,18 @@ export type ActionResolverFinalDecisionInput = {
    */
   selectedDomains: readonly DomainFanoutEntry[];
   /**
+   * Whether the preprocessor detected an explicit plan-creation/modification request
+   * (the `plan_request` signal from MessagePreprocessorSimpleSignals).
+   *
+   * When true AND the decision-maker returned plain_reply AND at least one valid
+   * domain proposal candidate exists in the final decision's proposals array,
+   * ActionResolver overrides plain_reply with the best matching proposal action.
+   *
+   * This is a deterministic code-level guard — it never fabricates proposals.
+   * It only re-orders/prefers existing valid candidates.
+   */
+  planRequestSignal?: boolean;
+  /**
    * Calorie-burn estimate (kcal, integer) from the workout domain LLM's
    * domain_answer.workoutCalorieEstimate.
    *
@@ -97,14 +109,42 @@ export class ActionResolverService {
   resolveFinalDecisionOutput(
     input: ActionResolverFinalDecisionInput,
   ): ActionResolverFinalDecisionResult {
-    const { finalDecision, selectedDomains, workoutCalorieEstimate, workoutCaloriePerHourRate } = input;
+    const {
+      finalDecision,
+      selectedDomains,
+      planRequestSignal,
+      workoutCalorieEstimate,
+      workoutCaloriePerHourRate,
+    } = input;
 
     // Build the union of all domains' allowedProposalIntents for filtering.
     // This is the same allowlist floor that ActionVariantCatalogService used to build
     // the catalog — the decision-maker cannot select outside this set.
     const unionAllowedIntents = buildUnionAllowedIntents(selectedDomains);
 
-    const selectedAction = finalDecision.selectedAction;
+    let selectedAction = finalDecision.selectedAction;
+
+    // Plain-reply guard (Slice C5):
+    // When (a) the user message matches an explicit plan-request signal AND
+    // (b) the decision-maker returned plain_reply BUT domain outputs produced at
+    // least one valid proposal candidate, prefer the first valid candidate action
+    // over plain_reply. We never fabricate proposals — only reorder existing ones.
+    if (
+      planRequestSignal &&
+      (!selectedAction || selectedAction === PLAIN_REPLY_ACTION_VARIANT_ID) &&
+      finalDecision.proposals.length > 0
+    ) {
+      const candidates = filterProposalsToAllowedIntents(
+        [...unionAllowedIntents] as CatalogProposalIntent[],
+        finalDecision.proposals as AiStructuredOutput["proposals"],
+      );
+
+      if (candidates.length > 0 && candidates[0] != null) {
+        // Override selectedAction to the first valid candidate's intent.
+        // The candidate already passed the allowlist filter — no fabrication.
+        selectedAction = candidates[0].intent;
+      }
+    }
 
     // Plain reply: no proposals, no consent required.
     if (!selectedAction || selectedAction === PLAIN_REPLY_ACTION_VARIANT_ID) {

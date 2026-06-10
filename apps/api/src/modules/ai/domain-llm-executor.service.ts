@@ -125,6 +125,10 @@ export interface DomainLlmExecutorResult {
   loopIterations: number;
   /** Tool names invoked in order during the loop. */
   toolsInvoked: AgentToolName[];
+  /** Number of tool requests that were denied by the capability allowlist. */
+  toolsDeniedCount: number;
+  /** Wall-clock latency of the domain loop in milliseconds. */
+  latencyMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +154,7 @@ export class DomainLlmExecutorService {
   async runDomainLoop(input: DomainLlmExecutorInput): Promise<DomainLlmExecutorResult> {
     const { domainEntry } = input;
     const domain = domainEntry.domain;
+    const start = Date.now();
 
     // Wrap the bounded loop in Promise.race with a per-domain timeout.
     // The timeout NEVER rejects — it resolves to a fallback so the outer
@@ -157,7 +162,8 @@ export class DomainLlmExecutorService {
     const loopPromise = this.executeDomainLoopSafe(input);
     const timeoutPromise = this.buildTimeoutFallback(domain);
 
-    return Promise.race([loopPromise, timeoutPromise]);
+    const result = await Promise.race([loopPromise, timeoutPromise]);
+    return { ...result, latencyMs: Date.now() - start };
   }
 
   // ---------------------------------------------------------------------------
@@ -176,7 +182,7 @@ export class DomainLlmExecutorService {
       return await this.executeDomainLoop(input);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown domain executor error.";
-      return this.buildFallbackResult(input.domainEntry.domain, [message], 0, []);
+      return this.buildFallbackResult(input.domainEntry.domain, [message], 0, [], 0);
     }
   }
 
@@ -273,12 +279,13 @@ export class DomainLlmExecutorService {
             ],
             iteration,
             toolsInvoked,
+            1, // toolsDeniedCount: this tool request was denied
           );
         }
 
         // Execute the allowed tool via AgentToolRegistryService (read-only context tools only).
-        // Pass the per-domain context budget so getDocumentContext re-applies the
-        // deny-by-default document floor (the budget is the code-level safety floor).
+        // The registry advertises only getUserContextSlice and getWeeklyProgressContext;
+        // getDocumentContext was removed (always empty under the allowDocuments=false floor).
         const toolInput = ((rawOutput as Record<string, unknown>)["input"] as Record<string, unknown> | undefined) ?? {};
         const toolResult = await this.agentToolRegistryService.executeTool(
           orchestratorInput.auth,
@@ -286,7 +293,6 @@ export class DomainLlmExecutorService {
             tool: toolName,
             input: toolInput,
           },
-          domainEntry.contextBudget,
         );
 
         priorToolResults.push(toolResult);
@@ -344,6 +350,7 @@ export class DomainLlmExecutorService {
           degradedReasons: [],
           loopIterations: iteration,
           toolsInvoked,
+          toolsDeniedCount: 0,
         };
       }
 
@@ -480,6 +487,7 @@ export class DomainLlmExecutorService {
     reasons: string[],
     loopIterations: number,
     toolsInvoked: AgentToolName[],
+    toolsDeniedCount = 0,
   ): DomainLlmExecutorResult {
     return {
       domainAnswer: createFallbackDomainAnswer(domain),
@@ -487,6 +495,7 @@ export class DomainLlmExecutorService {
       degradedReasons: reasons,
       loopIterations,
       toolsInvoked,
+      toolsDeniedCount,
     };
   }
 }

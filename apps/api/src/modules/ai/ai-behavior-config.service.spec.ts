@@ -43,15 +43,16 @@ describe("AiBehaviorConfigService", () => {
     expect(service.getAttachmentBehavior().safetyFloors.requireMedicalConsent).toBe(true);
   });
 
-  it("compiles prompt templates with safe fallback for invalid config bodies", () => {
+  it("compiles live pipeline router template with safe fallback for invalid config bodies", () => {
+    // openai_coach_loop was removed; the live pipeline uses router/domain_*/decision keys.
     const defaults = buildDefaultAiBehaviorConfig();
     const service = new AiBehaviorConfigService({
       config: {
         ...defaults,
         promptTemplates: {
           templates: {
-            openai_coach_loop: {
-              templateKey: "openai_coach_loop",
+            router: {
+              templateKey: "router",
               body: "Broken template without required placeholders",
               placeholders: [],
             },
@@ -63,26 +64,29 @@ describe("AiBehaviorConfigService", () => {
       warnings: [],
     });
 
-    expect(service.getCompiledPromptTemplates().templates.openai_coach_loop.source).toBe("default");
-    expect(
-      service.getCompiledPromptTemplates().renderCoachLoop({
-        iteration: "1",
-        maxIterations: "3",
-        selectedIntentLabel: "general",
-        intentInstructions: "Coach",
-        intentSafetyGuidance: "none",
-        allowedTools: "getUserContextSlice",
-        allowedProposalIntents: "none",
-        taskPurpose: "general_chat",
-        taskIntent: "general",
-        expectedResponseMode: "advice_only",
-        safetyFlags: "none",
-        missingContextNotes: "none",
-        priorToolResultsJson: "none",
-        safetyConstraints: "Stay conservative",
-        coachingContextJson: "{}",
-      }),
-    ).toContain("AI wellness coach");
+    // Invalid body → falls back to default
+    expect(service.getCompiledPromptTemplates().templates.router.source).toBe("default");
+    const rendered = service.getCompiledPromptTemplates().renderRouterDecision({
+      normalizedText: "test",
+      originalText: "test",
+      detectedLanguage: "en",
+      preprocessorJson: "{}",
+      attachmentHintsJson: "[]",
+      recentMessageHintsJson: "[]",
+      availableDomainsJson: "[]",
+      safetyGuardrailsJson: "[]",
+    });
+    expect(rendered).toContain("domain router");
+  });
+
+  it("openai_coach_loop is not a live template key in compiled templates", () => {
+    const service = new AiBehaviorConfigService(
+      resolveLoadedAiBehaviorConfig({ defaults: buildDefaultAiBehaviorConfig() }),
+      resolveLoadedAttachmentBehaviorConfig({ defaults: buildDefaultAttachmentBehaviorConfig() }),
+    );
+
+    // The old single-LLM coach loop was removed; only fan-out pipeline keys should exist
+    expect("openai_coach_loop" in service.getCompiledPromptTemplates().templates).toBe(false);
+    expect("renderCoachLoop" in service.getCompiledPromptTemplates()).toBe(false);
   });
 });
-

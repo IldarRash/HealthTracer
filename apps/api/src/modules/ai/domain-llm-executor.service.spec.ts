@@ -112,7 +112,6 @@ function makeToolRegistry(): AgentToolRegistryService {
     listAvailableTools: vi.fn().mockReturnValue([
       "getUserContextSlice",
       "getWeeklyProgressContext",
-      "getDocumentContext",
     ]),
   } as unknown as AgentToolRegistryService;
 }
@@ -222,10 +221,11 @@ describe("DomainLlmExecutorService", () => {
   // -------------------------------------------------------------------------
 
   it("degrades when the domain LLM requests a tool not in the domain allowlist", async () => {
-    // Workout domain only allows getUserContextSlice; provider requests getDocumentContext.
+    // Workout domain only allows getUserContextSlice; provider requests getWeeklyProgressContext
+    // which is not in the clamped allowlist for this test's domain entry.
     const provider = makeProvider({
       kind: "tool_request",
-      tool: "getDocumentContext",
+      tool: "getWeeklyProgressContext",
       input: {},
     });
 
@@ -238,9 +238,9 @@ describe("DomainLlmExecutorService", () => {
     });
 
     expect(result.degraded).toBe(true);
-    expect(result.degradedReasons.join(" ")).toContain("getDocumentContext");
+    expect(result.degradedReasons.join(" ")).toContain("getWeeklyProgressContext");
     expect(result.degradedReasons.join(" ")).toContain("per-domain allowlist");
-    // Tool registry must NOT have been called for the blocked tool.
+    // Tool registry must NOT have been called for the blocked tool (enforcement is pre-dispatch).
     expect(toolRegistry.executeTool).not.toHaveBeenCalled();
   });
 

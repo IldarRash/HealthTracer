@@ -4,10 +4,12 @@ import type {
   ChatThread,
   ChatTurnResponse,
   CreateChatThreadInput,
+  ProposalValidationFailureClass,
   RawAiProposal,
   SendChatMessageInput,
 } from "@health/types";
 import {
+  classifyProposalValidationFailure,
   evaluateWellbeingCrisisFromText,
   formatWellbeingCrisisSupportReply,
   getTodayIsoDateInTimezone,
@@ -15,7 +17,7 @@ import {
   mergeDeterministicChatProposals,
   shouldTriggerRecipeRecommendationRequest,
 } from "@health/types";
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiService } from "../ai/ai.service.js";
 import type { AttachmentTurnContext } from "../ai/agent-orchestrator.service.js";
@@ -41,6 +43,8 @@ const AI_RECENT_MESSAGE_LIMIT = 20;
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly usersService: UsersService,
@@ -486,6 +490,36 @@ export class ChatService {
           ...chatAttachmentProposalRefErrors,
         ];
         const validationStatus = validationErrors.length === 0 ? "valid" : "invalid";
+
+        if (validationStatus === "invalid") {
+          // All non-safety, non-schema errors from domain checks are ownership/context errors.
+          const allOwnershipErrors: string[] = [
+            ...ownershipErrors,
+            ...provenanceErrors,
+            ...progressLinkedProvenanceErrors,
+            ...goalHierarchyErrors,
+            ...todaySourceRefErrors,
+            ...recoveryAdaptationErrors,
+            ...habitProposalContextErrors,
+            ...wellbeingProposalContextErrors,
+            ...nutritionIncidentImageRefErrors,
+            ...recipeRecommendationContextErrors,
+            ...chatAttachmentProposalRefErrors,
+          ];
+          const failureClass: ProposalValidationFailureClass =
+            classifyProposalValidationFailure({
+              safetyErrors,
+              schemaErrors: validation.errors,
+              ownershipErrors: allOwnershipErrors,
+            });
+
+          this.logger.warn("Proposal validation failed", {
+            intent: rawProposal.intent,
+            targetDomain: rawProposal.targetDomain,
+            failureClass,
+            errorCount: validationErrors.length,
+          });
+        }
 
         const record = await this.chatRepository.createProposal(
           user.id,
