@@ -3,30 +3,25 @@ import { isSecondaryRoute } from "./nav-ui-state";
 /** Per-route theme: DARK for data/metric screens, LIGHT for everything else. */
 export type RouteTheme = "light" | "dark";
 
+/**
+ * Deliberate two-world boundary:
+ *   Dark world  — /today /longevity /training /nutrition(/**) /recipes /progress /metrics
+ *   Light world — /chat /profile /billing /proposals /onboarding + auth
+ *
+ * Every route under a dark prefix inherits dark — there are no light overrides
+ * (grocery-list is dark like its /nutrition parent).
+ */
 const DARK_ROUTE_PREFIXES = [
   "/today",
   "/longevity",
   "/training",
   "/nutrition",
+  "/recipes",
   "/progress",
   "/metrics",
 ] as const;
 
-/**
- * Routes that are nested under a dark prefix but intentionally use a light
- * content canvas (design spec: `contentBg=L.paper`).
- */
-const LIGHT_ROUTE_OVERRIDES = [
-  "/nutrition/grocery-list",
-] as const;
-
 export function resolveRouteTheme(pathname: string): RouteTheme {
-  // Light overrides take priority — check exact match or sub-path first.
-  for (const override of LIGHT_ROUTE_OVERRIDES) {
-    if (pathname === override || pathname.startsWith(`${override}/`)) {
-      return "light";
-    }
-  }
   for (const prefix of DARK_ROUTE_PREFIXES) {
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
       return "dark";

@@ -201,8 +201,9 @@ describe('GroceryListScreen: indigo "changes via chat" banner', () => {
     expect(src).toContain("rgba(123,123,255,0.28)");
   });
 
-  it("uses the #5b5bd6 spark icon stroke from the spec", () => {
-    expect(src).toContain("#5b5bd6");
+  it("uses theme token for the spark icon stroke (no hard-coded hex)", () => {
+    expect(src).toContain("color-metric-indigo");
+    expect(src).not.toContain("#5b5bd6");
   });
 });
 

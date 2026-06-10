@@ -62,6 +62,9 @@ describe("shell UI state", () => {
       expect(resolveRouteTheme("/training/session-1")).toBe("dark");
       expect(resolveRouteTheme("/nutrition")).toBe("dark");
       expect(resolveRouteTheme("/nutrition/plan")).toBe("dark");
+      expect(resolveRouteTheme("/nutrition/grocery-list")).toBe("dark");
+      expect(resolveRouteTheme("/recipes")).toBe("dark");
+      expect(resolveRouteTheme("/recipes/my-recipe")).toBe("dark");
       expect(resolveRouteTheme("/progress")).toBe("dark");
       expect(resolveRouteTheme("/metrics")).toBe("dark");
       expect(resolveRouteTheme("/metrics/overview")).toBe("dark");
@@ -73,7 +76,6 @@ describe("shell UI state", () => {
       expect(resolveRouteTheme("/profile")).toBe("light");
       expect(resolveRouteTheme("/goals")).toBe("light");
       expect(resolveRouteTheme("/documents")).toBe("light");
-      expect(resolveRouteTheme("/recipes")).toBe("light");
       expect(resolveRouteTheme("/proposals")).toBe("light");
       expect(resolveRouteTheme("/onboarding")).toBe("light");
       expect(resolveRouteTheme("/billing")).toBe("light");

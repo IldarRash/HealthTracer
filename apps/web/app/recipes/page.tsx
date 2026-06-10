@@ -1,5 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
+import { AppLayout } from "../../src/components/app-layout";
+import { PageContent, PageHeader } from "../../src/components/ui";
 import { RecipesWorkspace } from "../../src/components/recipes/recipes-workspace";
 
 export default async function RecipesPage() {
@@ -9,5 +11,15 @@ export default async function RecipesPage() {
     redirectToAppSignIn("/recipes");
   }
 
-  return <RecipesWorkspace />;
+  return (
+    <AppLayout>
+      <PageHeader
+        title="Recipes"
+        description="Browse the catalog and find meals that fit your active nutrition plan."
+      />
+      <PageContent>
+        <RecipesWorkspace />
+      </PageContent>
+    </AppLayout>
+  );
 }

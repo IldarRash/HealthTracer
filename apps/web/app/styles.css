@@ -1019,6 +1019,8 @@ dd {
   display: grid;
   gap: var(--space-2);
   min-height: 8rem;
+  min-width: 0;
+  overflow-wrap: break-word;
   padding: var(--space-4);
 }
 
@@ -4764,6 +4766,10 @@ span.confirmation-card__meta {
   .dashboard-card--span-4 {
     grid-column: span 4;
   }
+
+  .dashboard-card--span-3 {
+    grid-column: span 3;
+  }
 }
 
 .button-coach {
@@ -6388,6 +6394,25 @@ span.confirmation-card__meta {
   border-color: var(--color-border-default);
 }
 
+/* ── Recipes workspace — dark canvas overrides ──────────────────────────────
+   recipes-workspace inherits training-workspace panels/nested-cards/notice-inline
+   via the shared .training-workspace.recipes-workspace selector above.
+   Only recipe-specific overrides that differ are listed here.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Notice / notice-inline inside the dark recipes workspace */
+[data-theme="dark"] .app-shell__main--structured .recipes-workspace .notice {
+  background: rgba(245, 165, 36, 0.10);
+  border-color: rgba(245, 165, 36, 0.28);
+  color: var(--color-metric-amber);
+}
+
+[data-theme="dark"] .app-shell__main--structured .recipes-workspace .notice-inline {
+  background: rgba(245, 165, 36, 0.10);
+  border-color: rgba(245, 165, 36, 0.28);
+  color: var(--color-metric-amber);
+}
+
 /* ── Canvas state messages in dark context ── */
 [data-theme="dark"] .state-message--canvas {
   background: var(--color-surface-card);
@@ -6973,8 +6998,34 @@ span.confirmation-card__meta {
   color: var(--color-text-muted);
 }
 
+/* DashboardCards inside the weekly-review dashboard-section on dark canvas.
+   Overrides the .app-shell__main--structured light rules that would otherwise
+   render white cards on a dark background. */
+[data-theme="dark"] .training-progress-panel .dashboard-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__value {
+  color: var(--color-text-primary);
+}
+
 [data-theme="dark"] .training-progress-panel .dashboard-card__hint {
   color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__footer {
+  border-color: var(--color-border-default);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .training-progress-panel .goals li {
