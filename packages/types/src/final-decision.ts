@@ -95,6 +95,18 @@ export const finalDecisionRequestSchema = z.object({
     )
     .max(6)
     .default([]),
+  /**
+   * True when the system planner took the low-confidence/general fallback route
+   * for an LLM-routed turn (confidence below RULE_ROUTE_CONFIDENCE_THRESHOLD or
+   * selectedDomains empty).
+   *
+   * NOT set for proposal-revision, proposal-explainer, or deterministic routes.
+   * Defaults to false so existing callers are unaffected.
+   *
+   * When true the decision template instructs the LLM to ask a short clarifying
+   * question rather than guessing which domain to serve.
+   */
+  lowConfidenceRoute: z.boolean().default(false),
 });
 
 export type FinalDecisionRequest = z.infer<typeof finalDecisionRequestSchema>;

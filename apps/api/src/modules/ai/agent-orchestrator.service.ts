@@ -520,6 +520,9 @@ export class AgentOrchestratorService {
       provider: this.provider,
       responseLanguage,
       recentMessages: decisionRecentMessages,
+      // Thread low-confidence flag from planner fanout so the decision template can
+      // ask a clarifying question rather than guess the domain (Change 2 / Slice 5).
+      lowConfidenceRoute: plan.fanout.lowConfidenceRoute,
     });
 
     // Structured log: decision stage done (counts/ids/flags only — no text/health content).
@@ -530,6 +533,7 @@ export class AgentOrchestratorService {
       selectedAction: decisionResult.output.selectedAction ?? null,
       selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
+      lowConfidenceRoute: plan.fanout.lowConfidenceRoute === true,
     });
 
     // Extract the workout domain calorie estimate and rate from the fan-out results.
@@ -949,6 +953,9 @@ function buildFanOutTurnMetadata(params: {
       selectedAction: decisionResult.output.selectedAction ?? null,
       selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
+      ...(plan.fanout.lowConfidenceRoute === true
+        ? { lowConfidenceRoute: true as const }
+        : {}),
       ...(decisionResult.usage !== undefined ? { usage: decisionResult.usage } : {}),
     },
     resolution: {

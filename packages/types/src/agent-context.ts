@@ -554,6 +554,8 @@ export const agentProviderUsageSchema = z.object({
   latencyMs: z.number().int().nonnegative(),
   /** Number of retries consumed (0 = first attempt succeeded). */
   retries: z.number().int().nonnegative(),
+  /** Model id used for this stage call (e.g. "gpt-4o-mini"). Absent on fallback/non-LLM paths. */
+  model: z.string().min(1).optional(),
 });
 
 export type AgentProviderUsage = z.infer<typeof agentProviderUsageSchema>;
@@ -594,6 +596,12 @@ export const agentFanOutDecisionDiagnosticsSchema = z.object({
   /** Number of candidate IDs selected by the decision-maker (Slice 2: selection-by-ID). */
   selectedProposalIdCount: z.number().int().min(0).max(5),
   consentRequired: z.boolean().default(false),
+  /**
+   * True when the planner emitted a low-confidence route (Slice 5: clarifying-question
+   * fallback). Forwarded from the fan-out plan so telemetry can correlate low-confidence
+   * turns with decision-maker outputs. Optional/back-compat: absent on pre-Slice-5 rows.
+   */
+  lowConfidenceRoute: z.boolean().optional(),
   /** Token + latency usage for the decision-maker LLM call. Absent on fallback paths. */
   usage: agentProviderUsageSchema.optional(),
 });

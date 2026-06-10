@@ -146,6 +146,95 @@ describe("wellbeing crisis evaluation", () => {
     expect(evaluation.copy).toEqual(WELLBEING_CRISIS_SUPPORT_COPY);
   });
 
+  describe("Russian-language crisis keyword detection", () => {
+    it("flags direct suicide keyword суицид (base form, lowercase)", () => {
+      expect(containsWellbeingCrisisKeyword("у меня суицидальные мысли")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("суицид — это не выход")).toBe(true);
+    });
+
+    it("flags самоубийство and its forms", () => {
+      expect(containsWellbeingCrisisKeyword("думаю о самоубийстве")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("самоубийства не желаю никому")).toBe(true);
+    });
+
+    it("flags убить себя", () => {
+      expect(containsWellbeingCrisisKeyword("хочу убить себя")).toBe(true);
+    });
+
+    it("flags покончить с собой / с жизнью", () => {
+      expect(containsWellbeingCrisisKeyword("хочу покончить с собой")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("думаю покончить с жизнью")).toBe(true);
+    });
+
+    it("flags не хочу жить variants", () => {
+      expect(containsWellbeingCrisisKeyword("я не хочу жить")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("не хочу больше жить")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("не хочу уже жить")).toBe(true);
+    });
+
+    it("flags не хочу жить with up to 2 inserted words (broadened pattern)", () => {
+      // "я не хочу так жить" — one inserted word "так"
+      expect(containsWellbeingCrisisKeyword("я не хочу так жить")).toBe(true);
+      // "не хочу уже так жить" — two inserted words "уже так"
+      expect(containsWellbeingCrisisKeyword("не хочу уже так жить")).toBe(true);
+    });
+
+    it("flags не хочу жить в этом районе (safe-side over-trigger is intentional for crisis gate)", () => {
+      // This phrase is benign in isolation but we deliberately over-trigger here
+      // because missing a genuine crisis signal is worse than a false positive.
+      // The crisis gate exists to surface support resources, not to diagnose.
+      expect(containsWellbeingCrisisKeyword("не хочу жить в этом районе")).toBe(true);
+    });
+
+    it("flags свести счёты с жизнью", () => {
+      expect(containsWellbeingCrisisKeyword("хочу свести счёты с жизнью")).toBe(true);
+    });
+
+    it("flags self-harm verbs порезать себя / навредить себе / причинить себе вред", () => {
+      expect(containsWellbeingCrisisKeyword("хочу порезать себя")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("хочу навредить себе")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("причинить себе вред")).toBe(true);
+    });
+
+    it("is case-insensitive for Cyrillic (match via toLowerCase normalization)", () => {
+      expect(containsWellbeingCrisisKeyword("Суицид — это больно")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("ХОЧУ УБИТЬ СЕБЯ")).toBe(true);
+      expect(containsWellbeingCrisisKeyword("Не хочу Жить")).toBe(true);
+    });
+
+    it("detects crisis phrase embedded in a longer sentence", () => {
+      expect(
+        containsWellbeingCrisisKeyword("мне так плохо, я думаю о суициде каждый день"),
+      ).toBe(true);
+      expect(
+        containsWellbeingCrisisKeyword("просто устал, иногда не хочу жить уже"),
+      ).toBe(true);
+    });
+
+    it("does NOT flag benign fitness/wellness phrases with similar roots", () => {
+      // "убиться на тренировке" is colloquial for "train super hard"
+      expect(containsWellbeingCrisisKeyword("хочу убиться на тренировке")).toBe(false);
+      // general mood without ideation
+      expect(containsWellbeingCrisisKeyword("сегодня плохое настроение")).toBe(false);
+      // stress without crisis language
+      expect(containsWellbeingCrisisKeyword("я очень устал от работы")).toBe(false);
+      // вред in non-self context
+      expect(containsWellbeingCrisisKeyword("стресс причиняет вред здоровью")).toBe(false);
+    });
+
+    it("evaluateWellbeingCrisisFromText returns crisis support for RU phrases", () => {
+      const ev = evaluateWellbeingCrisisFromText("мне очень плохо, я хочу покончить с собой");
+      expect(ev.shouldShowCrisisSupport).toBe(true);
+      expect(ev.reasons).toEqual(["keyword_match"]);
+      expect(ev.copy).toEqual(WELLBEING_CRISIS_SUPPORT_COPY);
+    });
+
+    it("evaluateWellbeingCrisisFromText returns no crisis support for benign RU fitness message", () => {
+      const ev = evaluateWellbeingCrisisFromText("хочу убиться на тренировке, сделай план");
+      expect(ev.shouldShowCrisisSupport).toBe(false);
+    });
+  });
+
   it("formats static crisis support copy for chat replies", () => {
     const reply = formatWellbeingCrisisSupportReply(WELLBEING_CRISIS_SUPPORT_COPY);
 

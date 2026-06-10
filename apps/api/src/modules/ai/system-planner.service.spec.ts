@@ -876,4 +876,114 @@ describe("SystemPlannerService", () => {
       }
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Change 2 / Slice 5 — lowConfidenceRoute flag
+  // ---------------------------------------------------------------------------
+
+  describe("lowConfidenceRoute flag", () => {
+    it("sets lowConfidenceRoute=false for a confident LLM router route", async () => {
+      const { planner } = createPlannerHarness();
+      const plan = await planner.planTurn({
+        userMessage: "Adapt my workout plan",
+        recentMessages: [],
+        routerResult: createRouterResultForPlanner("workout", 0.9),
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(false);
+    });
+
+    it("sets lowConfidenceRoute=true when router confidence is below threshold (llm source)", async () => {
+      const { planner } = createPlannerHarness();
+      // Use an llm-source result with confidence 0.3 (below RULE_ROUTE_CONFIDENCE_THRESHOLD of 0.6)
+      const lowConfidenceLlmResult: RouterLlmResult = {
+        output: routerDecisionOutputSchema.parse({
+          selectedDomains: [
+            { domain: "workout", confidence: 0.3, intentHints: [], toolHints: [], signalHints: [] },
+          ],
+          contextNeeds: [],
+          safetyFlags: [],
+          confidence: 0.3,
+        }),
+        source: "llm",
+        validationErrors: [],
+      };
+
+      const plan = await planner.planTurn({
+        userMessage: "uh, I dunno, maybe workout?",
+        recentMessages: [],
+        routerResult: lowConfidenceLlmResult,
+      });
+
+      // Below threshold → falls back to general; flag is set.
+      expect(plan.catalogIntentId).toBe("general");
+      expect(plan.fanout.lowConfidenceRoute).toBe(true);
+    });
+
+    it("sets lowConfidenceRoute=true when router returned no selected domains (llm source)", async () => {
+      const { planner } = createPlannerHarness();
+      const noDomainsLlmResult: RouterLlmResult = {
+        output: routerDecisionOutputSchema.parse({
+          selectedDomains: [],
+          contextNeeds: [],
+          safetyFlags: [],
+          confidence: 0.55,
+        }),
+        source: "llm",
+        validationErrors: [],
+      };
+
+      const plan = await planner.planTurn({
+        userMessage: "hmm, not sure what I need",
+        recentMessages: [],
+        routerResult: noDomainsLlmResult,
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(true);
+    });
+
+    it("sets lowConfidenceRoute=false for a fallback-source router result (not an LLM low-confidence turn)", async () => {
+      const { planner } = createPlannerHarness();
+      // fallback source = rule_based, not an LLM low-confidence turn
+      const plan = await planner.planTurn({
+        userMessage: "I feel off today",
+        recentMessages: [],
+        routerResult: createRouterResultForPlanner("workout", 0.35, "fallback"),
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(false);
+    });
+
+    it("sets lowConfidenceRoute=false for a proposal-revision turn (router skipped)", async () => {
+      const { planner } = createPlannerHarness();
+      const plan = await planner.planTurn({
+        userMessage: "Make it 4 days instead",
+        recentMessages: [],
+        proposalRevision: {
+          supersededProposalId: "p1",
+          originalProposal: {
+            intent: "create_workout_plan",
+            targetDomain: "workout",
+            title: "3-day plan",
+          },
+          modificationFeedback: "Change to 4 days",
+        },
+        // Low-confidence LLM result provided, but proposalRevision takes priority
+        routerResult: createRouterResultForPlanner("workout", 0.2),
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(false);
+    });
+
+    it("sets lowConfidenceRoute=false when no routerResult is provided (no-router path)", async () => {
+      const { planner } = createPlannerHarness();
+      const plan = await planner.planTurn({
+        userMessage: "How are you?",
+        recentMessages: [],
+        // No routerResult: deterministic/safe fallback path
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(false);
+    });
+  });
 });

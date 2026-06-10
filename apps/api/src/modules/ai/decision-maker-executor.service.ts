@@ -111,6 +111,13 @@ export interface DecisionMakerInput {
     role: "user" | "assistant" | "system";
     content: string;
   }>;
+  /**
+   * True when the system planner took the low-confidence/general fallback route
+   * for an LLM-routed turn. Threaded into FinalDecisionRequest so the template
+   * can instruct the model to ask a clarifying question rather than guessing.
+   * Defaults to false; must not be set for deterministic/revision/explainer routes.
+   */
+  lowConfidenceRoute?: boolean;
 }
 
 export interface DecisionMakerResult {
@@ -184,6 +191,7 @@ export class DecisionMakerExecutorService {
       safetyConstraints: [...input.safetyConstraints],
       recentMessages: input.recentMessages != null ? [...input.recentMessages] : [],
       ...(input.responseLanguage != null ? { responseLanguage: input.responseLanguage } : {}),
+      lowConfidenceRoute: input.lowConfidenceRoute === true,
     };
 
     let rawOutput: unknown;

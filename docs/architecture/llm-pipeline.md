@@ -317,7 +317,15 @@ Functions:
 Location: `@health/types`, used by `ChatService`.
 
 When crisis support should be shown, the system creates a deterministic support
-reply and no proposals — before any LLM runs.
+reply and no proposals — before any LLM runs. The gate receives the **raw user
+text** and matching is **bilingual**: `containsWellbeingCrisisKeyword` checks the
+English `WELLBEING_CRISIS_KEYWORDS` substrings **and** the Russian
+`WELLBEING_CRISIS_KEYWORDS_RU` regexps (Cyrillic lookaround word boundaries,
+lowercase-normalized input, deliberate safe-side over-triggering — a false positive
+is preferred to a missed crisis signal), all in
+`packages/types/src/wellbeing-check-ins.ts`. Russian crisis phrases (e.g. "не хочу
+жить", "покончить с собой") therefore trip the gate, so crisis coverage is no longer
+EN-only.
 
 ### Proposal Explainer
 
@@ -414,7 +422,8 @@ problem:
 Per-stage token/latency **usage** is now recorded in the optional fan-out diagnostics
 block (`agent.fanOut`, schema in `packages/types/src/agent-context.ts`): the
 `AgentProviderUsage` shape (`promptTokens`, `completionTokens`, `totalTokens`,
-`latencyMs`, `retries`) is attached as an optional `usage` field on `fanOut.router`,
+`latencyMs`, `retries`, and the optional per-stage `model` id) is attached as an
+optional `usage` field on `fanOut.router`,
 each `fanOut.domains[]` entry (accumulated across that domain's loop iterations), and
 `fanOut.decision`. It is absent on fallback paths where no provider call was made. These
 are structural numbers only — never prompts, replies, or health content.
@@ -496,7 +505,11 @@ text plus `detectedLanguage`, so Russian requests such as "сгенерируй 
 план" can route to `workout`. Deterministic signal coverage is not equivalent across
 languages: some preprocessor signals cover Cyrillic workout terms, while domain YAML
 signal examples remain mostly English. Short typo-heavy requests therefore depend more
-on router LLM confidence.
+on router LLM confidence. The **safety floors are bilingual**, though: the crisis gate
+(`WELLBEING_CRISIS_KEYWORDS_RU`) and the unsafe-medical reply/proposal screen
+(`UNSAFE_MEDICAL_PATTERNS_RU`) both cover Russian, so a weak/low-confidence route on a
+Russian turn still falls back safely and is now handled by the decision-template
+clarifying-question path (see Stage 6 `lowConfidenceRoute`).
 
 ## Stage 6: SystemPlanner — Fan-out Planner
 
@@ -539,11 +552,26 @@ Selected domains are capped at **3** (code constant). The planner never widens
 tool/proposal allowlists beyond the catalog.
 
 Router confidence directly affects proposal availability. If the router result is not
-from the LLM, has confidence below `RULE_ROUTE_CONFIDENCE_THRESHOLD`, has no selected
-domains, or cannot map the selected domain to a capability, `SystemPlannerService`
-falls back to the configured fallback capability (currently `general`). The `general`
-capability does not allow workout proposal intents, so workout cards cannot be created
-from that route even if a later LLM writes workout-like text.
+from the LLM, has confidence below `RULE_ROUTE_CONFIDENCE_THRESHOLD` (`0.75`), has no
+selected domains, or cannot map the selected domain to a capability,
+`SystemPlannerService` falls back to the configured fallback capability (currently
+`general`). The `general` capability does not allow workout proposal intents, so workout
+cards cannot be created from that route even if a later LLM writes workout-like text.
+
+**The fallback is no longer silent: `lowConfidenceRoute`.** When `buildFanoutMetadata`
+takes the single-domain fallback specifically because an **LLM-routed** turn was below
+the confidence threshold or selected zero domains, it sets
+`DomainFanoutMetadata.lowConfidenceRoute = true`. The flag is **never** set for
+proposal-revision, proposal-explainer, deterministic/rule-based routes, or capability-map
+failures (those stay `false`). The orchestrator threads
+`plan.fanout.lowConfidenceRoute` into the `FinalDecisionRequest`
+(`packages/types/src/final-decision.ts`), and the decision template renders the
+`{{lowConfidenceRouteSuffix}}` placeholder (a `LOW_CONFIDENCE_ROUTE_INSTRUCTION` in
+`openai-coach-provider.ts`, injected into the decision template's DYNAMIC suffix so the
+cacheable static prefix is unchanged) instructing the decision-maker to ask **one short
+clarifying question** in the response language rather than guess the domain. The flag is
+also surfaced in `agent.fanOut.decision` diagnostics and the `decision_done` structured
+log (boolean only).
 
 ### `CapabilityRegistryService`
 
@@ -862,6 +890,18 @@ Functions:
 - `validateReplySafety`
 - `validateProposalSafety`
 
+`containsUnsafeMedicalLanguage` (the shared check behind both) is **bilingual**: it
+tests the English `UNSAFE_MEDICAL_PATTERNS` and, on the lowercased text, the Russian
+`UNSAFE_MEDICAL_PATTERNS_RU`. The RU patterns hold the same **prescriptive-medical
+altitude** as the EN set — they block diagnosis (`диагноз` with a `не `-disclaimer
+negative-lookbehind guard, `диагностиру…`), prescribing a drug (`назначаю` only with
+a pharmaceutical word co-occurring within ~60 chars), `рецепт на` + a drug noun,
+pharmaceutical dosing (`дозировка препарата`, `принимайте по … таблетк`), treatment of
+disease (`лечени… заболеван`), and `психотерапи…`/`психотерапевт` — while deliberately
+**not** firing on wellness/nutrition phrasing (e.g. "дозировка белка", "лучшая
+терапия", "не диагноз"). Russian coach replies and proposals are no longer EN-only for
+unsafe-medical screening.
+
 ### `ProposalValidationService`
 
 File: `apps/api/src/modules/proposals/proposal-validation.service.ts`
@@ -913,7 +953,13 @@ before a plan revision is written; they never persist on revisions.
 
 File: `apps/api/src/modules/ai/coach-provider.factory.ts`
 
-Selects provider mode from config/env.
+Selects provider mode from config/env and resolves **per-stage models**. The factory
+reads `OPENAI_MODEL` (default `gpt-4o-mini`) as the baseline and three optional
+overrides from `apps/api/src/env.ts` — `OPENAI_MODEL_ROUTER`, `OPENAI_MODEL_DOMAIN`,
+`OPENAI_MODEL_DECISION` — passing them to `createOpenAiCoachProvider`, which resolves
+each stage as `override ?? OPENAI_MODEL`. This lets the cheap router/domain stages run
+on a smaller model while the decision-maker uses a stronger one (cost tiering). When no
+override is set, all three stages fall back to `OPENAI_MODEL`.
 
 ### `OpenAiCoachProvider`
 
@@ -923,10 +969,17 @@ OpenAI-backed provider implementation. The `CoachAiProvider` surface
 (`packages/ai/src/coach-ai-provider.ts` defines the interface). The three fan-out
 methods drive the live multi-domain path:
 
-- `generateRouterDecision` — the first-LLM domain selection
+- `generateRouterDecision` — the first-LLM domain selection (uses `stageModels.router`)
 - `generateDomainStep` — one domain loop step (`domain: 'workout' | 'nutrition' |
-  'health'`); resolves image attachments to multimodal content when present
-- `generateFinalDecision` — the decision-maker synthesis
+  'health'`); resolves image attachments to multimodal content when present (uses
+  `stageModels.domain`)
+- `generateFinalDecision` — the decision-maker synthesis (uses `stageModels.decision`)
+
+The provider holds a resolved `stageModels` map (`{ router, domain, decision }`) built
+by the factory from the per-stage env overrides; each fan-out method passes its stage's
+model into the OpenAI request and **stamps that model id into `usage.model`** (see
+`AgentProviderUsage`/`ProviderUsage` below), so diagnostics record which model served
+each stage.
 
 The `CoachAiProvider` surface is exactly these three fan-out methods — there are no
 other provider methods. Proposal-revision, proposal-explainer, and low-confidence
@@ -939,7 +992,8 @@ drives every LLM turn.
 `ProviderCallResult<T> = { output, usage? }` (`packages/ai/src/coach-ai-provider.ts`)
 and accepts an optional `{ signal?: AbortSignal }` second argument. `usage` is a
 `ProviderUsage` (`promptTokens`, `completionTokens`, `totalTokens`, `latencyMs`,
-`retries`) — numbers only, never prompt/health content. The three-method surface
+`retries`, plus the optional `model` id stamped per call) — numbers/ids only, never
+prompt/health content. The three-method surface
 itself is unchanged; only the wrapped return type and the optional abort signal are
 new.
 
@@ -973,12 +1027,23 @@ OpenAI prompt templates are keyed `router`, `domain_workout`, `domain_nutrition`
 shared strict-`json_schema` completion + `stripExplicitNulls` normalization +
 shape-validation helpers (see "Return shape and transport reliability" above).
 
-These prompt templates come from `packages/types/src/prompt-template-defaults.ts` unless
-`packages/ai-behavior/config/ai-behavior.json` supplies valid `promptTemplates`
-overrides for the same keys. Per-domain YAML `prompts[]` are loaded with domain config,
-but they are not directly injected into `OpenAiCoachProvider.generateDomainStep` today.
-Live fan-out prompt changes therefore belong in the prompt-template config/defaults, not
-only in `domains/*.yml`.
+These prompt templates come from `packages/types/src/prompt-template-defaults.ts`. The
+`promptTemplates.templates` override in `packages/ai-behavior/config/ai-behavior.json`
+is now empty (`{}`) — defaults are the live source. A non-empty override for one of the
+five keys would still replace that key's body. Per-domain YAML `prompts[]` are loaded
+with domain config, but they are not directly injected into
+`OpenAiCoachProvider.generateDomainStep` today. Live fan-out prompt changes therefore
+belong in `prompt-template-defaults.ts`, not only in `domains/*.yml`.
+
+**Cache-friendly template structure (automatic prompt caching).** All four fan-out
+templates (`domain_workout`, `domain_nutrition`, `domain_health`, `decision`) are
+authored as a **placeholder-free static instruction prefix first**, followed by a
+**suffix carrying every per-turn dynamic placeholder** (`{{userMessage}}`,
+`{{coachingContextJson}}`, `{{responseLanguage}}`, etc.). Keeping the long stable
+instructions ahead of the volatile per-turn values maximizes OpenAI automatic
+prompt-cache hits on the shared prefix. The `router` template was already structured
+this way. Preserve this prefix/suffix split when editing these templates — moving a
+placeholder into the prefix breaks the cacheable prefix.
 
 ### Coach AI Provider Interface
 
@@ -993,8 +1058,8 @@ provider surface; each returns `Promise<ProviderCallResult<T>>` and accepts an o
 - `generateFinalDecision` — the decision-maker synthesis
 
 `ProviderCallResult<T> = { output: T; usage?: ProviderUsage }` and
-`ProviderUsage = { promptTokens, completionTokens, totalTokens, latencyMs, retries }`
-are exported alongside the interface. Callers unwrap `.output` for domain logic and may
+`ProviderUsage = { promptTokens, completionTokens, totalTokens, latencyMs, retries,
+model? }` are exported alongside the interface. Callers unwrap `.output` for domain logic and may
 forward `.usage` to per-stage diagnostics; `usage` is absent on paths where no provider
 call was made.
 
@@ -1148,10 +1213,16 @@ flowchart TD
   `proposals.length === 0`.
 - **Router fallback blocked workout intents.** SystemPlanner only trusts router output
   that came from the LLM, has ≥1 selected domain, and meets
-  `RULE_ROUTE_CONFIDENCE_THRESHOLD`; otherwise it falls back to `general`, which does not
-  allow workout proposal intents — so `create_workout_plan` / `adapt_workout_plan` never
-  reach the catalog. Signs: `catalogIntentId` is `general`, router confidence below
-  threshold or empty selected domains.
+  `RULE_ROUTE_CONFIDENCE_THRESHOLD` (`0.75`); otherwise it falls back to `general`, which
+  does not allow workout proposal intents — so `create_workout_plan` /
+  `adapt_workout_plan` never reach the catalog. The fallback is no longer silent: for an
+  **LLM-routed** low-confidence / zero-domain turn the planner sets
+  `lowConfidenceRoute = true`, and the decision-maker is told (via the
+  `{{lowConfidenceRouteSuffix}}` instruction) to ask one short clarifying question instead
+  of guessing — so the expected outcome is a clarifying reply with `proposals: []`, not a
+  fabricated card. Signs: `catalogIntentId` is `general`, router confidence below
+  threshold or empty selected domains, and `agent.fanOut.decision.lowConfidenceRoute ===
+  true` (also on the `decision_done` log).
 - **Workout domain degraded.** A failed/timed-out/invalid domain degrades to a safe empty
   `domain_answer` with no candidates. Sign: `parseErrors` contains
   `Fan-out: domains degraded to fallback: [workout]`.
@@ -1187,7 +1258,24 @@ outcome valid where the product may expect a card:
   signals stay weak (see Stage 5). The fan-out domain and decision templates now **do**
   require the reply in `{{responseLanguage}}` (resolved `hint ?? detected`), so reply
   language is contract-enforced; the residual risk is routing/recognition, not reply
-  language.
+  language. The crisis gate and unsafe-medical screen are now **bilingual** (EN + RU
+  patterns), so a non-English turn no longer slips past those safety floors. When the
+  router is genuinely unsure on such a turn, `lowConfidenceRoute` steers the
+  decision-maker to a clarifying question rather than a wrong-domain guess.
+
+### Golden evals (router + decision)
+
+An **env-gated live golden eval suite** exercises the real router and decision-maker
+stages against fixed cases:
+`apps/api/src/modules/ai/evals/router-golden.eval.spec.ts`. It runs only when
+`LLM_EVALS=1` **and** `OPENAI_API_KEY` is set (otherwise unconditionally skipped, so
+normal `pnpm test` / CI never incurs API cost). It covers **40 router cases + 8 decision
+cases** spanning RU and EN (single-domain, multi-domain, ambiguous, smalltalk, and
+proposal-intent-vs-plain-reply), and asserts a **≥80% pass rate over non-errored cases**.
+A provider fallback (`source === "fallback"`, e.g. auth/network failure) is marked
+`ERROR`, excluded from the pass-rate denominator, and **fails the run explicitly** so an
+unavailable provider can't masquerade as a pass. Run command (in the spec header):
+`LLM_EVALS=1 corepack pnpm --dir apps/api exec vitest run src/modules/ai/evals`.
 
 ## Removed Legacy Paths
 
@@ -1205,6 +1293,13 @@ The following files/exports were deleted and are no longer active runtime paths:
 - `packages/ai/src/agent-loop-output.ts` (`parseAgentLoopOutput`,
   `coerceAgentLoopFinalAnswer`, `ParsedAgentLoopOutput`) — loop output parsing helpers
   used exclusively by the deleted single-executor path.
+- The `openai_coach_loop` prompt template — its key, default body, and
+  required-placeholders entry in `packages/types/src/prompt-template-defaults.ts`, the
+  `renderCoachLoop` renderer on `CompiledPromptTemplates`, and its
+  `promptTemplates.templates` override in `packages/ai-behavior/config/ai-behavior.json`
+  (now `{}`). It backed the deleted single-executor coach loop; the live surface is the
+  five fan-out template keys only (`router`, `domain_workout`, `domain_nutrition`,
+  `domain_health`, `decision`).
 - `UNIFIED_TURN_DECISION_ENABLED` feature flag.
 - `intent-router.ts`, `provider.generateIntentRoute`, the `llm_router` route fallback.
 - `TurnDecisionService` (+ spec), `provider.generateTurnDecision`, the
