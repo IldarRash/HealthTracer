@@ -176,6 +176,53 @@ export const WELLBEING_CRISIS_KEYWORDS = [
   "hurt myself",
 ] as const;
 
+/**
+ * Russian-language crisis keywords matched after lowercasing the input text.
+ *
+ * Calibration notes:
+ * - Each pattern targets a prescriptive, high-specificity phrase indicating
+ *   suicidal ideation or self-harm intent — not general sadness/distress.
+ * - The `u` flag is required for \b behaviour with Cyrillic; we use it on all
+ *   patterns in this array for consistency.
+ * - Lookarounds (?<![а-яё]) / (?![а-яё]) simulate word boundaries for Cyrillic
+ *   since \b does not work correctly with Unicode letter-class boundaries.
+ * - Input is .toLowerCase() before matching so case-insensitivity is handled
+ *   uniformly without the `i` flag (which would interact with `u` differently
+ *   across JS engines on Windows).
+ *
+ * MUST NOT false-positive on typical fitness/wellness phrases such as:
+ *   "убиться на тренировке" (colloquial "train hard"), "хочу умереть от жары",
+ *   "устал до смерти" (idiomatic), "причинить вред здоровью" (general health risk).
+ * Those edge cases are tested explicitly in the spec.
+ */
+export const WELLBEING_CRISIS_KEYWORDS_RU: ReadonlyArray<RegExp> = [
+  // суицид, суицидальный, суицидные мысли, etc. — match the stem (no word-end guard needed)
+  /(?<![а-яё])суицид/u,
+  // самоубийство, самоубийств*
+  /(?<![а-яё])самоубийств/u,
+  // убить себя / убить себе
+  /убить себ[яе]/u,
+  // покончить с собой / с жизнью
+  /покончить с (собой|жизнью)/u,
+  // не хочу … жить — covers direct forms and forms with up to 2 inserted words, e.g.:
+  //   "не хочу жить", "не хочу больше жить", "не хочу уже жить",
+  //   "не хочу так жить", "я не хочу так жить", "не хочу уже так жить".
+  // (\S+\s+){0,2} allows 0–2 non-space word tokens between хочу and жить.
+  // Bounded repetition prevents catastrophic backtracking.
+  // Note: this will also match phrases like "не хочу жить в этом районе" — this is
+  // intentional safe-side over-triggering for a crisis safety gate (better a false
+  // positive than a missed genuine crisis signal).
+  /не хочу (\S+\s+){0,2}жить/u,
+  // свести счёты с жизнью
+  /свести счёт[ыа] с жизнью/u,
+  // порезать себя
+  /порезать себ[яе]/u,
+  // причинить себе вред (high-specificity — self-harm intent phrasing)
+  /причинить себе вред/u,
+  // навредить себе
+  /навредить себ[еёи]/u,
+];
+
 export const wellbeingCrisisEvaluationSchema = z.object({
   shouldShowCrisisSupport: z.boolean(),
   reasons: z.array(wellbeingCrisisFlagReasonSchema),
@@ -224,7 +271,11 @@ function normalizeNote(note: string | null | undefined): string | null {
 export function containsWellbeingCrisisKeyword(note: string): boolean {
   const normalized = note.trim().toLowerCase();
 
-  return WELLBEING_CRISIS_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (WELLBEING_CRISIS_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+    return true;
+  }
+
+  return WELLBEING_CRISIS_KEYWORDS_RU.some((pattern) => pattern.test(normalized));
 }
 
 export function evaluateWellbeingCrisisFromText(text: string): WellbeingCrisisEvaluation {

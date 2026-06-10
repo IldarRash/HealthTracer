@@ -135,6 +135,16 @@ export interface DomainFanoutMetadata {
    * will run multiple concurrent domain LLMs in Phase 5.
    */
   isMultiDomain: boolean;
+  /**
+   * True when the planner took the low-confidence/general fallback route for an
+   * LLM-routed turn (router confidence below RULE_ROUTE_CONFIDENCE_THRESHOLD, or
+   * no selected domains in the router output).
+   *
+   * Not set for proposal-revision, proposal-explainer, or deterministic routes.
+   * Defaults to false. Threaded into FinalDecisionRequest so the decision-maker
+   * template can ask a clarifying question rather than guessing the domain.
+   */
+  lowConfidenceRoute: boolean;
 }
 
 /**
@@ -255,8 +265,20 @@ export class SystemPlannerService {
       return this.buildRouterFanout(input, resolvedRoute, primaryContextBudget);
     }
 
+    // Low-confidence flag: true only when the router ran but confidence was below
+    // the threshold (or produced no domains). Not set for proposal-revision,
+    // proposal-explainer, or deterministic (rule_based) routes.
+    const isLlmRouterLowConfidence =
+      !input.proposalRevision &&
+      input.routerResult?.source === "llm" &&
+      (input.routerResult.output.confidence < RULE_ROUTE_CONFIDENCE_THRESHOLD ||
+        input.routerResult.output.selectedDomains.length === 0);
+
     // Single-domain fanout: primary capability used as the sole domain entry.
-    return this.buildSingleDomainFanout(resolvedRoute, primaryContextBudget);
+    return {
+      ...this.buildSingleDomainFanout(resolvedRoute, primaryContextBudget),
+      lowConfidenceRoute: isLlmRouterLowConfidence,
+    };
   }
 
   /**
@@ -337,12 +359,13 @@ export class SystemPlannerService {
 
     // If all domains failed capability mapping, fall back to single primary-domain entry.
     if (entries.length === 0) {
-      return this.buildSingleDomainFanout(resolvedRoute, primaryContextBudget);
+      return { ...this.buildSingleDomainFanout(resolvedRoute, primaryContextBudget), lowConfidenceRoute: false };
     }
 
     return {
       selectedDomains: entries,
       isMultiDomain: entries.length > 1,
+      lowConfidenceRoute: false,
     };
   }
 
@@ -389,6 +412,7 @@ export class SystemPlannerService {
         },
       ],
       isMultiDomain: false,
+      lowConfidenceRoute: false,
     };
   }
 

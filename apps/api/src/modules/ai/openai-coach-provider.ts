@@ -561,12 +561,27 @@ function buildAttachmentContextSummary(request: DomainLlmStepRequest): string {
   return JSON.stringify(summary);
 }
 
+/**
+ * Instruction injected into the decision-maker prompt suffix when routing
+ * confidence was low. Instructs the model to ask one short clarifying question
+ * in the response language rather than guessing the user's intent.
+ *
+ * Placed in the DYNAMIC SUFFIX only so the static prefix remains unchanged
+ * (preserves prompt-cache hits for the cached prefix segment).
+ */
+const LOW_CONFIDENCE_ROUTE_INSTRUCTION =
+  "ROUTING NOTE: The router had low confidence routing this message to a specific domain. " +
+  "If the user's goal is ambiguous, ask ONE short clarifying question in the response language " +
+  "to understand what they need, rather than guessing. Do not make assumptions about domain.";
+
 function buildOpenAiFinalDecisionPrompt(
   request: FinalDecisionRequest,
   promptTemplates: CompiledPromptTemplates,
 ): string {
   const candidateSummaries = request.candidateProposalSummaries ?? [];
   const recentMessages = request.recentMessages ?? [];
+  const lowConfidenceRouteSuffix =
+    request.lowConfidenceRoute === true ? LOW_CONFIDENCE_ROUTE_INSTRUCTION : "";
 
   return promptTemplates.renderFinalDecision({
     userMessage: request.userMessage,
@@ -581,6 +596,7 @@ function buildOpenAiFinalDecisionPrompt(
       ? request.safetyConstraints.join("\n- ")
       : "Do not diagnose, prescribe, or claim to treat diseases.",
     responseLanguage: request.responseLanguage ?? "",
+    lowConfidenceRouteSuffix,
   });
 }
 
