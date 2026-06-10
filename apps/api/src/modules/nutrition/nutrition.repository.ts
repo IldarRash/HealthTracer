@@ -27,7 +27,6 @@ export class NutritionRepository {
       .select()
       .from(nutritionPlans)
       .where(and(eq(nutritionPlans.userId, userId), eq(nutritionPlans.status, "active")))
-      .orderBy(desc(nutritionPlans.updatedAt))
       .limit(1);
 
     return plan ?? null;

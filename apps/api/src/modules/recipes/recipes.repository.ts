@@ -1,7 +1,7 @@
 import { recipes, userRecipeRecommendations } from "@health/db";
 import type { RecipeListQuery } from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
 import type { ProviderRecipeDraft } from "./recipe-catalog-provider.js";
@@ -25,6 +25,15 @@ const OPEN_RECOMMENDATION_STATUSES = ["pending", "accepted"] as const;
 @Injectable()
 export class RecipesRepository {
   constructor(@Inject(DATABASE) private readonly db: HealthDatabase) {}
+
+  async countActiveProviderRecipes(): Promise<number> {
+    const [row] = await this.db
+      .select({ value: count() })
+      .from(recipes)
+      .where(and(eq(recipes.status, "active"), isNotNull(recipes.provider)));
+
+    return row?.value ?? 0;
+  }
 
   async listActiveRecipes(filters: RecipeListQuery) {
     const conditions = [eq(recipes.status, "active")];
