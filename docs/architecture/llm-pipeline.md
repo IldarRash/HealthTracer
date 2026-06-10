@@ -108,6 +108,10 @@ Responsibilities:
 - Persist the assistant message with parse, safety, agent, and weekly-review
   metadata.
 - Run the proposal validation stack and persist reviewable proposals.
+- Accept an **optional `onProgress` (`ProgressReporter`)** and emit coarse stage events
+  for the SSE streaming endpoint (see "Streaming (SSE) variant of the chat turn" below).
+  The argument is absent on the synchronous endpoint, so streaming is opt-in and never
+  changes turn logic.
 
 `ChatService` does not create proposal cards from attachment recognition. Proposals
 shown to a user come from one of two sources:
@@ -140,6 +144,65 @@ or domain decisions.
 File: `apps/api/src/modules/chat/chat.mapper.ts`
 
 Maps database rows to API chat DTOs.
+
+### Streaming (SSE) variant of the chat turn
+
+The same `ChatService.sendMessage` turn can be **streamed** to the client over
+Server-Sent Events without changing the pipeline or its safety guarantees. The
+synchronous `POST /chat/threads/:threadId/messages` endpoint is unchanged; streaming
+is a parallel endpoint that reuses the identical guard, DTO, and turn logic.
+
+Files:
+
+- `apps/api/src/modules/chat/chat.controller.ts` — `POST
+  /chat/threads/:threadId/messages/stream` (same `ClerkAuthGuard` + `sendChatMessageSchema`
+  body). The body is validated with `parseBody` **before** the SSE stream is opened, so an
+  invalid body propagates as a normal HTTP 400 — never a half-opened `200` stream. It opens
+  a `ChatTurnStreamWriter`, emits `turn_accepted`, then calls
+  `chatService.sendMessage(auth, threadId, input, onProgress)` and emits the `final` (or
+  `error`) frame.
+- `apps/api/src/modules/chat/chat-turn-stream-writer.ts` — writes SSE frames
+  (`event: <kind>\ndata: <json>\n\n`) and sets the SSE headers (incl.
+  `X-Accel-Buffering: no` to disable proxy buffering). On client disconnect (`close`
+  event) it sets `isClientConnected = false` and **stops writing**, but the underlying
+  `sendMessage` promise still runs to completion — the user message and any proposals are
+  always persisted regardless of stream state.
+- `packages/types/src/chat-turn-stream.ts` — the event contract.
+  `chatTurnStreamEventSchema` is a discriminated union on `kind`:
+  - `turn_accepted` — `{ threadId, userMessageId? }`, emitted immediately after the body is
+    accepted.
+  - `stage` — `{ stage, selectedDomains? }` where `stage` is one of `preprocessing` |
+    `routing` | `domains_running` | `synthesis` | `validating`; `selectedDomains` (domain
+    names only) is present only for `domains_running`.
+  - `final` — `{ response: ChatTurnResponse }`, the exact payload the sync endpoint returns.
+  - `error` — `{ message }`, a generic safe copy only (no internals/stack/health data).
+  - `ProgressReporter = (event: ChatTurnStreamStageEvent) => void` is the narrow callback
+    threaded through the pipeline; only `stage` events flow through it (`turn_accepted` and
+    `final` are emitted by the controller/ChatService, which hold the response).
+
+**Optional `onProgress` threading.** `ProgressReporter` is an optional last argument on
+`ChatService.sendMessage` → `AiService.generateCoachResponse` → `AgentOrchestratorService`.
+The sync endpoint passes nothing, so all reporting is a no-op there. Emission points:
+
+- `ChatService` emits `preprocessing` (just before `AiService` is called) and `validating`
+  (just before the proposal safety + validation stack) via `emitStageProgress`.
+- `AgentOrchestratorService` emits `routing` (before the router LLM), `domains_running`
+  (with selected domain names, before the parallel domain LLMs), and `synthesis` (before
+  the decision-maker LLM) via `emitProgress`.
+- Both helpers **swallow callback errors in try/catch** — a throwing reporter must never
+  break or alter the turn.
+
+**Pre-AI gate turns** (crisis, direct-path, quota, no-proposal explainer) return early in
+`ChatService` before any stage emission, so over the stream they produce only
+`turn_accepted → final` (no `stage` events) — by design.
+
+**Safety design (no token streaming).** There is **no token-level / partial-reply
+streaming.** The `final` event is emitted only **after** `validateReplySafety` and the full
+`ProposalValidationService` stack have completed — the same safety floor as the sync
+endpoint. `stage` events carry **structural information only** (stage names and selected
+domain names); they never carry user content, reply text, proposal payloads, or health
+data. This is enforced by the `chatTurnStreamEventSchema` shape: only the single `final`
+event (and only after validation) ever carries the assistant text and validated proposals.
 
 ## Stage 1: Attachment Context (context-only, images only)
 

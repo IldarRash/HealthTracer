@@ -14,6 +14,7 @@ import type {
   ContextDepth,
   ContextTimeRange,
   ProposalExplainerTurnContext,
+  ProgressReporter,
   RawAiProposal,
   ResolvedCapabilityPresentationMetadata,
   UserLocale,
@@ -80,6 +81,12 @@ export interface OrchestrateCoachTurnInput {
   proposalRevision?: ProposalRevisionContext;
   proposalExplainer?: ProposalExplainerTurnContext;
   attachmentTurn?: AttachmentTurnContext;
+  /**
+   * Optional progress reporter for SSE streaming. Called at each coarse pipeline
+   * stage (routing, domains_running, synthesis). Failures are caught and swallowed —
+   * a throwing callback must never break the turn.
+   */
+  onProgress?: ProgressReporter;
 }
 
 export interface OrchestratedCoachTurnResult {
@@ -135,6 +142,8 @@ export class AgentOrchestratorService {
   async orchestrateCoachTurn(
     input: OrchestrateCoachTurnInput,
   ): Promise<OrchestratedCoachTurnResult> {
+    const { onProgress } = input;
+
     const preprocessorResult = this.messagePreprocessorService.preprocess({
       userMessage: input.userMessage,
       hasAttachments: Boolean(input.attachmentTurn?.attachments.length),
@@ -146,6 +155,13 @@ export class AgentOrchestratorService {
     // RouterLlm is the only first-LLM routing stage for eligible turns.
     // Proposal-revision and proposal-explainer turns are the explicit non-router exceptions.
     const shouldRunRouter = !input.proposalRevision && !input.proposalExplainer;
+
+    // Emit routing stage before the router LLM call (pre-AI gate turns never reach
+    // the orchestrator so they never emit stage events — handled in ChatService).
+    if (shouldRunRouter) {
+      emitProgress(onProgress, { kind: "stage", stage: "routing" });
+    }
+
     const routerResult = shouldRunRouter
       ? await this.routerLlmService.route({
           preprocessorResult,
@@ -280,6 +296,7 @@ export class AgentOrchestratorService {
       capabilityTurnMetadata,
       routerResult,
       responseLanguage: preprocessorResult.responseLanguage,
+      onProgress,
     });
   }
 
@@ -392,10 +409,19 @@ export class AgentOrchestratorService {
       routerResult: RouterLlmResult | undefined;
       /** Resolved response language (hint ?? detected). Null = fall back to message detection. */
       responseLanguage: string | null;
+      onProgress?: ProgressReporter;
     },
   ): Promise<OrchestratedCoachTurnResult> {
-    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage } = params;
+    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, onProgress } = params;
     const selectedDomains = plan.fanout.selectedDomains;
+
+    // Emit domains_running stage with the selected domain names (structural info only,
+    // no capabilities, intents, or content).
+    emitProgress(onProgress, {
+      kind: "stage",
+      stage: "domains_running",
+      selectedDomains: selectedDomains.map((d) => d.domain),
+    });
 
     // Build one bounded AgentContextPacket per selected domain.
     // Safety floors (documents/sensitive denied by default) are re-applied by
@@ -478,6 +504,9 @@ export class AgentOrchestratorService {
     const decisionRecentMessages = [...input.recentMessages]
       .slice(-6)
       .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
+
+    // Emit synthesis stage before the decision-maker LLM call.
+    emitProgress(onProgress, { kind: "stage", stage: "synthesis" });
 
     // Run the decision-maker LLM (Stage 9).
     // DecisionMakerExecutorService always resolves — degrades to fallback on error.
@@ -1081,6 +1110,28 @@ function buildCandidateProposalSummaries(
   }
 
   return summaries;
+}
+
+/**
+ * Safely emit a progress event via the optional reporter.
+ *
+ * Failures are swallowed — a throwing callback must never break the turn.
+ * Only structural stage events are emitted here; `turn_accepted` and `final`
+ * are emitted by ChatService which holds the full response shape.
+ */
+function emitProgress(
+  onProgress: ProgressReporter | undefined,
+  event: Parameters<ProgressReporter>[0],
+): void {
+  if (!onProgress) {
+    return;
+  }
+
+  try {
+    onProgress(event);
+  } catch {
+    // Swallow — progress reporting must never affect turn correctness.
+  }
 }
 
 /**

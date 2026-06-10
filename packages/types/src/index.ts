@@ -7,7 +7,6 @@ import {
   MAX_ACTIVE_WEEKLY_FOCUS,
   onboardingQuarterlyGoalSchema,
 } from "./goal-hierarchy.js";
-import { proposalCorrelationEvidenceRefsSchema } from "./document-signals.js";
 import { habitPlanPayloadSchema } from "./habits.js";
 import {
   habitsProgressAggregateSchema,
@@ -18,21 +17,49 @@ import {
   weeklyReviewLaneOutcomeSchema,
   weeklyReviewPackMetaSchema,
 } from "./progress-cross-domain.js";
-import { recoveryContextSourceRefSchema, recoveryProgressAggregateSchema } from "./recovery.js";
+import { recoveryProgressAggregateSchema } from "./recovery.js";
 import { todayChecklistPayloadSchema } from "./today.js";
-import { captureWellbeingCheckinProposalPayloadSchema } from "./chat-action-proposals.js";
-import { chatAttachmentOutcomeSchema, chatMessageAttachmentMetaSchema } from "./chat-attachments.js";
-import { logNutritionIncidentProposalPayloadSchema } from "./nutrition-incidents.js";
 import {
   recipeConfidenceBandSchema,
   recipeProvenanceSchema,
 } from "./recipes.js";
 import {
   adaptWorkoutPlanFromProgressChangesSchema,
-  logWorkoutActivityProposalPayloadSchema,
   workoutPlanProposalChangesSchema,
 } from "./workouts.js";
 import { saveBodyAnalysisProposalPayloadSchema } from "./body-composition.js";
+// nutrition-meal.ts holds the canonical nutrition meal/plan schemas.
+// NutritionMealSlot and NutritionPlanPayload are used in local function signatures.
+import {
+  type NutritionMealSlot,
+  type NutritionPlanPayload,
+} from "./nutrition-meal.js";
+// user-enums.ts, ai-proposal.ts, and chat-turn.ts are the canonical homes for
+// proposal domain schemas. Index.ts re-exports from them for backward compat.
+import {
+  activityLevelSchema,
+  goalPrioritySchema,
+  goalStatusSchema,
+  goalTypeSchema,
+  trainingExperienceSchema,
+} from "./user-enums.js";
+// ai-proposal.ts holds the canonical proposal domain schemas.
+// Only import names that are actually used in local expressions below.
+import {
+  adaptHabitPlanFromProgressChangesSchema,
+  adjustNutritionPlanFromProgressChangesSchema,
+  chatProposalRevisionSchema,
+  createGoalProposalChangesSchema,
+  emptyProposalChangesSchema,
+  nutritionPlanPayloadSchema,
+  profileProposalChangesSchema,
+  recipeRecommendationProposalPayloadSchema,
+  updateGoalProposalChangesSchema,
+  type AdjustNutritionPlanFromProgressChanges,
+  type HabitPlanProposalChanges,
+  type NutritionPlanProposalChanges,
+  type ProposalIntent,
+} from "./ai-proposal.js";
 
 export { isoDateSchema, isoDateTimeSchema, isCalendarValidIsoDate, isoDateOnly } from "./dates.js";
 
@@ -47,41 +74,21 @@ export const healthResponseSchema = z.object({
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 
-export const activityLevelSchema = z.enum([
-  "sedentary",
-  "lightly_active",
-  "moderately_active",
-  "very_active",
-  "athlete",
-]);
-
-export type ActivityLevel = z.infer<typeof activityLevelSchema>;
-
-export const trainingExperienceSchema = z.enum([
-  "beginner",
-  "intermediate",
-  "advanced",
-]);
-
-export type TrainingExperience = z.infer<typeof trainingExperienceSchema>;
-
-export const goalTypeSchema = z.enum([
-  "fat_loss",
-  "muscle_gain",
-  "maintenance",
-  "endurance",
-  "general_wellness",
-]);
-
-export type GoalType = z.infer<typeof goalTypeSchema>;
-
-export const goalStatusSchema = z.enum(["active", "paused", "completed", "archived"]);
-
-export type GoalStatus = z.infer<typeof goalStatusSchema>;
-
-export const goalPrioritySchema = z.enum(["primary", "secondary"]);
-
-export type GoalPriority = z.infer<typeof goalPrioritySchema>;
+// Re-exported from user-enums.ts (canonical home).
+export {
+  activityLevelSchema,
+  goalPrioritySchema,
+  goalStatusSchema,
+  goalTypeSchema,
+  trainingExperienceSchema,
+} from "./user-enums.js";
+export type {
+  ActivityLevel,
+  GoalPriority,
+  GoalStatus,
+  GoalType,
+  TrainingExperience,
+} from "./user-enums.js";
 
 export const userLocaleSchema = z.enum(["en", "ru"]);
 export type UserLocale = z.infer<typeof userLocaleSchema>;
@@ -231,32 +238,17 @@ export const currentUserStateSchema = z.object({
 
 export type CurrentUserState = z.infer<typeof currentUserStateSchema>;
 
-export const chatMessageRoleSchema = z.enum(["user", "assistant", "system"]);
-
-export type ChatMessageRole = z.infer<typeof chatMessageRoleSchema>;
-
-export const chatThreadSchema = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid(),
-  title: z.string().min(1).max(160).nullable(),
-  createdAt: isoDateTimeSchema,
-  updatedAt: isoDateTimeSchema,
-});
-
-export type ChatThread = z.infer<typeof chatThreadSchema>;
-
-export const chatMessageSchema = z.object({
-  id: z.string().uuid(),
-  threadId: z.string().uuid(),
-  role: chatMessageRoleSchema,
-  content: z.string().min(1).max(8000),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  createdAt: isoDateTimeSchema,
-  /** Display-only attachment metadata populated from linked chat_attachments rows. No bytes, storageKey, consent, or recognition payloads. */
-  attachments: z.array(chatMessageAttachmentMetaSchema).default([]),
-});
-
-export type ChatMessage = z.infer<typeof chatMessageSchema>;
+// Re-exported from chat-turn.ts (canonical home).
+export {
+  chatMessageRoleSchema,
+  chatMessageSchema,
+  chatThreadSchema,
+} from "./chat-turn.js";
+export type {
+  ChatMessage,
+  ChatMessageRole,
+  ChatThread,
+} from "./chat-turn.js";
 
 export const createChatThreadSchema = z.object({
   title: z.string().min(1).max(160).optional(),
@@ -285,59 +277,19 @@ export const sendChatMessageSchema = z
 
 export type SendChatMessageInput = z.infer<typeof sendChatMessageSchema>;
 
-export const proposalStatusSchema = z.enum([
-  "pending",
-  "accepted",
-  "rejected",
-  "superseded",
-]);
-
-export type ProposalStatus = z.infer<typeof proposalStatusSchema>;
-
-export const proposalValidationStatusSchema = z.enum([
-  "pending_validation",
-  "valid",
-  "invalid",
-]);
-
-export type ProposalValidationStatus = z.infer<
-  typeof proposalValidationStatusSchema
->;
-
-export const proposalTargetDomainSchema = z.enum([
-  "profile",
-  "goal",
-  "workout",
-  "nutrition",
-  "recipe",
-  "today",
-  "general",
-  "body",
-]);
-
-export type ProposalTargetDomain = z.infer<typeof proposalTargetDomainSchema>;
-
-export const proposalIntentSchema = z.enum([
-  "update_profile",
-  "create_goal",
-  "update_goal",
-  "create_workout_plan",
-  "adapt_workout_plan",
-  "adapt_workout_plan_from_progress",
-  "create_nutrition_plan",
-  "adjust_nutrition_plan",
-  "recommend_recipes",
-  "create_today_checklist",
-  "summarize_progress",
-  "create_habit_plan",
-  "adapt_habit_plan",
-  "capture_wellbeing_checkin",
-  "log_nutrition_incident",
-  "log_workout_activity",
-  "save_body_analysis",
-]);
-
-export type ProposalIntent = z.infer<typeof proposalIntentSchema>;
+// Re-exported from ai-proposal.ts (canonical home).
+export {
+  proposalIntentSchema,
+  proposalStatusSchema,
+  proposalTargetDomainSchema,
+  proposalValidationStatusSchema,
+} from "./ai-proposal.js";
+export type {
+  ProposalIntent,
+  ProposalStatus,
+  ProposalTargetDomain,
+  ProposalValidationStatus,
+} from "./ai-proposal.js";
 
 export {
   activeWorkoutPlanResponseSchema,
@@ -448,134 +400,35 @@ export {
   type WorkoutWeekday,
 } from "./workouts.js";
 
-/**
- * Ingredient entry for a meal slot.
- * Mirrors recipeIngredientSchema (defined later) — kept separate to avoid
- * forward-reference issues. The shape is intentionally identical.
- */
-export const nutritionMealIngredientSchema = z.object({
-  name: z.string().min(1).max(160),
-  quantity: z.number().positive().max(10000).nullable().optional(),
-  unit: z.string().min(1).max(40).nullable().optional(),
-  notes: z.string().min(1).max(240).nullable().optional(),
-});
+// Re-exported from nutrition-meal.ts (canonical home).
+export {
+  nutritionMealIngredientSchema,
+  nutritionMealSlotSchema,
+  nutritionWeekDaySchema,
+} from "./nutrition-meal.js";
+export type {
+  NutritionMealIngredient,
+  NutritionMealSlot,
+  NutritionWeekDay,
+} from "./nutrition-meal.js";
 
-export type NutritionMealIngredient = z.infer<typeof nutritionMealIngredientSchema>;
-
-export const nutritionMealSlotSchema = z.object({
-  label: z.string().min(1).max(80),
-  timingHint: z.string().min(1).max(120).nullable().default(null),
-  // --- C1: per-meal kcal + macros + time + dish (all optional — old plans lack these) ---
-  /** Estimated kcal for this meal slot. */
-  kcal: z.number().int().nonnegative().max(5000).optional(),
-  /** Protein estimate for this meal slot in grams. */
-  proteinGrams: z.number().int().nonnegative().max(500).optional(),
-  /** Carbohydrate estimate for this meal slot in grams. */
-  carbsGrams: z.number().int().nonnegative().max(1000).optional(),
-  /** Fat estimate for this meal slot in grams. */
-  fatGrams: z.number().int().nonnegative().max(500).optional(),
-  /** Suggested meal time, e.g. "08:00". */
-  mealTime: z.string().min(1).max(20).optional(),
-  /** Suggested dish or meal description for this slot. */
-  dish: z.string().min(1).max(240).optional(),
-  /** Ingredients for this meal slot (drives C3 grocery list). */
-  ingredients: z.array(nutritionMealIngredientSchema).max(30).optional(),
-});
-
-export type NutritionMealSlot = z.infer<typeof nutritionMealSlotSchema>;
-
-/**
- * A single day in the 7-day weekly plan matrix (C2).
- * All meal slots are optional — an absent slot means "as usual" for that slot.
- */
-export const nutritionWeekDaySchema = z.object({
-  /** ISO weekday: 1 = Monday … 7 = Sunday. */
-  weekday: z.number().int().min(1).max(7),
-  breakfast: z.string().min(1).max(240).optional(),
-  lunch: z.string().min(1).max(240).optional(),
-  snack: z.string().min(1).max(240).optional(),
-  dinner: z.string().min(1).max(240).optional(),
-  /** Total kcal target for this day (optional override). */
-  kcal: z.number().int().positive().max(10000).optional(),
-});
-
-export type NutritionWeekDay = z.infer<typeof nutritionWeekDaySchema>;
-
-export const nutritionPlanPayloadSchema = z.object({
-  title: z.string().min(1).max(160),
-  summary: z.string().min(1).max(1000),
-  caloriesPerDay: z.number().int().positive().max(10000).nullable(),
-  proteinGrams: z.number().int().nonnegative().max(1000).nullable(),
-  carbsGrams: z.number().int().nonnegative().max(1500).nullable(),
-  fatGrams: z.number().int().nonnegative().max(1000).nullable(),
-  hydrationLiters: z.number().positive().max(20).nullable(),
-  mealStructure: z.array(nutritionMealSlotSchema).max(8).default([]),
-  preferences: z.array(z.string().min(1).max(160)).max(20).default([]),
-  restrictions: z.array(z.string().min(1).max(160)).max(20).default([]),
-  allergies: z.array(z.string().min(1).max(160)).max(20).default([]),
-  notes: z.array(z.string().min(1).max(240)).max(20).default([]),
-  // --- C2: optional 7-day weekly matrix (absent = no weekly plan) ---
-  weeklyPlan: z.array(nutritionWeekDaySchema).min(1).max(7).optional(),
-});
-
-export type NutritionPlanPayload = z.infer<typeof nutritionPlanPayloadSchema>;
-
-/**
- * A single swap item in an adjust_nutrition_plan proposal (C4 dietary draft).
- * Describes a "before → after" substitution suggested by the AI.
- */
-export const nutritionSwapItemSchema = z.object({
-  /** Original dish/ingredient label being replaced. */
-  from: z.string().min(1).max(240),
-  /** Replacement dish/ingredient label. */
-  to: z.string().min(1).max(240),
-  /** Approximate calorie/macro saving from this swap (informational only). */
-  save: z.string().min(1).max(240).optional(),
-});
-
-export type NutritionSwapItem = z.infer<typeof nutritionSwapItemSchema>;
-
-export const adjustNutritionPlanFromProgressChangesSchema = z.object({
-  plan: nutritionPlanPayloadSchema,
-  sourceSummaryId: z.string().uuid().optional(),
-  sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
-  // --- C4: optional swap metadata (before/after items for dietary draft proposals) ---
-  /** Calorie target of the plan being replaced (for before/after display). */
-  fromCaloriesPerDay: z.number().int().positive().max(10000).optional(),
-  /** Swap list describing the substitutions this proposal makes (C4 DiffRow). */
-  swaps: z.array(nutritionSwapItemSchema).max(20).optional(),
-});
-
-export type AdjustNutritionPlanFromProgressChanges = z.infer<
-  typeof adjustNutritionPlanFromProgressChangesSchema
->;
-
-export const nutritionPlanProposalChangesSchema = z.union([
-  nutritionPlanPayloadSchema,
-  adjustNutritionPlanFromProgressChangesSchema,
-]);
-
-export type NutritionPlanProposalChanges = z.infer<
-  typeof nutritionPlanProposalChangesSchema
->;
-
-export const adaptHabitPlanFromProgressChangesSchema = z.object({
-  plan: habitPlanPayloadSchema,
-  sourceSummaryId: z.string().uuid().optional(),
-  sourceTrendObservationIds: z.array(z.string().uuid()).max(10).default([]),
-  recoverySourceRefs: z.array(recoveryContextSourceRefSchema).max(5).optional(),
-});
-
-export type AdaptHabitPlanFromProgressChanges = z.infer<
-  typeof adaptHabitPlanFromProgressChangesSchema
->;
-
-export const habitPlanProposalChangesSchema = z.union([
+// Re-exported from ai-proposal.ts (canonical home).
+export {
   adaptHabitPlanFromProgressChangesSchema,
-  habitPlanPayloadSchema,
-]);
-
-export type HabitPlanProposalChanges = z.infer<typeof habitPlanProposalChangesSchema>;
+  adjustNutritionPlanFromProgressChangesSchema,
+  habitPlanProposalChangesSchema,
+  nutritionPlanPayloadSchema,
+  nutritionPlanProposalChangesSchema,
+  nutritionSwapItemSchema,
+} from "./ai-proposal.js";
+export type {
+  AdaptHabitPlanFromProgressChanges,
+  AdjustNutritionPlanFromProgressChanges,
+  HabitPlanProposalChanges,
+  NutritionPlanPayload,
+  NutritionPlanProposalChanges,
+  NutritionSwapItem,
+} from "./ai-proposal.js";
 
 export function extractNutritionPlanPayload(
   proposedChanges: NutritionPlanProposalChanges,
@@ -1202,24 +1055,15 @@ export type GenerateRecipeRecommendationsResponse = z.infer<
   typeof generateRecipeRecommendationsResponseSchema
 >;
 
-export const recipeRecommendationItemProposalSchema = z.object({
-  recipeId: z.string().uuid(),
-  reason: z.string().min(1).max(1000),
-  fitSummary: z.string().min(1).max(500),
-});
-
-export type RecipeRecommendationItemProposal = z.infer<
-  typeof recipeRecommendationItemProposalSchema
->;
-
-export const recipeRecommendationProposalPayloadSchema = z.object({
-  relatedNutritionPlanRevisionId: z.string().uuid().nullable().optional(),
-  recommendations: z.array(recipeRecommendationItemProposalSchema).min(1).max(10),
-});
-
-export type RecipeRecommendationProposalPayload = z.infer<
-  typeof recipeRecommendationProposalPayloadSchema
->;
+// Re-exported from ai-proposal.ts (canonical home).
+export {
+  recipeRecommendationItemProposalSchema,
+  recipeRecommendationProposalPayloadSchema,
+} from "./ai-proposal.js";
+export type {
+  RecipeRecommendationItemProposal,
+  RecipeRecommendationProposalPayload,
+} from "./ai-proposal.js";
 
 export {
   calculateTodayAdherence,
@@ -1271,79 +1115,30 @@ export const todayDayResponseSchema = todayDayResponseBaseSchema.extend({
 
 export type TodayDayResponse = z.infer<typeof todayDayResponseSchema>;
 
-/** Strict so optional profile fields cannot match and strip other domain payloads in unions. */
-export const profileProposalChangesSchema = upsertUserProfileSchema.strict();
-
-export const createGoalProposalChangesSchema = createGoalSchema;
-
-export const updateGoalProposalChangesSchema = z.object({
-  goalId: z.string().uuid(),
-  changes: updateGoalSchema,
-});
-
-export const emptyProposalChangesSchema = z.object({}).strict();
-
-export function getProposedChangesSchemaForIntent(
-  intent: ProposalIntent,
-): z.ZodTypeAny {
-  switch (intent) {
-    case "update_profile":
-      return profileProposalChangesSchema;
-    case "create_goal":
-      return createGoalProposalChangesSchema;
-    case "update_goal":
-      return updateGoalProposalChangesSchema;
-    case "create_workout_plan":
-    case "adapt_workout_plan":
-      return workoutPlanProposalChangesSchema;
-    case "adapt_workout_plan_from_progress":
-      return adaptWorkoutPlanFromProgressChangesSchema;
-    case "create_nutrition_plan":
-      return nutritionPlanPayloadSchema;
-    case "adjust_nutrition_plan":
-      return nutritionPlanProposalChangesSchema;
-    case "recommend_recipes":
-      return recipeRecommendationProposalPayloadSchema;
-    case "create_today_checklist":
-      return todayChecklistPayloadSchema;
-    case "create_habit_plan":
-      return habitPlanPayloadSchema;
-    case "adapt_habit_plan":
-      return habitPlanProposalChangesSchema;
-    case "summarize_progress":
-      return emptyProposalChangesSchema;
-    case "capture_wellbeing_checkin":
-      return captureWellbeingCheckinProposalPayloadSchema;
-    case "log_nutrition_incident":
-      return logNutritionIncidentProposalPayloadSchema;
-    case "log_workout_activity":
-      return logWorkoutActivityProposalPayloadSchema;
-    case "save_body_analysis":
-      return saveBodyAnalysisProposalPayloadSchema;
-    default: {
-      const _exhaustive: never = intent;
-      return _exhaustive;
-    }
-  }
-}
-
-function addProposedChangesIssues(
-  intent: ProposalIntent,
-  proposedChanges: unknown,
-  ctx: z.RefinementCtx,
-) {
-  const schema = getProposedChangesSchemaForIntent(intent);
-  const result = schema.safeParse(proposedChanges);
-
-  if (!result.success) {
-    for (const issue of result.error.issues) {
-      ctx.addIssue({
-        ...issue,
-        path: ["proposedChanges", ...issue.path],
-      });
-    }
-  }
-}
+// Re-exported from ai-proposal.ts (canonical home, avoids circular dep via
+// chat-turn-stream.ts). The schemas defined there are the authoritative source.
+export {
+  aiProposalSchema,
+  aiStructuredOutputSchema,
+  chatProposalRevisionSchema,
+  createGoalProposalChangesSchema,
+  emptyProposalChangesSchema,
+  getProposedChangesSchemaForIntent,
+  profileProposalChangesSchema,
+  proposalDecisionSchema,
+  proposalModifyResponseSchema,
+  rawAiProposalSchema,
+  updateGoalProposalChangesSchema,
+} from "./ai-proposal.js";
+export type {
+  AiProposal,
+  AiStructuredOutput,
+  AiStructuredOutputInput,
+  ChatProposalRevision,
+  ProposalDecisionInput,
+  ProposalModifyResponse,
+  RawAiProposal,
+} from "./ai-proposal.js";
 
 /** Union for untyped contexts; domain-specific intents use getProposedChangesSchemaForIntent. */
 export const proposalChangesSchema = z.union([
@@ -1362,223 +1157,13 @@ export const proposalChangesSchema = z.union([
 
 export type ProposalChanges = z.infer<typeof proposalChangesSchema>;
 
-const proposalTitleReasonFields = {
-  title: z.string().min(1).max(160),
-  reason: z.string().min(1).max(1000),
-  evidenceRefs: proposalCorrelationEvidenceRefsSchema.optional(),
-};
-
-export const rawAiProposalSchema = z.discriminatedUnion("intent", [
-  z.object({
-    intent: z.literal("update_profile"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: profileProposalChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("create_goal"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: createGoalProposalChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("update_goal"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: updateGoalProposalChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("create_workout_plan"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: workoutPlanProposalChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("adapt_workout_plan"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: workoutPlanProposalChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("adapt_workout_plan_from_progress"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: adaptWorkoutPlanFromProgressChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("create_nutrition_plan"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: nutritionPlanPayloadSchema,
-  }),
-  z.object({
-    intent: z.literal("adjust_nutrition_plan"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: nutritionPlanProposalChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("recommend_recipes"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: recipeRecommendationProposalPayloadSchema,
-  }),
-  z.object({
-    intent: z.literal("create_today_checklist"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: todayChecklistPayloadSchema,
-  }),
-  z.object({
-    intent: z.literal("create_habit_plan"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: habitPlanPayloadSchema,
-  }),
-  z.object({
-    intent: z.literal("adapt_habit_plan"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: habitPlanProposalChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("summarize_progress"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: emptyProposalChangesSchema,
-  }),
-  z.object({
-    intent: z.literal("capture_wellbeing_checkin"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: captureWellbeingCheckinProposalPayloadSchema,
-  }),
-  z.object({
-    intent: z.literal("log_nutrition_incident"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: logNutritionIncidentProposalPayloadSchema,
-  }),
-  z.object({
-    intent: z.literal("log_workout_activity"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: logWorkoutActivityProposalPayloadSchema,
-  }),
-  z.object({
-    intent: z.literal("save_body_analysis"),
-    targetDomain: proposalTargetDomainSchema,
-    ...proposalTitleReasonFields,
-    proposedChanges: saveBodyAnalysisProposalPayloadSchema,
-  }),
-]);
-
-export type RawAiProposal = z.infer<typeof rawAiProposalSchema>;
-
-export const chatProposalRevisionSchema = z.object({
-  supersededProposalId: z.string().uuid(),
-  originalProposal: rawAiProposalSchema,
-  modificationFeedback: z.string().min(1).max(2000),
-});
-
-export type ChatProposalRevision = z.infer<typeof chatProposalRevisionSchema>;
-
-const aiProposalCoreSchema = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid(),
-  threadId: z.string().uuid(),
-  sourceMessageId: z.string().uuid().nullable(),
-  intent: proposalIntentSchema,
-  targetDomain: proposalTargetDomainSchema,
-  title: z.string().min(1).max(160),
-  reason: z.string().min(1).max(1000),
-  evidenceRefs: proposalCorrelationEvidenceRefsSchema.optional(),
-  proposedChanges: z.unknown(),
-  status: proposalStatusSchema,
-  validationStatus: proposalValidationStatusSchema,
-  validationErrors: z.array(z.string().min(1).max(500)).default([]),
-  userDecisionAt: isoDateTimeSchema.nullable(),
-  appliedReference: z.string().min(1).max(200).nullable(),
-  createdAt: isoDateTimeSchema,
-  updatedAt: isoDateTimeSchema,
-});
-
-type AiProposalPersistedFields = Omit<
-  z.infer<typeof aiProposalCoreSchema>,
-  "intent" | "proposedChanges"
->;
-
-export type AiProposal = AiProposalPersistedFields & RawAiProposal;
-
-export const aiProposalSchema = aiProposalCoreSchema.superRefine((proposal, ctx) => {
-  addProposedChangesIssues(proposal.intent, proposal.proposedChanges, ctx);
-}) as z.ZodType<AiProposal>;
-
-export const aiStructuredOutputSchema = z.object({
-  reply: z.string().min(1).max(8000),
-  proposals: z.array(rawAiProposalSchema).max(5).default([]),
-});
-
-export type AiStructuredOutput = z.infer<typeof aiStructuredOutputSchema>;
-export type AiStructuredOutputInput = z.input<typeof aiStructuredOutputSchema>;
-
-export const proposalDecisionSchema = z
-  .object({
-    decision: z.enum(["accept", "reject", "modify"]),
-    modificationFeedback: z.string().min(1).max(2000).optional(),
-    proposedChanges: z.unknown().optional(),
-  })
-  .superRefine((value, ctx) => {
-    if (value.decision === "modify" && !value.modificationFeedback?.trim()) {
-      ctx.addIssue({
-        code: "custom",
-        message: "modificationFeedback is required when decision is modify.",
-        path: ["modificationFeedback"],
-      });
-    }
-
-    if (value.decision !== "accept" && value.proposedChanges !== undefined) {
-      ctx.addIssue({
-        code: "custom",
-        message: "proposedChanges is only supported when decision is accept.",
-        path: ["proposedChanges"],
-      });
-    }
-  });
-
-export type ProposalDecisionInput = z.infer<typeof proposalDecisionSchema>;
-
-export const proposalModifyResponseSchema = z.object({
-  proposal: aiProposalSchema,
-  revisionContext: z.object({
-    supersededProposalId: z.string().uuid(),
-    originalIntent: proposalIntentSchema,
-    originalTitle: z.string().min(1).max(160),
-    originalReason: z.string().min(1).max(1000),
-    modificationFeedback: z.string().min(1).max(2000),
-    nextAction: z.literal("send_chat_message"),
-    suggestedUserMessage: z.string().min(1).max(4000),
-  }),
-});
-
-export type ProposalModifyResponse = z.infer<typeof proposalModifyResponseSchema>;
-
-export const chatTurnResponseSchema = z.object({
-  thread: chatThreadSchema,
-  userMessage: chatMessageSchema,
-  assistantMessage: chatMessageSchema,
-  proposals: z.array(aiProposalSchema),
-  attachmentOutcomes: z.array(z.lazy(() => chatAttachmentOutcomeSchema)).optional(),
-  /**
-   * When true, the AI pipeline produced a consent-gated outcome (e.g. medical
-   * document save) that requires explicit user consent before anything is persisted.
-   * The UI should surface a distinct consent prompt when this flag is present.
-   * Nothing is auto-persisted regardless of this value.
-   */
-  consentRequired: z.boolean().optional(),
-});
-
-export type ChatTurnResponse = z.infer<typeof chatTurnResponseSchema>;
+// Re-exported from chat-turn.ts (canonical home).
+export {
+  chatTurnResponseSchema,
+} from "./chat-turn.js";
+export type {
+  ChatTurnResponse,
+} from "./chat-turn.js";
 
 export {
   activeHabitPlanResponseSchema,
@@ -2443,3 +2028,14 @@ export {
   type DisplayField,
   type DisplayFieldKind,
 } from "./display-contract.js";
+export {
+  chatTurnStreamEventSchema,
+  chatTurnStreamStageSchema,
+  type ChatTurnStreamEvent,
+  type ChatTurnStreamErrorEvent,
+  type ChatTurnStreamFinalEvent,
+  type ChatTurnStreamStageEvent,
+  type ChatTurnStreamStage,
+  type ChatTurnStreamTurnAcceptedEvent,
+  type ProgressReporter,
+} from "./chat-turn-stream.js";
