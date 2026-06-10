@@ -97,6 +97,8 @@ docs/         product + architecture docs (ADRs, LLM pipeline, auth, MCP)
 
 ## Documentation
 
-- `docs/architecture/` — ADRs, the LLM-pipeline spec, auth, and MCP notes.
-- `docs/product/` — phased roadmap and the current phase audit.
+Start at [`docs/README.md`](docs/README.md) for the full index.
+
+- `docs/architecture/` — the LLM-pipeline spec, AI-behavior config, domain model, database, auth, MCP, and ADRs.
+- `docs/product/` — the phased feature roadmap, open feature briefs, and the mobile-parity deferral note.
 - `CLAUDE.md` / `AGENTS.md` — engineering invariants and contributor guidance.

@@ -26,34 +26,47 @@ packages/db/
   drizzle.config.ts
 ```
 
-## Initial Tables
+## Table Inventory
 
-MVP 1 tables:
+Source of truth is [`packages/db/src/schema/*`](../../packages/db/src/schema)
+(every table is a `pgTable` there). Grouped by domain:
 
-- `users`
-- `user_profiles`
-- `goals`
-- `chat_threads`
-- `chat_messages`
-- `workout_plans`
-- `workout_plan_revisions`
-- `workout_sessions`
-- `nutrition_plans`
-- `nutrition_plan_revisions`
-- `nutrition_incidents`
-- `daily_checklists`
-- `health_metrics`
-- `ai_proposals`
-- `chat_attachments`
-- `exercises`
+**Identity & profile** — `users`, `user_profiles`, `goals`.
 
-Implemented support tables:
+**Chat & AI** — `chat_threads`, `chat_messages`, `chat_attachments`,
+`ai_proposals`.
 
-- `recipes`
-- `user_recipe_recommendations`
-- `device_connections`
-- `health_documents`
-- `health_document_summaries`
+**Workouts** — `workout_plans`, `workout_plan_revisions`, `workout_sessions`
+(planned + `ad_hoc`), `exercises` (catalog).
+
+**Nutrition** — `nutrition_plans`, `nutrition_plan_revisions`,
+`nutrition_adherence`, `nutrition_incidents`, `food_photo_analyses`, `recipes`,
+`user_recipe_recommendations`.
+
+**Today & habits** — `daily_checklists`, `habit_plans`, `habit_plan_revisions`,
+`habit_templates`, `habit_completions`.
+
+**Wellbeing & recovery** — `wellbeing_check_ins`, `recovery_check_ins`,
+`recovery_context_snapshots`.
+
+**Body composition** — `body_composition_analyses`.
+
+**Progress** — `weekly_progress_summaries`, `trend_observations`.
+
+**Metrics & devices** — `health_metric_snapshots`, `health_metric_aggregates`,
+`device_connections`, `device_consents`.
+
+**Documents** — `health_documents`, `health_document_summaries`,
+`document_signals`.
+
+**Billing & usage** — `subscriptions`, `stripe_webhook_events`,
+`chat_ai_usage_daily`.
+
+**Infra** — `migration_checks`.
+
+Each domain maps to a NestJS module under
+[`apps/api/src/modules/*`](../../apps/api/src/modules) (registered in
+[`apps/api/src/app.module.ts`](../../apps/api/src/app.module.ts)).
 
 ## Revision Pattern
 
@@ -76,7 +89,19 @@ workout_plan_revisions
   created_at
 ```
 
-The same pattern should be used for any future user-facing plan that AI can change. AI proposals reference the revision they create after user approval.
+The same pattern is used for any user-facing plan that AI can change
+(`workout_plans` / `nutrition_plans` / `habit_plans` and their `*_revisions`).
+Most accepted workout/nutrition proposals reference the revision they create
+after user approval.
+
+**Performed vs planned.** `workout_sessions` is the performed side and never
+mutates a revision. Its `source` is `planned` (materialized from a revision) or
+`ad_hoc` (a logged one-off with **nullable** `workout_plan_id` /
+`workout_plan_revision_id`, an `activity_type`, and `estimated_calories`). NULLs
+are distinct in the `(user_id, workout_plan_id, workout_plan_revision_id,
+planned_date)` unique index, so multiple ad-hoc rows insert cleanly on one day.
+`nutrition_incidents` is the eaten/performed side and likewise never changes
+plan targets.
 
 ## Proposal Status Pattern
 
@@ -96,7 +121,13 @@ ai_proposals
   created_at
 ```
 
-Pending proposals must not change active plan state. Rejected proposals must remain auditable without applying changes.
+Pending proposals must not change active plan state. Rejected proposals must remain auditable without applying changes. `applied_revision_id` (the `applied`
+reference) points to the created revision for plan intents, or to the created row
+for LOG (revision-free) intents (e.g. `workout_session:<id>` /
+`nutrition_incident:<id>`). A proposal payload may carry an optional,
+non-authoritative `displayContract` render hint; it is recomputed/clamped on
+accept and stripped before any revision is written, so it never persists on a
+revision (see [`../product/features/editable-proposals-performed-log.md`](../product/features/editable-proposals-performed-log.md)).
 
 ## Attachment And Incident Pattern
 
@@ -130,9 +161,22 @@ nutrition_incidents
 
 Chat attachments are ownership scoped and may expire. They do not run a separate
 food/workout/medical recognition pipeline and do not create proposal candidates outside
-the unified LLM proposal path. Medical document save from an image is deferred; no
-attachment path may auto-create `health_documents`. Nutrition incidents are written only
+the unified LLM proposal path. Medical document save from an image is deferred; **no
+attachment path may auto-create `health_documents`**. Nutrition incidents are written only
 after an accepted `log_nutrition_incident` proposal.
+
+## Document Tables (explicit, consent-gated upload)
+
+`health_documents`, `health_document_summaries`, and `document_signals` back the
+**Profile** document feature ([`apps/api/src/modules/documents`](../../apps/api/src/modules/documents)) —
+an explicit user upload of a PDF/text file, never an attachment behavior. Consent
+is a **five-scope, per-operation** model on `health_documents` (`upload_storage`,
+`parse_ocr`, `ai_summarization`, `semantic_indexing`, `coach_chat_context`;
+[`packages/db/src/schema/documents.ts`](../../packages/db/src/schema/documents.ts))
+with revoke + delete. Raw bytes live on the storage adapter (encrypted store
+required in production), **extracted text is never persisted or logged**,
+summaries are governed/non-diagnostic, and `document_signals` holds only
+approved, consent-eligible wellness signals that may enter coaching context.
 
 ## Migration Rules
 

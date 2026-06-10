@@ -155,6 +155,12 @@ These capabilities extend the product toward AI-first coaching for a longer and 
 
 (2) and (3) do not yet have written briefs in `docs/product/features/`.
 
+**Mobile follow-ups (deferred).** Mobile (Expo) parity is explicitly deferred —
+web + API first (decision 2026-06), and no HealthKit / Health Connect in MVP. The
+Expo shell tracks web behind a deliberate lag; see
+[mobile-parity.md](mobile-parity.md) for current mobile coverage, the gap vs the
+web IA, and the trigger for revisiting.
+
 ### Open Feature Brief Index
 
 | Feature | Brief | Depends on |
