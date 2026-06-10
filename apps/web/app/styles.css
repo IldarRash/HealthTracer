@@ -116,7 +116,6 @@
   --layout-shell-max: 80rem;
   --layout-content-max: 72rem;
   --layout-chat-max: 48rem;
-  --layout-nav-height: 3.5rem;
   --touch-target-min: 2.75rem;
 
   /* Focus */
@@ -442,6 +441,7 @@ dd {
   display: flex;
   flex-direction: row;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -453,10 +453,12 @@ dd {
 .app-sidebar {
   background: var(--color-surface-sidebar);
   border-right: 1px solid var(--color-border-default);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 18px 14px 14px;
   width: 244px;
 }
@@ -630,6 +632,8 @@ dd {
   display: flex;
   flex-direction: column;
   max-width: none;
+  min-height: 0;
+  overflow: hidden;
   padding: 0;
 }
 
@@ -676,6 +680,130 @@ dd {
 .app-shell__main--structured .state-message__spinner {
   border-color: var(--color-border-subtle);
   border-top-color: var(--color-coach-600);
+}
+
+/* ── Mobile bar (hidden at ≥1024px) ── */
+.app-shell__mobile-bar {
+  align-items: center;
+  background: var(--color-surface-sidebar);
+  border-bottom: 1px solid var(--color-border-default);
+  display: none;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  height: 3.5rem;
+  padding: 0 var(--space-4);
+}
+
+.app-shell__mobile-bar__hamburger {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: flex;
+  height: var(--touch-target-min);
+  justify-content: center;
+  padding: 0;
+  width: var(--touch-target-min);
+}
+
+.app-shell__mobile-bar__hamburger:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.app-shell__mobile-bar__brand {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.app-shell__mobile-bar__brand-name {
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+}
+
+/* ── Drawer root overlay ── */
+.app-shell__drawer-root {
+  inset: 0;
+  position: fixed;
+  z-index: 50;
+}
+
+.app-shell__scrim {
+  background: rgb(0 0 0 / 50%);
+  inset: 0;
+  position: absolute;
+}
+
+.app-shell__drawer {
+  animation: drawer-in 200ms ease;
+  height: 100%;
+  max-width: 85vw;
+  position: relative;
+  width: 280px;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell__drawer {
+    animation: none;
+  }
+}
+
+.app-shell__drawer .app-sidebar {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* ── Mobile breakpoint: stack vertically, hide fixed sidebar ── */
+@media (max-width: 1023.98px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .app-shell > .app-sidebar {
+    display: none;
+  }
+
+  .app-shell__mobile-bar {
+    display: flex;
+  }
+
+  .app-shell__main {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+}
+
+/* ── Sticky page header (structured main only) ── */
+.app-shell__main--structured > .page-header {
+  background: var(--color-surface-content);
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin-left: calc(-1 * var(--space-4));
+  margin-right: calc(-1 * var(--space-4));
+  margin-top: calc(-1 * var(--space-6));
+  padding-bottom: var(--space-4);
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+  padding-top: var(--space-6);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+[data-theme="dark"] .app-shell__main--structured > .page-header {
+  background: var(--color-surface-app);
+  border-bottom-color: var(--color-border-default);
 }
 
 .page-header {
@@ -770,18 +898,6 @@ dd {
   color: var(--color-text-on-light);
   font-weight: 600;
   overflow-wrap: anywhere;
-}
-
-/* Legacy shell wrappers — keep until pages migrate to AppShell */
-.shell {
-  align-items: center;
-  display: flex;
-  min-height: 100vh;
-  padding: var(--space-8);
-}
-
-.shell-wide {
-  align-items: flex-start;
 }
 
 /* ==========================================================================
@@ -1509,8 +1625,7 @@ dd {
   outline: none;
 }
 
-.button:focus-visible,
-.thread-button:focus-visible {
+.button:focus-visible {
   outline: var(--focus-outline);
   outline-offset: var(--focus-outline-offset);
 }
@@ -1679,78 +1794,6 @@ dd {
 /* ==========================================================================
    Chat layout and bubbles
    ========================================================================== */
-
-.chat-layout {
-  display: grid;
-  gap: var(--space-4);
-  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
-  margin-top: var(--space-6);
-}
-
-.chat-layout--primary {
-  grid-template-columns: minmax(0, 1fr);
-  margin-top: 0;
-  min-height: calc(100vh - var(--layout-nav-height));
-}
-
-.chat-layout--primary .chat-main {
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  max-width: var(--layout-chat-max);
-  min-height: calc(100vh - var(--layout-nav-height));
-  margin: 0 auto;
-  width: 100%;
-}
-
-.chat-sidebar-header {
-  align-items: center;
-  display: flex;
-  gap: var(--space-3);
-  justify-content: space-between;
-  margin-bottom: var(--space-4);
-}
-
-.chat-sidebar-header h2 {
-  margin: 0;
-}
-
-.thread-list {
-  display: grid;
-  gap: var(--space-2);
-  list-style: none;
-  margin: var(--space-4) 0 0;
-  padding: 0;
-}
-
-.thread-button {
-  background: var(--color-surface-card);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  text-align: left;
-  width: 100%;
-}
-
-.thread-button span {
-  color: var(--color-text-muted);
-  font-size: 0.8125rem;
-}
-
-.thread-button.active {
-  border-color: var(--color-coach-500);
-  box-shadow: inset 0 0 0 1px var(--color-coach-500);
-}
-
-.chat-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-height: 28rem;
-}
 
 .chat-transcript,
 .message-list {
@@ -2157,7 +2200,7 @@ span.confirmation-card__meta {
   border-top: 1px solid var(--color-border-default);
   margin-top: var(--space-8);
   padding-top: var(--space-6);
-  scroll-margin-top: calc(var(--layout-nav-height) + var(--space-4));
+  scroll-margin-top: calc(4.5rem + var(--space-4));
 }
 
 .context-hub.profile-hub {
@@ -2169,13 +2212,13 @@ span.confirmation-card__meta {
 }
 
 .profile-hub .profile-section {
-  scroll-margin-top: calc(var(--layout-nav-height) + var(--space-4));
+  scroll-margin-top: calc(4.5rem + var(--space-4));
 }
 
 .context-hub .context-section-card,
 .context-hub .context-summary-card,
 .context-hub .consent-management-card {
-  scroll-margin-top: calc(var(--layout-nav-height) + var(--space-4));
+  scroll-margin-top: calc(4.5rem + var(--space-4));
 }
 
 .context-summary-card__title {
@@ -3700,10 +3743,6 @@ span.confirmation-card__meta {
 
 /* Narrow phones (~390–422px): stack progress actions; tighten structured canvas padding */
 @media (max-width: 480px) {
-  .app-shell__nav {
-    max-width: 100%;
-  }
-
   .app-shell__main--structured {
     padding-left: var(--space-3);
     padding-right: var(--space-3);
@@ -3729,7 +3768,8 @@ span.confirmation-card__meta {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  min-height: calc(100dvh - var(--layout-nav-height));
+  height: 100%;
+  min-height: 0;
 }
 
 /* Chat header row — 56px, coach status + context chip */
@@ -3781,6 +3821,8 @@ span.confirmation-card__meta {
   );
   max-height: none;
   max-width: 45rem;
+  min-height: 0;
+  overflow-y: auto;
   padding: var(--space-7, 1.75rem) 1.75rem var(--space-5);
   width: 100%;
   -webkit-mask-image: linear-gradient(
@@ -3809,6 +3851,7 @@ span.confirmation-card__meta {
   margin: 0;
   max-width: none;
   padding: var(--space-4) var(--space-4) var(--space-5);
+  position: static;
 }
 
 .chat-single .chat-composer-inner,
@@ -4742,17 +4785,9 @@ span.confirmation-card__meta {
    ========================================================================== */
 
 @media (max-width: 768px) {
-  .shell {
-    padding: var(--space-4);
-  }
-
   .card {
     border-radius: var(--radius-lg);
     padding: var(--space-5);
-  }
-
-  .chat-layout {
-    grid-template-columns: 1fr;
   }
 
   .chat-transcript,

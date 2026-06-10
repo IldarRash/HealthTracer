@@ -29,7 +29,9 @@
     "primaryNavLabel": "Primary navigation",
     "plansNavLabel": "Plans navigation",
     "completeOnboarding": "Complete onboarding to unlock navigation",
-    "brandName": "AI Health Coach"
+    "brandName": "AI Health Coach",
+    "openNavigation": "Open navigation",
+    "closeNavigation": "Close navigation"
   },
   "Settings": {
     "title": "Settings",

@@ -879,6 +879,7 @@ export function ProfileWorkspace() {
       <div
         style={{
           display: "flex",
+          flexWrap: "wrap",
           gap: 18,
           alignItems: "flex-start",
         }}
@@ -888,7 +889,7 @@ export function ProfileWorkspace() {
           id="profile-left-col"
           style={{
             flex: "1 1 0",
-            minWidth: 0,
+            minWidth: "min(100%, 22rem)",
             display: "flex",
             flexDirection: "column",
             gap: 16,
@@ -911,7 +912,7 @@ export function ProfileWorkspace() {
           id="profile-right-col"
           style={{
             flex: "1 1 0",
-            minWidth: 0,
+            minWidth: "min(100%, 22rem)",
             display: "flex",
             flexDirection: "column",
             gap: 16,

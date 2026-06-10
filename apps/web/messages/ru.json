@@ -29,7 +29,9 @@
     "primaryNavLabel": "Основная навигация",
     "plansNavLabel": "Навигация по планам",
     "completeOnboarding": "Завершите настройку для доступа к навигации",
-    "brandName": "AI Health Coach"
+    "brandName": "AI Health Coach",
+    "openNavigation": "Открыть навигацию",
+    "closeNavigation": "Закрыть навигацию"
   },
   "Settings": {
     "title": "Настройки",
