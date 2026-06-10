@@ -42,9 +42,24 @@ export class OpenAiCoachProviderMissingKeyError extends Error {
   }
 }
 
+/** Per-stage model overrides. Each field falls back to the top-level `model` when absent. */
+export interface OpenAiCoachProviderStageModels {
+  router: string;
+  domain: string;
+  decision: string;
+}
+
 export interface OpenAiCoachProviderOptions {
   apiKey: string;
+  /** Default model used for any stage that lacks an explicit override. */
   model: string;
+  /**
+   * Resolved per-stage models (router / domain / decision).
+   * When absent, all stages fall back to `model`. Built by the factory for the
+   * live provider; omitted when the options object is reused by other providers
+   * (e.g. OpenAiContextCompressionProvider) that don't need per-stage routing.
+   */
+  models?: OpenAiCoachProviderStageModels;
   promptTemplates?: CompiledPromptTemplates;
 }
 
@@ -96,6 +111,7 @@ function retryDelayMs(attempt: number): number {
 
 export class OpenAiCoachProvider implements CoachAiProvider {
   private readonly promptTemplates: CompiledPromptTemplates;
+  private readonly stageModels: OpenAiCoachProviderStageModels;
 
   constructor(private readonly options: OpenAiCoachProviderOptions) {
     if (!options.apiKey.trim()) {
@@ -103,6 +119,12 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     }
 
     this.promptTemplates = options.promptTemplates ?? getDefaultCompiledPromptTemplates();
+    // Default all stages to the top-level model when per-stage overrides are absent.
+    this.stageModels = options.models ?? {
+      router: options.model,
+      domain: options.model,
+      decision: options.model,
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -119,6 +141,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       request.normalizedText,
       request.recentMessageHints,
       { name: ROUTER_DECISION_SCHEMA_NAME, schema: routerDecisionWireSchema },
+      this.stageModels.router,
       options?.signal,
     );
 
@@ -151,6 +174,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
             request.recentMessages,
             imageDataUris,
             { name: DOMAIN_LLM_STEP_SCHEMA_NAME, schema: domainLlmStepWireSchema },
+            this.stageModels.domain,
             options?.signal,
           )
         : await this.requestJsonCompletion(
@@ -158,6 +182,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
             request.userMessage,
             request.recentMessages,
             { name: DOMAIN_LLM_STEP_SCHEMA_NAME, schema: domainLlmStepWireSchema },
+            this.stageModels.domain,
             options?.signal,
           );
 
@@ -188,6 +213,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       request.userMessage,
       recentMessages,
       { name: FINAL_DECISION_SCHEMA_NAME, schema: finalDecisionWireSchema },
+      this.stageModels.decision,
       options?.signal,
     );
 
@@ -223,6 +249,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       content: string;
     }>,
     jsonSchema: { name: string; schema: unknown },
+    model: string,
     signal?: AbortSignal,
   ): Promise<{ payload: unknown; usage: ProviderUsage }> {
     const messages = [
@@ -233,7 +260,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
 
     return this.fetchWithRetry(
       {
-        model: this.options.model,
+        model,
         temperature: 0.2,
         response_format: {
           type: "json_schema",
@@ -245,6 +272,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
         },
         messages,
       },
+      model,
       signal,
     );
   }
@@ -265,6 +293,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     }>,
     imageDataUris: readonly string[],
     jsonSchema: { name: string; schema: unknown },
+    model: string,
     signal?: AbortSignal,
   ): Promise<{ payload: unknown; usage: ProviderUsage }> {
     const userContent: Array<
@@ -280,7 +309,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
 
     return this.fetchWithRetry(
       {
-        model: this.options.model,
+        model,
         temperature: 0.2,
         response_format: {
           type: "json_schema",
@@ -296,6 +325,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
           { role: "user" as const, content: userContent },
         ],
       },
+      model,
       signal,
     );
   }
@@ -313,6 +343,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
    */
   private async fetchWithRetry(
     body: Record<string, unknown>,
+    model: string,
     signal?: AbortSignal,
   ): Promise<{ payload: unknown; usage: ProviderUsage }> {
     const startMs = Date.now();
@@ -374,6 +405,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
           totalTokens: completionResponse.usage?.total_tokens ?? 0,
           latencyMs,
           retries,
+          model,
         };
 
         return { payload: parsedPayload, usage };
@@ -529,12 +561,27 @@ function buildAttachmentContextSummary(request: DomainLlmStepRequest): string {
   return JSON.stringify(summary);
 }
 
+/**
+ * Instruction injected into the decision-maker prompt suffix when routing
+ * confidence was low. Instructs the model to ask one short clarifying question
+ * in the response language rather than guessing the user's intent.
+ *
+ * Placed in the DYNAMIC SUFFIX only so the static prefix remains unchanged
+ * (preserves prompt-cache hits for the cached prefix segment).
+ */
+const LOW_CONFIDENCE_ROUTE_INSTRUCTION =
+  "ROUTING NOTE: The router had low confidence routing this message to a specific domain. " +
+  "If the user's goal is ambiguous, ask ONE short clarifying question in the response language " +
+  "to understand what they need, rather than guessing. Do not make assumptions about domain.";
+
 function buildOpenAiFinalDecisionPrompt(
   request: FinalDecisionRequest,
   promptTemplates: CompiledPromptTemplates,
 ): string {
   const candidateSummaries = request.candidateProposalSummaries ?? [];
   const recentMessages = request.recentMessages ?? [];
+  const lowConfidenceRouteSuffix =
+    request.lowConfidenceRoute === true ? LOW_CONFIDENCE_ROUTE_INSTRUCTION : "";
 
   return promptTemplates.renderFinalDecision({
     userMessage: request.userMessage,
@@ -549,6 +596,7 @@ function buildOpenAiFinalDecisionPrompt(
       ? request.safetyConstraints.join("\n- ")
       : "Do not diagnose, prescribe, or claim to treat diseases.",
     responseLanguage: request.responseLanguage ?? "",
+    lowConfidenceRouteSuffix,
   });
 }
 
@@ -601,11 +649,18 @@ function stripExplicitNulls(value: unknown): unknown {
 export function createOpenAiCoachProvider(
   apiKey: string | undefined,
   model: string,
+  stageModelOverrides: { router?: string; domain?: string; decision?: string } = {},
   promptTemplates?: CompiledPromptTemplates,
 ): OpenAiCoachProvider {
   if (!apiKey?.trim()) {
     throw new OpenAiCoachProviderMissingKeyError();
   }
 
-  return new OpenAiCoachProvider({ apiKey, model, promptTemplates });
+  const models: OpenAiCoachProviderStageModels = {
+    router: stageModelOverrides.router ?? model,
+    domain: stageModelOverrides.domain ?? model,
+    decision: stageModelOverrides.decision ?? model,
+  };
+
+  return new OpenAiCoachProvider({ apiKey, model, models, promptTemplates });
 }

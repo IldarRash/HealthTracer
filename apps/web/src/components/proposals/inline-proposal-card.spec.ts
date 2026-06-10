@@ -359,7 +359,8 @@ describe("ChatWorkspace proposal revision routing", () => {
   it("routes modify responses into structured chat send with retry recovery", () => {
     expect(chatWorkspaceSource).toContain("buildProposalRevisionChatSend");
     expect(chatWorkspaceSource).toContain("onModifyRequest={handleProposalModifyRequest}");
-    expect(chatWorkspaceSource).toContain("sendMessageMutation.mutate(revisionSend)");
+    // Revision sends now go through the streaming path (with sync fallback).
+    expect(chatWorkspaceSource).toContain("sendMessageStreaming");
     expect(chatWorkspaceSource).toContain("pendingRevisionSend");
     expect(chatWorkspaceSource).toContain("shouldShowProposalRevisionSendRetry");
     expect(chatWorkspaceSource).toContain("Retry revision message");

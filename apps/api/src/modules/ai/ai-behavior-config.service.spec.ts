@@ -66,6 +66,7 @@ describe("AiBehaviorConfigService", () => {
 
     // Invalid body → falls back to default
     expect(service.getCompiledPromptTemplates().templates.router.source).toBe("default");
+    // Render a valid router prompt to confirm the fallback to default body works.
     const rendered = service.getCompiledPromptTemplates().renderRouterDecision({
       normalizedText: "test",
       originalText: "test",

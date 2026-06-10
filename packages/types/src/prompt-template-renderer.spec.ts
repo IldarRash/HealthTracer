@@ -89,6 +89,7 @@ describe("prompt template renderer", () => {
       safetyFlags: "none",
       safetyConstraints: "Stay conservative",
       responseLanguage: "en",
+      lowConfidenceRouteSuffix: "",
     });
 
     expect(rendered).toContain("wellness coach");

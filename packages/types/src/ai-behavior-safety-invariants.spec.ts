@@ -237,6 +237,7 @@ describe("ai behavior safety invariants", () => {
       });
 
       expect(compiled.templates.router.source).toBe("default");
+      // Fallback renders the default router body which references wellness domains.
       const rendered = compiled.renderRouterDecision({
         normalizedText: "test",
         originalText: "test",

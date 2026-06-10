@@ -242,7 +242,9 @@ describe("ChatWorkspace proposal handler wiring after render move", () => {
   it("keeps handleProposalModifyRequest building a revision send and mutating", () => {
     expect(chatWorkspaceSource).toContain("handleProposalModifyRequest");
     expect(chatWorkspaceSource).toContain("buildProposalRevisionChatSend");
-    expect(chatWorkspaceSource).toContain("sendMessageMutation.mutate(revisionSend)");
+    // Revision sends now go through the streaming path (with sync fallback).
+    expect(chatWorkspaceSource).toContain("sendMessageStreaming");
+    expect(chatWorkspaceSource).toContain("proposalRevision");
   });
 });
 

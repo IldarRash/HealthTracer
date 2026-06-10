@@ -19,6 +19,8 @@ export interface ProviderUsage {
   latencyMs: number;
   /** Number of retries consumed (0 = first attempt succeeded). */
   retries: number;
+  /** Model id used for this call (e.g. "gpt-4o-mini"). Absent on fallback/non-LLM paths. */
+  model?: string;
 }
 
 /**

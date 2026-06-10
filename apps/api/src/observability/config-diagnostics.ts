@@ -2,10 +2,25 @@ import { env } from "../env.js";
 
 export type IntegrationStatus = "enabled" | "disabled" | "misconfigured";
 
+export type PerStageModels = {
+  /** Resolved model id used for the router (first-LLM) stage. */
+  router: string;
+  /** Resolved model id used for each domain (fan-out) stage. */
+  domain: string;
+  /** Resolved model id used for the decision-maker (final synthesis) stage. */
+  decision: string;
+};
+
 export type ConfigDiagnostics = {
   clerkJwks: IntegrationStatus;
   aiCoachProvider: "openai";
   openai: IntegrationStatus;
+  /**
+   * Per-stage resolved model ids (override ?? OPENAI_MODEL).
+   * Always present — all stages fall back to OPENAI_MODEL when no per-stage
+   * override is configured. Never includes the API key.
+   */
+  openaiModels: PerStageModels;
   corsOrigins: "configured" | "reflect_origin";
   documentStorage: "configured";
   databaseUrl: "configured";
@@ -27,10 +42,18 @@ export function getConfigDiagnostics(): ConfigDiagnostics {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+  const defaultModel = env.OPENAI_MODEL;
+  const openaiModels: PerStageModels = {
+    router: env.OPENAI_MODEL_ROUTER ?? defaultModel,
+    domain: env.OPENAI_MODEL_DOMAIN ?? defaultModel,
+    decision: env.OPENAI_MODEL_DECISION ?? defaultModel,
+  };
+
   return {
     clerkJwks: env.CLERK_JWKS_URL ? "enabled" : "disabled",
     aiCoachProvider: env.AI_COACH_PROVIDER,
     openai: env.OPENAI_API_KEY ? "enabled" : "misconfigured",
+    openaiModels,
     corsOrigins: configuredOrigins?.length ? "configured" : "reflect_origin",
     documentStorage: "configured",
     databaseUrl: "configured",

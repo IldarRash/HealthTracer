@@ -15,6 +15,7 @@ import type {
   ContextDepth,
   ContextTimeRange,
   ProposalExplainerTurnContext,
+  ProgressReporter,
   RawAiProposal,
   ResolvedCapabilityPresentationMetadata,
   UserLocale,
@@ -82,6 +83,12 @@ export interface OrchestrateCoachTurnInput {
   proposalRevision?: ProposalRevisionContext;
   proposalExplainer?: ProposalExplainerTurnContext;
   attachmentTurn?: AttachmentTurnContext;
+  /**
+   * Optional progress reporter for SSE streaming. Called at each coarse pipeline
+   * stage (routing, domains_running, synthesis). Failures are caught and swallowed —
+   * a throwing callback must never break the turn.
+   */
+  onProgress?: ProgressReporter;
 }
 
 export interface OrchestratedCoachTurnResult {
@@ -137,6 +144,7 @@ export class AgentOrchestratorService {
   async orchestrateCoachTurn(
     input: OrchestrateCoachTurnInput,
   ): Promise<OrchestratedCoachTurnResult> {
+    const { onProgress } = input;
     const turnStart = Date.now();
 
     const preprocessorResult = this.messagePreprocessorService.preprocess({
@@ -150,6 +158,13 @@ export class AgentOrchestratorService {
     // RouterLlm is the only first-LLM routing stage for eligible turns.
     // Proposal-revision and proposal-explainer turns are the explicit non-router exceptions.
     const shouldRunRouter = !input.proposalRevision && !input.proposalExplainer;
+
+    // Emit routing stage before the router LLM call (pre-AI gate turns never reach
+    // the orchestrator so they never emit stage events — handled in ChatService).
+    if (shouldRunRouter) {
+      emitProgress(onProgress, { kind: "stage", stage: "routing" });
+    }
+
     const routerStart = Date.now();
     const routerResult = shouldRunRouter
       ? await this.routerLlmService.route({
@@ -288,6 +303,7 @@ export class AgentOrchestratorService {
       capabilityTurnMetadata,
       routerResult,
       responseLanguage: preprocessorResult.responseLanguage,
+      onProgress,
       turnStart,
       routerLatencyMs,
       contextLatencyMs,
@@ -403,6 +419,7 @@ export class AgentOrchestratorService {
       routerResult: RouterLlmResult | undefined;
       /** Resolved response language (hint ?? detected). Null = fall back to message detection. */
       responseLanguage: string | null;
+      onProgress?: ProgressReporter;
       /** Turn entry timestamp for total latency calculation. */
       turnStart: number;
       /** Router LLM latency in ms. Absent when router was skipped. */
@@ -411,8 +428,16 @@ export class AgentOrchestratorService {
       contextLatencyMs: number;
     },
   ): Promise<OrchestratedCoachTurnResult> {
-    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, turnStart, routerLatencyMs, contextLatencyMs } = params;
+    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
     const selectedDomains = plan.fanout.selectedDomains;
+
+    // Emit domains_running stage with the selected domain names (structural info only,
+    // no capabilities, intents, or content).
+    emitProgress(onProgress, {
+      kind: "stage",
+      stage: "domains_running",
+      selectedDomains: selectedDomains.map((d) => d.domain),
+    });
 
     // Build one bounded AgentContextPacket per selected domain.
     // Safety floors (documents/sensitive denied by default) are re-applied by
@@ -498,6 +523,9 @@ export class AgentOrchestratorService {
       .slice(-6)
       .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
 
+    // Emit synthesis stage before the decision-maker LLM call.
+    emitProgress(onProgress, { kind: "stage", stage: "synthesis" });
+
     // Run the decision-maker LLM (Stage 9).
     // DecisionMakerExecutorService always resolves — degrades to fallback on error.
     const decisionStart = Date.now();
@@ -511,6 +539,9 @@ export class AgentOrchestratorService {
       provider: this.provider,
       responseLanguage,
       recentMessages: decisionRecentMessages,
+      // Thread low-confidence flag from planner fanout so the decision template can
+      // ask a clarifying question rather than guess the domain (Change 2 / Slice 5).
+      lowConfidenceRoute: plan.fanout.lowConfidenceRoute,
     });
     const decisionLatencyMs = Date.now() - decisionStart;
 
@@ -522,6 +553,7 @@ export class AgentOrchestratorService {
       selectedAction: decisionResult.output.selectedAction ?? null,
       selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
+      lowConfidenceRoute: plan.fanout.lowConfidenceRoute === true,
     });
 
     // Extract the workout domain calorie estimate and rate from the fan-out results.
@@ -999,6 +1031,9 @@ function buildFanOutTurnMetadata(params: {
       selectedAction: decisionResult.output.selectedAction ?? null,
       selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
+      ...(plan.fanout.lowConfidenceRoute === true
+        ? { lowConfidenceRoute: true as const }
+        : {}),
       ...(decisionResult.usage !== undefined ? { usage: decisionResult.usage } : {}),
     },
     resolution: {
@@ -1164,6 +1199,28 @@ function buildCandidateProposalSummaries(
   }
 
   return summaries;
+}
+
+/**
+ * Safely emit a progress event via the optional reporter.
+ *
+ * Failures are swallowed — a throwing callback must never break the turn.
+ * Only structural stage events are emitted here; `turn_accepted` and `final`
+ * are emitted by ChatService which holds the full response shape.
+ */
+function emitProgress(
+  onProgress: ProgressReporter | undefined,
+  event: Parameters<ProgressReporter>[0],
+): void {
+  if (!onProgress) {
+    return;
+  }
+
+  try {
+    onProgress(event);
+  } catch {
+    // Swallow — progress reporting must never affect turn correctness.
+  }
 }
 
 /**

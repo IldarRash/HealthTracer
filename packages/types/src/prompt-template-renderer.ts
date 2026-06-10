@@ -77,6 +77,11 @@ export type CompiledPromptTemplates = {
     safetyConstraints: string;
     /** Resolved response language (e.g. "en", "ru"). Empty string = fall back to message detection. */
     responseLanguage: string;
+    /**
+     * Appended to the dynamic suffix only when routing confidence was low.
+     * Empty string for confident routes — must never modify the static prefix.
+     */
+    lowConfidenceRouteSuffix: string;
   }): string;
 };
 
