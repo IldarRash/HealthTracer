@@ -19,6 +19,10 @@ decision-maker LLM synthesizes their output into one reply plus typed proposals.
 > `buildDeterministicGateMissResult`, the `DETERMINISTIC_PRE_AI_GATE_REPLY` canned reply,
 > and the provider methods `generateAgentLoopStep`/`generateCoachResponse` no longer exist.
 
+> **Related:** for a chronological message-journey / decision-tree (one user message,
+> every branch point and the condition that selects it), see
+> [`chat-message-flow.md`](./chat-message-flow.md).
+
 Attachments are **context** for this same pipeline — there is no separate attachment
 recognition/classification pipeline and no attachment proposal side channel. The old
 intent router (`intent-router.ts`), `TurnDecisionService`, `MessageUnderstandingService`,

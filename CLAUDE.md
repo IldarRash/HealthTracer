@@ -149,4 +149,4 @@ For larger features, the heavier multi-agent workflow is described in `AGENTS.md
 
 ## Useful docs
 
-`docs/architecture/llm-pipeline.md` (chat pipeline), `overview.md`, `domain-model.md`, `database.md`, `auth.md`, `ai-behavior-config.md`, `product-surface-architecture.md`; `docs/product/feature-roadmap.md`; `docs/deployment/railway.md`.
+`docs/architecture/llm-pipeline.md` (chat pipeline), `chat-message-flow.md` (one-message decision-tree trace), `overview.md`, `domain-model.md`, `database.md`, `auth.md`, `ai-behavior-config.md`, `product-surface-architecture.md`; `docs/product/feature-roadmap.md`; `docs/deployment/railway.md`.
