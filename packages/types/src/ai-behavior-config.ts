@@ -288,6 +288,56 @@ export type DeterministicProposalTriggersConfig = z.infer<
   typeof deterministicProposalTriggersConfigSchema
 >;
 
+export const quickActionConfigSchema = z.object({
+  id: directChatPathKindSchema,
+  labelEn: z.string().min(1).max(120),
+  labelRu: z.string().min(1).max(120),
+  messageText: z.object({
+    en: z.string().min(1).max(240),
+    ru: z.string().min(1).max(240),
+  }),
+});
+
+export type QuickActionConfig = z.infer<typeof quickActionConfigSchema>;
+
+export const suggestedQuickActionsConfigSchema = z.object({
+  actions: z.array(quickActionConfigSchema).max(10).default([]),
+});
+
+export type SuggestedQuickActionsConfig = z.infer<typeof suggestedQuickActionsConfigSchema>;
+
+export const DEFAULT_SUGGESTED_QUICK_ACTIONS: SuggestedQuickActionsConfig = {
+  actions: [
+    {
+      id: "today_summary_read",
+      labelEn: "Today's summary",
+      labelRu: "Сводка на сегодня",
+      messageText: {
+        en: "What's today?",
+        ru: "Что у меня на сегодня?",
+      },
+    },
+    {
+      id: "mark_today_workout_done",
+      labelEn: "Mark workout done",
+      labelRu: "Отметить тренировку",
+      messageText: {
+        en: "Mark today's workout done",
+        ru: "Отметь тренировку как выполненную",
+      },
+    },
+    {
+      id: "nutrition_plan_read",
+      labelEn: "My nutrition plan",
+      labelRu: "Мой план питания",
+      messageText: {
+        en: "Show my nutrition plan",
+        ru: "Покажи мой план питания",
+      },
+    },
+  ],
+};
+
 export const aiBehaviorConfigSchema = z.object({
   version: aiBehaviorConfigVersionSchema,
   capabilities: z.array(capabilityConfigSchema).max(50).default([]),
@@ -300,15 +350,17 @@ export const aiBehaviorConfigSchema = z.object({
   attachmentRouting: attachmentRoutingConfigSchema,
   proposalExplainer: proposalExplainerBehaviorConfigSchema,
   deterministicProposalTriggers: deterministicProposalTriggersConfigSchema,
+  suggestedQuickActions: suggestedQuickActionsConfigSchema,
 });
 
 export type AiBehaviorConfig = z.infer<typeof aiBehaviorConfigSchema>;
 
 /** Runtime file shape: attachmentRouting moved to attachments.json and is optional here. */
 export const aiBehaviorConfigFileSchema = aiBehaviorConfigSchema
-  .omit({ attachmentRouting: true })
+  .omit({ attachmentRouting: true, suggestedQuickActions: true })
   .extend({
     attachmentRouting: attachmentRoutingConfigSchema.optional(),
+    suggestedQuickActions: suggestedQuickActionsConfigSchema.optional(),
   });
 
 export type AiBehaviorConfigFile = z.infer<typeof aiBehaviorConfigFileSchema>;
@@ -420,6 +472,7 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
       },
     },
     deterministicProposalTriggers: DEFAULT_DETERMINISTIC_PROPOSAL_TRIGGERS,
+    suggestedQuickActions: DEFAULT_SUGGESTED_QUICK_ACTIONS,
   });
 }
 
@@ -438,6 +491,7 @@ export function safeParseAiBehaviorConfig(value: unknown): AiBehaviorConfigParse
     const data = aiBehaviorConfigSchema.parse({
       ...parsed.data,
       attachmentRouting: parsed.data.attachmentRouting ?? defaults.attachmentRouting,
+      suggestedQuickActions: parsed.data.suggestedQuickActions ?? defaults.suggestedQuickActions,
     });
 
     return { success: true, data };
@@ -536,6 +590,10 @@ export function normalizeAiBehaviorConfig(
           ...defaults.directPaths.replyTemplates.markWorkoutDone,
           ...partial?.directPaths?.replyTemplates?.markWorkoutDone,
         },
+        nutritionPlan: {
+          ...defaults.directPaths.replyTemplates.nutritionPlan,
+          ...partial?.directPaths?.replyTemplates?.nutritionPlan,
+        },
       },
     },
     proposalRevisionRouting: {
@@ -604,6 +662,11 @@ export function normalizeAiBehaviorConfig(
       },
     },
     capabilities: partial?.capabilities ?? defaults.capabilities,
+    suggestedQuickActions: {
+      ...defaults.suggestedQuickActions,
+      ...partial?.suggestedQuickActions,
+      actions: partial?.suggestedQuickActions?.actions ?? defaults.suggestedQuickActions.actions,
+    },
   };
 
   const parsed = aiBehaviorConfigSchema.parse(merged);

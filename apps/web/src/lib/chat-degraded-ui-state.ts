@@ -1,5 +1,5 @@
-import { parseChatMessageDegradedTurn } from "@health/types";
-import type { ChatMessageDegradedTurn } from "@health/types";
+import { parseChatMessageDegradedTurn, parseChatMessageTurnError } from "@health/types";
+import type { ChatMessageDegradedTurn, ChatTurnError } from "@health/types";
 import type { DisplayChatMessage } from "./chat-ui-state.js";
 
 /**
@@ -20,6 +20,27 @@ export function resolveChatMessageDegradedTurn(
   }
 
   return parseChatMessageDegradedTurn(meta as Record<string, unknown>);
+}
+
+/**
+ * Resolve whether an assistant message has a turnError (decision_failed / reply_blocked).
+ * Returns the parsed ChatTurnError if present and valid, null otherwise.
+ * Distinct from the older turnDegraded path — turnError is the new honest-failure contract
+ * stored in metadata.turnError.
+ */
+export function resolveChatMessageTurnError(
+  message: Pick<DisplayChatMessage, "role" | "metadata">,
+): ChatTurnError | null {
+  if (message.role !== "assistant") {
+    return null;
+  }
+
+  const meta = message.metadata;
+  if (!meta || typeof meta !== "object") {
+    return null;
+  }
+
+  return parseChatMessageTurnError(meta as Record<string, unknown>);
 }
 
 /**

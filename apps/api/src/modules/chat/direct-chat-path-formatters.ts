@@ -2,6 +2,9 @@ import {
   buildDefaultAiBehaviorConfig,
   formatTodaySummaryReadMessage as formatTodaySummaryReadMessageFromConfig,
   formatWorkoutMarkedDoneMessage as formatWorkoutMarkedDoneMessageFromConfig,
+  interpolateBehaviorTemplate,
+  type ActiveNutritionPlanResponse,
+  type DirectPathNutritionPlanReplies,
   type DirectPathReplyTemplates,
   type TodayDayResponseBase,
 } from "@health/types";
@@ -29,4 +32,53 @@ export function formatWorkoutMarkedDoneMessage(
   replyTemplates: DirectPathReplyTemplates = DEFAULT_REPLY_TEMPLATES,
 ): string {
   return formatWorkoutMarkedDoneMessageFromConfig(label, replyTemplates.markWorkoutDone);
+}
+
+export function formatNutritionPlanReadMessage(
+  activePlan: ActiveNutritionPlanResponse,
+  templates: DirectPathNutritionPlanReplies = DEFAULT_REPLY_TEMPLATES.nutritionPlan,
+): string {
+  if (!activePlan.plan || !activePlan.activeRevision) {
+    return templates.noActivePlanLine;
+  }
+
+  const { payload } = activePlan.activeRevision;
+  const lines: string[] = [
+    interpolateBehaviorTemplate(templates.introTemplate, { title: payload.title }),
+  ];
+
+  if (payload.mealStructure.length > 0) {
+    lines.push("");
+    for (const meal of payload.mealStructure) {
+      const timingHint = meal.timingHint ? ` (${meal.timingHint})` : "";
+      const dish = meal.dish ? ` — ${meal.dish}` : "";
+      lines.push(
+        interpolateBehaviorTemplate(templates.mealLineTemplate, {
+          label: meal.label,
+          timingHint,
+          dish,
+        }),
+      );
+    }
+  }
+
+  const hasMacros =
+    payload.caloriesPerDay != null ||
+    payload.proteinGrams != null ||
+    payload.carbsGrams != null ||
+    payload.fatGrams != null;
+
+  if (hasMacros) {
+    lines.push(
+      "",
+      interpolateBehaviorTemplate(templates.macrosLineTemplate, {
+        caloriesPerDay: payload.caloriesPerDay ?? "—",
+        proteinGrams: payload.proteinGrams ?? "—",
+        carbsGrams: payload.carbsGrams ?? "—",
+        fatGrams: payload.fatGrams ?? "—",
+      }),
+    );
+  }
+
+  return lines.join("\n");
 }

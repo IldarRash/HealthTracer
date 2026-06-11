@@ -85,9 +85,19 @@ const TODAY_SUMMARY_MATCH_PATTERNS = [
   pattern("^план\\s+на\\s+сегодня\\s*\\??$"),
 ];
 
+const NUTRITION_PLAN_MATCH_PATTERNS = [
+  pattern(`^what(?:${APOSTROPHE}s| is)\\s+(?:in\\s+)?(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$`),
+  pattern("^show\\s+(?:me\\s+)?(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$"),
+  pattern("^(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$"),
+  pattern("^что\\s+(?:в\\s+)?(?:моём?|у меня)\\s+план(?:е)?\\s+питани(?:я|е)\\s*\\??$"),
+  pattern("^покажи\\s+(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$"),
+  pattern("^(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$"),
+];
+
 export const DEFAULT_DIRECT_PATH_DETECTION_ORDER: readonly DirectChatPathKind[] = [
   "mark_today_workout_done",
   "today_summary_read",
+  "nutrition_plan_read",
 ];
 
 export function buildDefaultDirectPathKindMatchers(): DirectPathKindMatcherConfig[] {
@@ -99,25 +109,35 @@ export function buildDefaultDirectPathKindMatchers(): DirectPathKindMatcherConfi
       refreshHintsOnExecuted: ["today", "dashboard", "longevity"],
       matchPatterns: WORKOUT_MATCH_PATTERNS,
       negativePatterns: [
+        // adviceOrImplicitMutation already covers should/could/would/can i/do i/shall i
         shared.adviceOrImplicitMutation,
         pattern("\\?\\s*$"),
-        pattern("\\b(?:should|could|would|can i|do i|shall i)\\b"),
         pattern("\\b(?:i\\s+)?(?:finished|completed|did)\\s+(?:my\\s+)?(?:workout|training)\\b"),
       ],
       requireWorkoutLexeme: true,
-      workoutLexemePattern: "\\b(?:workout|training|трениров)\\b",
+      workoutLexemePattern: "(?:\\b(?:workout|training)\\b|трениров)",
     },
     {
       kind: "today_summary_read",
       refreshHintsOnExecuted: ["today"],
       matchPatterns: TODAY_SUMMARY_MATCH_PATTERNS,
       negativePatterns: [
+        // adviceOrImplicitMutation already covers should/could/would/can i/do i/shall i
         shared.adviceOrImplicitMutation,
         shared.workoutCompletionCommandHint!,
-        pattern("\\b(?:should|could|would|can i|do i|shall i)\\b"),
       ],
       requireTodayMention: true,
       todayMentionPatterns: [pattern("\\btoday\\b"), pattern("сегодня")],
+    },
+    {
+      kind: "nutrition_plan_read",
+      refreshHintsOnExecuted: [],
+      matchPatterns: NUTRITION_PLAN_MATCH_PATTERNS,
+      negativePatterns: [
+        // adviceOrImplicitMutation already covers should/could/would/can i/do i/shall i
+        shared.adviceOrImplicitMutation,
+        pattern("\\b(?:change|modify|update|create|build|add|remove|edit)\\b"),
+      ],
     },
   ];
 }

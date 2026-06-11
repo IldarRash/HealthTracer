@@ -12,7 +12,8 @@
     "blockWhenProposalRevision": true,
     "detectionOrder": [
       "mark_today_workout_done",
-      "today_summary_read"
+      "today_summary_read",
+      "nutrition_plan_read"
     ],
     "sharedPatterns": {
       "adviceOrImplicitMutation": {
@@ -68,16 +69,12 @@
             "flags": "i"
           },
           {
-            "source": "\\b(?:should|could|would|can i|do i|shall i)\\b",
-            "flags": "i"
-          },
-          {
             "source": "\\b(?:i\\s+)?(?:finished|completed|did)\\s+(?:my\\s+)?(?:workout|training)\\b",
             "flags": "i"
           }
         ],
         "requireWorkoutLexeme": true,
-        "workoutLexemePattern": "\\b(?:workout|training|трениров)\\b"
+        "workoutLexemePattern": "(?:\\b(?:workout|training)\\b|трениров)"
       },
       {
         "kind": "today_summary_read",
@@ -138,10 +135,6 @@
           {
             "source": "\\b(?:mark|set|check off|log|complete|finish)\\s+(?:today(?:['’]s|s)?\\s+)?(?:my\\s+)?(?:workout|training)\\b",
             "flags": "i"
-          },
-          {
-            "source": "\\b(?:should|could|would|can i|do i|shall i)\\b",
-            "flags": "i"
           }
         ],
         "requireTodayMention": true,
@@ -152,6 +145,46 @@
           },
           {
             "source": "сегодня",
+            "flags": "i"
+          }
+        ]
+      },
+      {
+        "kind": "nutrition_plan_read",
+        "refreshHintsOnExecuted": [],
+        "matchPatterns": [
+          {
+            "source": "^what(?:['’]s| is)\\s+(?:in\\s+)?(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^show\\s+(?:me\\s+)?(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^что\\s+(?:в\\s+)?(?:моём?|у меня)\\s+план(?:е)?\\s+питани(?:я|е)\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^покажи\\s+(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$",
+            "flags": "i"
+          }
+        ],
+        "negativePatterns": [
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:change|modify|update|create|build|add|remove|edit)\\b",
             "flags": "i"
           }
         ]
@@ -176,6 +209,12 @@
         "noPendingWorkoutMessage": "I couldn't find a pending workout on your Today checklist. Open Today to review your items.",
         "multiplePendingWorkoutsMessage": "You have multiple pending workout items today. Open Today and mark the specific workout you completed.",
         "markedDoneTemplate": "Marked \"{{label}}\" as done on your Today checklist."
+      },
+      "nutritionPlan": {
+        "introTemplate": "Your active nutrition plan — {{title}}:",
+        "mealLineTemplate": "- {{label}}{{timingHint}}{{dish}}",
+        "macrosLineTemplate": "Daily targets: {{caloriesPerDay}} kcal, {{proteinGrams}}g protein, {{carbsGrams}}g carbs, {{fatGrams}}g fat",
+        "noActivePlanLine": "You don't have an active nutrition plan yet. Ask me to create one for you!"
       }
     }
   },
@@ -442,5 +481,36 @@
       "excludeWhenNutritionIncidentSignal": true,
       "skipWhenCrisis": true
     }
+  },
+  "suggestedQuickActions": {
+    "actions": [
+      {
+        "id": "today_summary_read",
+        "labelEn": "Today's summary",
+        "labelRu": "Сводка на сегодня",
+        "messageText": {
+          "en": "What's today?",
+          "ru": "Что у меня на сегодня?"
+        }
+      },
+      {
+        "id": "mark_today_workout_done",
+        "labelEn": "Mark workout done",
+        "labelRu": "Отметить тренировку",
+        "messageText": {
+          "en": "Mark today's workout done",
+          "ru": "Отметь тренировку как выполненную"
+        }
+      },
+      {
+        "id": "nutrition_plan_read",
+        "labelEn": "My nutrition plan",
+        "labelRu": "Мой план питания",
+        "messageText": {
+          "en": "Show my nutrition plan",
+          "ru": "Покажи мой план питания"
+        }
+      }
+    ]
   }
 }

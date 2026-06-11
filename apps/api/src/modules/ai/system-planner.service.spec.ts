@@ -222,8 +222,47 @@ describe("SystemPlannerService", () => {
       recentMessages: [],
     });
 
-    expect(plan.executorMode).toBe("deterministic_read");
+    // planTurn coerces deterministic_read → single_llm (pre_ai_gate.miss guard).
+    // The pre-AI gate (DirectChatPathService) handles the actual today-summary read
+    // in ChatService before AiService is ever called; the planner must never emit
+    // a deterministic executor mode so the orchestrator deterministic branch is unreachable.
+    expect(plan.executorMode).toBe("single_llm");
     expect(plan.catalogIntentId).toBe("general");
+  });
+
+  it("emits pre_ai_gate.miss warn log when direct path candidate coerces executor mode", async () => {
+    const { planner } = createPlannerHarness();
+
+    // Spy on the Logger.warn output by intercepting console.warn; the NestJS Logger
+    // writes structured objects via process.stdout in test, so we capture logger.warn
+    // via vi.spyOn on the Logger prototype.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const loggerWarnSpy = vi.spyOn((planner as any).logger, "warn");
+
+    const plan = await planner.planTurn({
+      userMessage: "What is today?",
+      recentMessages: [],
+    });
+
+    // Executor mode is coerced, not deterministic
+    expect(plan.executorMode).toBe("single_llm");
+
+    // The structured warn event must have been emitted
+    const warnCalls = loggerWarnSpy.mock.calls;
+    const missEvent = warnCalls.find(
+      (call) =>
+        typeof call[0] === "object" &&
+        call[0] !== null &&
+        (call[0] as Record<string, unknown>)["event"] === "pre_ai_gate.miss",
+    );
+    expect(missEvent).toBeDefined();
+    if (missEvent) {
+      const payload = missEvent[0] as Record<string, unknown>;
+      expect(payload["rawExecutorMode"]).toBe("deterministic_read");
+      expect(payload["coercedExecutorMode"]).toBe("single_llm");
+    }
+
+    loggerWarnSpy.mockRestore();
   });
 
   it("blocks direct path classification for attachment and proposal revision turns", () => {
@@ -609,7 +648,10 @@ describe("SystemPlannerService", () => {
       expect(plan.executorMode).toBe("proposal_flow");
     });
 
-    it("maps direct read candidates to deterministic_read on the plan", async () => {
+    it("coerces direct read candidates from deterministic_read to single_llm on the plan", async () => {
+      // planTurn must never emit a deterministic executor mode — the pre_ai_gate.miss
+      // guard coerces it so the orchestrator deterministic branch stays unreachable.
+      // The pre-AI gate (DirectChatPathService in ChatService) handles the actual read.
       const { planner } = createPlannerHarness();
 
       const plan = await planner.planTurn({
@@ -617,7 +659,7 @@ describe("SystemPlannerService", () => {
         recentMessages: [],
       });
 
-      expect(plan.executorMode).toBe("deterministic_read");
+      expect(plan.executorMode).toBe("single_llm");
     });
 
     it("maps proposal explainer plans to single_llm", async () => {

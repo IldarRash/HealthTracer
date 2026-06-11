@@ -1167,14 +1167,19 @@ export type ProposalChanges = z.infer<typeof proposalChangesSchema>;
 // Re-exported from chat-turn.ts (canonical home).
 export {
   chatTurnResponseSchema,
+  chatTurnErrorSchema,
   chatTurnDegradedReasonSchema,
   chatMessageDegradedTurnSchema,
+  suggestedQuickActionSchema,
+  parseChatMessageTurnError,
   parseChatMessageDegradedTurn,
 } from "./chat-turn.js";
 export type {
   ChatTurnResponse,
+  ChatTurnError,
   ChatTurnDegradedReason,
   ChatMessageDegradedTurn,
+  SuggestedQuickAction,
 } from "./chat-turn.js";
 
 export {
@@ -1777,16 +1782,23 @@ export {
   DEFAULT_DIRECT_PATH_REPLY_TEMPLATES,
   directPathItemStatusLabelsSchema,
   directPathMarkWorkoutDoneRepliesSchema,
+  directPathNutritionPlanRepliesSchema,
   directPathReplyTemplatesSchema,
   directPathTodaySummaryRepliesSchema,
   formatTodaySummaryReadMessage,
   formatWorkoutMarkedDoneMessage,
   type DirectPathItemStatusLabels,
   type DirectPathMarkWorkoutDoneReplies,
+  type DirectPathNutritionPlanReplies,
   type DirectPathReplyTemplates,
   type DirectPathTodaySummaryReplies,
 } from "./direct-chat-path-replies.js";
 export { interpolateBehaviorTemplate } from "./behavior-template.js";
+export {
+  deriveQuickActionsForTurn,
+  type DeriveQuickActionsInput,
+  type FanOutDomain,
+} from "./suggested-quick-actions.js";
 export {
   buildProposalExplainerTurnContext,
   compileProposalExplainerMatcher,
@@ -1892,6 +1904,11 @@ export {
   type ProposalRevisionIntent,
   type ProposalRevisionRoutingConfig,
   type ResponseModesBehaviorConfig,
+  quickActionConfigSchema,
+  suggestedQuickActionsConfigSchema,
+  type QuickActionConfig,
+  type SuggestedQuickActionsConfig,
+  DEFAULT_SUGGESTED_QUICK_ACTIONS,
 } from "./ai-behavior-config.js";
 export {
   ATTACHMENT_BEHAVIOR_CONFIG_VERSION,

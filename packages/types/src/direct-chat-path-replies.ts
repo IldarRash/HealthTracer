@@ -31,9 +31,19 @@ export const directPathMarkWorkoutDoneRepliesSchema = z.object({
 
 export type DirectPathMarkWorkoutDoneReplies = z.infer<typeof directPathMarkWorkoutDoneRepliesSchema>;
 
+export const directPathNutritionPlanRepliesSchema = z.object({
+  introTemplate: z.string().min(1).max(500),
+  mealLineTemplate: z.string().min(1).max(500),
+  macrosLineTemplate: z.string().min(1).max(500),
+  noActivePlanLine: z.string().min(1).max(500),
+});
+
+export type DirectPathNutritionPlanReplies = z.infer<typeof directPathNutritionPlanRepliesSchema>;
+
 export const directPathReplyTemplatesSchema = z.object({
   todaySummary: directPathTodaySummaryRepliesSchema,
   markWorkoutDone: directPathMarkWorkoutDoneRepliesSchema,
+  nutritionPlan: directPathNutritionPlanRepliesSchema,
 });
 
 export type DirectPathReplyTemplates = z.infer<typeof directPathReplyTemplatesSchema>;
@@ -62,6 +72,14 @@ export const DEFAULT_DIRECT_PATH_REPLY_TEMPLATES: DirectPathReplyTemplates = {
     multiplePendingWorkoutsMessage:
       "You have multiple pending workout items today. Open Today and mark the specific workout you completed.",
     markedDoneTemplate: 'Marked "{{label}}" as done on your Today checklist.',
+  },
+  nutritionPlan: {
+    introTemplate: "Your active nutrition plan — {{title}}:",
+    mealLineTemplate: "- {{label}}{{timingHint}}{{dish}}",
+    macrosLineTemplate:
+      "Daily targets: {{caloriesPerDay}} kcal, {{proteinGrams}}g protein, {{carbsGrams}}g carbs, {{fatGrams}}g fat",
+    noActivePlanLine:
+      "You don't have an active nutrition plan yet. Ask me to create one for you!",
   },
 };
 

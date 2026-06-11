@@ -65,7 +65,7 @@ describe("ChatWorkspace proposal unified rendering (Obs-3 fix)", () => {
 
   it("does not render message-proposals as a sibling of ChatBubble inside the same <li>", () => {
     // After </ChatBubble> closes the main message unit, none of the sibling content
-    // (weeklyReviewPack, attachmentOutcomesByMessageId, </li>) should reference message-proposals.
+    // (weeklyReviewPack, quick-action chips, </li>) should reference message-proposals.
     const chatBubbleCloseIndex = chatWorkspaceSource.indexOf("</ChatBubble>");
     expect(chatBubbleCloseIndex).toBeGreaterThan(-1);
 
@@ -261,12 +261,10 @@ describe("ChatWorkspace sibling panels remain outside the assistant bubble", () 
     expect(weeklyReviewIndex).toBeGreaterThan(-1);
   });
 
-  it("renders ChatAttachmentOutcomePanel as a sibling after </ChatBubble>, not inside it", () => {
-    const chatBubbleClose = chatWorkspaceSource.indexOf("</ChatBubble>");
-    expect(chatBubbleClose).toBeGreaterThan(-1);
-
-    const outcomePanelIndex = indexAfter(chatWorkspaceSource, "ChatAttachmentOutcomePanel", chatBubbleClose);
-    expect(outcomePanelIndex).toBeGreaterThan(-1);
+  it("does not render ChatAttachmentOutcomePanel (deleted in W3 — dead noise)", () => {
+    // chat-attachment-outcome-panel.tsx was deleted: attachment status never leaves
+    // "queued" at runtime so the panel was dead noise and has been removed entirely.
+    expect(chatWorkspaceSource).not.toContain("ChatAttachmentOutcomePanel");
   });
 
   it("keeps crisis branch inside the bubble using CrisisSupportPanel, not message-proposals", () => {

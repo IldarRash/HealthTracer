@@ -22,6 +22,7 @@ import type {
   ProposalExplainerBehaviorConfig,
   ProposalRevisionRoutingConfig,
   ResponseModesBehaviorConfig,
+  SuggestedQuickActionsConfig,
 } from "@health/types";
 import { compilePromptTemplates } from "@health/types";
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
@@ -169,6 +170,10 @@ export class AiBehaviorConfigService {
 
   getDeterministicProposalTriggers(): DeterministicProposalTriggersConfig {
     return this.loadResult.config.deterministicProposalTriggers;
+  }
+
+  getSuggestedQuickActions(): SuggestedQuickActionsConfig {
+    return this.loadResult.config.suggestedQuickActions;
   }
 
   getDomainConfigs(): DomainConfigBundle {

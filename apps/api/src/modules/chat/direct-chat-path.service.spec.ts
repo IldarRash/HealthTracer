@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { TodayDayResponse } from "@health/types";
+import type { ActiveNutritionPlanResponse, TodayDayResponse } from "@health/types";
 import { getTodayIsoDateInTimezone } from "@health/types";
 import { createAiPolicyTestStack } from "../ai/test-ai-behavior-fixtures.js";
 import {
   DIRECT_PATH_MULTIPLE_PENDING_WORKOUTS_MESSAGE,
   DIRECT_PATH_NO_PENDING_WORKOUT_MESSAGE,
+  formatNutritionPlanReadMessage,
   formatTodaySummaryReadMessage,
 } from "./direct-chat-path-formatters.js";
 import { DirectChatPathService } from "./direct-chat-path.service.js";
@@ -86,6 +87,9 @@ function createDirectChatPathService(deps: {
     getOrGenerateDay: ReturnType<typeof vi.fn>;
     updateItemStatus?: ReturnType<typeof vi.fn>;
   };
+  nutritionService?: {
+    getCurrentActivePlan: ReturnType<typeof vi.fn>;
+  };
 }) {
   const { systemPlannerService, aiBehaviorConfigService } = createAiPolicyTestStack();
 
@@ -96,6 +100,9 @@ function createDirectChatPathService(deps: {
     {
       resolveFromAuth: async () => user,
     } as never,
+    (deps.nutritionService ?? {
+      getCurrentActivePlan: vi.fn().mockResolvedValue({ plan: null, activeRevision: null }),
+    }) as never,
   );
 }
 
@@ -307,6 +314,92 @@ describe("DirectChatPathService", () => {
     expect(result).toBeNull();
   });
 
+  it("executes nutrition_plan_read and returns formatted plan when active plan exists", async () => {
+    const activePlan: ActiveNutritionPlanResponse = {
+      plan: {
+        id: "a1000001-0000-4000-8000-000000000001",
+        userId: user.id,
+        activeRevisionId: "b2000002-0000-4000-8000-000000000002",
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      activeRevision: {
+        id: "b2000002-0000-4000-8000-000000000002",
+        nutritionPlanId: "a1000001-0000-4000-8000-000000000001",
+        revisionNumber: 1,
+        reason: "Initial plan",
+        source: "ai",
+        payload: {
+          title: "Balanced Diet",
+          summary: "A well-balanced daily diet",
+          caloriesPerDay: 2000,
+          proteinGrams: 150,
+          carbsGrams: 200,
+          fatGrams: 70,
+          hydrationLiters: 2.5,
+          mealStructure: [
+            { label: "Breakfast", timingHint: "08:00", dish: "Oatmeal with berries" },
+            { label: "Lunch", timingHint: "13:00" },
+          ],
+          preferences: [],
+          restrictions: [],
+          allergies: [],
+          notes: [],
+        },
+        createdAt: new Date().toISOString(),
+      },
+    };
+    const getCurrentActivePlan = vi.fn().mockResolvedValue(activePlan);
+    const service = createDirectChatPathService({
+      todayService: { getOrGenerateDay: vi.fn() },
+      nutritionService: { getCurrentActivePlan },
+    });
+
+    const result = await service.tryExecute({
+      auth,
+      userMessage: "Show my nutrition plan",
+      hasAttachments: false,
+    });
+
+    expect(getCurrentActivePlan).toHaveBeenCalledTimes(1);
+    expect(result).not.toBeNull();
+    expect(result?.metadata.outcome).toMatchObject({
+      kind: "nutrition_plan_read",
+      status: "executed",
+      refreshHints: [],
+    });
+    expect(result?.reply).toBe(formatNutritionPlanReadMessage(activePlan));
+    expect(result?.reply).toContain("Balanced Diet");
+    expect(result?.reply).toContain("Breakfast");
+    expect(result?.reply).toContain("2000 kcal");
+  });
+
+  it("executes nutrition_plan_read and returns fallback when no active plan", async () => {
+    const noActivePlan: ActiveNutritionPlanResponse = { plan: null, activeRevision: null };
+    const getCurrentActivePlan = vi.fn().mockResolvedValue(noActivePlan);
+    const service = createDirectChatPathService({
+      todayService: { getOrGenerateDay: vi.fn() },
+      nutritionService: { getCurrentActivePlan },
+    });
+
+    const result = await service.tryExecute({
+      auth,
+      userMessage: "My nutrition plan",
+      hasAttachments: false,
+    });
+
+    expect(getCurrentActivePlan).toHaveBeenCalledTimes(1);
+    expect(result).not.toBeNull();
+    expect(result?.metadata.outcome).toMatchObject({
+      kind: "nutrition_plan_read",
+      status: "executed",
+      refreshHints: [],
+    });
+    expect(result?.reply).toBe(formatNutritionPlanReadMessage(noActivePlan));
+    expect(result?.reply).toContain("don't have an active nutrition plan");
+  });
+
   it("blocks direct path when proposal revision is present", async () => {
     const service = createDirectChatPathService({
       todayService: {
@@ -357,5 +450,105 @@ describe("formatTodaySummaryReadMessage", () => {
         "Adherence: 50% (0 of 1 required items completed)",
       ].join("\n"),
     );
+  });
+});
+
+describe("formatNutritionPlanReadMessage", () => {
+  it("returns fallback line when no active plan", () => {
+    const noActivePlan: ActiveNutritionPlanResponse = { plan: null, activeRevision: null };
+    const result = formatNutritionPlanReadMessage(noActivePlan);
+
+    expect(result).toContain("don't have an active nutrition plan");
+  });
+
+  it("formats title, meals with timing/dish, and macro targets", () => {
+    const activePlan: ActiveNutritionPlanResponse = {
+      plan: {
+        id: "a1000001-0000-4000-8000-000000000001",
+        userId: user.id,
+        activeRevisionId: "b2000002-0000-4000-8000-000000000002",
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      activeRevision: {
+        id: "b2000002-0000-4000-8000-000000000002",
+        nutritionPlanId: "a1000001-0000-4000-8000-000000000001",
+        revisionNumber: 1,
+        reason: "Initial plan",
+        source: "ai",
+        payload: {
+          title: "Clean Bulk",
+          summary: "High protein",
+          caloriesPerDay: 2500,
+          proteinGrams: 180,
+          carbsGrams: 250,
+          fatGrams: 80,
+          hydrationLiters: 3,
+          mealStructure: [
+            { label: "Breakfast", timingHint: "07:30", dish: "Eggs and toast" },
+            { label: "Dinner", timingHint: null },
+          ],
+          preferences: [],
+          restrictions: [],
+          allergies: [],
+          notes: [],
+        },
+        createdAt: new Date().toISOString(),
+      },
+    };
+
+    const result = formatNutritionPlanReadMessage(activePlan);
+
+    expect(result).toContain("Clean Bulk");
+    expect(result).toContain("Breakfast");
+    expect(result).toContain("(07:30)");
+    expect(result).toContain("Eggs and toast");
+    expect(result).toContain("Dinner");
+    expect(result).toContain("2500 kcal");
+    expect(result).toContain("180g protein");
+    expect(result).toContain("250g carbs");
+    expect(result).toContain("80g fat");
+  });
+
+  it("omits macro line when all macro fields are null", () => {
+    const activePlan: ActiveNutritionPlanResponse = {
+      plan: {
+        id: "a1000001-0000-4000-8000-000000000001",
+        userId: user.id,
+        activeRevisionId: "b2000002-0000-4000-8000-000000000002",
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      activeRevision: {
+        id: "b2000002-0000-4000-8000-000000000002",
+        nutritionPlanId: "a1000001-0000-4000-8000-000000000001",
+        revisionNumber: 1,
+        reason: "Initial plan",
+        source: "ai",
+        payload: {
+          title: "Simple Plan",
+          summary: "No macros",
+          caloriesPerDay: null,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          hydrationLiters: null,
+          mealStructure: [{ label: "Lunch", timingHint: null }],
+          preferences: [],
+          restrictions: [],
+          allergies: [],
+          notes: [],
+        },
+        createdAt: new Date().toISOString(),
+      },
+    };
+
+    const result = formatNutritionPlanReadMessage(activePlan);
+
+    expect(result).toContain("Simple Plan");
+    expect(result).not.toContain("kcal");
+    expect(result).not.toContain("protein");
   });
 });

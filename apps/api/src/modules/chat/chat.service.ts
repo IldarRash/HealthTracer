@@ -11,6 +11,7 @@ import type {
 } from "@health/types";
 import {
   classifyProposalValidationFailure,
+  deriveQuickActionsForTurn,
   evaluateWellbeingCrisisFromText,
   formatWellbeingCrisisSupportReply,
   getTodayIsoDateInTimezone,
@@ -406,16 +407,30 @@ export class ChatService {
     // completes (they're in the `final` SSE event) — this is the safety floor.
     emitStageProgress(onProgress, "validating");
 
+    // S2: honest degradation — when turnError is set, persist an error marker instead
+    // of fake coach text. The assistant message content is empty (space placeholder
+    // that satisfies the DB not-null constraint) and turnError is stored in metadata
+    // so the frontend can render an error card instead of coach prose.
+    const assistantMessageContent = generated.turnError ? " " : generated.output.reply;
+
     const assistantMessage = await this.chatRepository.createMessage(
       threadId,
       "assistant",
-      generated.output.reply,
+      assistantMessageContent,
       {
         parseErrors: generated.parseErrors,
         replySafetyErrors: generated.replySafetyErrors,
         agent: generated.agentMetadata,
         ...(weeklyReviewMetadata ?? {}),
-        ...(generated.degraded ? { turnDegraded: { degraded: true, reason: generated.degraded.reason } } : {}),
+        // turnError and turnDegraded are mutually exclusive:
+        //   turnError  = no usable reply (error card + retry); content is " ".
+        //   turnDegraded = usable reply persisted but a pipeline stage degraded (quality marker).
+        // When turnError is set, skip turnDegraded so the frontend only sees one signal.
+        ...(generated.turnError
+          ? { turnError: generated.turnError }
+          : generated.degraded
+            ? { turnDegraded: { degraded: true, reason: generated.degraded.reason } }
+            : {}),
       },
     );
 
@@ -557,6 +572,16 @@ export class ChatService {
 
     const updatedThread = await this.chatRepository.findThreadById(user.id, threadId);
 
+    // Derive suggested quick actions for LLM-backed turns only.
+    // Excluded: turnError turns (honest degradation — no coach text to follow up).
+    // Selected domains come from the fan-out diagnostics on the agent metadata.
+    const suggestedQuickActions = generated.turnError
+      ? undefined
+      : deriveQuickActionsForTurn({
+          selectedDomains: (generated.agentMetadata.fanOut?.domains ?? []).map((d) => d.domain),
+          quickActionsConfig: this.aiBehaviorConfigService.getSuggestedQuickActions(),
+        });
+
     return {
       thread: toChatThread(updatedThread ?? thread),
       userMessage: toChatMessage(userMessage, await getUserMessageDisplayAttachments()),
@@ -568,6 +593,12 @@ export class ChatService {
       // flow (proposal-driven recognition → consent-gated proposal → accept → persist
       // health_document). Do not remove — add enforcement when that flow is implemented.
       ...(generated.consentRequired === true ? { consentRequired: true } : {}),
+      // S2: thread the turn-level error to the response so SSE final event and sync
+      // response both carry it. The frontend renders an error card instead of coach prose.
+      ...(generated.turnError ? { turnError: generated.turnError } : {}),
+      ...(suggestedQuickActions && suggestedQuickActions.length > 0
+        ? { suggestedQuickActions }
+        : {}),
     };
   }
 }

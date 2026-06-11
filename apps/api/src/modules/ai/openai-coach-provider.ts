@@ -14,7 +14,6 @@ import type {
 } from "@health/types";
 import {
   clampRouterDecisionOutput,
-  createFallbackFinalDecision,
   createFallbackRouterDecision,
   domainLlmStepOutputSchema,
   finalDecisionOutputSchema,
@@ -231,7 +230,14 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     const shapeErrors = validateFinalDecisionOutputShape(normalizedPayload);
 
     if (shapeErrors.length > 0) {
-      return { output: createFallbackFinalDecision(), usage };
+      // Throw rather than returning a fallback so that DecisionMakerExecutorService's
+      // catch → retry-once → turnError path owns the degradation. This mirrors the
+      // malformed-JSON path below (line ~237) which also throws.
+      // The "[degraded]" fallback reply must never reach persisted/streamed output;
+      // the orchestrator substitutes " " content when turnError is set.
+      throw new Error(
+        `OpenAI final-decision returned forbidden-key shape: ${shapeErrors.join(" ")}`,
+      );
     }
 
     return { output: finalDecisionOutputSchema.parse(normalizedPayload), usage };

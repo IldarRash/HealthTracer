@@ -104,6 +104,9 @@ function createDirectChatPathServiceForChatTests(todayService: {
     {
       resolveFromAuth: async () => user,
     } as never,
+    {
+      getCurrentActivePlan: vi.fn().mockResolvedValue({ plan: null, activeRevision: null }),
+    } as never,
   );
 }
 
@@ -133,6 +136,7 @@ const noopAiBehaviorConfigService = {
       skipWhenCrisis: true,
     },
   }),
+  getSuggestedQuickActions: () => ({ actions: [] }),
 } as never;
 
 const noopChatTurnAttachmentStageService = {
@@ -3666,6 +3670,9 @@ describe("ChatService", () => {
           }),
         } as never,
         { resolveFromAuth: async () => user } as never,
+        {
+          getCurrentActivePlan: vi.fn().mockResolvedValue({ plan: null, activeRevision: null }),
+        } as never,
       );
 
       const entitlementsService = {
@@ -3722,6 +3729,138 @@ describe("ChatService", () => {
       expect(result.assistantMessage.metadata.directPath).toBeDefined();
       expect(assertAiMessageAllowed).not.toHaveBeenCalled();
       expect(recordAiMessageUsage).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // F2 / F6b — turnError: assistant content is " " + no suggestedQuickActions
+  // -------------------------------------------------------------------------
+
+  describe("turnError honest degradation", () => {
+    function buildTurnErrorChatService(turnError: { reason: "decision_failed" | "reply_blocked" }) {
+      let assistantMessageContent = "";
+      let assistantMessageMetadata: Record<string, unknown> = {};
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "assistant") {
+              assistantMessageContent = content;
+              assistantMessageMetadata = metadata;
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            };
+          },
+          createProposal: async () => {
+            throw new Error("createProposal should not be called for turnError turns");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: {
+              reply: "[degraded]",
+              proposals: [],
+            },
+            parseErrors: [],
+            replySafetyErrors: [],
+            turnError,
+            agentMetadata: {
+              ...createDefaultAgentMetadataForTests(),
+              fanOut: {
+                domains: [
+                  {
+                    domain: "workout",
+                    status: "degraded",
+                    degradedReasons: [],
+                    tokenUsage: null,
+                  },
+                ],
+                router: null,
+                decision: null,
+                resolution: null,
+              },
+            },
+          }),
+        },
+        proposalValidationService: {
+          validateRawProposal: () => ({ valid: true, errors: [] }),
+          validateCorrelationEvidenceOwnership: async () => [],
+          validateProvenanceOwnership: async () => [],
+          validateProgressLinkedProvenanceRequired: () => [],
+          validateGoalProposalHierarchy: async () => [],
+          validateTodayChecklistGoalSourceRefs: async () => [],
+          validateRecoveryAwareWorkoutAdaptation: async () => [],
+          validateHabitProposalContext: async () => [],
+          validateWellbeingCheckinProposalContext: async () => [],
+          validateNutritionIncidentImageRefOwnership: async () => [],
+          validateChatAttachmentProposalRefs: async () => [],
+          validateRecipeRecommendationProposalContext: async () => [],
+        },
+      });
+
+      return { service, getAssistantContent: () => assistantMessageContent, getAssistantMetadata: () => assistantMessageMetadata };
+    }
+
+    it("persists assistant content as ' ' (space) when turnError is set — not the fallback reply", async () => {
+      const { service, getAssistantContent } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      // Must be the space placeholder, not "[degraded]" or any real coaching text
+      expect(getAssistantContent()).toBe(" ");
+    });
+
+    it("persists turnError in assistant message metadata when turnError is set", async () => {
+      const { service, getAssistantMetadata } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      expect(getAssistantMetadata().turnError).toEqual({ reason: "decision_failed" });
+    });
+
+    it("does NOT persist turnDegraded when turnError is set (mutually exclusive)", async () => {
+      const { service, getAssistantMetadata } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      // turnDegraded must be absent — only turnError is written
+      expect(getAssistantMetadata().turnDegraded).toBeUndefined();
+    });
+
+    it("does not attach suggestedQuickActions on turnError turns", async () => {
+      const { service } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      const result = await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      // Quick actions are derived for LLM-backed turns only — absent when turnError is set
+      expect(result.suggestedQuickActions).toBeUndefined();
+    });
+
+    it("surfaces turnError.reason=reply_blocked in the response and persists ' ' content", async () => {
+      const { service, getAssistantContent } = buildTurnErrorChatService({ reason: "reply_blocked" });
+
+      const result = await service.sendMessage(auth, thread.id, { content: "diagnose me" });
+
+      expect(result.turnError).toEqual({ reason: "reply_blocked" });
+      expect(getAssistantContent()).toBe(" ");
     });
   });
 });

@@ -168,6 +168,15 @@
       "body": "The connection dropped while I was preparing a response. Your message is saved — you can retry.",
       "retry": "Retry",
       "editRequest": "Edit request"
+    },
+    "turnError": {
+      "title": "Couldn't process this request",
+      "body": "Couldn't process this request — please try again.",
+      "bodyBlocked": "The answer didn't pass the safety check.",
+      "retry": "Retry"
+    },
+    "quickActions": {
+      "label": "Quick actions"
     }
   },
   "Recipes": {

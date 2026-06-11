@@ -1,0 +1,10 @@
+# No Stubs
+
+**Always applies.** The owner's standing rule: no stub/canned replies that masquerade as the AI coach, and no dead-end branches in the chat pipeline.
+
+- **Degradation paths must never produce fake coach prose.** When an LLM stage fails (provider error, invalid/unsafe output), retry once where appropriate, then surface a **typed turn error** (`turnError: { reason }` in the chat contract) that the UI renders as an honest error card with a Retry action — never a hardcoded sentence pretending to be the coach.
+- **Deterministic product replies are allowed but constrained:** crisis support, quota limits, direct chat paths, and the no-proposal explainer are deliberate product features. Their copy must live in repo config (`packages/ai-behavior/config/*`) or typed constants with tests — and they must read as system messages, not as fake LLM output.
+- **A declined gate must fall through, never dead-end.** Pre-AI gates (direct paths, explainer) are cost/latency shortcuts. When a gate declines a turn (attachments present, ambiguity, quota of the gate itself), the turn MUST continue into the full LLM fan-out pipeline. It is a bug for any orchestrated turn to terminate in a canned reply because "a gate should have handled it" (the removed `DETERMINISTIC_PRE_AI_GATE_REPLY` / `buildDeterministicGateMissResult` pattern — do not reintroduce it).
+- **No behavioral splits on attachment presence beyond safety floors.** A message with an attachment is the same message: it flows through the same LLM pipeline, with the attachment as context. The only allowed attachment-conditional behavior: gates stepping aside (falling through to the LLM) and code-level safety floors (context budgets, consent). Routing/executor decisions must not silently change meaning based on attachments.
+- **Planner/router hints must not bypass the pipeline.** LLM-suggested flags (e.g. the router's `directCommand`) are telemetry/hints only; the deterministic SystemPlanner decides, and orchestrated turns always fan out.
+- When removing a stub, remove the whole dead branch (constants, builders, specs) in the same change — see `refactor-cleanup.md`.

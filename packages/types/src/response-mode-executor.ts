@@ -20,7 +20,6 @@ export const responseModeExecutorModeSchema = z.enum([
 export type ResponseModeExecutorMode = z.infer<typeof responseModeExecutorModeSchema>;
 
 export const responseModeExecutorHandlerPathSchema = z.enum([
-  "pre_ai_gate_delegation",
   "single_final_answer",
   "bounded_tool_loop",
   "proposal_bounded_loop",
@@ -35,8 +34,6 @@ export const responseModeExecutionMetadataSchema = z.object({
   executorMode: responseModeExecutorModeSchema,
   llmInvoked: z.boolean(),
   expectedResponseMode: expectedResponseModeSchema,
-  delegatedToPreAiGate: z.boolean().optional(),
-  preAiGateDelegationMissed: z.boolean().optional(),
   handlerPath: responseModeExecutorHandlerPathSchema.optional(),
   maxLoopIterations: z.number().int().min(0).max(MAX_AGENT_LOOP_ITERATIONS).optional(),
   allowToolLoop: z.boolean().optional(),
@@ -52,7 +49,6 @@ export interface ResolveResponseModeExecutorModeInput {
   allowedProposalIntents: readonly string[];
   allowedTools: readonly string[];
   directPathCandidate?: DirectChatPathCandidate | null;
-  turnDecisionDirectCommand?: boolean;
 }
 
 const DETERMINISTIC_EXECUTOR_MODES = new Set<ResponseModeExecutorMode>([
@@ -78,6 +74,8 @@ function resolveDirectPathExecutorMode(
       return "deterministic_read";
     case "mark_today_workout_done":
       return "deterministic_write";
+    case "nutrition_plan_read":
+      return "deterministic_read";
   }
 }
 
@@ -98,10 +96,6 @@ export function resolveResponseModeExecutorMode(
 ): ResponseModeExecutorMode {
   if (input.directPathCandidate) {
     return resolveDirectPathExecutorMode(input.directPathCandidate);
-  }
-
-  if (input.turnDecisionDirectCommand) {
-    return "deterministic_write";
   }
 
   if (input.requiresCompression) {
@@ -149,8 +143,12 @@ export function resolveResponseModeExecutorLoopPolicy(
   switch (mode) {
     case "deterministic_read":
     case "deterministic_write":
+      // Deterministic modes are handled by the pre-AI gate before the orchestrator.
+      // The SystemPlanner coerces them to fan-out, so these cases never reach the
+      // executor metadata builder in the live pipeline. The loop policy is a safe
+      // no-op default; the handler path is absent (not "pre_ai_gate_delegation").
       return {
-        handlerPath: "pre_ai_gate_delegation",
+        handlerPath: "single_final_answer",
         maxLoopIterations: 0,
         allowToolLoop: false,
         useContextExpansionMetadata: false,
@@ -190,8 +188,6 @@ export function buildResponseModeExecutionMetadata(input: {
   executorMode: ResponseModeExecutorMode;
   llmInvoked: boolean;
   expectedResponseMode: ExpectedResponseMode;
-  delegatedToPreAiGate?: boolean;
-  preAiGateDelegationMissed?: boolean;
 }): ResponseModeExecutionMetadata {
   const loopPolicy = resolveResponseModeExecutorLoopPolicy(input.executorMode);
 
@@ -199,12 +195,6 @@ export function buildResponseModeExecutionMetadata(input: {
     executorMode: input.executorMode,
     llmInvoked: input.llmInvoked,
     expectedResponseMode: input.expectedResponseMode,
-    ...(input.delegatedToPreAiGate != null
-      ? { delegatedToPreAiGate: input.delegatedToPreAiGate }
-      : {}),
-    ...(input.preAiGateDelegationMissed != null
-      ? { preAiGateDelegationMissed: input.preAiGateDelegationMissed }
-      : {}),
     handlerPath: loopPolicy.handlerPath,
     maxLoopIterations: loopPolicy.maxLoopIterations,
     allowToolLoop: loopPolicy.allowToolLoop,

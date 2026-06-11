@@ -16,6 +16,8 @@ import {
   RULE_ROUTE_CONFIDENCE_THRESHOLD,
   buildContextSliceRequestForIntent,
   buildRouteFromCatalogIntent,
+  isDeterministicResponseModeExecutorMode,
+  mapExpectedResponseModeToDefaultExecutorMode,
   normalizePreprocessorText,
   proposalRevisionIntentSchema,
   resolveProposalRevisionCapabilityId,
@@ -24,7 +26,7 @@ import {
   type RouterDomain,
 } from "@health/types";
 import type { RouterLlmResult } from "./router-llm.service.js";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import type { CoachIntentDefinitionMetadata } from "./capability-intent-definition.adapter.js";
 import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import { CapabilityRegistryService } from "./capability-registry.service.js";
@@ -163,6 +165,8 @@ export interface DomainFanoutPlan extends CapabilityPlanResult {
 
 @Injectable()
 export class SystemPlannerService {
+  private readonly logger = new Logger(SystemPlannerService.name);
+
   constructor(
     private readonly capabilityRegistryService: CapabilityRegistryService,
     private readonly responseModePolicyService: ResponseModePolicyService,
@@ -202,17 +206,32 @@ export class SystemPlannerService {
       ...route,
       expectedResponseMode,
     };
-    const routerDirectCommand =
-      input.routerResult?.output.directCommand?.detected === true;
-    const executorMode = resolveResponseModeExecutorMode({
+    const rawExecutorMode = resolveResponseModeExecutorMode({
       route: resolvedRoute,
       expectedResponseMode,
       requiresCompression: budgetMetadata.requiresCompression,
       allowedProposalIntents: intentDefinition.allowedProposalIntents,
       allowedTools: intentDefinition.allowedTools,
       directPathCandidate: this.classifyDirectPathCandidate(input),
-      turnDecisionDirectCommand: routerDirectCommand,
     });
+
+    // S1: planTurn must NEVER return a deterministic executor mode.
+    // If resolveResponseModeExecutorMode returns deterministic_read/write (because
+    // classifyDirectPathCandidate matched a pre-AI candidate that the pre-AI gate
+    // should have already handled), coerce to the fan-out default and log a warn
+    // so telemetry surfaces the miss.
+    let executorMode = rawExecutorMode;
+
+    if (isDeterministicResponseModeExecutorMode(rawExecutorMode)) {
+      executorMode = mapExpectedResponseModeToDefaultExecutorMode(expectedResponseMode);
+      this.logger.warn({
+        event: "pre_ai_gate.miss",
+        rawExecutorMode,
+        coercedExecutorMode: executorMode,
+        hasAttachments: Boolean(input.attachmentTurn?.attachments.length),
+        hasProposalRevision: Boolean(input.proposalRevision),
+      });
+    }
 
     // Build the fan-out metadata for Phase 4.
     // - Confident router routes iterate all selectedDomains (up to MAX_ROUTER_SELECTED_DOMAINS).
@@ -344,7 +363,6 @@ export class SystemPlannerService {
         allowedProposalIntents: domainIntentDef.allowedProposalIntents,
         allowedTools: domainIntentDef.allowedTools,
         directPathCandidate: null,
-        turnDecisionDirectCommand: false,
       });
 
       entries.push({
@@ -397,7 +415,6 @@ export class SystemPlannerService {
       allowedProposalIntents: intentDef.allowedProposalIntents,
       allowedTools: intentDef.allowedTools,
       directPathCandidate: null,
-      turnDecisionDirectCommand: false,
     });
 
     return {

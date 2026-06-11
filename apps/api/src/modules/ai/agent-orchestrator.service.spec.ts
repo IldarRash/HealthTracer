@@ -13,7 +13,7 @@
  *  - proposal-revision / proposal-explainer turns skip the router
  *  - decision-maker failure → safe fallback reply, proposals empty
  *  - reply safety block → reply replaced, proposals zeroed, safety.status = reply_blocked
- *  - deterministic gate-miss: executorMode deterministic → canned reply, no LLM calls after router
+ *  - decision_failed: decision-maker exhausts retry → turnError.reason=decision_failed on result
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -692,6 +692,39 @@ describe("AgentOrchestratorService", () => {
 
       expect(result.parseErrors.join(" ")).toContain("Zod parse failure");
     });
+
+    it("sets turnError.reason=decision_failed when decision-maker returns turnError", async () => {
+      // Simulates the retry-exhausted path from DecisionMakerExecutorService.
+      (mocks.decisionMakerExecutorService.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+        output: {
+          reply: "[degraded]",
+          selectedAction: null,
+          selectedProposalIds: [],
+          consentRequired: false,
+        },
+        degraded: true,
+        degradedReasons: ["attempt1: Provider error", "attempt2: Provider error"],
+        turnError: { reason: "decision_failed" },
+      });
+
+      (mocks.actionResolverService.resolveFinalDecisionOutput as ReturnType<typeof vi.fn>).mockReturnValue({
+        reply: "[degraded]",
+        proposals: [],
+        consentRequired: false,
+        parseErrors: [],
+        idResolutionDropCount: 0,
+      });
+
+      const orchestrator = buildOrchestrator(mocks);
+      const result = await orchestrator.orchestrateCoachTurn(makeInput());
+
+      expect(result.turnError).toEqual({ reason: "decision_failed" });
+      // Honest empty content: orchestrator emits " " (single space) for the output
+      expect(result.output.reply).toBe(" ");
+      expect(result.output.proposals).toHaveLength(0);
+      // Reply safety check is skipped when decision failed — no safety errors added
+      expect(result.replySafetyErrors).toHaveLength(0);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -699,7 +732,7 @@ describe("AgentOrchestratorService", () => {
   // -------------------------------------------------------------------------
 
   describe("reply safety block", () => {
-    it("replaces reply with safe fallback and zeros proposals when reply contains unsafe language", async () => {
+    it("sets empty content + turnError.reason=reply_blocked and zeros proposals when reply contains unsafe language", async () => {
       (mocks.actionResolverService.resolveFinalDecisionOutput as ReturnType<typeof vi.fn>).mockReturnValue({
         reply: "Based on your blood work, I diagnose you with iron deficiency anemia. Take 150mg iron supplements daily.",
         proposals: [],
@@ -732,36 +765,23 @@ describe("AgentOrchestratorService", () => {
 
       expect(result.consentRequired).toBe(false);
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // Deterministic gate-miss — executorMode deterministic
-  // -------------------------------------------------------------------------
-
-  describe("deterministic gate-miss", () => {
-    it("returns canned reply without additional LLM calls when executorMode is deterministic_read", async () => {
-      const detPlan = makeFanoutPlan([makeDomainEntry("workout")], "deterministic_read");
-      (mocks.systemPlannerService.planTurn as ReturnType<typeof vi.fn>).mockResolvedValue(detPlan);
+    it("sets turnError.reason=reply_blocked and emits empty content when reply safety fails", async () => {
+      (mocks.actionResolverService.resolveFinalDecisionOutput as ReturnType<typeof vi.fn>).mockReturnValue({
+        reply: "You have diabetes and should take metformin 1000mg to treat it.",
+        proposals: [],
+        consentRequired: false,
+        parseErrors: [],
+        idResolutionDropCount: 0,
+      });
 
       const orchestrator = buildOrchestrator(mocks);
       const result = await orchestrator.orchestrateCoachTurn(makeInput());
 
-      // No domain LLM calls after the gate-miss
-      expect(mocks.domainLlmExecutorService.runDomainLoop).not.toHaveBeenCalled();
-      expect(mocks.decisionMakerExecutorService.execute).not.toHaveBeenCalled();
-      expect(result.output.reply).toBeTruthy();
+      expect(result.turnError).toEqual({ reason: "reply_blocked" });
+      expect(result.output.reply).toBe(" ");
       expect(result.output.proposals).toHaveLength(0);
-    });
-
-    it("returns preAiGateDelegationMissed=true in responseModeExecution metadata", async () => {
-      const detPlan = makeFanoutPlan([makeDomainEntry("workout")], "deterministic_write");
-      (mocks.systemPlannerService.planTurn as ReturnType<typeof vi.fn>).mockResolvedValue(detPlan);
-
-      const orchestrator = buildOrchestrator(mocks);
-      const result = await orchestrator.orchestrateCoachTurn(makeInput());
-
-      expect(result.agentMetadata.responseModeExecution?.preAiGateDelegationMissed).toBe(true);
-      expect(result.agentMetadata.responseModeExecution?.llmInvoked).toBe(false);
+      expect(result.agentMetadata.safety.status).toBe("reply_blocked");
     });
   });
 

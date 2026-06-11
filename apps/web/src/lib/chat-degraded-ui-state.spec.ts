@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveChatMessageDegradedTurn,
+  resolveChatMessageTurnError,
   findPrecedingUserMessage,
 } from "./chat-degraded-ui-state.js";
 
@@ -58,6 +59,45 @@ describe("resolveChatMessageDegradedTurn", () => {
     const meta = { turnDegraded: { degraded: true, reason: "provider_error", extra: "ok" } };
     const result = resolveChatMessageDegradedTurn(assistantMsg("", meta));
     expect(result).toEqual({ degraded: true, reason: "provider_error" });
+  });
+});
+
+describe("resolveChatMessageTurnError", () => {
+  it("returns null for user messages", () => {
+    const msg = userMsg("hello");
+    expect(resolveChatMessageTurnError(msg)).toBeNull();
+  });
+
+  it("returns null for assistant message with no metadata", () => {
+    expect(resolveChatMessageTurnError(assistantMsg("ok"))).toBeNull();
+  });
+
+  it("returns null when metadata has no turnError key", () => {
+    const msg = assistantMsg("ok", { turnDegraded: { degraded: true, reason: "provider_error" } });
+    expect(resolveChatMessageTurnError(msg)).toBeNull();
+  });
+
+  it("returns null when turnError shape is invalid", () => {
+    const msg = assistantMsg(" ", { turnError: { reason: "unknown_reason" } });
+    expect(resolveChatMessageTurnError(msg)).toBeNull();
+  });
+
+  it("returns turnError for decision_failed reason", () => {
+    const meta = { turnError: { reason: "decision_failed" } };
+    const result = resolveChatMessageTurnError(assistantMsg(" ", meta));
+    expect(result).toEqual({ reason: "decision_failed" });
+  });
+
+  it("returns turnError for reply_blocked reason", () => {
+    const meta = { turnError: { reason: "reply_blocked" } };
+    const result = resolveChatMessageTurnError(assistantMsg(" ", meta));
+    expect(result).toEqual({ reason: "reply_blocked" });
+  });
+
+  it("ignores unknown extra keys in the turnError payload (Zod strips them)", () => {
+    const meta = { turnError: { reason: "decision_failed", extra: "ignored" } };
+    const result = resolveChatMessageTurnError(assistantMsg(" ", meta));
+    expect(result).toEqual({ reason: "decision_failed" });
   });
 });
 

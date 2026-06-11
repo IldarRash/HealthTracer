@@ -13,9 +13,11 @@ import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
 import { SystemPlannerService } from "../ai/system-planner.service.js";
+import { NutritionService } from "../nutrition/nutrition.service.js";
 import { TodayService } from "../today/today.service.js";
 import { UsersService } from "../users/users.service.js";
 import {
+  formatNutritionPlanReadMessage,
   formatTodaySummaryReadMessage,
   formatWorkoutMarkedDoneMessage,
 } from "./direct-chat-path-formatters.js";
@@ -39,6 +41,7 @@ export class DirectChatPathService {
     private readonly aiBehaviorConfigService: AiBehaviorConfigService,
     private readonly todayService: TodayService,
     private readonly usersService: UsersService,
+    private readonly nutritionService: NutritionService,
   ) {}
 
   async tryExecute(
@@ -94,6 +97,8 @@ export class DirectChatPathService {
         return this.executeTodaySummaryRead(auth, candidate.kind, replyTemplates);
       case "mark_today_workout_done":
         return this.executeMarkTodayWorkoutDone(auth, candidate.kind, replyTemplates);
+      case "nutrition_plan_read":
+        return this.executeNutritionPlanRead(auth, candidate.kind, replyTemplates);
       default: {
         const _exhaustive: never = candidate.kind;
         return _exhaustive;
@@ -158,6 +163,22 @@ export class DirectChatPathService {
       status,
       message: formatWorkoutMarkedDoneMessage(targetItem.label, replyTemplates),
       refreshHints: this.resolveRefreshHints(kind, status),
+    };
+  }
+
+  private async executeNutritionPlanRead(
+    auth: ClerkAuthContext,
+    kind: DirectChatPathCandidate["kind"],
+    replyTemplates: ReturnType<AiBehaviorConfigService["getDirectPaths"]>["replyTemplates"],
+  ): Promise<DirectChatPathOutcome> {
+    const activePlan = await this.nutritionService.getCurrentActivePlan(auth);
+    const status = "executed" as const;
+
+    return {
+      kind,
+      status,
+      message: formatNutritionPlanReadMessage(activePlan, replyTemplates.nutritionPlan),
+      refreshHints: [],
     };
   }
 

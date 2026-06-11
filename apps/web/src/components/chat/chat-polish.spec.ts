@@ -56,7 +56,8 @@ const CHAT_USER_VISIBLE_SOURCES = [
   crisisPanelSource,
   chatBubbleSource,
   readSource(join(chatDir, "chat-composer-attachments.tsx")),
-  readSource(join(chatDir, "chat-attachment-outcome-panel.tsx")),
+  // chat-attachment-outcome-panel.tsx was deleted (W3) — attachment status never
+  // leaves "queued" at runtime, so the panel was dead noise.
   JSON.stringify(SUGGESTED_CHAT_PROMPT_DEFINITIONS),
   INLINE_PROPOSAL_VALIDATION_HEADING,
   JSON.stringify(WELLBEING_CRISIS_SUPPORT_COPY),

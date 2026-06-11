@@ -34,7 +34,6 @@ import {
 } from "./openai-coach-provider.js";
 import {
   createFallbackRouterDecision,
-  createFallbackFinalDecision,
   getDefaultCompiledPromptTemplates,
 } from "@health/types";
 import type {
@@ -555,7 +554,7 @@ describe("OpenAiCoachProvider", () => {
       expect(result.output.selectedAction).toBe("adapt_workout_plan");
     });
 
-    it("returns fallback when the output contains forbidden shape (direct_reply field)", async () => {
+    it("throws when the output contains forbidden shape (direct_reply field) — executor owns degradation via retry/turnError", async () => {
       const forbidden = JSON.stringify({
         reply: "OK",
         selectedAction: null,
@@ -567,11 +566,11 @@ describe("OpenAiCoachProvider", () => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeSuccessfulFetchResponse(forbidden)));
 
       const provider = makeProvider();
-      const result = await provider.generateFinalDecision(makeFinalDecisionRequest());
-
-      const fallback = createFallbackFinalDecision();
-      expect(result.output.selectedAction).toBe(fallback.selectedAction);
-      expect(result.output.selectedProposalIds).toHaveLength(0);
+      // Provider throws so DecisionMakerExecutorService's catch → retry-once → turnError
+      // path owns degradation. The literal "[degraded]" string never reaches persisted output.
+      await expect(provider.generateFinalDecision(makeFinalDecisionRequest())).rejects.toThrow(
+        "forbidden-key shape",
+      );
     });
 
     it("throws when JSON is malformed (truncated) — non-JSON content propagates up to executor for degradation", async () => {
@@ -587,21 +586,20 @@ describe("OpenAiCoachProvider", () => {
       );
     });
 
-    it("returns fallback when Zod parse fails (missing required reply field)", async () => {
-      // reply is required by finalDecisionOutputSchema
+    it("throws when reply is missing (Zod parse failure propagates to executor)", async () => {
+      // reply is required. No forbidden keys, but Zod parse fails inside the shape guard
+      // (validateFinalDecisionOutputShape runs Zod internally and returns errors).
+      // The provider now throws on any shape/parse failure so the executor owns degradation.
       const missingReply = JSON.stringify({
         selectedAction: null,
-        proposals: [],
         consentRequired: false,
+        // reply is intentionally absent
       });
 
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeSuccessfulFetchResponse(missingReply)));
 
       const provider = makeProvider();
-      const result = await provider.generateFinalDecision(makeFinalDecisionRequest());
-
-      const fallback = createFallbackFinalDecision();
-      expect(result.output.selectedProposalIds).toHaveLength(fallback.selectedProposalIds.length);
+      await expect(provider.generateFinalDecision(makeFinalDecisionRequest())).rejects.toThrow();
     });
 
     it("throws when the API returns a 4xx error", async () => {

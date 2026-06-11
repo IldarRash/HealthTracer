@@ -2,7 +2,7 @@
 
 import { useTranslations, useLocale } from "next-intl";
 import { useAuth } from "@clerk/nextjs";
-import type { AiProposal, ChatTurnResponse, ProposalModifyResponse } from "@health/types";
+import type { AiProposal, ChatTurnResponse, ProposalModifyResponse, SuggestedQuickAction } from "@health/types";
 import { MAX_CHAT_USER_MESSAGE_CHARS } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -22,7 +22,6 @@ import {
   createChatComposerAttachmentDraft,
   isChatAttachmentSendEligible,
   revokeChatAttachmentPreviewUrl,
-  type ChatAttachmentOutcomeDisplay,
   type ChatComposerAttachmentDraft,
 } from "../../lib/chat-attachment-ui-state";
 import { buildChatAttachmentUploadPayload } from "../../lib/chat-attachment-upload";
@@ -33,6 +32,7 @@ import {
 import {
   findPrecedingUserMessage,
   resolveChatMessageDegradedTurn,
+  resolveChatMessageTurnError,
 } from "../../lib/chat-degraded-ui-state";
 import { useChatAutoScroll } from "../../lib/use-chat-auto-scroll";
 import {
@@ -61,7 +61,7 @@ import {
   type ChatTurnStreamEvent,
 } from "../../lib/chat-stream";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
-import { ChatAttachmentOutcomePanel } from "./chat-attachment-outcome-panel";
+import { ChatQuickActionChips } from "./chat-quick-action-chips";
 import { ChatComposerAttachmentInput } from "./chat-composer-attachment-input";
 import { ChatComposerAttachments } from "./chat-composer-attachments";
 import { ChatMessageAttachmentPreviews } from "./chat-message-attachment-previews";
@@ -125,9 +125,9 @@ export function ChatWorkspace() {
   const [composerAttachments, setComposerAttachments] = useState<ChatComposerAttachmentDraft[]>(
     [],
   );
-  const [attachmentOutcomesByMessageId, setAttachmentOutcomesByMessageId] = useState<
-    Record<string, ChatAttachmentOutcomeDisplay[]>
-  >({});
+  const [liveSuggestedQuickActions, setLiveSuggestedQuickActions] = useState<SuggestedQuickAction[]>(
+    [],
+  );
   /**
    * chatBodyFlow — tracks whether we are in the body-analysis photo intake flow.
    * - "ask": coach has requested photos; PhotoGuide is mounted after the request message.
@@ -247,7 +247,7 @@ export function ChatWorkspace() {
     setLocalProposals([]);
     setOptimisticMessage(null);
     setPendingRevisionSend(null);
-    setAttachmentOutcomesByMessageId({});
+    setLiveSuggestedQuickActions([]);
     setChatBodyFlowStep(null);
     setComposerAttachments((current) => {
       for (const attachment of current) {
@@ -351,12 +351,12 @@ export function ChatWorkspace() {
       }
 
       setLocalProposals(turn.proposals);
-      if (turn.attachmentOutcomes?.length) {
-        setAttachmentOutcomesByMessageId((current) => ({
-          ...current,
-          [turn.assistantMessage.id]: turn.attachmentOutcomes ?? [],
-        }));
-      }
+      // Capture quick actions from this turn (only on non-error turns).
+      setLiveSuggestedQuickActions(
+        !turn.turnError && turn.suggestedQuickActions?.length
+          ? turn.suggestedQuickActions
+          : [],
+      );
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
       void queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
       void queryClient.invalidateQueries({ queryKey: ["proposals", turn.thread.id] });
@@ -880,6 +880,14 @@ export function ChatWorkspace() {
               const degradedTurn = isUser
                 ? null
                 : resolveChatMessageDegradedTurn(message);
+              const messageTurnError = isUser
+                ? null
+                : resolveChatMessageTurnError(message);
+              // The latest assistant message is the last non-user, non-optimistic message.
+              const isLatestAssistantMessage =
+                !isUser &&
+                !isSendPending &&
+                messageIndex === messages.length - 1;
 
               // Body-flow: show PhotoStripMsg instead of generic previews for user
               // messages that carry body-analysis photos (3 images in body flow context).
@@ -929,7 +937,18 @@ export function ChatWorkspace() {
                           <ChatMessageAttachmentPreviews previews={attachmentPreviews} />
                         ) : null}
                         {isUser && messageText ? <p className="chat-bubble__text">{messageText}</p> : null}
-                        {!isUser && degradedTurn ? (
+                        {!isUser && messageTurnError ? (
+                          <ChatTurnErrorCard
+                            reason={messageTurnError.reason}
+                            disabled={isSendPending}
+                            onRetry={() => {
+                              const precedingText = findPrecedingUserMessage(messages, messageIndex);
+                              if (precedingText) {
+                                void sendMessageStreaming(precedingText);
+                              }
+                            }}
+                          />
+                        ) : !isUser && degradedTurn ? (
                           <ChatTurnErrorCard
                             onRetry={() => {
                               const precedingText = findPrecedingUserMessage(messages, messageIndex);
@@ -981,10 +1000,14 @@ export function ChatWorkspace() {
                     />
                   ) : null}
 
-                  {attachmentOutcomesByMessageId[message.id]?.length ? (
-                    <ChatAttachmentOutcomePanel
-                      outcomes={attachmentOutcomesByMessageId[message.id] ?? []}
-                      titleId={`chat-attachment-outcomes-${message.id}`}
+                  {/* Quick-action chips — latest assistant message only, no turnError */}
+                  {isLatestAssistantMessage && !messageTurnError && liveSuggestedQuickActions.length > 0 ? (
+                    <ChatQuickActionChips
+                      actions={liveSuggestedQuickActions}
+                      disabled={isSendPending}
+                      onActionSelect={(messageText) => {
+                        void sendMessageStreaming(messageText);
+                      }}
                     />
                   ) : null}
                 </li>

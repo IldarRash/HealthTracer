@@ -82,7 +82,7 @@ describe("ChatMessageAttachmentPreviews component", () => {
     expect(previewsSource).not.toContain("storageKey");
     expect(previewsSource).not.toContain("recognition");
     // "consentScope" / consent details must not be rendered here
-    // (the consent grant flow lives in ChatAttachmentOutcomePanel, not here).
+    // (consent flows live in the Profile documents feature, not in chat attachment previews).
     expect(previewsSource).not.toContain("consentScope");
     expect(previewsSource).not.toContain("documentText");
     // Should not import or call the full attachment record API
