@@ -294,6 +294,11 @@ describe("ChatService", () => {
         }),
       },
       proposalValidationService: {
+        normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
         validateRawProposal: () => ({ valid: true, errors: [] }),
         validateCorrelationEvidenceOwnership: async () => [],
         validateProvenanceOwnership: async () => [],
@@ -390,6 +395,11 @@ describe("ChatService", () => {
         },
       },
       proposalValidationService: {
+        normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
         validateRawProposal: () => ({ valid: true, errors: [] }),
         validateCorrelationEvidenceOwnership: async () => [],
         validateProvenanceOwnership: async () => [],
@@ -482,6 +492,11 @@ describe("ChatService", () => {
         }),
       },
       proposalValidationService: {
+        normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
         validateRawProposal: () => ({ valid: true, errors: [] }),
         validateCorrelationEvidenceOwnership: async () => [],
         validateProvenanceOwnership: async () => [],
@@ -721,6 +736,11 @@ describe("ChatService", () => {
         }),
       },
       proposalValidationService: {
+        normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
         validateRawProposal: () => ({ valid: true, errors: [] }),
         validateCorrelationEvidenceOwnership: async () => [evidenceError],
         validateProvenanceOwnership: async () => [],
@@ -796,6 +816,11 @@ describe("ChatService", () => {
         },
       },
       proposalValidationService: {
+        normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
         validateRawProposal: () => ({ valid: true, errors: [] }),
         validateCorrelationEvidenceOwnership: async () => [],
         validateProvenanceOwnership: async () => [],
@@ -938,7 +963,12 @@ describe("ChatService", () => {
           },
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -1523,7 +1553,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -1640,7 +1675,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -1876,7 +1916,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2009,7 +2054,12 @@ describe("ChatService", () => {
           },
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2153,7 +2203,12 @@ describe("ChatService", () => {
           },
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2273,7 +2328,12 @@ describe("ChatService", () => {
           },
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2392,7 +2452,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2509,7 +2574,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
@@ -2551,7 +2621,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2628,7 +2703,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2705,7 +2785,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2811,7 +2896,12 @@ describe("ChatService", () => {
           },
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -2883,7 +2973,12 @@ describe("ChatService", () => {
           generateCoachResponse,
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
         },
         proposalExplainerService: {
           resolvePreAiTurn: async () => ({
@@ -2978,7 +3073,12 @@ describe("ChatService", () => {
           },
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
         },
         proposalExplainerService: {
           resolvePreAiTurn: async () => ({
@@ -3121,7 +3221,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -3248,7 +3353,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -3409,7 +3519,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -3482,7 +3597,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
@@ -3801,7 +3921,12 @@ describe("ChatService", () => {
           }),
         },
         proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
+          normalizeWorkoutProposalExercises: async (
+          _userId: string,
+          _intent: unknown,
+          proposedChanges: unknown,
+        ) => proposedChanges,
+        validateRawProposal: () => ({ valid: true, errors: [] }),
           validateCorrelationEvidenceOwnership: async () => [],
           validateProvenanceOwnership: async () => [],
           validateProgressLinkedProvenanceRequired: () => [],
