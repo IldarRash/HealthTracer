@@ -48,28 +48,27 @@ describe("nav UI state", () => {
     expect(isActivePath("/today", "/longevity")).toBe(false);
   });
 
-  it("treats legacy aliases as active for secondary and profile routes", () => {
-    const workouts = SECONDARY_ROUTE_LINKS.find((link) => link.href === "/training");
+  it("treats /recipes as alias for nutrition and /billing as alias for profile", () => {
     const nutrition = SECONDARY_ROUTE_LINKS.find((link) => link.href === "/nutrition");
     const profile = PRIMARY_NAV_LINKS.find((link) => link.href === "/profile");
 
-    expect(workouts).toBeDefined();
     expect(nutrition).toBeDefined();
     expect(profile).toBeDefined();
-    expect(isNavLinkActive("/training", workouts!)).toBe(true);
-    expect(isNavLinkActive("/progress", workouts!)).toBe(true);
     expect(isNavLinkActive("/nutrition", nutrition!)).toBe(true);
     expect(isNavLinkActive("/recipes", nutrition!)).toBe(true);
-    expect(isNavLinkActive("/goals", profile!)).toBe(true);
-    expect(isNavLinkActive("/documents", profile!)).toBe(true);
-    expect(isNavLinkActive("/metrics", profile!)).toBe(true);
+    expect(isNavLinkActive("/billing", profile!)).toBe(true);
+    // Deleted alias routes — /goals, /documents, /metrics, /progress no longer alias any tab.
+    expect(isNavLinkActive("/goals", profile!)).toBe(false);
+    expect(isNavLinkActive("/documents", profile!)).toBe(false);
+    expect(isNavLinkActive("/metrics", profile!)).toBe(false);
   });
 
   it("resolves secondary routes without highlighting primary tabs", () => {
     expect(isSecondaryRoute("/training")).toBe(true);
-    expect(isSecondaryRoute("/progress")).toBe(true);
     expect(isSecondaryRoute("/nutrition")).toBe(true);
     expect(isSecondaryRoute("/longevity")).toBe(false);
+    // /progress is a deleted alias route — no longer a secondary route.
+    expect(isSecondaryRoute("/progress")).toBe(false);
 
     const training = findSecondaryRoute("/training");
     expect(training?.labelKey).toBe("Nav.workouts");
@@ -84,10 +83,6 @@ describe("nav UI state", () => {
       parent: { href: "/today", labelKey: "Nav.today" },
       current: { labelKey: "Nav.workouts" },
     });
-    expect(resolveSecondaryRouteWayfinding("/progress")).toEqual({
-      parent: { href: "/today", labelKey: "Nav.today" },
-      current: { labelKey: "Nav.workouts" },
-    });
     expect(resolveSecondaryRouteWayfinding("/recipes")).toEqual({
       parent: { href: "/today", labelKey: "Nav.today" },
       current: { labelKey: "Nav.nutrition" },
@@ -95,6 +90,8 @@ describe("nav UI state", () => {
     expect(resolveSecondaryRouteWayfinding("/longevity")).toBeUndefined();
     expect(resolveSecondaryRouteWayfinding("/today")).toBeUndefined();
     expect(resolveSecondaryRouteWayfinding("/profile")).toBeUndefined();
+    // Deleted alias routes — no wayfinding for ghost routes.
+    expect(resolveSecondaryRouteWayfinding("/progress")).toBeUndefined();
     expect(resolveSecondaryRouteWayfinding("/metrics")).toBeUndefined();
     expect(resolveSecondaryRouteWayfinding("/goals")).toBeUndefined();
     expect(resolveSecondaryRouteWayfinding("/documents")).toBeUndefined();

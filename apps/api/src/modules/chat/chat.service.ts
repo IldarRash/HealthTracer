@@ -415,6 +415,7 @@ export class ChatService {
         replySafetyErrors: generated.replySafetyErrors,
         agent: generated.agentMetadata,
         ...(weeklyReviewMetadata ?? {}),
+        ...(generated.degraded ? { turnDegraded: { degraded: true, reason: generated.degraded.reason } } : {}),
       },
     );
 

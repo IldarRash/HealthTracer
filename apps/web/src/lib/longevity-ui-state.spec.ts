@@ -586,7 +586,7 @@ describe("longevity UI state", () => {
 
       expect(ready.status).toBe("ready");
       if (ready.status === "ready") {
-        expect(ready.value).toBe("1 of 1 sessions completed");
+        expect(ready.value).toBe("1 of 1 planned session completed");
       }
       assertNoForbiddenTerms(ready);
     });

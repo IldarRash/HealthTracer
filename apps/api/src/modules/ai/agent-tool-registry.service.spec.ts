@@ -262,11 +262,11 @@ describe("AgentToolRegistryService", () => {
         id: recipeId,
         name: "Greek Yogurt Bowl",
         mealTypes: ["breakfast"],
-        macroEstimates: {
-          estimatedCalories: 320,
-          proteinGrams: 22,
-          carbsGrams: 38,
-          fatGrams: 7,
+        perServingMacros: {
+          caloriesPerServing: 320,
+          proteinGramsPerServing: 22,
+          carbsGramsPerServing: 38,
+          fatGramsPerServing: 7,
         },
         tags: ["high_protein"],
         confidence: "high",

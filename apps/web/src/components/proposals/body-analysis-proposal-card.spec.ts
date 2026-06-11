@@ -168,7 +168,7 @@ describe("InlineProposalCard — save_body_analysis routing", () => {
 describe("proposal-ui-state — save_body_analysis entries", () => {
   it("provides an intent label for save_body_analysis", () => {
     expect(proposalUiStateSrc).toContain('"save_body_analysis"');
-    expect(proposalUiStateSrc).toContain('"Анализ тела"');
+    expect(proposalUiStateSrc).toContain('"Body analysis"');
   });
 
   it("provides a body-specific rejected message for save_body_analysis", () => {

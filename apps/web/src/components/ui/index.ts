@@ -36,6 +36,13 @@ export {
   type ConsentScopeItem,
 } from "./privacy";
 export { ProposalConfirmation } from "./proposal-confirmation";
+export {
+  ProposalFrame,
+  ProposalFrameHeader,
+  ProposalWhy,
+  ProposalDiffRow,
+  ProposalStateBand,
+} from "./proposal-frame";
 export { EmptyState, ErrorState, LoadingState } from "./state-message";
 export {
   ActionPriorityCard,

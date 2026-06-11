@@ -201,8 +201,9 @@ describe('GroceryListScreen: indigo "changes via chat" banner', () => {
     expect(src).toContain("rgba(123,123,255,0.28)");
   });
 
-  it("uses the #5b5bd6 spark icon stroke from the spec", () => {
-    expect(src).toContain("#5b5bd6");
+  it("uses theme token for the spark icon stroke (no hard-coded hex)", () => {
+    expect(src).toContain("color-metric-indigo");
+    expect(src).not.toContain("#5b5bd6");
   });
 });
 
@@ -271,9 +272,10 @@ describe("GroceryListPage route: /nutrition/grocery-list", () => {
     expect(pageSrc).toContain("<PageContent>");
   });
 
-  it("redirects unauthenticated users to sign-in", () => {
-    expect(pageSrc).toContain("isAuthenticated");
-    expect(pageSrc).toContain("redirectToAppSignIn");
+  it("delegates auth to middleware — no per-page auth boilerplate", () => {
+    // Auth protection moved to clerkMiddleware in proxy.ts.
+    expect(pageSrc).not.toContain("isAuthenticated");
+    expect(pageSrc).not.toContain("redirectToAppSignIn");
   });
 });
 

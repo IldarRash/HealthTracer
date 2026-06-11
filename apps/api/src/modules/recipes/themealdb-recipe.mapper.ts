@@ -1,4 +1,4 @@
-import type { RecipeIngredient, RecipeMacroEstimates, RecipeMealType } from "@health/types";
+import type { RecipeIngredient, RecipePerServingMacros, RecipeMealType } from "@health/types";
 import {
   inferAllergenTagsFromIngredients,
   inferRestrictionTagsFromIngredients,
@@ -8,12 +8,12 @@ import {
   type ProviderRecipeDraft,
 } from "./recipe-catalog-provider.js";
 
-export const APPROXIMATE_PROVIDER_MACRO_ESTIMATES: RecipeMacroEstimates = {
-  estimatedCalories: 550,
-  proteinGrams: 25,
-  carbsGrams: 45,
-  fatGrams: 20,
-  fiberGrams: 8,
+export const APPROXIMATE_PROVIDER_MACRO_ESTIMATES: RecipePerServingMacros = {
+  caloriesPerServing: 550,
+  proteinGramsPerServing: 25,
+  carbsGramsPerServing: 45,
+  fatGramsPerServing: 20,
+  fiberGramsPerServing: 8,
 };
 
 export const APPROXIMATE_MACRO_SOURCE =

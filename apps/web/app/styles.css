@@ -116,7 +116,6 @@
   --layout-shell-max: 80rem;
   --layout-content-max: 72rem;
   --layout-chat-max: 48rem;
-  --layout-nav-height: 3.5rem;
   --touch-target-min: 2.75rem;
 
   /* Focus */
@@ -442,6 +441,7 @@ dd {
   display: flex;
   flex-direction: row;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -453,10 +453,12 @@ dd {
 .app-sidebar {
   background: var(--color-surface-sidebar);
   border-right: 1px solid var(--color-border-default);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 18px 14px 14px;
   width: 244px;
 }
@@ -630,6 +632,8 @@ dd {
   display: flex;
   flex-direction: column;
   max-width: none;
+  min-height: 0;
+  overflow: hidden;
   padding: 0;
 }
 
@@ -676,6 +680,130 @@ dd {
 .app-shell__main--structured .state-message__spinner {
   border-color: var(--color-border-subtle);
   border-top-color: var(--color-coach-600);
+}
+
+/* ── Mobile bar (hidden at ≥1024px) ── */
+.app-shell__mobile-bar {
+  align-items: center;
+  background: var(--color-surface-sidebar);
+  border-bottom: 1px solid var(--color-border-default);
+  display: none;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  height: 3.5rem;
+  padding: 0 var(--space-4);
+}
+
+.app-shell__mobile-bar__hamburger {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: flex;
+  height: var(--touch-target-min);
+  justify-content: center;
+  padding: 0;
+  width: var(--touch-target-min);
+}
+
+.app-shell__mobile-bar__hamburger:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.app-shell__mobile-bar__brand {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.app-shell__mobile-bar__brand-name {
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+}
+
+/* ── Drawer root overlay ── */
+.app-shell__drawer-root {
+  inset: 0;
+  position: fixed;
+  z-index: 50;
+}
+
+.app-shell__scrim {
+  background: rgb(0 0 0 / 50%);
+  inset: 0;
+  position: absolute;
+}
+
+.app-shell__drawer {
+  animation: drawer-in 200ms ease;
+  height: 100%;
+  max-width: 85vw;
+  position: relative;
+  width: 280px;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell__drawer {
+    animation: none;
+  }
+}
+
+.app-shell__drawer .app-sidebar {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* ── Mobile breakpoint: stack vertically, hide fixed sidebar ── */
+@media (max-width: 1023.98px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .app-shell > .app-sidebar {
+    display: none;
+  }
+
+  .app-shell__mobile-bar {
+    display: flex;
+  }
+
+  .app-shell__main {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+}
+
+/* ── Sticky page header (structured main only) ── */
+.app-shell__main--structured > .page-header {
+  background: var(--color-surface-content);
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin-left: calc(-1 * var(--space-4));
+  margin-right: calc(-1 * var(--space-4));
+  margin-top: calc(-1 * var(--space-6));
+  padding-bottom: var(--space-4);
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+  padding-top: var(--space-6);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+[data-theme="dark"] .app-shell__main--structured > .page-header {
+  background: var(--color-surface-app);
+  border-bottom-color: var(--color-border-default);
 }
 
 .page-header {
@@ -770,18 +898,6 @@ dd {
   color: var(--color-text-on-light);
   font-weight: 600;
   overflow-wrap: anywhere;
-}
-
-/* Legacy shell wrappers — keep until pages migrate to AppShell */
-.shell {
-  align-items: center;
-  display: flex;
-  min-height: 100vh;
-  padding: var(--space-8);
-}
-
-.shell-wide {
-  align-items: flex-start;
 }
 
 /* ==========================================================================
@@ -903,6 +1019,8 @@ dd {
   display: grid;
   gap: var(--space-2);
   min-height: 8rem;
+  min-width: 0;
+  overflow-wrap: break-word;
   padding: var(--space-4);
 }
 
@@ -1509,8 +1627,7 @@ dd {
   outline: none;
 }
 
-.button:focus-visible,
-.thread-button:focus-visible {
+.button:focus-visible {
   outline: var(--focus-outline);
   outline-offset: var(--focus-outline-offset);
 }
@@ -1679,78 +1796,6 @@ dd {
 /* ==========================================================================
    Chat layout and bubbles
    ========================================================================== */
-
-.chat-layout {
-  display: grid;
-  gap: var(--space-4);
-  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
-  margin-top: var(--space-6);
-}
-
-.chat-layout--primary {
-  grid-template-columns: minmax(0, 1fr);
-  margin-top: 0;
-  min-height: calc(100vh - var(--layout-nav-height));
-}
-
-.chat-layout--primary .chat-main {
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  max-width: var(--layout-chat-max);
-  min-height: calc(100vh - var(--layout-nav-height));
-  margin: 0 auto;
-  width: 100%;
-}
-
-.chat-sidebar-header {
-  align-items: center;
-  display: flex;
-  gap: var(--space-3);
-  justify-content: space-between;
-  margin-bottom: var(--space-4);
-}
-
-.chat-sidebar-header h2 {
-  margin: 0;
-}
-
-.thread-list {
-  display: grid;
-  gap: var(--space-2);
-  list-style: none;
-  margin: var(--space-4) 0 0;
-  padding: 0;
-}
-
-.thread-button {
-  background: var(--color-surface-card);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  text-align: left;
-  width: 100%;
-}
-
-.thread-button span {
-  color: var(--color-text-muted);
-  font-size: 0.8125rem;
-}
-
-.thread-button.active {
-  border-color: var(--color-coach-500);
-  box-shadow: inset 0 0 0 1px var(--color-coach-500);
-}
-
-.chat-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  min-height: 28rem;
-}
 
 .chat-transcript,
 .message-list {
@@ -2095,6 +2140,159 @@ span.confirmation-card__meta {
   border-left-color: var(--color-status-pending-border);
 }
 
+/* ── ProposalFrame design-system primitives ─────────────────────────────── */
+
+.proposal-frame {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-coach-500);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 6%), 0 8px 24px rgb(0 0 0 / 4%);
+  overflow: hidden;
+  padding: var(--space-4);
+  transition: box-shadow 160ms ease;
+}
+
+.proposal-frame--inline {
+  /* Inline variant is compact inside chat bubbles */
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 6%);
+}
+
+/* Status accent colors via data attribute */
+.proposal-frame[data-proposal-status="accepted"] {
+  border-color: var(--color-status-success-border);
+}
+
+.proposal-frame[data-proposal-status="rejected"] {
+  border-color: var(--color-status-error-border);
+}
+
+.proposal-frame[data-proposal-status="superseded"] {
+  background: var(--color-surface-inset);
+  border-color: var(--color-border-default);
+  opacity: 0.95;
+}
+
+.proposal-frame[data-proposal-status="pending"] {
+  border-left-color: var(--color-status-pending-border);
+}
+
+.proposal-frame__header {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+}
+
+.proposal-frame__title-group {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.proposal-frame__title {
+  display: block;
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.proposal-frame__meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: var(--space-1) 0 0;
+}
+
+.proposal-frame__meta-label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.proposal-frame__badge-slot {
+  flex-shrink: 0;
+}
+
+.proposal-frame__body {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.proposal-frame__why {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.proposal-frame__actions {
+  margin-top: var(--space-3);
+}
+
+.proposal-frame__link {
+  color: var(--color-coach-600);
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+}
+
+.proposal-frame__link:hover {
+  text-decoration: underline;
+}
+
+/* ProposalDiffRow */
+.proposal-diff-row {
+  align-items: baseline;
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: var(--space-3);
+}
+
+.proposal-diff-row__label {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  min-width: 6rem;
+}
+
+.proposal-diff-row__before {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.proposal-diff-row__after {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+/* ProposalStateBand */
+.proposal-state-band {
+  background: var(--color-surface-inset);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  padding: var(--space-2) var(--space-3);
+}
+
+.proposal-frame[data-proposal-status="accepted"] .proposal-state-band {
+  background: var(--color-status-success-bg, #f0fdf4);
+  color: var(--color-status-success-text, #166534);
+}
+
+.proposal-frame[data-proposal-status="rejected"] .proposal-state-band {
+  background: var(--color-status-error-bg, #fef2f2);
+  color: var(--color-status-error-text, #991b1b);
+}
+
+/* ── message-proposals uses proposal-frame too ─────────────────────────── */
+.message-proposals .proposal-frame {
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.message-proposals .proposal-frame[data-proposal-status="pending"] {
+  box-shadow: 0 4px 20px rgb(0 0 0 / 6%);
+}
+
 /* ==========================================================================
    Goals, training, and domain-specific layouts
    ========================================================================== */
@@ -2157,7 +2355,7 @@ span.confirmation-card__meta {
   border-top: 1px solid var(--color-border-default);
   margin-top: var(--space-8);
   padding-top: var(--space-6);
-  scroll-margin-top: calc(var(--layout-nav-height) + var(--space-4));
+  scroll-margin-top: calc(4.5rem + var(--space-4));
 }
 
 .context-hub.profile-hub {
@@ -2169,13 +2367,13 @@ span.confirmation-card__meta {
 }
 
 .profile-hub .profile-section {
-  scroll-margin-top: calc(var(--layout-nav-height) + var(--space-4));
+  scroll-margin-top: calc(4.5rem + var(--space-4));
 }
 
 .context-hub .context-section-card,
 .context-hub .context-summary-card,
 .context-hub .consent-management-card {
-  scroll-margin-top: calc(var(--layout-nav-height) + var(--space-4));
+  scroll-margin-top: calc(4.5rem + var(--space-4));
 }
 
 .context-summary-card__title {
@@ -3700,10 +3898,6 @@ span.confirmation-card__meta {
 
 /* Narrow phones (~390–422px): stack progress actions; tighten structured canvas padding */
 @media (max-width: 480px) {
-  .app-shell__nav {
-    max-width: 100%;
-  }
-
   .app-shell__main--structured {
     padding-left: var(--space-3);
     padding-right: var(--space-3);
@@ -3729,7 +3923,9 @@ span.confirmation-card__meta {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  min-height: calc(100dvh - var(--layout-nav-height));
+  height: 100%;
+  min-height: 0;
+  position: relative;
 }
 
 /* Chat header row — 56px, coach status + context chip */
@@ -3773,22 +3969,12 @@ span.confirmation-card__meta {
   flex: 1 1 auto;
   gap: var(--space-6);
   margin: 0 auto;
-  mask-image: linear-gradient(
-    to bottom,
-    #000 0%,
-    #000 calc(100% - 3rem),
-    transparent 100%
-  );
   max-height: none;
   max-width: 45rem;
+  min-height: 0;
+  overflow-y: auto;
   padding: var(--space-7, 1.75rem) 1.75rem var(--space-5);
   width: 100%;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    #000 0%,
-    #000 calc(100% - 3rem),
-    transparent 100%
-  );
 }
 
 .chat-single .chat-transcript > li {
@@ -3809,6 +3995,7 @@ span.confirmation-card__meta {
   margin: 0;
   max-width: none;
   padding: var(--space-4) var(--space-4) var(--space-5);
+  position: static;
 }
 
 .chat-single .chat-composer-inner,
@@ -3824,18 +4011,19 @@ span.confirmation-card__meta {
 .chat-single .chat-composer-controls {
   align-items: flex-end;
   background: #ffffff;
-  border: 1px solid var(--color-border-default);
+  border: 1px solid var(--color-border-strong);
   border-radius: 1.625rem;
-  box-shadow: 0 2px 14px rgb(0 0 0 / 4%);
+  box-shadow: 0 2px 14px rgb(0 0 0 / 6%);
   display: flex;
+  flex-wrap: nowrap;
   gap: 0;
   padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .chat-single .chat-composer-controls:focus-within {
-  border-color: var(--color-border-focus);
-  box-shadow: var(--shadow-focus);
+  border-color: var(--color-border-strong);
+  box-shadow: 0 2px 14px rgb(0 0 0 / 6%);
 }
 
 .chat-single .chat-composer textarea,
@@ -3844,11 +4032,12 @@ span.confirmation-card__meta {
   border: none;
   border-radius: 0;
   box-shadow: none;
+  field-sizing: content;
   flex: 1 1 auto;
   font-size: var(--font-size-chat);
   line-height: 1.55;
   max-height: 8rem;
-  min-height: 2.5rem;
+  min-height: 1.55rem;
   min-width: 0;
   outline: none;
   padding: var(--space-2) var(--space-2) var(--space-2) 0;
@@ -3890,21 +4079,36 @@ span.confirmation-card__meta {
 .chat-single .chat-composer-controls__send:disabled {
   background: var(--color-border-strong);
   cursor: not-allowed;
-  opacity: 0.6;
 }
 
 .chat-single .chat-composer-controls__send:hover:not(:disabled) {
   background: var(--color-coach-600);
 }
 
-/* Disclaimer footer */
+/* Disclaimer / enter-hint footer */
+.chat-single .chat-composer-footer {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: center;
+  margin: var(--space-2) auto 0;
+  max-width: 45rem;
+}
+
 .chat-single .chat-composer-disclaimer {
   color: var(--color-text-muted);
   font-size: 0.71875rem;
-  margin: var(--space-2) auto 0;
-  max-width: 45rem;
   opacity: 0.8;
   text-align: center;
+}
+
+.chat-single .chat-composer-enter-hint {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  opacity: 0.6;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .chat-composer-controls {
@@ -4138,6 +4342,75 @@ span.confirmation-card__meta {
   padding: var(--space-2) var(--space-3);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* chat-attachment-card variants */
+.chat-attachment-card {
+  display: inline-flex;
+}
+
+.chat-attachment-card--image {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.chat-attachment-card__thumb {
+  border-radius: var(--radius-md);
+  display: block;
+  height: auto;
+  max-height: 12rem;
+  max-width: min(100%, 16rem);
+  object-fit: cover;
+  width: auto;
+}
+
+.chat-attachment-card--file,
+.chat-attachment-card--unavailable {
+  align-items: center;
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  max-width: 16rem;
+  overflow: hidden;
+  padding: var(--space-2) var(--space-3);
+}
+
+.chat-attachment-card--unavailable {
+  border-color: var(--color-border-default);
+  opacity: 0.8;
+}
+
+.chat-attachment-card__icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.chat-attachment-card__icon--unavailable {
+  color: var(--color-text-muted);
+}
+
+.chat-attachment-card__name {
+  flex: 1 1 auto;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-card__category {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+}
+
+.chat-attachment-card__status {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  font-style: italic;
 }
 
 .chat-bubble__text {
@@ -4721,6 +4994,10 @@ span.confirmation-card__meta {
   .dashboard-card--span-4 {
     grid-column: span 4;
   }
+
+  .dashboard-card--span-3 {
+    grid-column: span 3;
+  }
 }
 
 .button-coach {
@@ -4742,17 +5019,9 @@ span.confirmation-card__meta {
    ========================================================================== */
 
 @media (max-width: 768px) {
-  .shell {
-    padding: var(--space-4);
-  }
-
   .card {
     border-radius: var(--radius-lg);
     padding: var(--space-5);
-  }
-
-  .chat-layout {
-    grid-template-columns: 1fr;
   }
 
   .chat-transcript,
@@ -6353,6 +6622,25 @@ span.confirmation-card__meta {
   border-color: var(--color-border-default);
 }
 
+/* ── Recipes workspace — dark canvas overrides ──────────────────────────────
+   recipes-workspace inherits training-workspace panels/nested-cards/notice-inline
+   via the shared .training-workspace.recipes-workspace selector above.
+   Only recipe-specific overrides that differ are listed here.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Notice / notice-inline inside the dark recipes workspace */
+[data-theme="dark"] .app-shell__main--structured .recipes-workspace .notice {
+  background: rgba(245, 165, 36, 0.10);
+  border-color: rgba(245, 165, 36, 0.28);
+  color: var(--color-metric-amber);
+}
+
+[data-theme="dark"] .app-shell__main--structured .recipes-workspace .notice-inline {
+  background: rgba(245, 165, 36, 0.10);
+  border-color: rgba(245, 165, 36, 0.28);
+  color: var(--color-metric-amber);
+}
+
 /* ── Canvas state messages in dark context ── */
 [data-theme="dark"] .state-message--canvas {
   background: var(--color-surface-card);
@@ -6938,8 +7226,34 @@ span.confirmation-card__meta {
   color: var(--color-text-muted);
 }
 
+/* DashboardCards inside the weekly-review dashboard-section on dark canvas.
+   Overrides the .app-shell__main--structured light rules that would otherwise
+   render white cards on a dark background. */
+[data-theme="dark"] .training-progress-panel .dashboard-card {
+  background: var(--color-surface-card);
+  border-color: var(--color-border-default);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__value {
+  color: var(--color-text-primary);
+}
+
 [data-theme="dark"] .training-progress-panel .dashboard-card__hint {
   color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .training-progress-panel .dashboard-card__footer {
+  border-color: var(--color-border-default);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="dark"] .training-progress-panel .goals li {
@@ -8161,6 +8475,206 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
 .body-analysis-card__footer {
   border-top: 1px solid var(--color-border-default);
   padding-top: 12px;
+}
+
+/* ── chat-date-separator ── */
+/* Centered muted day boundary label in the transcript. */
+.chat-date-separator {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-1) 0;
+}
+
+.chat-date-separator__label {
+  color: var(--color-text-muted);
+  font-size: 0.71875rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: none;
+}
+
+/* ── chat-jump-to-latest ── */
+/* Floating pill above the composer when user has scrolled away from the bottom. */
+.chat-jump-to-latest {
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  transform: translateY(-0.5rem);
+}
+
+.chat-jump-to-latest__pill {
+  align-items: center;
+  background: var(--color-surface-card, #ffffff);
+  border: 1px solid var(--color-border-default);
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 12%);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.875rem;
+  pointer-events: all;
+  transition: box-shadow 150ms ease, transform 150ms ease;
+}
+
+.chat-jump-to-latest__pill:hover {
+  box-shadow: 0 4px 16px rgb(0 0 0 / 16%);
+  transform: translateY(-1px);
+}
+
+/* ── chat-turn-error-card ── */
+/* Rendered in place of the coach reply when a turn is degraded. */
+.chat-turn-error-card {
+  background: rgba(240, 80, 106, 0.16);
+  border: 1px solid rgba(240, 80, 106, 0.35);
+  border-radius: 0.875rem;
+  padding: 0.875rem 1rem;
+}
+
+.chat-turn-error-card__header {
+  align-items: center;
+  display: flex;
+  gap: 0.5625rem;
+  margin-bottom: 0.375rem;
+}
+
+.chat-turn-error-card__title {
+  color: #b32a45;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.chat-turn-error-card__body {
+  color: var(--color-text-secondary, #3b3b38);
+  font-size: 0.84375rem;
+  line-height: 1.5;
+  margin: 0 0 0.75rem;
+}
+
+.chat-turn-error-card__footer {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat-turn-error-card__btn {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  justify-content: center;
+  line-height: 1;
+  padding: 0.5rem 0.75rem;
+}
+
+.chat-turn-error-card__btn--retry {
+  background: var(--color-surface-inset, #f3f3f1);
+  color: var(--color-text-primary);
+}
+
+.chat-turn-error-card__btn--retry:hover {
+  background: var(--color-surface-card, #ffffff);
+}
+
+.chat-turn-error-card__btn--edit {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.chat-turn-error-card__btn--edit:hover {
+  color: var(--color-text-primary);
+}
+
+/* ── chat-markdown ── */
+/* Coach reply markdown — constrained element set, ink tokens. */
+.chat-markdown {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-chat, 0.9375rem);
+  line-height: 1.6;
+  white-space: normal;
+}
+
+.chat-markdown p {
+  margin: 0 0 0.625rem;
+}
+
+.chat-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0 0 0.625rem;
+  padding-left: 1.25rem;
+}
+
+.chat-markdown li {
+  margin-bottom: 0.25rem;
+}
+
+.chat-markdown .chat-markdown__heading {
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.chat-markdown strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.chat-markdown blockquote {
+  border-left: 3px solid var(--color-border-default);
+  color: var(--color-text-secondary);
+  margin: 0 0 0.625rem;
+  padding-left: 0.75rem;
+}
+
+.chat-markdown code {
+  background: var(--color-surface-inset, #f3f3f1);
+  border-radius: 0.25rem;
+  font-family: ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace;
+  font-size: 0.875em;
+  padding: 0.125rem 0.25rem;
+}
+
+.chat-markdown pre {
+  background: var(--color-surface-inset, #f3f3f1);
+  border-radius: 0.5rem;
+  margin: 0 0 0.625rem;
+  overflow-x: auto;
+  padding: 0.75rem 1rem;
+}
+
+.chat-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.chat-markdown a {
+  color: var(--color-accent-green, #19c37d);
+  text-underline-offset: 2px;
+}
+
+.chat-markdown hr {
+  border: none;
+  border-top: 1px solid var(--color-border-default);
+  margin: 0.75rem 0;
+}
+
+/* Coach replies: body text uses secondary color so it's not brand green */
+.chat-bubble--assistant .chat-markdown {
+  color: var(--color-text-secondary, var(--color-text-primary));
 }
 
 /* ── photo-guide ── */

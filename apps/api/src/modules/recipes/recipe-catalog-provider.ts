@@ -1,7 +1,7 @@
 import type {
   RecipeConfidenceBand,
   RecipeIngredient,
-  RecipeMacroEstimates,
+  RecipePerServingMacros,
   RecipeMealType,
   RecipeProvenance,
 } from "@health/types";
@@ -19,7 +19,7 @@ export interface ProviderRecipeDraft {
   ingredients: RecipeIngredient[];
   preparationSteps: string[];
   servings: number;
-  macroEstimates: RecipeMacroEstimates;
+  macroEstimates: RecipePerServingMacros;
   mealTypes: RecipeMealType[];
   tags: string[];
   restrictionTags: string[];

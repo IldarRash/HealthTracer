@@ -11,6 +11,7 @@ import type {
   WorkoutPlanRevision,
   WorkoutSession,
 } from "@health/types";
+import { aggregateWorkoutWeek } from "@health/types";
 import {
   apiQueryKeys,
   getActiveWorkoutPlan,
@@ -26,6 +27,7 @@ import {
 import {
   formatPlanRevisionSource,
   formatPlanRevisionTimestamp,
+  formatRevisionReason,
 } from "../../lib/plan-view-ui-state";
 import {
   resolvePlanExerciseCatalogMetadata,
@@ -71,7 +73,7 @@ type ActivePlanHeaderDataProps = {
   weekDays: readonly { label: string; value: number }[];
   statsWorkoutsPerWeek: number;
   statsCompleted: number;
-  statsMinutes: number;
+  statsActiveDays: number;
 };
 type ActivePlanHeaderProps = ActivePlanHeaderEmptyProps | ActivePlanHeaderDataProps;
 
@@ -160,7 +162,7 @@ function ActivePlanHeader(props: ActivePlanHeaderProps): ReactElement {
     );
   }
 
-  const { name, summary, revisionNumber, weekDays, statsWorkoutsPerWeek, statsCompleted, statsMinutes } = props;
+  const { name, summary, revisionNumber, weekDays, statsWorkoutsPerWeek, statsCompleted, statsActiveDays } = props;
 
   return (
     <div
@@ -244,8 +246,8 @@ function ActivePlanHeader(props: ActivePlanHeaderProps): ReactElement {
             {(
               [
                 [String(statsWorkoutsPerWeek), "workouts / week", "var(--color-metric-blue)"],
-                [`${statsCompleted}`, "completed", "var(--color-metric-green)"],
-                [String(statsMinutes), "min this week", "var(--color-metric-amber)"],
+                [`${statsCompleted}`, "completed this week", "var(--color-metric-green)"],
+                [String(statsActiveDays), "active days", "var(--color-metric-amber)"],
               ] as const
             ).map(([v, l, c]) => (
               <div key={l}>
@@ -1296,14 +1298,19 @@ function buildRevisionHistoryRows(
   revisions: readonly WorkoutPlanRevision[],
   activeRevisionId: string,
 ): RevisionHistoryRow[] {
-  return [...revisions]
-    .sort((a, b) => b.revisionNumber - a.revisionNumber)
-    .map((r) => ({
+  const sorted = [...revisions].sort((a, b) => b.revisionNumber - a.revisionNumber);
+  return sorted.map((r, index) => {
+    // The previous entry in the sorted array has the next-lower revisionNumber
+    const previousRevision = sorted[index + 1];
+    const reason = formatRevisionReason(r.reason, previousRevision?.reason, r.revisionNumber);
+    const note = reason.length > 90 ? `${reason.slice(0, 90)}…` : reason;
+    return {
       rev: `v${r.revisionNumber}`,
       when: formatPlanRevisionTimestamp(r.createdAt),
-      note: r.reason.length > 90 ? `${r.reason.slice(0, 90)}…` : r.reason,
+      note,
       active: r.id === activeRevisionId,
-    }));
+    };
+  });
 }
 
 // ── Main export: TrainingWorkspace ────────────────────────────────
@@ -1397,11 +1404,33 @@ export function TrainingWorkspace() {
   // ── Derive data for done state ─────────────────────────────────
   const todaySession = deriveTodayExercises(payload.days, todayIso);
   const historyRows = buildRevisionHistoryRows(revisions, activeRevision.id);
+  // Derive today's Monday-based day index (0=Mon…6=Sun) for future/today bar states.
+  const _trainingTodayJsDay = new Date().getDay();
+  const _trainingTodayWeekIdx = _trainingTodayJsDay === 0 ? 6 : _trainingTodayJsDay - 1;
   const weekDays = weekStrip.dayLabels.map((label, i) => ({
     label,
     value: weekStrip.trend[i] ?? 0,
+    state: i > _trainingTodayWeekIdx
+      ? ("future" as const)
+      : i === _trainingTodayWeekIdx
+        ? ("today" as const)
+        : ("past" as const),
   }));
-  const completedCount = sessions.filter((s) => s.status === "completed").length;
+  // Week-scoped stats via canonical aggregateWorkoutWeek
+  const _nowDate = new Date();
+  const _weekday = _nowDate.getDay();
+  const _weekOffset = _weekday === 0 ? -6 : 1 - _weekday;
+  const _weekStartDate = new Date(_nowDate);
+  _weekStartDate.setDate(_nowDate.getDate() + _weekOffset);
+  _weekStartDate.setHours(0, 0, 0, 0);
+  const _weekEndDate = new Date(_weekStartDate);
+  _weekEndDate.setDate(_weekStartDate.getDate() + 6);
+  const weekStats = aggregateWorkoutWeek(
+    sessions,
+    formatLocalIsoDate(_weekStartDate),
+    formatLocalIsoDate(_weekEndDate),
+  );
+  const completedCount = weekStats.plannedCompletedCount;
   const workoutsPerWeek = payload.days.filter((d) => d.exercises.length > 0).length;
 
   // ── Video state ────────────────────────────────────────────────
@@ -1435,7 +1464,7 @@ export function TrainingWorkspace() {
         weekDays={weekDays}
         statsWorkoutsPerWeek={workoutsPerWeek}
         statsCompleted={completedCount}
-        statsMinutes={0}
+        statsActiveDays={weekStats.activeDays}
       />
 
       {/* 3. DailyExecCard */}

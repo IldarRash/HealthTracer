@@ -116,8 +116,8 @@ export function isRecipeCompatibleWithHardFilters(
 }
 
 export interface MacroFitInput {
-  estimatedCalories: number;
-  proteinGrams: number;
+  caloriesPerServing: number;
+  proteinGramsPerServing: number;
 }
 
 export interface MacroFitTargets {
@@ -133,7 +133,7 @@ export function scoreRecipeMacroFit(
 
   if (targets.caloriesPerDay) {
     const perMealTarget = targets.caloriesPerDay / 3;
-    const calorieDelta = Math.abs(recipe.estimatedCalories - perMealTarget);
+    const calorieDelta = Math.abs(recipe.caloriesPerServing - perMealTarget);
     const calorieRatio = calorieDelta / Math.max(perMealTarget, 1);
     score += Math.max(0, 100 - calorieRatio * 100);
   } else {
@@ -142,7 +142,7 @@ export function scoreRecipeMacroFit(
 
   if (targets.proteinGrams) {
     const perMealProtein = targets.proteinGrams / 3;
-    const proteinDelta = Math.abs(recipe.proteinGrams - perMealProtein);
+    const proteinDelta = Math.abs(recipe.proteinGramsPerServing - perMealProtein);
     score += Math.max(0, 50 - proteinDelta * 2);
   } else {
     score += 20;
@@ -155,10 +155,10 @@ export function buildRuleBasedFitSummary(
   recipe: MacroFitInput & { mealTypes: string[] },
   targets: MacroFitTargets,
 ): string {
-  const mealLabel = recipe.mealTypes[0]?.replace("_", " ") ?? "meal";
+  const mealLabel = recipe.mealTypes[0]?.replace(/_/g, " ") ?? "meal";
   const calorieText = targets.caloriesPerDay
-    ? `Estimated macros are a reasonable fit for your current daily targets across ${mealLabel}.`
-    : `This ${mealLabel} option offers balanced estimated macros for general wellness consistency.`;
+    ? `Estimated per-serving macros are a reasonable fit for your current daily targets across ${mealLabel}.`
+    : `This ${mealLabel} option offers balanced per-serving estimated macros for general wellness consistency.`;
 
   return `${calorieText} Macro values are estimates, not guaranteed nutrition facts.`;
 }

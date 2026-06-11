@@ -121,6 +121,7 @@ function WeeklySummarySection({ heading, response }: WeeklySummarySectionProps) 
         </DashboardCard>
 
         <DashboardCard
+          className="dashboard-card--span-3"
           label="Domains"
           title="Included in this summary"
           hint={summarizeDeferredDomains(summary.deferredDomains)}

@@ -9,7 +9,7 @@ import type {
   WorkoutProgressAggregate,
   WorkoutSession,
 } from "@health/types";
-import { countSufficientDomains } from "@health/types";
+import { countSufficientDomains, aggregateWorkoutWeek, formatWorkoutWeekLabel } from "@health/types";
 import {
   countStructuredWorkoutSessionExerciseProgress,
   isStructuredWorkoutSessionExercise,
@@ -99,29 +99,13 @@ export function aggregateWorkoutSessions(
   weekStart: string,
   weekEnd: string,
 ): WorkoutProgressAggregate {
+  // Delegate core session counting to the shared canonical helper.
+  const base = aggregateWorkoutWeek(sessions, weekStart, weekEnd);
+
   const weekSessions = sessions.filter((session) =>
     isDateWithinRange(session.plannedDate, weekStart, weekEnd),
   );
-
-  // Ad-hoc sessions are already-completed activities; they count toward
-  // completedCount and activeDays but must NOT inflate plannedCount or the
-  // adherence denominator (adherence = "of planned sessions").
-  const adHocSessions = weekSessions.filter((session) => session.source === "ad_hoc");
   const plannedSessions = weekSessions.filter((session) => session.source !== "ad_hoc");
-
-  const plannedCount = plannedSessions.length;
-  const completedCount = weekSessions.filter((session) => session.status === "completed").length;
-  const skippedCount = plannedSessions.filter((session) => session.status === "skipped").length;
-  // Adherence is measured against planned sessions only.
-  const plannedCompletedCount = plannedSessions.filter((session) => session.status === "completed").length;
-  const adherencePercent =
-    plannedCount > 0 ? Math.round((plannedCompletedCount / plannedCount) * 100) : null;
-
-  const activeDays = new Set(
-    weekSessions
-      .filter((session) => session.status === "completed" || session.status === "skipped")
-      .map((session) => session.plannedDate),
-  ).size;
 
   const fatigueValues = weekSessions
     .filter((session) => session.status === "completed")
@@ -174,16 +158,12 @@ export function aggregateWorkoutSessions(
         )
       : null;
 
-  const adHocCompletedCount = adHocSessions.filter(
-    (session) => session.status === "completed",
-  ).length;
-
   return {
-    plannedCount,
-    completedCount,
-    skippedCount,
-    adherencePercent,
-    activeDays,
+    plannedCount: base.plannedCount,
+    completedCount: base.completedCount,
+    skippedCount: base.skippedCount,
+    adherencePercent: base.plannedCount > 0 ? base.adherencePercent : null,
+    activeDays: base.activeDays,
     sessionIds: weekSessions.map((session) => session.id),
     averageFatigue,
     exercisePlannedCount,
@@ -192,8 +172,8 @@ export function aggregateWorkoutSessions(
     exerciseAdjustedCount,
     exerciseCompletionPercent,
     partialSessionCount,
-    adHocCompletedCount,
-    plannedCompletedCount,
+    adHocCompletedCount: base.adHocCompletedCount,
+    plannedCompletedCount: base.plannedCompletedCount,
   };
 }
 
@@ -302,21 +282,18 @@ export function buildSummaryUserMessage(
     return "There is not enough structured history across workouts, Today, nutrition, habits, or recovery for a full cross-domain weekly review yet. Log a few entries in the domains you care about to build a clearer picture.";
   }
 
-  if (workout && workout.plannedCount > 0) {
-    if (workout.plannedCompletedCount === 0) {
-      segments.push(
-        `You had ${workout.plannedCount} planned workout session${workout.plannedCount === 1 ? "" : "s"} this week, but none were marked completed yet.`,
-      );
-    } else {
-      segments.push(
-        `Workouts: you completed ${workout.plannedCompletedCount} of ${workout.plannedCount} planned sessions (${workout.adherencePercent ?? 0}% completion) based on the entries available.`,
-      );
-    }
-  }
-  if (workout && workout.adHocCompletedCount > 0) {
-    const n = workout.adHocCompletedCount;
+  if (workout && (workout.plannedCount > 0 || workout.adHocCompletedCount > 0)) {
     segments.push(
-      `Plus ${n} logged ad-hoc ${n === 1 ? "activity" : "activities"} this week.`,
+      `Workouts: ${formatWorkoutWeekLabel({
+        plannedCount: workout.plannedCount,
+        plannedCompletedCount: workout.plannedCompletedCount,
+        adHocCompletedCount: workout.adHocCompletedCount,
+        completedCount: workout.completedCount,
+        skippedCount: workout.skippedCount,
+        adherencePercent: workout.adherencePercent ?? 0,
+        activeDays: workout.activeDays,
+        days: [],
+      })} based on the entries available.`,
     );
   }
 

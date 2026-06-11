@@ -1,4 +1,4 @@
--- Curated starter catalog for local verification. Macro values are estimates only.
+-- Curated starter catalog for local verification. Macro values are per single serving estimates only.
 INSERT INTO recipes (
   id,
   name,
@@ -6,11 +6,11 @@ INSERT INTO recipes (
   ingredients,
   preparation_steps,
   servings,
-  estimated_calories,
-  protein_grams,
-  carbs_grams,
-  fat_grams,
-  fiber_grams,
+  calories_per_serving,
+  protein_grams_per_serving,
+  carbs_grams_per_serving,
+  fat_grams_per_serving,
+  fiber_grams_per_serving,
   meal_types,
   tags,
   restriction_tags,

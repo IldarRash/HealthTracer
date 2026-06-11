@@ -1,16 +1,8 @@
-import { auth } from "@clerk/nextjs/server";
-import { redirectToAppSignIn } from "../../../src/lib/auth-redirect";
 import { AppLayout } from "../../../src/components/app-layout";
 import { GroceryListScreen } from "../../../src/components/nutrition/grocery-list-screen";
 import { PageContent, PageHeader } from "../../../src/components/ui";
 
-export default async function GroceryListPage() {
-  const { isAuthenticated } = await auth();
-
-  if (!isAuthenticated) {
-    redirectToAppSignIn("/nutrition/grocery-list");
-  }
-
+export default function GroceryListPage() {
   return (
     <AppLayout>
       <PageHeader

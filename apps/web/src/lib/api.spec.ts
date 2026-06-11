@@ -1861,9 +1861,9 @@ describe("web api helpers", () => {
     expect(
       buildRecipeListQueryString({
         tags: ["high-protein"],
-        minProteinGrams: 20,
+        minProteinGramsPerServing: 20,
       }),
-    ).toBe("?tags=high-protein&minProteinGrams=20");
+    ).toBe("?tags=high-protein&minProteinGramsPerServing=20");
   });
 
   it("parses recipe catalog and recommendation responses", async () => {
@@ -1874,12 +1874,12 @@ describe("web api helpers", () => {
       ingredients: [{ name: "Greek yogurt", quantity: 1, unit: "cup" }],
       preparationSteps: ["Combine ingredients in a bowl."],
       servings: 1,
-      macroEstimates: {
-        estimatedCalories: 320,
-        proteinGrams: 24,
-        carbsGrams: 30,
-        fatGrams: 10,
-        fiberGrams: 4,
+      perServingMacros: {
+        caloriesPerServing: 320,
+        proteinGramsPerServing: 24,
+        carbsGramsPerServing: 30,
+        fatGramsPerServing: 10,
+        fiberGramsPerServing: 4,
       },
       mealTypes: ["breakfast"],
       tags: ["high-protein"],

@@ -412,9 +412,18 @@ export function LongevityDashboard() {
   const crossDomainFailed = isPartial && trendsView.status !== "ready";
 
   // ── Trend strip data for DsTrendStrip ─────────────────────────
+  // Derive today's Monday-based day index (0=Mon…6=Sun) for future/today states.
+  const _todayJsDay = new Date().getDay(); // 0=Sun…6=Sat
+  const todayWeekIndex = _todayJsDay === 0 ? 6 : _todayJsDay - 1; // convert to Mon=0 base
+
   const trendStripDays = heroTrend.trend.map((value, i) => ({
     value: Math.round(value),
     label: WEEKDAY_TREND_LABELS[i] ?? "",
+    state: i > todayWeekIndex
+      ? ("future" as const)
+      : i === todayWeekIndex
+        ? ("today" as const)
+        : ("past" as const),
   }));
 
   return (
@@ -552,7 +561,7 @@ export function LongevityDashboard() {
                   size={138}
                   sw={12}
                   color="var(--color-metric-green)"
-                  label={hero.percent}
+                  label={`${hero.percent}%`}
                   sub="this week"
                 />
                 <div
