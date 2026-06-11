@@ -231,6 +231,10 @@ function makeOrchestrator(opts: {
     ]),
   } as unknown as ActionVariantCatalogService;
 
+  const attachmentTextExtractionService = {
+    extractTurnAttachmentTexts: vi.fn().mockResolvedValue(new Map()),
+  };
+
   return new AgentOrchestratorService(
     coachingContextService,
     contextCompressionService,
@@ -243,6 +247,7 @@ function makeOrchestrator(opts: {
     actionResolverService,
     decisionMakerExecutorService,
     actionVariantCatalogService,
+    attachmentTextExtractionService as never,
   );
 }
 

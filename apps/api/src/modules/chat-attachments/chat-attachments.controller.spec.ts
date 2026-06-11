@@ -14,32 +14,37 @@ function createServiceMock() {
 }
 
 describe("ChatAttachmentsController", () => {
-  describe("createAttachment — image-only enforcement", () => {
-    it("rejects a non-image MIME type (400)", () => {
+  describe("createAttachment — MIME enforcement", () => {
+    it("rejects truly unsupported MIME type application/zip (400)", () => {
       const service = createServiceMock();
       const controller = new ChatAttachmentsController(service as never);
 
       expect(() =>
         controller.createAttachment(authA as never, {
-          filename: "report.pdf",
-          mimeType: "application/pdf",
+          filename: "archive.zip",
+          mimeType: "application/zip",
           fileContentBase64: "dGVzdA==",
         }),
       ).toThrow(BadRequestException);
       expect(service.createAttachment).not.toHaveBeenCalled();
     });
 
-    it("rejects 'text/plain' as a MIME type (400)", () => {
+    it("accepts PDF (document_file category) and delegates to service", () => {
       const service = createServiceMock();
+      service.createAttachment.mockResolvedValue({ attachmentRefId: "ref-2" });
       const controller = new ChatAttachmentsController(service as never);
 
-      expect(() =>
-        controller.createAttachment(authA as never, {
-          filename: "note.txt",
-          mimeType: "text/plain",
-          fileContentBase64: "dGVzdA==",
-        }),
-      ).toThrow(BadRequestException);
+      // Must not throw — PDF is now a valid provisional upload
+      controller.createAttachment(authA as never, {
+        filename: "training-program.pdf",
+        mimeType: "application/pdf",
+        fileContentBase64: "dGVzdA==",
+      });
+
+      expect(service.createAttachment).toHaveBeenCalledWith(
+        authA,
+        expect.objectContaining({ mimeType: "application/pdf" }),
+      );
     });
 
     it("rejects an empty filename (400)", () => {

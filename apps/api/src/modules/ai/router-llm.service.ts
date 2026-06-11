@@ -10,6 +10,7 @@ import {
   routerDecisionOutputSchema,
   routerDecisionRequestSchema,
   routerDomainSchema,
+  truncateForRouter,
   validateRouterDecisionOutputShape,
   type RouterAttachmentHint,
   type RouterAvailableDomain,
@@ -150,19 +151,34 @@ export class RouterLlmService {
       .map((hint) => ({ category: hint.category }));
 
     // Limit recent messages to a small window — the router needs context hints
-    // only, not the full conversation history.
+    // only, not the full conversation history. Each message is truncated to the
+    // same ROUTER_TEXT_MAX_CHARS cap so no single history item can bloat the prompt.
     const recentMessageHints = (input.recentMessages ?? [])
       .slice(-MAX_RECENT_MESSAGE_HINTS)
-      .map((msg) => ({ role: msg.role, content: msg.content.slice(0, 4000) }));
+      .map((msg) => ({ role: msg.role, content: truncateForRouter(msg.content) }));
+
+    // Truncate to ROUTER_TEXT_MAX_CHARS before schema parse. The router only needs
+    // the head of the message to determine domain routing; domain LLMs receive the
+    // full un-truncated userMessage via domainLlmStepRequestSchema (20 000-char cap).
+    //
+    // Build a router-scoped shallow copy of the preprocessor with truncated text
+    // fields so that the serialised preprocessorJson in the prompt does not leak
+    // the full message to the routing LLM. Domain stages receive the original
+    // preprocessor (via CoachingContext) with the full text intact.
+    const routerPreprocessor = {
+      ...preprocessor,
+      originalText: truncateForRouter(preprocessor.originalText),
+      normalizedText: truncateForRouter(preprocessor.normalizedText),
+    };
 
     return routerDecisionRequestSchema.parse({
-      originalText: preprocessor.originalText,
-      normalizedText: preprocessor.normalizedText,
+      originalText: routerPreprocessor.originalText,
+      normalizedText: routerPreprocessor.normalizedText,
       // Send the resolved response language (hint ?? detected) so the router receives
       // the authoritative language signal. The router is read-only — this does not
       // add a new output field and the clamped output schema is unchanged.
       detectedLanguage: (preprocessor.responseLanguage ?? preprocessor.detectedLanguage) ?? undefined,
-      preprocessor,
+      preprocessor: routerPreprocessor,
       attachmentHints,
       recentMessageHints,
       availableDomains,

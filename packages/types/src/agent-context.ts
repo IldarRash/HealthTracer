@@ -6,6 +6,7 @@ import { personalContextSummarySchema } from "./goal-hierarchy.js";
 import { habitAdherencePlanSummarySchema } from "./habits.js";
 import { aiRecoveryContextSummarySchema } from "./recovery.js";
 import { aiWellbeingContextSummarySchema } from "./wellbeing-check-ins.js";
+import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
 
 const progressDataStatusValues = ["sufficient", "partial", "insufficient"] as const;
 const trendDirectionValues = ["up", "down", "stable", "unknown"] as const;
@@ -306,7 +307,7 @@ export const userContextSliceSchema = z.object({
 export type UserContextSlice = z.infer<typeof userContextSliceSchema>;
 
 export const buildAgentContextRequestSchema = z.object({
-  userMessage: z.string().min(1).max(4000),
+  userMessage: z.string().min(1).max(MAX_CHAT_USER_MESSAGE_CHARS),
   intent: agentIntentSchema.optional(),
   purpose: contextSlicePurposeSchema.optional(),
   depth: contextDepthSchema.optional(),

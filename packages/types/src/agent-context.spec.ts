@@ -192,8 +192,9 @@ describe("agent context contracts", () => {
 
     it("rejects empty buildAgentContext requests", () => {
       expect(buildAgentContextRequestSchema.safeParse({ userMessage: "" }).success).toBe(false);
+      // Cap is now MAX_CHAT_USER_MESSAGE_CHARS (20 000); 20 001 must be rejected.
       expect(
-        buildAgentContextRequestSchema.safeParse({ userMessage: "a".repeat(4001) }).success,
+        buildAgentContextRequestSchema.safeParse({ userMessage: "a".repeat(20_001) }).success,
       ).toBe(false);
     });
 

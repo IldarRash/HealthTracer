@@ -165,14 +165,21 @@ export class OpenAiCoachProvider implements CoachAiProvider {
   ): Promise<ProviderCallResult<DomainLlmStepOutputInput>> {
     const systemPrompt = buildOpenAiDomainStepPrompt(request, this.promptTemplates);
     const imageDataUris = resolveImageDataUrisFromAttachmentContext(request);
+    const textBlocks = resolveTextAttachmentBlocks(request);
+
+    // Route to multimodal completion when images OR text blocks are present.
+    // Text blocks appear as labeled user content — never in the system prompt
+    // (preserves the cacheable static prefix).
+    const hasMultimodalContent = imageDataUris.length > 0 || textBlocks.length > 0;
 
     const { payload, usage } =
-      imageDataUris.length > 0
+      hasMultimodalContent
         ? await this.requestMultimodalJsonCompletion(
             systemPrompt,
             request.userMessage,
             request.recentMessages,
             imageDataUris,
+            textBlocks,
             { name: DOMAIN_LLM_STEP_SCHEMA_NAME, schema: domainLlmStepWireSchema },
             this.stageModels.domain,
             options?.signal,
@@ -278,11 +285,15 @@ export class OpenAiCoachProvider implements CoachAiProvider {
   }
 
   /**
-   * Multimodal completion — sends the user message alongside one or more image
-   * data URIs. Used by generateDomainStep when an image attachment is present.
+   * Multimodal completion — sends the user message alongside image data URIs and/or
+   * labeled text file content blocks. Used by generateDomainStep when image or document
+   * attachments are present.
    *
-   * Note: images reach the LLM without a pre-upload consent gate. The imageDataUris
-   * are filtered by the caller to image/* MIMEs and size limits only.
+   * Safety:
+   *  - Images reach the LLM without a pre-upload consent gate (temporary relaxation; see pipeline docs).
+   *  - Text file content appears as labeled user-content text blocks — NEVER in the system prompt
+   *    (preserves the cacheable static prefix and prevents accidental system-prompt contamination).
+   *  - The imageDataUris and textBlocks arrays are pre-filtered by the caller; this method trusts them.
    */
   private async requestMultimodalJsonCompletion(
     systemPrompt: string,
@@ -292,6 +303,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       content: string;
     }>,
     imageDataUris: readonly string[],
+    textBlocks: readonly string[],
     jsonSchema: { name: string; schema: unknown },
     model: string,
     signal?: AbortSignal,
@@ -300,6 +312,8 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       | { type: "text"; text: string }
       | { type: "image_url"; image_url: { url: string; detail: "low" } }
     > = [
+      // Text blocks (extracted document file content) come first so the user message follows.
+      ...textBlocks.map((block) => ({ type: "text" as const, text: block })),
       { type: "text", text: userMessage },
       ...imageDataUris.map((uri) => ({
         type: "image_url" as const,
@@ -470,7 +484,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * image/* MIME types are included — PDFs and other non-image MIMEs cannot be
  * sent to the vision endpoint. Items without an imageDataUri are skipped.
  *
- * Note: imageDataUri is set by DomainLlmExecutorService.buildAttachmentContextWithImages
+ * Note: imageDataUri is set by DomainLlmExecutorService.buildAttachmentContext
  * only when the domain is nutrition/health AND the attachment is an image MIME.
  * There is no consent filter — all images reach the LLM regardless of category.
  */
@@ -490,6 +504,41 @@ function resolveImageDataUrisFromAttachmentContext(request: DomainLlmStepRequest
       return typeof item.imageDataUri === "string" && item.imageDataUri.length > 0;
     })
     .map((item) => item.imageDataUri as string);
+}
+
+/**
+ * Resolve labeled text content blocks from document_file attachments in the request.
+ *
+ * Each block is a labeled user-content text string:
+ *   `ATTACHED FILE "<filename>" (user-provided context, may be truncated):\n<textContent>`
+ *
+ * These go into the user message content array — NEVER into the system prompt.
+ * Preserves the static prefix/suffix structure for prompt-cache hits.
+ *
+ * Safety:
+ *  - Only items with textContent set are included (document_file MIMEs with successful extraction).
+ *  - Text content is ephemeral — not persisted or logged beyond this call.
+ *  - File content never touches the system prompt.
+ */
+function resolveTextAttachmentBlocks(request: DomainLlmStepRequest): string[] {
+  const items = request.attachmentContext?.items;
+
+  if (!items || items.length === 0) {
+    return [];
+  }
+
+  const blocks: string[] = [];
+
+  for (const item of items) {
+    if (typeof item.textContent === "string" && item.textContent.length > 0) {
+      const label = item.filename ?? item.attachmentRefId;
+      blocks.push(
+        `ATTACHED FILE "${label}" (user-provided context, may be truncated):\n${item.textContent}`,
+      );
+    }
+  }
+
+  return blocks;
 }
 
 // ---------------------------------------------------------------------------
@@ -542,9 +591,17 @@ function buildOpenAiDomainStepPrompt(
 
 /**
  * Build a compact JSON summary of the attachment context for inclusion in the
- * domain system prompt. The summary omits imageDataUri (too large for system
- * prompt) and focuses on category, MIME, and consent state so the LLM knows
- * what attachments are present.
+ * domain system prompt. The summary omits imageDataUri and textContent (too large
+ * for system prompt) and focuses on structural metadata so the LLM knows what
+ * attachments are present and whether content was extracted.
+ *
+ * - hasImage: true when an image MIME with imageDataUri is present (multimodal content
+ *   follows in the user message content array).
+ * - hasText: true when textContent was extracted and included in the user message
+ *   as a labeled text block.
+ * - filename: the original filename of the document (e.g. "training-plan.pdf").
+ *
+ * Safety: textContent and imageDataUri are NEVER included in the system prompt.
  */
 function buildAttachmentContextSummary(request: DomainLlmStepRequest): string {
   if (!request.attachmentContext?.items.length) {
@@ -556,6 +613,8 @@ function buildAttachmentContextSummary(request: DomainLlmStepRequest): string {
     mimeType: item.mimeType,
     consentState: item.consentState,
     hasImage: item.mimeType.startsWith("image/") && !!item.imageDataUri,
+    hasText: typeof item.textContent === "string" && item.textContent.length > 0,
+    ...(item.filename ? { filename: item.filename } : {}),
   }));
 
   return JSON.stringify(summary);

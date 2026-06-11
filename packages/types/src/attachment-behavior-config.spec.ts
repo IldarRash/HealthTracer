@@ -63,6 +63,7 @@ describe("attachment behavior config", () => {
           food_photo: "ephemeral_recognition",
           medical_document: "ephemeral_recognition",
           workout_attachment: "ephemeral_recognition",
+          document_file: "ephemeral_recognition",
         },
       },
     });

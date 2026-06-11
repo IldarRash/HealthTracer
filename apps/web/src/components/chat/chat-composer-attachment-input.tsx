@@ -76,7 +76,7 @@ export function ChatComposerAttachmentInput({
         type="button"
         className="chat-composer-icon-btn"
         disabled={isDisabled}
-        aria-label="Attach image"
+        aria-label="Attach file"
         onClick={() => fileInputRef.current?.click()}
       >
         <Icon name="clip" size={18} aria-hidden />

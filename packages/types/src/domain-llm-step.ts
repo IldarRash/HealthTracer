@@ -6,6 +6,7 @@ import {
 } from "./agent-context.js";
 import { routerDomainSchema } from "./router-decision.js";
 import { messagePreprocessorLanguageCodeSchema } from "./message-preprocessor.js";
+import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
 
 // ---------------------------------------------------------------------------
 // Bounded attachment context for domain LLM steps
@@ -21,6 +22,13 @@ import { messagePreprocessorLanguageCodeSchema } from "./message-preprocessor.js
 //     floors in CoachingContextService; this schema does not relax them.
 //   - imageDataUri is set only on the OpenAI vision path for vision-capable models.
 // ---------------------------------------------------------------------------
+
+/**
+ * Maximum number of characters for extracted text content in domain attachment items.
+ * Text content is ephemeral context-only (NEVER persisted or logged).
+ * Larger documents are truncated at the head to this limit.
+ */
+export const MAX_ATTACHMENT_TEXT_CONTENT_CHARS = 12_000;
 
 export const domainAttachmentItemSchema = z.object({
   /** Stable attachment ref id from the chat-attachments upload. */
@@ -48,6 +56,22 @@ export const domainAttachmentItemSchema = z.object({
    * Maximum size guard: truncated before reaching this field if oversized.
    */
   imageDataUri: z.string().min(1).optional(),
+  /**
+   * Original filename of the uploaded document (e.g. "training-plan.pdf").
+   * Set for document_file attachments on ALL selected domains.
+   * Context-only — never persisted or logged beyond the turn.
+   */
+  filename: z.string().min(1).max(200).optional(),
+  /**
+   * Extracted plain-text content from the document file.
+   * Populated for document_file MIME attachments on ALL selected domains.
+   * Capped at MAX_ATTACHMENT_TEXT_CONTENT_CHARS (12,000 chars); truncated flag is
+   * indicated by the extraction service but not carried on this schema field.
+   *
+   * SAFETY: text content is NEVER persisted to the database and NEVER logged.
+   * It is ephemeral, context-only, and scoped to this turn's LLM calls only.
+   */
+  textContent: z.string().min(1).max(MAX_ATTACHMENT_TEXT_CONTENT_CHARS).optional(),
 });
 
 export type DomainAttachmentItem = z.infer<typeof domainAttachmentItemSchema>;
@@ -74,12 +98,12 @@ export const domainLlmStepRequestSchema = z.object({
   priorToolResults: z.array(agentToolCallResultSchema).max(10).default([]),
 
   // Core request fields
-  userMessage: z.string().min(1).max(4000),
+  userMessage: z.string().min(1).max(MAX_CHAT_USER_MESSAGE_CHARS),
   recentMessages: z
     .array(
       z.object({
         role: z.enum(["user", "assistant", "system"]),
-        content: z.string().max(4000),
+        content: z.string().max(MAX_CHAT_USER_MESSAGE_CHARS),
       }),
     )
     .max(10)

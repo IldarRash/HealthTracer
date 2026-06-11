@@ -17,6 +17,7 @@ export const chatAttachmentCategoryEnum = pgEnum("chat_attachment_category", [
   "food_photo",
   "medical_document",
   "workout_attachment",
+  "document_file",
 ]);
 
 export const chatAttachmentStatusEnum = pgEnum("chat_attachment_status", [

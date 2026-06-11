@@ -2,6 +2,7 @@ import { z } from "zod";
 import { agentSafetyFlagSchema } from "./agent-context.js";
 import { domainAnswerSchema } from "./domain-llm-step.js";
 import { messagePreprocessorLanguageCodeSchema } from "./message-preprocessor.js";
+import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
 
 // ---------------------------------------------------------------------------
 // Action variant catalog entry
@@ -54,7 +55,7 @@ export type CandidateProposalSummary = z.infer<typeof candidateProposalSummarySc
 // ---------------------------------------------------------------------------
 
 export const finalDecisionRequestSchema = z.object({
-  userMessage: z.string().min(1).max(4000),
+  userMessage: z.string().min(1).max(MAX_CHAT_USER_MESSAGE_CHARS),
   /**
    * Outputs from the selected domain LLMs.
    * Only `domain_answer` entries reach the decision-maker — tool requests

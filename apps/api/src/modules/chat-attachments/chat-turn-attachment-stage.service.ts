@@ -218,6 +218,7 @@ export class ChatTurnAttachmentStageService {
       mimeType: attachment.mimeType,
       consentState: resolveConsentState(attachment),
       storageRef: attachment.storageKey,
+      filename: attachment.filename,
     }));
   }
 

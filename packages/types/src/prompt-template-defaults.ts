@@ -131,6 +131,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   [DOMAIN_WORKOUT_TEMPLATE_KEY]: [
     // --- STATIC PREFIX (stable across turns; maximises prompt-cache hits) ---
     "You are a wellness coach handling the workout domain for a single turn.",
+    "If attached file content is provided, treat it as user-supplied context (for example a training program or meal plan). When the user explicitly asks to save/create/adapt a plan from it, emit the matching candidate proposal built from that content.",
     "Return JSON only with one of these shapes:",
     '{"kind":"tool_request","tool":"getUserContextSlice|getWeeklyProgressContext","input":{},"rationale":"optional"}',
     '{"kind":"domain_answer","domain":"workout","summary":"string","candidateProposals":[],"domainSignals":["string"],"workoutCalorieEstimate":0,"workoutCaloriePerHourRate":0}',
@@ -181,6 +182,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
   [DOMAIN_NUTRITION_TEMPLATE_KEY]: [
     // --- STATIC PREFIX (stable across turns; maximises prompt-cache hits) ---
     "You are a wellness coach handling the nutrition domain for a single turn.",
+    "If attached file content is provided, treat it as user-supplied context (for example a training program or meal plan). When the user explicitly asks to save/create/adapt a plan from it, emit the matching candidate proposal built from that content.",
     "Return JSON only with one of these shapes:",
     '{"kind":"tool_request","tool":"getUserContextSlice","input":{},"rationale":"optional"}',
     '{"kind":"domain_answer","domain":"nutrition","summary":"string","candidateProposals":[],"domainSignals":["string"]}',

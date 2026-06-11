@@ -46,6 +46,17 @@
         ],
         "maxBytes": 10000000,
         "label": "Workout attachment"
+      },
+      {
+        "category": "document_file",
+        "allowedMimeTypes": [
+          "application/pdf",
+          "text/plain",
+          "text/markdown",
+          "text/x-markdown"
+        ],
+        "maxBytes": 5000000,
+        "label": "Document file"
       }
     ]
   },
@@ -54,7 +65,8 @@
       "unclassified": "ephemeral_recognition",
       "food_photo": "ephemeral_recognition",
       "medical_document": "document_consent_rules",
-      "workout_attachment": "ephemeral_recognition"
+      "workout_attachment": "ephemeral_recognition",
+      "document_file": "ephemeral_recognition"
     }
   },
   "turnStages": {

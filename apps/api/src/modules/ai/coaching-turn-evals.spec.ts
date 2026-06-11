@@ -791,6 +791,10 @@ function buildE2EOrchestratorWithMocks(
     createCoachAiProviderMock(),
   );
 
+  const attachmentTextExtractionService = {
+    extractTurnAttachmentTexts: vi.fn().mockResolvedValue(new Map()),
+  };
+
   return new AgentOrchestratorService(
     stubCoachingContext as never,
     stubCompression as never,
@@ -803,6 +807,7 @@ function buildE2EOrchestratorWithMocks(
     actionResolver as never,
     decisionMaker as never,
     actionVariantCatalog as never,
+    attachmentTextExtractionService as never,
   );
 }
 

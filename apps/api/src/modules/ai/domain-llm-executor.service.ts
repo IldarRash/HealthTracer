@@ -40,6 +40,7 @@ import {
   type DomainLlmStepRequest,
 } from "@health/types";
 import { Injectable, Logger } from "@nestjs/common";
+import type { AttachmentTextExtractionResult } from "../chat-attachments/attachment-text-extraction.service.js";
 import { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
@@ -108,6 +109,13 @@ export interface DomainLlmExecutorInput {
    * Threaded into the domain step request so the domain LLM writes in the correct language.
    */
   responseLanguage?: string | null;
+  /**
+   * Pre-extracted text content from document_file attachments (extracted once per turn
+   * by AttachmentTextExtractionService before the domain fan-out). Populated for ALL
+   * selected domains — workout included. Text is ephemeral context only (never persisted).
+   * Empty map when no document attachments were present or all extractions degraded.
+   */
+  attachmentTextMap?: ReadonlyMap<string, AttachmentTextExtractionResult>;
 }
 
 export interface DomainLlmExecutorResult {
@@ -221,10 +229,12 @@ export class DomainLlmExecutorService {
 
     // Build bounded attachment context for this domain step.
     // All attachments flow to every selected domain; imageDataUri is populated
-    // below for nutrition/health domains with image-MIME attachments.
-    const attachmentContext = await this.buildAttachmentContextWithImages(
+    // for nutrition/health domains with image-MIME attachments; textContent and
+    // filename are populated for document_file MIMEs on ALL selected domains.
+    const attachmentContext = await this.buildAttachmentContext(
       orchestratorInput.attachmentTurn?.attachments,
       domain,
+      input.attachmentTextMap,
     );
 
     // Build the base step request once; we will update iteration + priorToolResults per step.
@@ -421,27 +431,29 @@ export class DomainLlmExecutorService {
   }
 
   // ---------------------------------------------------------------------------
-  // Private — attachment context with image bytes
+  // Private — attachment context with image bytes and extracted text
   // ---------------------------------------------------------------------------
 
   /**
-   * Build bounded attachment context for a domain step, with imageDataUri
-   * populated for eligible image attachments on the nutrition and health domains.
+   * Build bounded attachment context for a domain step, with:
+   *  - imageDataUri populated for eligible image attachments on nutrition/health domains.
+   *  - textContent + filename populated for document_file MIME attachments on ALL domains
+   *    (including workout), sourced from the pre-extracted attachmentTextMap.
    *
    * Safety floors (never relaxable):
-   *  - Only image/* MIME types are loaded; non-image MIMEs are skipped.
-   *  - Only domains that perform multimodal analysis (nutrition, health) get
-   *    imageDataUri populated; the workout domain does not need vision content.
-   *  - Images larger than IMAGE_DATA_URI_MAX_BYTES are skipped to stay within
-   *    the OpenAI vision per-request size limit.
-   *  - Storage read failures are logged and skipped — the turn degrades to
-   *    text-only metadata rather than blocking the entire domain loop.
-   *  - allowDocuments=false context-budget floor is enforced by CoachingContextService
-   *    upstream; this method does not relax it.
+   *  - Only image/* MIME types are loaded for vision; non-image MIMEs skip imageDataUri.
+   *  - Only domains that perform multimodal analysis (nutrition, health) get imageDataUri;
+   *    the workout domain skips image bytes.
+   *  - Images larger than IMAGE_DATA_URI_MAX_BYTES are skipped (text metadata fallback).
+   *  - Storage read failures are logged and skipped — the turn degrades gracefully.
+   *  - textContent is sourced from the pre-extracted map (never re-read from storage here).
+   *  - textContent is NEVER logged (only refId + presence logged).
+   *  - allowDocuments=false context-budget floor is enforced upstream; not relaxed here.
    */
-  private async buildAttachmentContextWithImages(
+  private async buildAttachmentContext(
     attachments: ReadonlyArray<AttachmentTurnContextItem> | undefined,
     domain: RouterDomain,
+    attachmentTextMap?: ReadonlyMap<string, AttachmentTextExtractionResult>,
   ): Promise<DomainAttachmentContext | undefined> {
     const baseContext = buildDomainAttachmentContext(attachments, domain);
 
@@ -452,21 +464,40 @@ export class DomainLlmExecutorService {
     // Only nutrition and health domains use multimodal vision content.
     const needsImages = domain === "nutrition" || domain === "health";
 
-    if (!needsImages) {
-      return baseContext;
-    }
-
-    // For each item in the context, attempt to load imageDataUri from storage.
-    const itemsWithImages: DomainAttachmentItem[] = await Promise.all(
+    // For each item, populate imageDataUri (vision domains) and textContent/filename (all domains).
+    const enrichedItems: DomainAttachmentItem[] = await Promise.all(
       baseContext.items.map(async (item) => {
-        // Only image/* MIMEs are supported by the OpenAI vision endpoint.
-        if (!item.mimeType.startsWith("image/")) {
-          return item;
+        let enriched: DomainAttachmentItem = item;
+
+        // Populate textContent + filename for document_file MIMEs on ALL domains.
+        // Sourced from the pre-extracted map (never re-read from storage here).
+        if (attachmentTextMap && !item.mimeType.startsWith("image/")) {
+          const extraction = attachmentTextMap.get(item.attachmentRefId);
+          // Hoist the attachments lookup once — used by both the ok and empty/failed branches.
+          const originalAttachment = attachments?.find(
+            (a) => a.attachmentRefId === item.attachmentRefId,
+          );
+
+          if (extraction?.status === "ok" && extraction.text) {
+            enriched = {
+              ...enriched,
+              textContent: extraction.text,
+              ...(originalAttachment?.filename ? { filename: originalAttachment.filename } : {}),
+            };
+          } else if (originalAttachment?.filename) {
+            // No text extracted (empty/failed), but still carry filename as metadata.
+            enriched = { ...enriched, filename: originalAttachment.filename };
+          }
+        }
+
+        // Populate imageDataUri for image MIMEs on vision-capable domains only.
+        if (!needsImages || !item.mimeType.startsWith("image/")) {
+          return enriched;
         }
 
         // storageRef may be null if content was purged by retention policy.
         if (!item.storageRef) {
-          return item;
+          return enriched;
         }
 
         try {
@@ -478,12 +509,12 @@ export class DomainLlmExecutorService {
               `(${buffer.length} bytes) exceeds size cap (${IMAGE_DATA_URI_MAX_BYTES} bytes); ` +
               `skipping imageDataUri — domain LLM will receive text metadata only.`,
             );
-            return item;
+            return enriched;
           }
 
           const imageDataUri = `data:${item.mimeType};base64,${buffer.toString("base64")}`;
 
-          return { ...item, imageDataUri };
+          return { ...enriched, imageDataUri };
         } catch (error) {
           // A storage read failure degrades to text-only; the turn is not blocked.
           const message = error instanceof Error ? error.message : String(error);
@@ -491,12 +522,12 @@ export class DomainLlmExecutorService {
             `Domain "${domain}": failed to read storage ref "${item.storageRef}" for ` +
             `attachment "${item.attachmentRefId}": ${message}. Falling back to text-only context.`,
           );
-          return item;
+          return enriched;
         }
       }),
     );
 
-    return { items: itemsWithImages };
+    return { items: enrichedItems };
   }
 
   // ---------------------------------------------------------------------------
@@ -601,7 +632,7 @@ export function buildCandidateMap(
  *
  * Safety constraints (still enforced):
  *  - imageDataUri is NOT populated here. The instance method
- *    buildAttachmentContextWithImages calls this helper then loads image bytes
+ *    buildAttachmentContext calls this helper then loads image bytes
  *    from ChatAttachmentsService for nutrition/health domains.
  *    The stub provider path leaves imageDataUri absent (no external calls).
  *  - allowDocuments=false context-budget floor is enforced by CoachingContextService
@@ -623,7 +654,7 @@ function buildDomainAttachmentContext(
     mimeType: a.mimeType,
     consentState: a.consentState,
     storageRef: a.storageRef,
-    // imageDataUri is populated by buildAttachmentContextWithImages after this function returns.
+    // imageDataUri is populated by buildAttachmentContext after this function returns.
   }));
 
   return { items };

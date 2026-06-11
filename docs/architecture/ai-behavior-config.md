@@ -14,7 +14,7 @@ defaults: [`packages/types/src/ai-behavior-config.ts`](../../packages/types/src/
 | Surface | File | Owns |
 |---------|------|------|
 | Chat / LLM behavior | [`config/ai-behavior.json`](../../packages/ai-behavior/config/ai-behavior.json) | Routing, direct-path patterns/order, live fan-out prompt templates, empty-attachment message. |
-| Attachments | [`config/attachments.json`](../../packages/ai-behavior/config/attachments.json) | Image categories + allowed MIME types/size, retention/consent metadata, plumbing stage order, attachment safety floors. **No classification/recognition.** |
+| Attachments | [`config/attachments.json`](../../packages/ai-behavior/config/attachments.json) | Image + `document_file` categories with allowed MIME types/size, retention map, consent metadata, plumbing stage order, attachment safety floors. **No classification/recognition.** |
 | Per-domain | [`config/domains/*.yml`](../../packages/ai-behavior/config/domains) | One file per domain (`workout.yml`, `nutrition.yml`, `health.yml`): `intents[]` (each mapping to a catalog capability), `tools[]`, and `safetyNotes[]`. |
 
 ## Loaders (fail-closed)
@@ -44,6 +44,26 @@ capability or tool that code does not already permit. The domain enum itself is
 fixed in code — `workout | nutrition | health`
 ([`domain-config.ts`](../../packages/types/src/domain-config.ts)).
 
+## Attachment categories & retention (`attachments.json`)
+
+`categories.entries[]` declares each attachment category with its `allowedMimeTypes`,
+`maxBytes`, and `label`; `retention.byCategory` maps each category to a retention
+policy. Two kinds of attachment are accepted:
+
+- **Image categories** (`unclassified`, `food_photo`, `medical_document`,
+  `workout_attachment`) — `image/jpeg`, `image/png`, `image/webp`.
+- **`document_file`** — `application/pdf`, `text/plain`, `text/markdown`,
+  `text/x-markdown`, capped at **5 MB** (`maxBytes: 5000000`), retention
+  `ephemeral_recognition`. The category is **MIME-inferred** (no user-declared
+  category): the deterministic MIME→category map resolves these types to
+  `document_file`. Document text is extracted per-turn and fed to the domain LLMs as
+  context — never persisted or logged (see [`llm-pipeline.md`](./llm-pipeline.md)
+  Stage 1).
+
+`turnStages.order` is the plumbing stage order
+(`validate_refs → link_to_message → apply_upload_disposition`); there are no
+classification/recognition stages.
+
 ## What is NOT configurable (code safety floors)
 
 Config cannot relax these — they are enforced in code and regression-tested:
@@ -56,8 +76,9 @@ Config cannot relax these — they are enforced in code and regression-tested:
 - **The decision-maker emits typed proposals only** and never writes domain
   state; only the workout domain LLM may set a workout calorie estimate.
 - **Crisis support and the other pre-AI gates** bypass the LLM entirely.
-- **Attachments are image-only and context-only** — no attachment path may
-  create or parse `health_documents`.
+- **Attachments are images + document files (PDF/TXT/Markdown), context-only** —
+  no attachment path may create or parse `health_documents`. Document text is
+  extracted per-turn and never persisted or logged.
 
 See [`llm-pipeline.md`](./llm-pipeline.md) for the full pipeline and the
 "Removed Legacy Paths" list.
@@ -76,8 +97,11 @@ See [`llm-pipeline.md`](./llm-pipeline.md) for the full pipeline and the
   intents (general context, longevity, body-photo analysis) and its own
   non-diagnostic safety notes.
 
-> Document upload/parse is a separate, explicit **Profile** feature
+> `document_file` chat attachments are **context-only**: their text is extracted
+> per-turn and never persisted. **Durable** document upload/parse/storage is a
+> separate, explicit **Profile** feature
 > ([`apps/api/src/modules/documents`](../../apps/api/src/modules/documents)) under
 > a five-scope per-operation consent model — it is not an attachment behavior and
-> is not driven by this config. See [`domain-model.md`](./domain-model.md) and
+> is not driven by this config, and no attachment path may create or parse a
+> `health_document`. See [`domain-model.md`](./domain-model.md) and
 > [`database.md`](./database.md).
