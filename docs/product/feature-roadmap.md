@@ -166,6 +166,9 @@ web IA, and the trigger for revisiting.
 | Feature | Brief | Depends on |
 |---------|-------|------------|
 | Editable proposals + performed log | [editable-proposals-performed-log.md](features/editable-proposals-performed-log.md) | Proposals, workouts, nutrition, Today, progress |
+| LLM live-contract hardening (strict wire schemas + catalog-aware workout) | [llm-live-contract-hardening.md](features/llm-live-contract-hardening.md) | AI fan-out pipeline, exercise catalog, types |
+| Pipeline observability (stdout token/cost + per-turn diagnostics) | [pipeline-observability.md](features/pipeline-observability.md) | AI orchestrator, chat module |
+| No-stubs program — conformance follow-ups | [no-stubs-followups.md](features/no-stubs-followups.md) | Chat, types, web chat UI, ai-behavior config |
 
 ## AI Safety and State Rules
 
