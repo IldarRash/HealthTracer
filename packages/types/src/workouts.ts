@@ -54,12 +54,27 @@ const UNSAFE_WORKOUT_MEDICAL_PATTERNS = [
   /\brehabilitation protocol\b/i,
 ];
 
+/**
+ * Reps is canonically a string ("8-12", "20", "to failure"), but LLM domain
+ * outputs routinely emit plain numbers — accept and normalize them instead of
+ * invalidating the whole proposal.
+ */
+const workoutRepsSchema = z.union([
+  z.string().min(1).max(80),
+  z
+    .number()
+    .int()
+    .positive()
+    .max(10_000)
+    .transform((value) => String(value)),
+]);
+
 /** Session-level and legacy plan exercise object shape. */
 export const workoutExerciseSchema = z.object({
   name: z.string().min(1).max(160),
   target: z.string().min(1).max(240).nullable().optional(),
   sets: z.number().int().positive().max(20).nullable().optional(),
-  reps: z.string().min(1).max(80).nullable().optional(),
+  reps: workoutRepsSchema.nullable().optional(),
   notes: z.string().min(1).max(500).nullable().optional(),
 });
 
@@ -89,7 +104,7 @@ export const workoutPlanExerciseSchema = z.object({
   pendingExerciseRef: z.string().min(1).max(80).optional(),
   snapshot: workoutExerciseDisplaySnapshotSchema,
   sets: z.number().int().positive().max(20).nullable().optional(),
-  reps: z.string().min(1).max(80).nullable().optional(),
+  reps: workoutRepsSchema.nullable().optional(),
   durationSeconds: z.number().int().positive().max(7200).nullable().optional(),
   recommendedLoadGuidance: z.string().min(1).max(240).nullable().optional(),
   weightKgGuidance: z.number().positive().max(500).nullable().optional(),
@@ -287,7 +302,7 @@ export type WorkoutSessionExerciseExecution = z.infer<
 export const workoutSessionExercisePrescriptionSchema = z.object({
   snapshot: workoutExerciseDisplaySnapshotSchema,
   sets: z.number().int().positive().max(20).nullable().optional(),
-  reps: z.string().min(1).max(80).nullable().optional(),
+  reps: workoutRepsSchema.nullable().optional(),
   durationSeconds: z.number().int().positive().max(7200).nullable().optional(),
   recommendedLoadGuidance: z.string().min(1).max(240).nullable().optional(),
   weightKgGuidance: z.number().positive().max(500).nullable().optional(),
