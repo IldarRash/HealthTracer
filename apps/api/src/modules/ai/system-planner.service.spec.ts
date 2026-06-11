@@ -28,7 +28,6 @@ function createRouterResultForPlanner(
     return {
       output: routerDecisionOutputSchema.parse({
         selectedDomains: [],
-        contextNeeds: [],
         safetyFlags: [],
         confidence,
       }),
@@ -50,12 +49,6 @@ function createRouterResultForPlanner(
           signalHints: [],
         },
       ],
-      contextNeeds:
-        domain === "workout"
-          ? ["active_workout_plan"]
-          : domain === "nutrition"
-            ? ["active_nutrition_plan"]
-            : [],
       safetyFlags: domainSafetyFlags,
       confidence,
     }),
@@ -406,7 +399,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: ["weekly_progress"],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -440,7 +432,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -472,7 +463,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -504,7 +494,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -536,7 +525,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: RULE_ROUTE_CONFIDENCE_THRESHOLD - 0.01,
       }),
@@ -769,7 +757,6 @@ describe("SystemPlannerService", () => {
             { domain: "workout", confidence: 0.88, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "nutrition", confidence: 0.72, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.88,
         }),
@@ -813,7 +800,6 @@ describe("SystemPlannerService", () => {
             { domain: "nutrition", confidence: 0.78, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "health", confidence: 0.76, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.9,
         }),
@@ -893,7 +879,6 @@ describe("SystemPlannerService", () => {
             { domain: "workout", confidence: 0.88, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "nutrition", confidence: 0.72, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.88,
         }),
@@ -943,7 +928,6 @@ describe("SystemPlannerService", () => {
           selectedDomains: [
             { domain: "workout", confidence: 0.3, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.3,
         }),
@@ -967,7 +951,6 @@ describe("SystemPlannerService", () => {
       const noDomainsLlmResult: RouterLlmResult = {
         output: routerDecisionOutputSchema.parse({
           selectedDomains: [],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.55,
         }),

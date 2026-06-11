@@ -143,7 +143,6 @@ export const routerDecisionWireSchema: JsonSchema = strictObject(
         ["domain", "confidence", "intentHints", "toolHints", "signalHints"],
       ),
     ),
-    contextNeeds: arrayOf({ type: "string" }),
     directCommand: nullable(
       strictObject(
         {
@@ -157,7 +156,7 @@ export const routerDecisionWireSchema: JsonSchema = strictObject(
     safetyFlags: arrayOf(agentSafetyFlagSchema),
     confidence: { type: "number" },
   },
-  ["selectedDomains", "contextNeeds", "directCommand", "safetyFlags", "confidence"],
+  ["selectedDomains", "directCommand", "safetyFlags", "confidence"],
 );
 
 // ---------------------------------------------------------------------------

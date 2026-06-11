@@ -43,7 +43,6 @@ const validOutputBase = {
       signalHints: ["request_change"],
     },
   ],
-  contextNeeds: ["recent_conversation"],
   safetyFlags: [],
   confidence: 0.8,
 };
@@ -137,7 +136,6 @@ describe("RouterDecisionOutput schema", () => {
     });
 
     expect(parsed.selectedDomains).toEqual([]);
-    expect(parsed.contextNeeds).toEqual([]);
     expect(parsed.safetyFlags).toEqual([]);
   });
 
@@ -423,7 +421,6 @@ describe("createFallbackRouterDecision", () => {
     expect(fallback.selectedDomains).toEqual([]);
     expect(fallback.confidence).toBe(0);
     expect(fallback.safetyFlags).toEqual([]);
-    expect(fallback.contextNeeds).toEqual([]);
   });
 
   it("passes schema validation", () => {

@@ -110,7 +110,6 @@ export const routerDecisionOutputSchema = z
       .array(routerSelectedDomainSchema)
       .max(MAX_ROUTER_SELECTED_DOMAINS)
       .default([]),
-    contextNeeds: z.array(z.string().min(1).max(240)).max(10).default([]),
     directCommand: routerDirectCommandSchema.optional(),
     safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
     confidence: z.number().min(0).max(1),
@@ -221,7 +220,6 @@ export function clampRouterDecisionOutput(
 export function createFallbackRouterDecision(): RouterDecisionOutput {
   return routerDecisionOutputSchema.parse({
     selectedDomains: [],
-    contextNeeds: [],
     safetyFlags: [],
     confidence: 0,
   });

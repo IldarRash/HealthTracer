@@ -189,7 +189,6 @@ function buildMocks() {
         selectedDomains: [
           { domain: "workout", confidence: 0.85, intentHints: [], toolHints: [], signalHints: [] },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.85,
       },

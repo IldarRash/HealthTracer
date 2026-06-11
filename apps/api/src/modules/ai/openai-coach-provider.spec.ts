@@ -97,7 +97,6 @@ function makeOpenAiErrorResponse(status: number, message: string) {
 
 const validRouterOutput = {
   selectedDomains: [],
-  contextNeeds: [],
   directCommand: null,
   safetyFlags: [],
   confidence: 0.8,
@@ -296,7 +295,6 @@ describe("OpenAiCoachProvider", () => {
         selectedDomains: [
           { domain: "workout", confidence: 0.85, intentHints: [], toolHints: [], signalHints: [] },
         ],
-        contextNeeds: ["active_workout_plan"],
         safetyFlags: [],
         directCommand: { detected: false, kind: null, confidence: 0 },
         confidence: 0.85,
@@ -842,7 +840,6 @@ describe("OpenAiCoachProvider", () => {
             makeSuccessfulFetchResponse(
               JSON.stringify({
                 selectedDomains: [],
-                contextNeeds: [],
                 safetyFlags: [],
                 confidence: 0.5,
               }),
@@ -892,7 +889,6 @@ describe("OpenAiCoachProvider", () => {
             makeSuccessfulFetchResponse(
               JSON.stringify({
                 selectedDomains: [],
-                contextNeeds: [],
                 safetyFlags: [],
                 confidence: 0.5,
               }),

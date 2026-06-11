@@ -57,7 +57,6 @@ function makeRouterService(
     selectedDomains: [
       { domain: "workout", confidence: 0.85, intentHints: [], toolHints: [], signalHints: [] },
     ],
-    contextNeeds: [],
     safetyFlags: [],
     confidence: 0.85,
   }),
@@ -523,7 +522,6 @@ describe("S9: Router domain clamping", () => {
         { domain: "health", confidence: 0.7, intentHints: [], toolHints: [], signalHints: [] },
         { domain: "workout", confidence: 0.6, intentHints: [], toolHints: [], signalHints: [] },
       ],
-      contextNeeds: [],
       safetyFlags: [],
       confidence: 0.9,
     });
@@ -539,7 +537,6 @@ describe("S9: Router domain clamping", () => {
         { domain: "nutrition", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
         { domain: "health", confidence: 0.7, intentHints: [], toolHints: [], signalHints: [] },
       ],
-      contextNeeds: [],
       safetyFlags: [],
       confidence: 0.9,
     });
@@ -743,7 +740,6 @@ function makeRouterResultForWorkout() {
       selectedDomains: [
         { domain: "workout", confidence: 0.92, intentHints: [], toolHints: [], signalHints: [] },
       ],
-      contextNeeds: [],
       safetyFlags: [],
       confidence: 0.92,
     }),

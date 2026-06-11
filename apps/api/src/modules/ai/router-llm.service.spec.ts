@@ -94,7 +94,6 @@ function buildService(providerOverrides: Partial<{
           selectedDomains: [
             { domain: "workout", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.8,
         }),
@@ -297,7 +296,6 @@ describe("RouterLlmService", () => {
           output: {
             reply: "Here is my coaching advice",
             selectedDomains: [],
-            contextNeeds: [],
             safetyFlags: [],
             confidence: 0.5,
           },
@@ -316,7 +314,6 @@ describe("RouterLlmService", () => {
           output: {
             proposals: [{ intent: "create_workout_plan" }],
             selectedDomains: [],
-            contextNeeds: [],
             safetyFlags: [],
             confidence: 0.5,
           },
@@ -340,7 +337,6 @@ describe("RouterLlmService", () => {
           // Pretend the provider snuck in a fourth entry:
           { domain: "health", confidence: 0.6, intentHints: [], toolHints: [], signalHints: [] },
         ] as RouterDecisionOutput["selectedDomains"],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.9,
       };
@@ -357,7 +353,6 @@ describe("RouterLlmService", () => {
     it("clamps unknown safetyFlags from the provider output", async () => {
       const outputWithUnknownFlag = {
         selectedDomains: [],
-        contextNeeds: [],
         safetyFlags: ["fatigue", "unknown_flag_xyz"],
         confidence: 0.5,
       };
@@ -412,7 +407,6 @@ describe("RouterLlmService", () => {
           output: {
             tool: "getDocumentContext",
             selectedDomains: [],
-            contextNeeds: [],
             safetyFlags: [],
             confidence: 0.5,
           },
@@ -433,7 +427,6 @@ describe("RouterLlmService", () => {
           output: {
             kind: "final_answer",
             selectedDomains: [],
-            contextNeeds: [],
             safetyFlags: [],
             confidence: 0.5,
           },
@@ -452,7 +445,6 @@ describe("RouterLlmService", () => {
           output: {
             advice: "You should eat more protein.",
             selectedDomains: [],
-            contextNeeds: [],
             safetyFlags: [],
             confidence: 0.5,
           },
@@ -480,7 +472,6 @@ describe("RouterLlmService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.8,
       };
@@ -504,7 +495,6 @@ describe("RouterLlmService", () => {
         generateRouterDecision: vi.fn().mockResolvedValue({
           output: {
             selectedDomains: [],
-            contextNeeds: [],
             safetyFlags: [],
             confidence: 0.9,
           },

@@ -563,7 +563,6 @@ Output: `RouterDecisionOutput` (`packages/types/src/router-decision.ts`):
 
 - `selectedDomains[]` (max 3) — each with `domain`, `confidence`, and per-domain
   `intentHints[]` / `toolHints[]` / `signalHints[]`
-- `contextNeeds[]`
 - `directCommand` signal
 - `safetyFlags[]`
 - `confidence`

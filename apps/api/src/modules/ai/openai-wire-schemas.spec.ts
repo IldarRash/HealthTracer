@@ -47,7 +47,6 @@ const validRouterSample = {
       signalHints: ["fatigue"],
     },
   ],
-  contextNeeds: ["recent_workouts"],
   // directCommand is optional (undefined) in Zod; omit to keep sample valid
   safetyFlags: ["fatigue"],
   confidence: 0.85,
@@ -232,7 +231,6 @@ describe("stripExplicitNulls — null-stripping edge cases", () => {
           signalHints: [],
         },
       ],
-      contextNeeds: [],
       directCommand: { detected: true, kind: null, confidence: null },
       safetyFlags: [],
       confidence: 0.8,
@@ -253,7 +251,6 @@ describe("stripExplicitNulls — null-stripping edge cases", () => {
   it("router payload with directCommand: null (entire field null) strips the field entirely", () => {
     const withNullDirectCommandField = {
       selectedDomains: [],
-      contextNeeds: [],
       directCommand: null,
       safetyFlags: [],
       confidence: 0.5,

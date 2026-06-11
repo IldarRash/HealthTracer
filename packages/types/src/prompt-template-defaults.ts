@@ -103,7 +103,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Return JSON only. Do not answer the user. Do not include reply, proposals, text, or advice.",
     "Identify which wellness domains (workout, nutrition, health) are relevant to the user message.",
     'Allowed JSON shape:',
-    '{"selectedDomains":[{"domain":"workout|nutrition|health","confidence":0.0-1.0,"intentHints":["string"],"toolHints":["string"],"signalHints":["string"]}],"contextNeeds":["string"],"directCommand":{"detected":true|false,"kind":"today_summary_read|mark_today_workout_done|null","confidence":0.0-1.0},"safetyFlags":["string"],"confidence":0.0-1.0}',
+    '{"selectedDomains":[{"domain":"workout|nutrition|health","confidence":0.0-1.0,"intentHints":["string"],"toolHints":["string"],"signalHints":["string"]}],"directCommand":{"detected":true|false,"kind":"today_summary_read|mark_today_workout_done|null","confidence":0.0-1.0},"safetyFlags":["string"],"confidence":0.0-1.0}',
     "Select up to 3 domains. Only include domains relevant to the message. Safety flags are advisory.",
     "Never include reply, text, message, advice, recommendation, answer, response, proposals, proposal, or user-facing fields.",
     // [ROUTING-RULE] Marker: explicit plan-request routing rule

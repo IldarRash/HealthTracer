@@ -10,7 +10,6 @@ import {
   clampContextDepth,
   clampContextBudgetPolicy,
   buildDefaultAiBehaviorConfig,
-  resolveContextBudgetPolicyForProfile,
   resolveContextBudgetProfilePolicy,
   tryCompileContextBudgetMessagePattern,
 } from "@health/types";
@@ -275,22 +274,6 @@ export function clampTimeRangeToLookback(
   }
 
   return best;
-}
-
-export function resolveContextBudgetProfileForSignals(
-  signals: ContextPlanReviewSignals,
-): ContextBudgetPolicy["profile"] {
-  return signals.isMonthlyReview ||
-    signals.isMultiDomainReview ||
-    (signals.isProgressReview && signals.hasExtendedLookback)
-    ? "deep_review"
-    : "default";
-}
-
-export function resolveContextBudgetPolicyForSignals(
-  signals: ContextPlanReviewSignals,
-): ContextBudgetPolicy {
-  return resolveContextBudgetPolicyForProfile(resolveContextBudgetProfileForSignals(signals));
 }
 
 function countRawItemsInSlice(slice: UserContextSlice): number {

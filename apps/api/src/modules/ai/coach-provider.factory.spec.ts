@@ -15,7 +15,6 @@ function makeOpenAiRouterResponse() {
       message: {
         content: JSON.stringify({
           selectedDomains: [],
-          contextNeeds: [],
           directCommand: null,
           safetyFlags: [],
           confidence: 0.8,
