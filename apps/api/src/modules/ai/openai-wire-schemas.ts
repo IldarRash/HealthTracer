@@ -22,6 +22,8 @@
  * in sync.
  */
 
+import { agentToolNameSchema as agentToolNameZodSchema } from "@health/types";
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -114,9 +116,12 @@ const agentSafetyFlagSchema: JsonSchema = {
   enum: [...AGENT_SAFETY_FLAG_VALUES],
 };
 
+// Derived from the authoritative Zod enum so the wire contract can never
+// drift from the live tool set (it previously hardcoded a stale list that
+// still advertised the removed getDocumentContext and omitted newer tools).
 const agentToolNameSchema: JsonSchema = {
   type: "string",
-  enum: ["getUserContextSlice", "getDocumentContext", "getWeeklyProgressContext"],
+  enum: [...agentToolNameZodSchema.options],
 };
 
 const routerDomainSchema: JsonSchema = {

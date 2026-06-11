@@ -5,7 +5,7 @@ import type {
   WorkoutPlanPayload,
 } from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase, HealthDatabaseTransaction } from "../../database/database.types.js";
 
@@ -145,6 +145,53 @@ export class WorkoutsRepository {
         ),
       )
       .orderBy(desc(workoutSessions.plannedDate), desc(workoutSessions.createdAt));
+  }
+
+  /**
+   * Numeric-only session execution projection for progress-history aggregation.
+   * Deliberately selects NO free-text columns (no title, no activityType, no
+   * feedback notes) — fatigue is extracted from the feedback jsonb in SQL so
+   * free text never leaves the database.
+   */
+  async listSessionExecutionRowsByUserIdInDateRange(
+    userId: string,
+    startDate: string,
+    endDate: string,
+  ) {
+    return this.db
+      .select({
+        plannedDate: workoutSessions.plannedDate,
+        status: workoutSessions.status,
+        source: workoutSessions.source,
+        completionFatigue: sql<number | null>`(${workoutSessions.feedback} ->> 'fatigue')::int`,
+      })
+      .from(workoutSessions)
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          gte(workoutSessions.plannedDate, startDate),
+          lte(workoutSessions.plannedDate, endDate),
+        ),
+      )
+      .orderBy(workoutSessions.plannedDate);
+  }
+
+  /**
+   * Revision creation timestamps only (for plan-change markers) — never the
+   * revision payloads.
+   */
+  async listRevisionCreatedAtByUserId(userId: string) {
+    const rows = await this.db
+      .select({ createdAt: workoutPlanRevisions.createdAt })
+      .from(workoutPlanRevisions)
+      .innerJoin(
+        workoutPlans,
+        eq(workoutPlanRevisions.workoutPlanId, workoutPlans.id),
+      )
+      .where(eq(workoutPlans.userId, userId))
+      .orderBy(desc(workoutPlanRevisions.createdAt));
+
+    return rows.map((row) => row.createdAt);
   }
 
   async findSessionByUserPlanRevisionAndDate(

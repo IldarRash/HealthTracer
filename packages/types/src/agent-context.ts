@@ -387,6 +387,7 @@ export const agentToolNameSchema = z.enum([
   "searchRecipeCatalog",
   "getActivePlanDetail",
   "getRecentAdherence",
+  "getProgressHistory",
 ]);
 
 export type AgentToolName = z.infer<typeof agentToolNameSchema>;
@@ -518,6 +519,20 @@ export const recentAdherenceResultSchema = z.object({
 });
 
 export type RecentAdherenceResult = z.infer<typeof recentAdherenceResultSchema>;
+
+/**
+ * getProgressHistory — adaptive-lookback numeric progress aggregates.
+ * periodDays is clamped server-side (min 7, granularity-ladder cap); the result
+ * is a ProgressHistoryReviewSummary (numbers/enums/ISO dates only — see
+ * progress-history.ts). Allowlisted only on review capabilities.
+ */
+export const getProgressHistoryInputSchema = z
+  .object({
+    periodDays: z.number().int().min(1).max(36500),
+  })
+  .strict();
+
+export type GetProgressHistoryInput = z.input<typeof getProgressHistoryInputSchema>;
 
 export const agentToolCallRequestSchema = z.object({
   tool: agentToolNameSchema,

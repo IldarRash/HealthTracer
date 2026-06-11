@@ -1,3 +1,4 @@
+import { getAllowedToolsForCatalogIntent, type ProgressHistoryReviewSummary } from "@health/types";
 import { describe, expect, it, vi } from "vitest";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
 
@@ -29,12 +30,40 @@ function createStubNutritionService(plan: unknown = null, revision: unknown = nu
   return { getCurrentActivePlan: vi.fn(async () => ({ plan, activeRevision: revision })) };
 }
 
+function buildProgressHistorySummary(
+  overrides: Partial<ProgressHistoryReviewSummary> = {},
+): ProgressHistoryReviewSummary {
+  return {
+    requestedPeriodDays: 180,
+    grantedPeriodDays: 180,
+    granularity: "weekly",
+    buckets: [],
+    planChangeMarkers: [],
+    dataSufficiency: {
+      workout: "partial",
+      habits: "insufficient",
+      recovery: "insufficient",
+      wellbeing: "insufficient",
+    },
+    coveredDays: 12,
+    noteCodes: ["sparse_recovery_data", "sparse_wellbeing_data"],
+    ...overrides,
+  };
+}
+
+function createStubProgressHistoryService(
+  summary: ProgressHistoryReviewSummary = buildProgressHistorySummary(),
+) {
+  return { buildReviewSummaryForAuth: vi.fn(async () => summary) };
+}
+
 function createService(
   coachingContext: object = {},
   exercisesService?: ReturnType<typeof createStubExercisesService>,
   recipesService?: ReturnType<typeof createStubRecipesService>,
   workoutsService?: ReturnType<typeof createStubWorkoutsService>,
   nutritionService?: ReturnType<typeof createStubNutritionService>,
+  progressHistoryService?: ReturnType<typeof createStubProgressHistoryService>,
 ) {
   return new AgentToolRegistryService(
     coachingContext as never,
@@ -43,11 +72,12 @@ function createService(
     (recipesService ?? createStubRecipesService()) as never,
     (workoutsService ?? createStubWorkoutsService()) as never,
     (nutritionService ?? createStubNutritionService()) as never,
+    (progressHistoryService ?? createStubProgressHistoryService()) as never,
   );
 }
 
 describe("AgentToolRegistryService", () => {
-  it("lists all six live read-only agent tools (getDocumentContext removed)", () => {
+  it("lists all seven live read-only agent tools (getDocumentContext removed)", () => {
     const service = createService();
 
     const tools = service.listAvailableTools();
@@ -58,6 +88,7 @@ describe("AgentToolRegistryService", () => {
       "searchRecipeCatalog",
       "getActivePlanDetail",
       "getRecentAdherence",
+      "getProgressHistory",
     ]);
     // Regression: getDocumentContext must not be advertised
     expect(tools).not.toContain("getDocumentContext");
@@ -499,5 +530,124 @@ describe("AgentToolRegistryService", () => {
     const adherence = result.result as Record<string, unknown>;
     expect(adherence.workout).toBeNull();
     expect(adherence.habits).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // getProgressHistory
+  // ---------------------------------------------------------------------------
+
+  it("getProgressHistory — executes the aggregate service and returns the numeric summary", async () => {
+    const progressHistoryService = createStubProgressHistoryService();
+    const service = createService(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      progressHistoryService,
+    );
+
+    const result = await service.executeTool(auth, {
+      tool: "getProgressHistory",
+      input: { periodDays: 180 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("getProgressHistory");
+    expect(result.result).toMatchObject({
+      requestedPeriodDays: 180,
+      grantedPeriodDays: 180,
+      granularity: "weekly",
+    });
+    expect(progressHistoryService.buildReviewSummaryForAuth).toHaveBeenCalledWith(auth, 180);
+  });
+
+  it("getProgressHistory — clamps periodDays to the server-side minimum of 7", async () => {
+    const progressHistoryService = createStubProgressHistoryService();
+    const service = createService(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      progressHistoryService,
+    );
+
+    const result = await service.executeTool(auth, {
+      tool: "getProgressHistory",
+      input: { periodDays: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(progressHistoryService.buildReviewSummaryForAuth).toHaveBeenCalledWith(auth, 7);
+  });
+
+  it("getProgressHistory — rejects invalid input without calling the aggregate service", async () => {
+    const progressHistoryService = createStubProgressHistoryService();
+    const service = createService(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      progressHistoryService,
+    );
+
+    const result = await service.executeTool(auth, {
+      tool: "getProgressHistory",
+      input: { periodDays: "six months" },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.tool).toBe("getProgressHistory");
+    expect(result.errors.some((error) => /periodDays/i.test(error))).toBe(true);
+    expect(progressHistoryService.buildReviewSummaryForAuth).not.toHaveBeenCalled();
+  });
+
+  it("getProgressHistory — returns a typed error when the summary fails schema validation", async () => {
+    const progressHistoryService = createStubProgressHistoryService(
+      buildProgressHistorySummary({
+        // Free text smuggled into a typed-enum field must fail the result parse.
+        noteCodes: ["the user trained badly"] as never,
+      }),
+    );
+    const service = createService(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      progressHistoryService,
+    );
+
+    const result = await service.executeTool(auth, {
+      tool: "getProgressHistory",
+      input: { periodDays: 30 },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.tool).toBe("getProgressHistory");
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("getProgressHistory — allowlisted only on review capabilities (review_progress, longevity_overview)", () => {
+    // The per-domain executor rejects any tool not in the active capability
+    // allowlist pre-dispatch (see domain-llm-executor allowlist tests). These
+    // catalog assertions pin which capabilities may ever reach this tool.
+    expect(getAllowedToolsForCatalogIntent("review_progress")).toContain("getProgressHistory");
+    expect(getAllowedToolsForCatalogIntent("longevity_overview")).toContain("getProgressHistory");
+
+    for (const nonReviewCapability of [
+      "general",
+      "ask_about_today",
+      "adjust_workout",
+      "adjust_nutrition",
+      "ask_health_context",
+      "proposal_explainer",
+    ] as const) {
+      expect(getAllowedToolsForCatalogIntent(nonReviewCapability)).not.toContain(
+        "getProgressHistory",
+      );
+    }
   });
 });

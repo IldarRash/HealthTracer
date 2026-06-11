@@ -86,7 +86,7 @@ export const capabilityConfigSchema = z.object({
   routingGuidance: z.string().min(1).max(1000),
   examples: z.array(z.string().min(1).max(240)).max(8),
   defaultContextStrategy: capabilityContextStrategySchema,
-  allowedTools: z.array(agentToolNameSchema).max(5),
+  allowedTools: z.array(agentToolNameSchema).max(6),
   allowedProposals: z.array(capabilityProposalIntentSchema).max(15),
   safetyNotes: z.array(z.string().min(1).max(240)).max(10),
   prompt: z.string().min(1).max(4000),

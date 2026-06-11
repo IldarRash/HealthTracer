@@ -485,8 +485,9 @@ describe("S8: Capability catalog — all four new tools registered", () => {
     expect(nutritionConfig.allowedTools).toContain("getUserContextSlice");
   });
 
-  it("no capability has more than 5 tools (Zod schema limit)", () => {
-    // Cap of 5 is a Zod-enforced invariant in the intent catalog schema.
+  it("no capability has more than 6 tools (Zod schema limit)", () => {
+    // Cap of 6 is a Zod-enforced invariant in the intent catalog schema
+    // (raised from 5 when review capabilities gained getProgressHistory).
     const configs = [
       "adjust_workout",
       "adjust_nutrition",
@@ -497,7 +498,7 @@ describe("S8: Capability catalog — all four new tools registered", () => {
 
     for (const id of configs) {
       const config = getCapabilityConfig(id);
-      expect(config.allowedTools.length).toBeLessThanOrEqual(5);
+      expect(config.allowedTools.length).toBeLessThanOrEqual(6);
     }
   });
 });
