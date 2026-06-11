@@ -202,10 +202,20 @@ export class OpenAiCoachProvider implements CoachAiProvider {
             options?.signal,
           );
 
+    // The wire schema wraps the tool_request/domain_answer union in a root
+    // `result` object (OpenAI requires a type:"object" root). Unwrap it, with a
+    // flat-payload fallback for models/tests that emit the union directly.
+    const unwrappedPayload =
+      payload !== null &&
+      typeof payload === "object" &&
+      "result" in payload
+        ? (payload as { result: unknown }).result
+        : payload;
+
     // Strip OpenAI strict-mode explicit nulls so all three methods' payloads are
     // normalised consistently before Zod parse. This covers every nullable-required
     // wire field (directCommand, calorie fields, tool_request.rationale, etc.).
-    const normalizedPayload = stripExplicitNulls(payload);
+    const normalizedPayload = stripExplicitNulls(unwrappedPayload);
 
     const shapeErrors = validateDomainLlmStepOutputShape(normalizedPayload);
 

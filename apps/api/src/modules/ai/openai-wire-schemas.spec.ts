@@ -160,10 +160,16 @@ describe("openai-wire-schemas — sync with Zod contracts", () => {
     expect(result.success).toBe(false);
   });
 
-  it("domainLlmStepWireSchema is an anyOf with two variants", () => {
-    const wireSchema = domainLlmStepWireSchema as { anyOf: unknown[] };
-    expect(Array.isArray(wireSchema.anyOf)).toBe(true);
-    expect(wireSchema.anyOf).toHaveLength(2);
+  it("domainLlmStepWireSchema has a type:object root wrapping the two-variant union in `result` (OpenAI requires an object root)", () => {
+    const wireSchema = domainLlmStepWireSchema as {
+      type: string;
+      required: string[];
+      properties: { result: { anyOf: unknown[] } };
+    };
+    expect(wireSchema.type).toBe("object");
+    expect(wireSchema.required).toEqual(["result"]);
+    expect(Array.isArray(wireSchema.properties.result.anyOf)).toBe(true);
+    expect(wireSchema.properties.result.anyOf).toHaveLength(2);
   });
 
   it("valid final decision sample passes Zod finalDecisionOutputSchema", () => {
