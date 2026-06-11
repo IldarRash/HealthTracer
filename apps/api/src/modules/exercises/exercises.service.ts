@@ -4,7 +4,11 @@ import type {
   ExerciseListQuery,
   ExerciseListResponse,
 } from "@health/types";
-import { buildExerciseDedupeKeyFromName, createExerciseInputSchema } from "@health/types";
+import {
+  buildExerciseDedupeKeyFromName,
+  createExerciseInputSchema,
+  normalizeExerciseName,
+} from "@health/types";
 import {
   BadRequestException,
   Injectable,
@@ -110,6 +114,20 @@ export class ExercisesService {
     const accessibleIds = new Set(rows.map((row) => row.id));
 
     return uniqueIds.filter((exerciseId) => !accessibleIds.has(exerciseId));
+  }
+
+  /**
+   * Look up a single exercise by normalized name (case-insensitive, punctuation-stripped).
+   * Returns null when not found.  Used by the legacy-exercise normalizer to bridge
+   * name-only LLM workout plan entries to catalog ids before proposal validation.
+   */
+  async findExerciseByNormalizedName(
+    name: string,
+    userId: string,
+  ): Promise<Exercise | null> {
+    const normalizedName = normalizeExerciseName(name);
+    const row = await this.exercisesRepository.findByNormalizedName(normalizedName, userId);
+    return row ? toExercise(row) : null;
   }
 
   async findExercisesByIds(

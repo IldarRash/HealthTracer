@@ -437,7 +437,23 @@ export class ChatService {
     const createdProposals = [];
 
     if (!isProposalExplainerTurn) {
-      for (const rawProposal of proposalsToPersist) {
+      for (let rawProposal of proposalsToPersist) {
+        // Bridge legacy name-only exercise entries to structured catalog-backed form
+        // before schema + domain validation runs.  Must happen before validateRawProposal.
+        const normalizedChanges =
+          await this.proposalValidationService.normalizeWorkoutProposalExercises(
+            user.id,
+            rawProposal.intent,
+            rawProposal.proposedChanges,
+          );
+
+        if (normalizedChanges !== rawProposal.proposedChanges) {
+          // Cast is safe: normalizeWorkoutProposalExercises only modifies workout-plan
+          // intents and preserves all non-exercise fields; validation will re-parse.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          rawProposal = { ...rawProposal, proposedChanges: normalizedChanges } as any as typeof rawProposal;
+        }
+
         const safetyErrors = validateProposalSafety(rawProposal);
         const validation = this.proposalValidationService.validateRawProposal(rawProposal);
         const ownershipErrors =
