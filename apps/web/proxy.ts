@@ -11,11 +11,18 @@ const isPublicRoute = createRouteMatcher([
   "/api-proxy(.*)",
 ]);
 
-export default clerkMiddleware(async (auth, req) => {
-  if (!isPublicRoute(req)) {
-    await auth.protect();
-  }
-});
+export default clerkMiddleware(
+  async (auth, req) => {
+    if (!isPublicRoute(req)) {
+      await auth.protect();
+    }
+  },
+  {
+    // Dev-only tolerance: a lagging local system clock makes fresh Clerk tokens look
+    // issued-in-the-future (default tolerance 5s) and loops the sign-in redirect.
+    clockSkewInMs: process.env.NODE_ENV === "development" ? 60_000 : undefined,
+  },
+);
 
 export const config = {
   matcher: [
