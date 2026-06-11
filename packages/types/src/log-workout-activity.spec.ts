@@ -159,13 +159,17 @@ describe("logWorkoutActivityProposalPayloadSchema — invalid payloads", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects non-integer durationMinutes", () => {
+  it("accepts non-integer durationMinutes and rounds them (LLM tolerance)", () => {
+    // LLMs emit decimals for integer fields; the schema now rounds instead of failing.
     const result = logWorkoutActivityProposalPayloadSchema.safeParse({
       ...validBase,
       durationMinutes: 90.5,
       estimatedCalories: 300,
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.durationMinutes).toBe(91);
+    }
   });
 
   it("rejects unknown extra fields (.strict())", () => {

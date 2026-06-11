@@ -224,6 +224,7 @@
     "stateBandRejected": "Отклонено · план без изменений",
     "stateBandSuperseded": "Пересмотрено · см. обновлённое предложение",
     "viewUpdatedPlan": "Открыть обновлённый план →",
+    "invalidValidationNotice": "Это предложение не прошло проверку и не может быть применено — попросите коуча сформировать его заново.",
     "intentLabels": {
       "adapt_workout_plan_from_progress": "Адаптация тренировок по прогрессу",
       "create_habit_plan": "Новый план привычек",

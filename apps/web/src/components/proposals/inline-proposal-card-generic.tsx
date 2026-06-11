@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import type { AiProposal, ProposalModifyResponse } from "@health/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import {
   decideProposal,
@@ -29,6 +30,7 @@ import {
   INLINE_PROPOSAL_VALIDATION_HEADING,
   isHabitPlanProposalIntent,
   shouldShowInlineProposalIntentLabel,
+  shouldShowInvalidValidationNotice,
 } from "../../lib/proposal-ui-state";
 import { ProposalEvidenceList } from "./proposal-evidence-list";
 import { Badge, Button, ProposalFrame, ProposalFrameHeader, ProposalWhy, ProposalStateBand } from "../ui";
@@ -81,6 +83,7 @@ export function InlineProposalCard({
 }: InlineProposalCardProps) {
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
+  const tProposals = useTranslations("Proposals");
   const modifyFeedbackId = useId();
   const [isModifyMode, setIsModifyMode] = useState(false);
   const [modificationFeedback, setModificationFeedback] = useState("");
@@ -207,17 +210,27 @@ export function InlineProposalCard({
 
         {showValidationNotice ? (
           <div className="notice notice-inline">
-            {acceptDisabledReason ? <p className="proposal-meta">{acceptDisabledReason}</p> : null}
-            {validationErrors.length > 0 ? (
+            {shouldShowInvalidValidationNotice(proposal) ? (
+              <p className="proposal-meta proposal-meta--invalid">
+                {tProposals("invalidValidationNotice")}
+              </p>
+            ) : (
               <>
-                <strong>{INLINE_PROPOSAL_VALIDATION_HEADING}</strong>
-                <ul>
-                  {validationErrors.map((error) => (
-                    <li key={error}>{error}</li>
-                  ))}
-                </ul>
+                {acceptDisabledReason ? (
+                  <p className="proposal-meta">{acceptDisabledReason}</p>
+                ) : null}
+                {validationErrors.length > 0 ? (
+                  <>
+                    <strong>{INLINE_PROPOSAL_VALIDATION_HEADING}</strong>
+                    <ul>
+                      {validationErrors.map((error) => (
+                        <li key={error}>{error}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
               </>
-            ) : null}
+            )}
           </div>
         ) : null}
 

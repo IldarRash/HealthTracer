@@ -1274,6 +1274,7 @@ export * from "./chat-action-proposals.js";
 export * from "./chat-attachments.js";
 export * from "./chat-attachment-category-source.js";
 export * from "./recovery.js";
+export * from "./llm-coerce.js";
 export {
   buildCoachingHierarchySummary,
   coachingNoteCategorySchema,

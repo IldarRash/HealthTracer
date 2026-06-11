@@ -853,21 +853,28 @@ describe("phase 4 contracts", () => {
     expect(result.activeRevision?.payload.title).toBe("Balanced base");
   });
 
-  it("rejects nutrition plan revisions with incomplete payloads", () => {
-    expect(() =>
-      nutritionPlanRevisionSchema.parse({
-        id: revisionId,
-        nutritionPlanId: planId,
-        revisionNumber: 1,
-        reason: "Initial plan",
-        source: "ai_proposal",
-        payload: {
-          title: "Incomplete",
-          summary: "Missing required nutrition targets.",
-        },
-        createdAt: timestamp,
-      }),
-    ).toThrow();
+  it("parses nutrition plan revisions with omitted targets (fields default to null after LLM null-stripping)", () => {
+    // After stripExplicitNulls, the LLM may omit caloriesPerDay/macros.
+    // The Zod schema now defaults these to null (requiredNullable) instead of failing,
+    // matching the full tolerance pass. Domain validation (getNutritionPlanDomainErrors)
+    // is the correct layer to enforce "at least one target".
+    const result = nutritionPlanRevisionSchema.safeParse({
+      id: revisionId,
+      nutritionPlanId: planId,
+      revisionNumber: 1,
+      reason: "Initial plan",
+      source: "ai_proposal",
+      payload: {
+        title: "Incomplete",
+        summary: "Missing required nutrition targets.",
+      },
+      createdAt: timestamp,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.payload.caloriesPerDay).toBeNull();
+      expect(result.data.payload.proteinGrams).toBeNull();
+    }
   });
 });
 

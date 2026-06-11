@@ -224,6 +224,7 @@
     "stateBandRejected": "Rejected · no changes",
     "stateBandSuperseded": "Revised · see updated suggestion",
     "viewUpdatedPlan": "View updated plan →",
+    "invalidValidationNotice": "This suggestion didn't pass validation and can't be applied — ask the coach to regenerate it.",
     "intentLabels": {
       "adapt_workout_plan_from_progress": "Progress-based workout adaptation",
       "create_habit_plan": "New daily habit plan",

@@ -224,6 +224,20 @@ describe("GenericInlineProposalCard chat hierarchy", () => {
     // Links now use proposal-frame__link class (ProposalFrame chrome)
     expect(genericProposalSource).toContain('className="proposal-frame__link"');
   });
+
+  it("uses useTranslations(Proposals) for the invalid-proposal human notice", () => {
+    expect(genericProposalSource).toMatch(/useTranslations\("Proposals"\)/);
+    expect(genericProposalSource).toContain('tProposals("invalidValidationNotice")');
+  });
+
+  it("replaces raw Zod error list with one human notice for invalid non-habit proposals", () => {
+    // shouldShowInvalidValidationNotice gates the human notice — no inline validationStatus check
+    expect(genericProposalSource).toContain("shouldShowInvalidValidationNotice");
+    // The human notice is rendered via the Proposals i18n key
+    expect(genericProposalSource).toContain('tProposals("invalidValidationNotice")');
+    // Raw Zod paths must never be rendered directly — the human notice replaces them
+    expect(genericProposalSource).not.toContain("validationStatus");
+  });
 });
 
 describe("Inline proposal action hooks", () => {
