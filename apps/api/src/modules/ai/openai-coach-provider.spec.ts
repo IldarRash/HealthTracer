@@ -932,7 +932,7 @@ describe("OpenAiCoachProvider", () => {
       expect(jsonSchema["schema"]).toBeDefined();
     });
 
-    it("generateDomainStep sends json_schema response_format with strict:true and correct schema name", async () => {
+    it("generateDomainStep sends json_schema response_format with strict:false and correct schema name", async () => {
       const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
       vi.stubGlobal("fetch", fetchMock);
 
@@ -945,7 +945,12 @@ describe("OpenAiCoachProvider", () => {
       expect(responseFormat["type"]).toBe("json_schema");
 
       const jsonSchema = responseFormat["json_schema"] as Record<string, unknown>;
-      expect(jsonSchema["strict"]).toBe(true);
+      // strict:false is REQUIRED here: the domain step schema contains open-ended
+      // objects (tool input, per-intent candidateProposals) and OpenAI strict mode
+      // rejects any object schema with additionalProperties:true. Zod validates
+      // post-receive. Regression guard: live calls failed with
+      // "Invalid schema for response_format 'domain_llm_step_output'" when strict was true.
+      expect(jsonSchema["strict"]).toBe(false);
       expect(jsonSchema["name"]).toBe(DOMAIN_LLM_STEP_SCHEMA_NAME);
       expect(jsonSchema["schema"]).toBeDefined();
     });

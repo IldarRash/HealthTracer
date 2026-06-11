@@ -171,6 +171,16 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     // (preserves the cacheable static prefix).
     const hasMultimodalContent = imageDataUris.length > 0 || textBlocks.length > 0;
 
+    // strict:false — the domain step schema has open-ended objects (tool input,
+    // per-intent candidateProposals) and OpenAI strict mode rejects any object
+    // with additionalProperties:true. The schema still guides generation; Zod
+    // validates post-receive and the executor degrades safely on mismatch.
+    const domainStepSchema = {
+      name: DOMAIN_LLM_STEP_SCHEMA_NAME,
+      schema: domainLlmStepWireSchema,
+      strict: false,
+    };
+
     const { payload, usage } =
       hasMultimodalContent
         ? await this.requestMultimodalJsonCompletion(
@@ -179,7 +189,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
             request.recentMessages,
             imageDataUris,
             textBlocks,
-            { name: DOMAIN_LLM_STEP_SCHEMA_NAME, schema: domainLlmStepWireSchema },
+            domainStepSchema,
             this.stageModels.domain,
             options?.signal,
           )
@@ -187,7 +197,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
             systemPrompt,
             request.userMessage,
             request.recentMessages,
-            { name: DOMAIN_LLM_STEP_SCHEMA_NAME, schema: domainLlmStepWireSchema },
+            domainStepSchema,
             this.stageModels.domain,
             options?.signal,
           );
@@ -261,7 +271,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       role: "user" | "assistant" | "system";
       content: string;
     }>,
-    jsonSchema: { name: string; schema: unknown },
+    jsonSchema: { name: string; schema: unknown; strict?: boolean },
     model: string,
     signal?: AbortSignal,
   ): Promise<{ payload: unknown; usage: ProviderUsage }> {
@@ -279,7 +289,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
           type: "json_schema",
           json_schema: {
             name: jsonSchema.name,
-            strict: true,
+            strict: jsonSchema.strict ?? true,
             schema: jsonSchema.schema,
           },
         },
@@ -310,7 +320,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     }>,
     imageDataUris: readonly string[],
     textBlocks: readonly string[],
-    jsonSchema: { name: string; schema: unknown },
+    jsonSchema: { name: string; schema: unknown; strict?: boolean },
     model: string,
     signal?: AbortSignal,
   ): Promise<{ payload: unknown; usage: ProviderUsage }> {
@@ -335,7 +345,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
           type: "json_schema",
           json_schema: {
             name: jsonSchema.name,
-            strict: true,
+            strict: jsonSchema.strict ?? true,
             schema: jsonSchema.schema,
           },
         },

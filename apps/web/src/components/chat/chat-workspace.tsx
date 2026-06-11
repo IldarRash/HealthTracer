@@ -948,7 +948,7 @@ export function ChatWorkspace() {
                               }
                             }}
                           />
-                        ) : !isUser && degradedTurn ? (
+                        ) : !isUser && degradedTurn && !messageText.trim() ? (
                           <ChatTurnErrorCard
                             onRetry={() => {
                               const precedingText = findPrecedingUserMessage(messages, messageIndex);
