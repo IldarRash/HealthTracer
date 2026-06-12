@@ -68,6 +68,10 @@ const validReading = {
   valueText: null,
   unit: "mg/dL",
   referenceRangeText: "70 - 99",
+  referenceRangeLow: 70,
+  referenceRangeHigh: 99,
+  optimalRangeLow: 75,
+  optimalRangeHigh: 90,
   observedAt: null,
   confidence: 0.93,
 } as const;
@@ -83,6 +87,10 @@ const validOutput: LabExtractionOutputInput = {
       valueText: null,
       unit: "%",
       referenceRangeText: null,
+      referenceRangeLow: null,
+      referenceRangeHigh: null,
+      optimalRangeLow: null,
+      optimalRangeHigh: null,
       observedAt: "2026-05-19",
       confidence: 0.8,
     },
@@ -184,9 +192,29 @@ describe("LabReportsService extraction pipeline", () => {
       valueText: null,
       unit: "mg/dL",
       referenceRangeText: "70 - 99",
+      // Structured ranges persist as drizzle-numeric strings.
+      referenceRangeLow: "70",
+      referenceRangeHigh: "99",
+      optimalRangeLow: "75",
+      optimalRangeHigh: "90",
       source: "extraction",
       confidence: "0.930",
     });
+    // A reading whose ranges are all null flows through with null columns,
+    // leaving referenceRangeText untouched.
+    expect(batch[1]).toMatchObject({
+      biomarkerKey: "hba1c",
+      referenceRangeText: null,
+      referenceRangeLow: null,
+      referenceRangeHigh: null,
+      optimalRangeLow: null,
+      optimalRangeHigh: null,
+    });
+    // The materialized read contract exposes the nested ranges in the reading unit.
+    expect(detail.readings[0]?.referenceRange).toEqual({ low: 70, high: 99, unit: "mg/dL" });
+    expect(detail.readings[0]?.optimalRange).toEqual({ low: 75, high: 90, unit: "mg/dL" });
+    expect(detail.readings[1]?.referenceRange).toBeNull();
+    expect(detail.readings[1]?.optimalRange).toBeNull();
     // Per-reading observedAt falls back to the document-level date…
     expect(batch[0]?.observedAt).toEqual(new Date("2026-05-20T00:00:00.000Z"));
     // …but an explicit per-reading date wins.
@@ -300,6 +328,104 @@ describe("LabReportsService extraction pipeline", () => {
     expect(harness.readingsBatches[0]).toHaveLength(1);
     expect(harness.readingsBatches[0]?.[0]?.value).toBe("92");
     expect(harness.statusUpdates.at(-1)?.unmappedMarkerCount).toBe(1);
+  });
+
+  it("nulls an implausible optimal band (catalog clamp) but keeps the reading and its plausible reference", async () => {
+    const harness = createHarness(
+      providerReturning({
+        isLabReport: true,
+        observedAt: null,
+        readings: [
+          {
+            ...validReading,
+            // glucose typical {70,99} mg/dL → clamp band [3.5, 1980]; an optimal
+            // band an order of magnitude high is implausible and soft-nulled,
+            // while the in-band reference survives.
+            referenceRangeLow: 70,
+            referenceRangeHigh: 99,
+            optimalRangeLow: 5000,
+            optimalRangeHigh: 6000,
+          },
+        ],
+        unmappedMarkerCount: 0,
+      }),
+    );
+
+    const detail = await harness.service.extract(auth, reportRow.id);
+
+    expect(detail.report.status).toBe("extracted");
+    const batch = harness.readingsBatches[0] ?? [];
+    expect(batch).toHaveLength(1);
+    expect(batch[0]?.referenceRangeLow).toBe("70");
+    expect(batch[0]?.referenceRangeHigh).toBe("99");
+    // The offending optimal pair is nulled; the reading itself is NOT dropped.
+    expect(batch[0]?.optimalRangeLow).toBeNull();
+    expect(batch[0]?.optimalRangeHigh).toBeNull();
+    expect(harness.statusUpdates.at(-1)?.unmappedMarkerCount).toBe(0);
+    expect(detail.readings[0]?.optimalRange).toBeNull();
+    expect(detail.readings[0]?.referenceRange).toEqual({ low: 70, high: 99, unit: "mg/dL" });
+  });
+
+  it("nulls a malformed range pair (one-sided / low >= high) but keeps the reading", async () => {
+    const harness = createHarness(
+      providerReturning({
+        isLabReport: true,
+        observedAt: null,
+        readings: [
+          {
+            ...validReading,
+            // A one-sided reference pair and an inverted optimal pair both fail
+            // SOFT — each is nulled, the reading survives and the whole report
+            // is not sunk by the malformed bands.
+            referenceRangeLow: 70,
+            referenceRangeHigh: null,
+            optimalRangeLow: 99,
+            optimalRangeHigh: 80,
+          },
+        ],
+        unmappedMarkerCount: 0,
+      }),
+    );
+
+    const detail = await harness.service.extract(auth, reportRow.id);
+
+    expect(detail.report.status).toBe("extracted");
+    const batch = harness.readingsBatches[0] ?? [];
+    expect(batch).toHaveLength(1);
+    expect(batch[0]?.referenceRangeLow).toBeNull();
+    expect(batch[0]?.referenceRangeHigh).toBeNull();
+    expect(batch[0]?.optimalRangeLow).toBeNull();
+    expect(batch[0]?.optimalRangeHigh).toBeNull();
+    expect(harness.statusUpdates.at(-1)?.unmappedMarkerCount).toBe(0);
+  });
+
+  it("accepts ranges as-is when the reading unit does not match the catalog unit", async () => {
+    const harness = createHarness(
+      providerReturning({
+        isLabReport: true,
+        observedAt: null,
+        readings: [
+          {
+            ...validReading,
+            // mmol/L is an accepted glucose unit but differs from the catalog
+            // typicalRange unit (mg/dL), so no catalog clamp applies.
+            unit: "mmol/L",
+            valueNumeric: 5.1,
+            referenceRangeLow: 3.9,
+            referenceRangeHigh: 5.5,
+            optimalRangeLow: 4.4,
+            optimalRangeHigh: 5.0,
+          },
+        ],
+        unmappedMarkerCount: 0,
+      }),
+    );
+
+    const detail = await harness.service.extract(auth, reportRow.id);
+
+    expect(detail.report.status).toBe("extracted");
+    expect(detail.readings[0]?.referenceRange).toEqual({ low: 3.9, high: 5.5, unit: "mmol/L" });
+    expect(detail.readings[0]?.optimalRange).toEqual({ low: 4.4, high: 5.0, unit: "mmol/L" });
   });
 
   it("fails with no_readings_extracted when every reading is dropped by validation", async () => {

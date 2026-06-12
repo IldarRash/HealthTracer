@@ -18,20 +18,22 @@ import {
   biomarkerStatusColor,
   biomarkerStatusLabelKey,
   biomarkerStatusTone,
-  buildTrendStripDays,
-  computeRangeBarModel,
+  buildHistoryChartModel,
+  computeMultiZoneRangeBarModel,
   deriveBiomarkerReadingStatus,
   formatReadingValue,
+  resolveDisplayRanges,
 } from "../../lib/biomarkers-ui-state";
 import {
   Badge,
   Button,
-  DsTrendStrip,
   EmptyState,
   ErrorState,
   LoadingScreen,
   MedicalNote,
 } from "../ui";
+import { buildRangeBarAriaLabel } from "./biomarker-range-aria";
+import { BiomarkerHistoryChart } from "./biomarker-history-chart";
 import { BiomarkerRangeBar } from "./biomarker-range-bar";
 import { BiomarkerReadingRow } from "./biomarker-reading-row";
 
@@ -157,13 +159,11 @@ export function BiomarkerDetailWorkspace({ markerKey }: BiomarkerDetailWorkspace
 
   const history = historyQuery.data;
   const latest = history.readings[0] ?? null;
-  const status = deriveBiomarkerReadingStatus(latest, history.typicalRange);
+  const { reference, optimal } = resolveDisplayRanges(latest, history.typicalRange);
+  const status = deriveBiomarkerReadingStatus(latest, reference);
   const statusLabel = t(biomarkerStatusLabelKey(status));
-  const rangeModel =
-    status === "no_reference"
-      ? null
-      : computeRangeBarModel(latest?.value ?? null, history.typicalRange);
-  const trendDays = buildTrendStripDays(history.readings);
+  const rangeModel = computeMultiZoneRangeBarModel(latest?.value ?? null, reference, optimal);
+  const chartModel = buildHistoryChartModel(history.readings, history.typicalRange);
   const isBusy = updateMutation.isPending || deleteMutation.isPending;
 
   const onUpdateReading = async (
@@ -260,20 +260,30 @@ export function BiomarkerDetailWorkspace({ markerKey }: BiomarkerDetailWorkspace
           <BiomarkerRangeBar
             model={rangeModel}
             toneColor={biomarkerStatusColor(status)}
-            ariaLabel={
-              history.typicalRange
-                ? `${history.displayLabel}: ${formatReadingValue(latest)} ${latest.unit} — ${statusLabel} ${history.typicalRange.low}–${history.typicalRange.high} ${history.typicalRange.unit}`
-                : `${history.displayLabel}: ${formatReadingValue(latest)} ${latest.unit} — ${statusLabel}`
-            }
+            ariaLabel={buildRangeBarAriaLabel({
+              t,
+              label: history.displayLabel,
+              valueLabel: formatReadingValue(latest),
+              unitLabel: latest.unit,
+              statusLabel,
+              reference,
+              optimal,
+            })}
             noReferenceLabel={t("status.noReference")}
           />
         ) : null}
+
+        {latest?.referenceRangeText ? (
+          <p style={{ fontSize: 11, color: "var(--color-text-muted)", margin: 0 }}>
+            {t("range.asReported", { text: latest.referenceRangeText })}
+          </p>
+        ) : null}
       </section>
 
-      {/* Trend across reports */}
-      {trendDays.length >= 2 ? (
+      {/* History over time */}
+      {chartModel ? (
         <section
-          aria-label={t("detail.trendTitle")}
+          aria-label={t("chart.title")}
           style={{
             background: "var(--color-surface-card)",
             border: "1px solid var(--color-border-default)",
@@ -291,17 +301,37 @@ export function BiomarkerDetailWorkspace({ markerKey }: BiomarkerDetailWorkspace
               margin: "0 0 4px",
             }}
           >
-            {t("detail.trendTitle")}
+            {t("chart.title")}
           </h3>
           <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: "0 0 14px" }}>
             {t("detail.trendHint")}
           </p>
-          <DsTrendStrip
-            days={trendDays}
-            maxH={72}
-            barColor="var(--color-metric-green)"
-            ariaLabel={`${history.displayLabel} — ${t("detail.trendTitle")}`}
+          <BiomarkerHistoryChart
+            model={chartModel}
+            ariaLabel={t("chart.aria", { label: history.displayLabel })}
           />
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 14,
+              marginTop: 12,
+              fontSize: 11.5,
+              color: "var(--color-text-muted)",
+            }}
+          >
+            <LegendSwatch
+              color="color-mix(in srgb, var(--color-metric-green) 28%, transparent)"
+              label={t("chart.legendReference")}
+            />
+            {chartModel.optimalBand ? (
+              <LegendSwatch
+                color="color-mix(in srgb, var(--color-metric-green) 55%, transparent)"
+                label={t("chart.legendOptimal")}
+              />
+            ) : null}
+            <LegendSwatch color="var(--color-metric-green)" label={t("chart.legendReading")} />
+          </div>
         </section>
       ) : null}
 
@@ -439,5 +469,18 @@ export function BiomarkerDetailWorkspace({ markerKey }: BiomarkerDetailWorkspace
 
       <MedicalNote>{t("wellnessNote")}</MedicalNote>
     </div>
+  );
+}
+
+/** A small color square + label for the history-chart legend. */
+function LegendSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span
+        aria-hidden="true"
+        style={{ width: 12, height: 12, borderRadius: 3, background: color }}
+      />
+      {label}
+    </span>
   );
 }

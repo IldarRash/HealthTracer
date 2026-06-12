@@ -33,6 +33,10 @@ function readingRow(overrides: Record<string, unknown> = {}) {
     valueText: null,
     unit: "mg/dL",
     referenceRangeText: null,
+    referenceRangeLow: null,
+    referenceRangeHigh: null,
+    optimalRangeLow: null,
+    optimalRangeHigh: null,
     observedAt: new Date("2026-05-20T00:00:00.000Z"),
     source: "manual",
     confidence: null,
@@ -80,6 +84,30 @@ describe("BiomarkersService", () => {
       expect(hba1c.readingCount).toBe(3);
     });
 
+    it("materializes the latest reading's nested ranges in the reading's own unit", async () => {
+      const service = createService({
+        listLatestReadingPerMarker: async () => [
+          readingRow({
+            biomarkerKey: "fasting_glucose",
+            unit: "mg/dL",
+            referenceRangeLow: "70.0000",
+            referenceRangeHigh: "99.0000",
+            optimalRangeLow: "75.0000",
+            optimalRangeHigh: "90.0000",
+          }),
+        ],
+        countActiveReadingsByMarker: async () => [
+          { biomarkerKey: "fasting_glucose", readingCount: 1 },
+        ],
+      });
+
+      const dashboard = await service.getDashboard(auth);
+      const latest = dashboard.areas[0]?.markers[0]?.latestReading;
+
+      expect(latest?.referenceRange).toEqual({ low: 70, high: 99, unit: "mg/dL" });
+      expect(latest?.optimalRange).toEqual({ low: 75, high: 90, unit: "mg/dL" });
+    });
+
     it("returns no areas when the user has no readings", async () => {
       const service = createService({
         listLatestReadingPerMarker: async () => [],
@@ -119,6 +147,25 @@ describe("BiomarkersService", () => {
       expect(history.typicalRange).toEqual({ low: 70, high: 99, unit: "mg/dL" });
       expect(history.readings).toHaveLength(1);
       expect(history.readings[0]?.value).toBe(92);
+    });
+
+    it("exposes each history reading's nested ranges in that reading's unit", async () => {
+      const service = createService({
+        listReadingsByMarkerKey: async () => [
+          readingRow({
+            unit: "mg/dL",
+            referenceRangeLow: "70.0000",
+            referenceRangeHigh: "99.0000",
+            optimalRangeLow: "75.0000",
+            optimalRangeHigh: "90.0000",
+          }),
+        ],
+      });
+
+      const history = await service.getHistory(auth, "fasting_glucose");
+
+      expect(history.readings[0]?.referenceRange).toEqual({ low: 70, high: 99, unit: "mg/dL" });
+      expect(history.readings[0]?.optimalRange).toEqual({ low: 75, high: 90, unit: "mg/dL" });
     });
   });
 
@@ -295,6 +342,11 @@ describe("BiomarkersService", () => {
         unit: "mg/dL",
         source: "manual",
         confidence: null,
+        // Manual readings carry no extracted ranges.
+        referenceRangeLow: null,
+        referenceRangeHigh: null,
+        optimalRangeLow: null,
+        optimalRangeHigh: null,
       });
       expect(captured[0]?.observedAt).toEqual(new Date("2026-05-20T00:00:00.000Z"));
       expect(reading.source).toBe("manual");
@@ -341,12 +393,16 @@ describe("BiomarkersService", () => {
   });
 
   describe("updateReading", () => {
-    it("sets userEdited and nulls confidence on edit", async () => {
+    it("sets userEdited, nulls confidence, and carries ranges through when the unit is unchanged", async () => {
       const captured: Array<Record<string, unknown>> = [];
       const existing = readingRow({
         labReportId: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
         source: "extraction",
         confidence: "0.820",
+        referenceRangeLow: "70.0000",
+        referenceRangeHigh: "99.0000",
+        optimalRangeLow: "75.0000",
+        optimalRangeHigh: "90.0000",
       });
       const service = createService({
         findActiveReadingById: async () => existing,
@@ -368,9 +424,48 @@ describe("BiomarkersService", () => {
         unit: "mg/dL",
         userEdited: true,
         confidence: null,
+        // Same unit → stored ranges are preserved.
+        referenceRangeLow: "70.0000",
+        referenceRangeHigh: "99.0000",
+        optimalRangeLow: "75.0000",
+        optimalRangeHigh: "90.0000",
       });
       expect(updated.userEdited).toBe(true);
       expect(updated.confidence).toBeNull();
+    });
+
+    it("clears all four stored ranges when the unit is edited to a different value", async () => {
+      const captured: Array<Record<string, unknown>> = [];
+      const existing = readingRow({
+        unit: "mg/dL",
+        referenceRangeLow: "70.0000",
+        referenceRangeHigh: "99.0000",
+        optimalRangeLow: "75.0000",
+        optimalRangeHigh: "90.0000",
+      });
+      const service = createService({
+        findActiveReadingById: async () => existing,
+        updateReading: async (
+          _userId: string,
+          _readingId: string,
+          values: Record<string, unknown>,
+        ) => {
+          captured.push(values);
+          return { ...existing, ...values };
+        },
+      });
+
+      // mmol/L is an accepted glucose unit but differs from the stored mg/dL,
+      // invalidating ranges captured in the original unit.
+      await service.updateReading(auth, existing.id as string, { value: 5.1, unit: "mmol/L" });
+
+      expect(captured[0]).toMatchObject({
+        unit: "mmol/L",
+        referenceRangeLow: null,
+        referenceRangeHigh: null,
+        optimalRangeLow: null,
+        optimalRangeHigh: null,
+      });
     });
 
     it("rejects an edit that violates the plausibility band", async () => {

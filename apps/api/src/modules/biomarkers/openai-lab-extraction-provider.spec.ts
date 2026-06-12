@@ -157,6 +157,33 @@ describe("OpenAiLabExtractionProvider", () => {
       expect(LAB_EXTRACTION_SYSTEM_PROMPT).not.toMatch(/\{\{/);
     });
 
+    it("instructs the model on the four structured-range fields, in the value's unit", () => {
+      for (const field of [
+        "referenceRangeLow",
+        "referenceRangeHigh",
+        "optimalRangeLow",
+        "optimalRangeHigh",
+      ]) {
+        expect(LAB_EXTRACTION_SYSTEM_PROMPT).toContain(field);
+      }
+
+      // Same-unit-as-the-value rule appears for both ranges.
+      expect(LAB_EXTRACTION_SYSTEM_PROMPT).toMatch(/SAME unit as the value/);
+      // One-sided/qualitative reference ranges null out.
+      expect(LAB_EXTRACTION_SYSTEM_PROMPT.toLowerCase()).toContain("one-sided");
+    });
+
+    it("frames the optimal range as wellness from general knowledge, never diagnostic", () => {
+      const prompt = LAB_EXTRACTION_SYSTEM_PROMPT;
+
+      expect(prompt).toMatch(/general knowledge/i);
+      expect(prompt).toMatch(/wellness/i);
+      // Safety floor: the optimal-range instruction must explicitly forbid
+      // diagnostic / treatment / medical-certainty framing.
+      expect(prompt).toMatch(/NEVER a diagnostic threshold/);
+      expect(prompt).not.toMatch(/\b(diagnose the patient|treat with|prescribe|dosage)\b/i);
+    });
+
     it("sends the Authorization bearer header to the OpenAI endpoint", async () => {
       const capturedUrls: string[] = [];
       const capturedHeaders: Array<Record<string, string>> = [];

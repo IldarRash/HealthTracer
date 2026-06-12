@@ -125,11 +125,21 @@
     "detail": {
       "back": "All biomarkers",
       "latestLabel": "Latest",
-      "trendTitle": "Trend across reports",
       "trendHint": "Most recent readings, same-unit values only.",
-      "historyTitle": "History",
       "unknownTitle": "Unknown biomarker",
       "unknownDescription": "This marker is not in the tracked catalog. Pick a marker from the dashboard."
+    },
+    "range": {
+      "reference": "typical range {low}–{high} {unit}",
+      "optimal": "optimal range {low}–{high} {unit}",
+      "asReported": "As reported: {text}"
+    },
+    "chart": {
+      "title": "History over time",
+      "aria": "{label} readings over time, with the typical range and optimal range shaded.",
+      "legendReference": "Typical range",
+      "legendOptimal": "Optimal range",
+      "legendReading": "Reading"
     },
     "empty": {
       "title": "Start your biomarker dashboard",

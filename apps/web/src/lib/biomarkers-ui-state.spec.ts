@@ -9,14 +9,15 @@ import {
   biomarkerStatusLabelKey,
   biomarkerStatusTone,
   buildBiomarkersHeroView,
+  buildHistoryChartModel,
   buildReadingProvenanceView,
-  buildTrendStripDays,
   canRetryLabReportExtraction,
   canSubmitLabReportUpload,
-  computeRangeBarModel,
+  computeMultiZoneRangeBarModel,
   countTrackedMarkers,
   deriveBiomarkerReadingStatus,
   deriveBiomarkerStatus,
+  resolveDisplayRanges,
   failureCodeMessageKey,
   formatBiomarkerValue,
   formatReadingConfidence,
@@ -41,6 +42,8 @@ function createReading(overrides: Partial<BiomarkerReading> = {}): BiomarkerRead
     valueText: null,
     unit: "ng/mL",
     referenceRangeText: null,
+    referenceRange: null,
+    optimalRange: null,
     observedAt: "2026-05-01",
     source: "extraction",
     confidence: 0.82,
@@ -130,28 +133,165 @@ describe("status tone and label keys", () => {
   });
 });
 
-describe("computeRangeBarModel", () => {
-  it("builds a padded track with the typical range zone at fixed boundaries", () => {
-    // Domain = [low - 0.25*span, high + 0.25*span] → zone sits at 1/6 and 5/6.
-    const model = computeRangeBarModel(65, RANGE);
+describe("computeMultiZoneRangeBarModel", () => {
+  const OPTIMAL = { low: 40, high: 60, unit: "ng/mL" };
+
+  it("matches the single-zone geometry when only the reference range is given", () => {
+    // Domain is the reference range itself → zone at 1/6 and 5/6, midpoint dot.
+    const model = computeMultiZoneRangeBarModel(65, RANGE, null);
     expect(model).not.toBeNull();
-    expect(model!.rangeStartPct).toBeCloseTo(100 / 6, 5);
-    expect(model!.rangeEndPct).toBeCloseTo(500 / 6, 5);
-    // 65 is the midpoint of [30, 100] → midpoint of the track.
+    expect(model!.referenceStartPct).toBeCloseTo(100 / 6, 5);
+    expect(model!.referenceEndPct).toBeCloseTo(500 / 6, 5);
     expect(model!.positionPct).toBeCloseTo(50, 5);
+    expect(model!.optimalStartPct).toBeNull();
+    expect(model!.optimalEndPct).toBeNull();
     expect(model!.lowLabel).toBe("30");
     expect(model!.highLabel).toBe("100");
   });
 
-  it("clamps the dot position into [2, 98]", () => {
-    expect(computeRangeBarModel(-1000, RANGE)!.positionPct).toBe(2);
-    expect(computeRangeBarModel(100000, RANGE)!.positionPct).toBe(98);
+  it("projects an optimal zone nested inside the reference onto the same union domain", () => {
+    // Optimal [40,60] ⊂ reference [30,100] → domain stays the reference's; the
+    // optimal zone sits strictly inside the reference zone.
+    const model = computeMultiZoneRangeBarModel(50, RANGE, OPTIMAL)!;
+    expect(model.referenceStartPct).toBeCloseTo(100 / 6, 5);
+    expect(model.referenceEndPct).toBeCloseTo(500 / 6, 5);
+    expect(model.optimalStartPct).not.toBeNull();
+    expect(model.optimalEndPct).not.toBeNull();
+    expect(model.optimalStartPct!).toBeGreaterThan(model.referenceStartPct);
+    expect(model.optimalEndPct!).toBeLessThan(model.referenceEndPct);
   });
 
-  it("returns null without a value or reference range", () => {
-    expect(computeRangeBarModel(null, RANGE)).toBeNull();
-    expect(computeRangeBarModel(42, null)).toBeNull();
-    expect(computeRangeBarModel(42, { low: 5, high: 5, unit: "%" })).toBeNull();
+  it("widens the union domain when the optimal band extends past the reference", () => {
+    // Optimal high 120 > reference high 100 → domain union ends at 120, so the
+    // reference end no longer sits at 5/6 and the optimal zone clamps to ≤100%.
+    const wide = { low: 30, high: 120, unit: "ng/mL" };
+    const model = computeMultiZoneRangeBarModel(110, RANGE, wide)!;
+    expect(model.referenceEndPct).toBeLessThan(500 / 6);
+    expect(model.optimalEndPct!).toBeLessThanOrEqual(100);
+    expect(model.optimalStartPct!).toBeGreaterThanOrEqual(0);
+  });
+
+  it("returns null without a value or a reference-quality range", () => {
+    expect(computeMultiZoneRangeBarModel(null, RANGE, OPTIMAL)).toBeNull();
+    expect(computeMultiZoneRangeBarModel(50, null, OPTIMAL)).toBeNull();
+    expect(
+      computeMultiZoneRangeBarModel(50, { low: 5, high: 5, unit: "ng/mL" }, OPTIMAL),
+    ).toBeNull();
+  });
+});
+
+describe("resolveDisplayRanges", () => {
+  const TYPICAL = { low: 30, high: 100, unit: "ng/mL" };
+
+  it("prefers the lab-printed reference range over the catalog typical range", () => {
+    const reading = createReading({
+      referenceRange: { low: 25, high: 80, unit: "ng/mL" },
+    });
+    const { reference, optimal } = resolveDisplayRanges(reading, TYPICAL);
+    expect(reference).toEqual({ low: 25, high: 80, unit: "ng/mL" });
+    expect(optimal).toBeNull();
+  });
+
+  it("falls back to the catalog typical range when no lab range exists", () => {
+    expect(resolveDisplayRanges(createReading(), TYPICAL).reference).toEqual(TYPICAL);
+  });
+
+  it("drops ranges whose unit differs from the reading's own unit", () => {
+    const reading = createReading({
+      unit: "nmol/L",
+      referenceRange: { low: 60, high: 200, unit: "nmol/L" },
+      optimalRange: { low: 80, high: 150, unit: "ng/mL" },
+    });
+    const { reference, optimal } = resolveDisplayRanges(reading, TYPICAL);
+    // Reference (nmol/L) matches the reading unit; the catalog (ng/mL) is dropped.
+    expect(reference).toEqual({ low: 60, high: 200, unit: "nmol/L" });
+    // Optimal is in a mismatched unit → dropped, never silently compared.
+    expect(optimal).toBeNull();
+  });
+
+  it("surfaces a unit-matched optimal range", () => {
+    const reading = createReading({
+      optimalRange: { low: 40, high: 60, unit: "ng/mL" },
+    });
+    expect(resolveDisplayRanges(reading, TYPICAL).optimal).toEqual({
+      low: 40,
+      high: 60,
+      unit: "ng/mL",
+    });
+  });
+
+  it("returns the typical range and no optimal for a null reading", () => {
+    expect(resolveDisplayRanges(null, TYPICAL)).toEqual({
+      reference: TYPICAL,
+      optimal: null,
+    });
+  });
+});
+
+describe("buildHistoryChartModel", () => {
+  it("builds oldest→newest points sharing the latest reading's unit", () => {
+    const model = buildHistoryChartModel([
+      createReading({ value: 60, observedAt: "2026-06-01" }),
+      createReading({ value: 40, observedAt: "2026-05-01" }),
+      createReading({ value: 20, observedAt: "2026-04-01" }),
+    ]);
+
+    expect(model).not.toBeNull();
+    expect(model!.unit).toBe("ng/mL");
+    expect(model!.points.map((point) => point.value)).toEqual([20, 40, 60]);
+    expect(model!.points[0]!.label).toBe("Apr 1");
+    expect(model!.points[2]!.label).toBe("Jun 1");
+  });
+
+  it("filters readings whose unit differs from the most recent reading", () => {
+    const model = buildHistoryChartModel([
+      createReading({ value: 60, observedAt: "2026-06-01" }),
+      createReading({ value: 110, unit: "nmol/L", observedAt: "2026-05-01" }),
+      createReading({ value: 30, observedAt: "2026-04-01" }),
+    ]);
+
+    expect(model!.points.map((point) => point.value)).toEqual([30, 60]);
+  });
+
+  it("takes bands from the latest reading and pads the Y domain to contain them", () => {
+    const model = buildHistoryChartModel([
+      createReading({
+        value: 50,
+        observedAt: "2026-06-01",
+        referenceRange: { low: 30, high: 100, unit: "ng/mL" },
+        optimalRange: { low: 40, high: 60, unit: "ng/mL" },
+      }),
+      createReading({ value: 45, observedAt: "2026-05-01" }),
+    ]);
+
+    expect(model!.referenceBand).toEqual({ low: 30, high: 100 });
+    expect(model!.optimalBand).toEqual({ low: 40, high: 60 });
+    // Domain spans at least [30, 100] (the band extent) plus padding on each side.
+    expect(model!.yDomain[0]).toBeLessThan(30);
+    expect(model!.yDomain[1]).toBeGreaterThan(100);
+  });
+
+  it("falls back to the catalog typical range for the reference band", () => {
+    const model = buildHistoryChartModel(
+      [
+        createReading({ value: 50, observedAt: "2026-06-01" }),
+        createReading({ value: 45, observedAt: "2026-05-01" }),
+      ],
+      { low: 30, high: 100, unit: "ng/mL" },
+    );
+
+    expect(model!.referenceBand).toEqual({ low: 30, high: 100 });
+    expect(model!.optimalBand).toBeNull();
+  });
+
+  it("returns null for fewer than two chartable points", () => {
+    expect(buildHistoryChartModel([createReading()])).toBeNull();
+    expect(
+      buildHistoryChartModel([
+        createReading({ value: null, valueText: "trace" }),
+        createReading({ value: null, valueText: "trace" }),
+      ]),
+    ).toBeNull();
   });
 });
 
@@ -226,52 +366,6 @@ describe("dashboard grouping and hero", () => {
 
   it("returns a null last-report label when no reports exist", () => {
     expect(buildBiomarkersHeroView(createDashboard(), []).lastReportLabel).toBeNull();
-  });
-});
-
-describe("buildTrendStripDays", () => {
-  it("charts up to six same-unit numeric readings oldest→newest, normalized 0-100", () => {
-    const readings = [
-      createReading({ value: 60, observedAt: "2026-06-01" }),
-      createReading({ value: 40, observedAt: "2026-05-01" }),
-      createReading({ value: 20, observedAt: "2026-04-01" }),
-    ];
-
-    const days = buildTrendStripDays(readings);
-    expect(days.map((day) => day.value)).toEqual([0, 50, 100]);
-    expect(days[0]!.label).toBe("Apr 1");
-    expect(days[2]!.label).toBe("Jun 1");
-  });
-
-  it("skips readings whose unit differs from the most recent reading", () => {
-    const days = buildTrendStripDays([
-      createReading({ value: 60, observedAt: "2026-06-01" }),
-      createReading({ value: 110, unit: "nmol/L", observedAt: "2026-05-01" }),
-      createReading({ value: 30, observedAt: "2026-04-01" }),
-    ]);
-
-    expect(days).toHaveLength(2);
-    expect(days.map((day) => day.value)).toEqual([0, 100]);
-  });
-
-  it("returns [] for fewer than two chartable readings and flattens equal values to 50", () => {
-    expect(buildTrendStripDays([createReading()])).toEqual([]);
-    expect(
-      buildTrendStripDays([
-        createReading({ value: null, valueText: "trace" }),
-        createReading({ value: null, valueText: "trace" }),
-      ]),
-    ).toEqual([]);
-
-    const flat = buildTrendStripDays([createReading(), createReading()]);
-    expect(flat.map((day) => day.value)).toEqual([50, 50]);
-  });
-
-  it("caps the strip at six readings", () => {
-    const readings = Array.from({ length: 10 }, (_, index) =>
-      createReading({ value: 10 + index, observedAt: `2026-05-0${(index % 9) + 1}` }),
-    );
-    expect(buildTrendStripDays(readings)).toHaveLength(6);
   });
 });
 

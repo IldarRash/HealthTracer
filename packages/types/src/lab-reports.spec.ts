@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  biomarkerReadingSchema,
   createBiomarkerReadingSchema,
   createLabReportSchema,
   MAX_LAB_REPORT_UPLOAD_BASE64_CHARS,
@@ -93,6 +94,46 @@ describe("createBiomarkerReadingSchema", () => {
         unit: "ng/mL",
       }),
     ).toThrow();
+  });
+});
+
+describe("biomarkerReadingSchema nested ranges", () => {
+  const base = {
+    id: "11111111-1111-4111-8111-111111111111",
+    userId: "22222222-2222-4222-8222-222222222222",
+    labReportId: null,
+    biomarkerKey: "vitamin_d" as const,
+    value: 42,
+    valueText: null,
+    unit: "ng/mL",
+    referenceRangeText: "30-100 ng/mL",
+    referenceRange: null,
+    optimalRange: null,
+    observedAt: null,
+    source: "extraction" as const,
+    confidence: 0.9,
+    userEdited: false,
+    createdAt: "2026-05-01T00:00:00.000Z",
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  };
+
+  it("accepts a reading with null nested ranges", () => {
+    expect(() => biomarkerReadingSchema.parse(base)).not.toThrow();
+  });
+
+  it("accepts a reading carrying both nested ranges in the reading unit", () => {
+    const parsed = biomarkerReadingSchema.parse({
+      ...base,
+      referenceRange: { low: 30, high: 100, unit: "ng/mL" },
+      optimalRange: { low: 40, high: 60, unit: "ng/mL" },
+    });
+    expect(parsed.referenceRange).toEqual({ low: 30, high: 100, unit: "ng/mL" });
+    expect(parsed.optimalRange).toEqual({ low: 40, high: 60, unit: "ng/mL" });
+  });
+
+  it("rejects a reading missing the nested-range keys entirely", () => {
+    const { referenceRange: _r, optimalRange: _o, ...withoutRanges } = base;
+    expect(() => biomarkerReadingSchema.parse(withoutRanges)).toThrow();
   });
 });
 

@@ -46,6 +46,19 @@ describe("aiBiomarkerContextSummarySchema", () => {
     }
   });
 
+  it("strict schema rejects the new structured nested-range keys (safety floor)", () => {
+    // The user-visible reading carries referenceRange/optimalRange; the coach
+    // context must NEVER let those range keys through.
+    for (const forbidden of [
+      { referenceRange: { low: 30, high: 100, unit: "ng/mL" } },
+      { optimalRange: { low: 40, high: 60, unit: "ng/mL" } },
+    ]) {
+      const result = biomarkerContextItemSchema.safeParse(validItem(forbidden));
+
+      expect(result.success, `item must reject ${Object.keys(forbidden)[0]}`).toBe(false);
+    }
+  });
+
   it(`caps items at ${MAX_BIOMARKER_CONTEXT_ITEMS}`, () => {
     const result = aiBiomarkerContextSummarySchema.safeParse({
       items: Array.from({ length: MAX_BIOMARKER_CONTEXT_ITEMS + 1 }, () => validItem()),
