@@ -79,15 +79,15 @@ try {
     await sql`
       UPDATE recipes
       SET
-        servings            = ${servings},
-        estimated_calories = ${computed.estimatedCalories},
-        protein_grams       = ${computed.proteinGrams},
-        carbs_grams         = ${computed.carbsGrams},
-        fat_grams           = ${computed.fatGrams},
-        fiber_grams         = ${computed.fiberGrams ?? null},
-        confidence          = ${computed.confidence},
-        source              = 'TheMealDB catalog — macros computed from USDA FoodData Central (estimates, not verified nutrition facts)',
-        updated_at          = NOW()
+        servings                  = ${servings},
+        calories_per_serving      = ${computed.caloriesPerServing},
+        protein_grams_per_serving = ${computed.proteinGramsPerServing},
+        carbs_grams_per_serving   = ${computed.carbsGramsPerServing},
+        fat_grams_per_serving     = ${computed.fatGramsPerServing},
+        fiber_grams_per_serving   = ${computed.fiberGramsPerServing ?? null},
+        confidence                = ${computed.confidence},
+        source                    = 'TheMealDB catalog — macros computed from USDA FoodData Central (estimates, not verified nutrition facts)',
+        updated_at                = NOW()
       WHERE id = ${row.id}
     `;
 

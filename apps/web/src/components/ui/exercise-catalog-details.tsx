@@ -1,3 +1,5 @@
+"use client";
+
 import type { ExerciseCatalogMetadata } from "@health/types";
 import { useId, useState } from "react";
 import { buildExerciseCatalogDetailView } from "../../lib/exercise-catalog-ui-state";
