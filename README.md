@@ -67,9 +67,9 @@ cp apps/web/.env.example apps/web/.env
 cp packages/db/.env.example packages/db/.env
 
 pnpm db:up        # start local Postgres (docker compose)
-pnpm db:migrate   # apply Drizzle migrations
+pnpm db:migrate   # apply Drizzle migrations (needed before seeding; pnpm dev also applies them)
 pnpm db:seed      # seed reference data: exercises, recipes, and habit templates
-pnpm dev          # run the dev stack — API on :3000, Web on :3001
+pnpm dev          # apply migrations + run the dev stack — API on :3000, Web on :3001 (fails fast if Postgres is down)
 
 pnpm db:down      # stop Postgres when finished
 ```

@@ -16,7 +16,7 @@ All commands run from the repo root unless noted. Package manager is **pnpm 10**
 
 ```text
 pnpm install              # install all workspaces
-pnpm dev                  # run full dev stack (turbo dev) — API :3000, Web :3001
+pnpm dev                  # apply migrations, then run full dev stack (turbo dev) — API :3000, Web :3001; fails fast if Postgres is down (run pnpm db:up first)
 pnpm lint                 # eslint across workspaces (--max-warnings=0, so warnings fail)
 pnpm typecheck            # tsc --noEmit across workspaces
 pnpm test                 # vitest run across workspaces
@@ -27,7 +27,7 @@ Database (local Postgres via Docker Compose):
 
 ```text
 pnpm db:up                # start Postgres container
-pnpm db:migrate           # apply Drizzle migrations
+pnpm db:migrate           # apply Drizzle migrations (also runs automatically at the start of pnpm dev)
 pnpm db:down              # stop Postgres
 pnpm --filter @health/db db:generate   # generate a new migration after schema changes
 pnpm db:seed:recipes      # seed reference data (also :exercises)
@@ -131,7 +131,7 @@ When refactoring, **remove the superseded path** — dead files, exports, obsole
 - Create a feature branch (`feature/<slug>` or `fix/<slug>`) before feature work; don't implement features directly on `main`.
 - Inspect `git status` / `git diff` first, stage only files relevant to the approved change, and **don't disturb unrelated staged/unstaged user changes.** Commit/push only when the user asks.
 - Never stage secrets, `.env`, `.idea/`, `.turbo/`, `.next/`, build info, or local runtime artifacts.
-- **Railway deploys with new migrations under `packages/db/drizzle` are not complete until the migration is applied manually via Railway CLI.** Keep API runtime `DATABASE_URL` on private networking; use the public migration URL only for the explicit migrate command. See `docs/deployment/railway.md`.
+- **Railway applies Drizzle migrations automatically on every `health-api` deploy** via the pre-deploy command in `apps/api/railway.json`; a failed migration halts the deploy and the previous version keeps serving. Keep API runtime `DATABASE_URL` on private networking — the pre-deploy command uses it directly. See `docs/deployment/railway.md`.
 
 ## MCP servers
 
