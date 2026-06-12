@@ -13,7 +13,9 @@
     "detectionOrder": [
       "mark_today_workout_done",
       "today_summary_read",
-      "nutrition_plan_read"
+      "nutrition_plan_read",
+      "weekly_progress_read",
+      "workout_plan_read"
     ],
     "sharedPatterns": {
       "adviceOrImplicitMutation": {
@@ -188,6 +190,98 @@
             "flags": "i"
           }
         ]
+      },
+      {
+        "kind": "weekly_progress_read",
+        "refreshHintsOnExecuted": [],
+        "matchPatterns": [
+          {
+            "source": "^(?:show\\s+(?:me\\s+)?)?(?:my\\s+)?weekly\\s+progress\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:show\\s+(?:me\\s+)?)?(?:my\\s+)?progress\\s+(?:for\\s+|of\\s+)?(?:this|the)\\s+week\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^how\\s+(?:was|did)\\s+(?:my|the)\\s+week(?:\\s+go)?\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:покажи\\s+)?(?:мой\\s+)?прогресс\\s+за\\s+(?:эту\\s+|последнюю\\s+)?неделю\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^как\\s+прошла\\s+(?:моя\\s+)?неделя\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^недельный\\s+прогресс\\s*\\??$",
+            "flags": "i"
+          }
+        ],
+        "negativePatterns": [
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:analy[sz]e|analysis|review|why|improve|compare|advice)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "(?:проанализ|анализ|разбор|разбер|почему|повлиял|не так|улучш|сравн|посовет)",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:month|months|monthly|quarter|year|all[- ]?time|history)\\b|месяц|квартал|полгода|пол года|за год|за вс[её] время|истори",
+            "flags": "i"
+          }
+        ]
+      },
+      {
+        "kind": "workout_plan_read",
+        "refreshHintsOnExecuted": [],
+        "matchPatterns": [
+          {
+            "source": "^what(?:['’]s| is)\\s+(?:in\\s+)?(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^show\\s+(?:me\\s+)?(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^что\\s+(?:в\\s+)?(?:моём?|у меня)\\s+план(?:е)?\\s+тренировок\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^покажи\\s+(?:мой\\s+)?план\\s+тренировок\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:мой\\s+)?план\\s+тренировок\\s*\\??$",
+            "flags": "i"
+          }
+        ],
+        "negativePatterns": [
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:change|modify|update|create|build|add|remove|edit|adapt|improve|make|recommend)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "(?:созда|сдела|измени|адаптир|улучш|поменя|обнов|порекоменд|посовет)",
+            "flags": "i"
+          }
+        ]
       }
     ],
     "replyTemplates": {
@@ -215,6 +309,21 @@
         "mealLineTemplate": "- {{label}}{{timingHint}}{{dish}}",
         "macrosLineTemplate": "Daily targets: {{caloriesPerDay}} kcal, {{proteinGrams}}g protein, {{carbsGrams}}g carbs, {{fatGrams}}g fat",
         "noActivePlanLine": "You don't have an active nutrition plan yet. Ask me to create one for you!"
+      },
+      "weeklyProgress": {
+        "introTemplate": "Your weekly progress for {{weekStart}} – {{weekEnd}}:",
+        "workoutLineTemplate": "Workouts: {{completed}} of {{planned}} planned session(s) completed ({{adherencePercent}}% adherence)",
+        "habitLineTemplate": "Habits: {{completed}} completed, {{missed}} missed ({{adherencePercent}}% adherence)",
+        "trendsHeaderLine": "Trends:",
+        "trendLineTemplate": "- {{message}}",
+        "noSummaryLine": "You don't have a weekly progress summary yet. It will appear after your first tracked week."
+      },
+      "workoutPlan": {
+        "introTemplate": "Your active workout plan — {{title}}:",
+        "weeklyCadenceLineTemplate": "{{dayCount}} training day(s) per week",
+        "sessionLineTemplate": "- {{weekday}}: {{focus}}",
+        "moreSessionsLineTemplate": "…and {{count}} more session(s)",
+        "noActivePlanLine": "You don't have an active workout plan yet. Ask me to create one for you!"
       }
     }
   },
@@ -528,6 +637,24 @@
         "messageText": {
           "en": "Show my nutrition plan",
           "ru": "Покажи мой план питания"
+        }
+      },
+      {
+        "id": "weekly_progress_read",
+        "labelEn": "Weekly progress",
+        "labelRu": "Прогресс за неделю",
+        "messageText": {
+          "en": "Show my weekly progress",
+          "ru": "Мой прогресс за неделю"
+        }
+      },
+      {
+        "id": "workout_plan_read",
+        "labelEn": "My workout plan",
+        "labelRu": "Мой план тренировок",
+        "messageText": {
+          "en": "Show my workout plan",
+          "ru": "Покажи мой план тренировок"
         }
       }
     ]

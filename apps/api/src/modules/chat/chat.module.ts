@@ -10,6 +10,7 @@ import { RecipesModule } from "../recipes/recipes.module.js";
 import { UsersModule } from "../users/users.module.js";
 import { TodayModule } from "../today/today.module.js";
 import { WellbeingCheckInsModule } from "../wellbeing-check-ins/wellbeing-check-ins.module.js";
+import { WorkoutsModule } from "../workouts/workouts.module.js";
 import { ChatController } from "./chat.controller.js";
 import { ChatRepository } from "./chat.repository.js";
 import { ChatService } from "./chat.service.js";
@@ -28,6 +29,7 @@ import { ProposalExplainerService } from "./proposal-explainer.service.js";
     RecipesModule,
     TodayModule,
     NutritionModule,
+    WorkoutsModule,
     forwardRef(() => ChatAttachmentsModule),
   ],
   controllers: [ChatController],

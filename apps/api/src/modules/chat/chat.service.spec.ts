@@ -107,6 +107,14 @@ function createDirectChatPathServiceForChatTests(todayService: {
     {
       getCurrentActivePlan: vi.fn().mockResolvedValue({ plan: null, activeRevision: null }),
     } as never,
+    {
+      getLatestSummarySnapshot: vi.fn().mockResolvedValue(null),
+    } as never,
+    {
+      getCurrentActivePlan: vi
+        .fn()
+        .mockResolvedValue({ plan: null, activeRevision: null, sessions: [] }),
+    } as never,
   );
 }
 
@@ -3422,6 +3430,14 @@ describe("ChatService", () => {
         { resolveFromAuth: async () => user } as never,
         {
           getCurrentActivePlan: vi.fn().mockResolvedValue({ plan: null, activeRevision: null }),
+        } as never,
+        {
+          getLatestSummarySnapshot: vi.fn().mockResolvedValue(null),
+        } as never,
+        {
+          getCurrentActivePlan: vi
+            .fn()
+            .mockResolvedValue({ plan: null, activeRevision: null, sessions: [] }),
         } as never,
       );
 

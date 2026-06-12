@@ -94,10 +94,51 @@ const NUTRITION_PLAN_MATCH_PATTERNS = [
   pattern("^(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$"),
 ];
 
+const WEEKLY_PROGRESS_MATCH_PATTERNS = [
+  pattern("^(?:show\\s+(?:me\\s+)?)?(?:my\\s+)?weekly\\s+progress\\s*\\??$"),
+  pattern("^(?:show\\s+(?:me\\s+)?)?(?:my\\s+)?progress\\s+(?:for\\s+|of\\s+)?(?:this|the)\\s+week\\s*\\??$"),
+  pattern("^how\\s+(?:was|did)\\s+(?:my|the)\\s+week(?:\\s+go)?\\s*\\??$"),
+  pattern("^(?:покажи\\s+)?(?:мой\\s+)?прогресс\\s+за\\s+(?:эту\\s+|последнюю\\s+)?неделю\\s*\\??$"),
+  pattern("^как\\s+прошла\\s+(?:моя\\s+)?неделя\\s*\\??$"),
+  pattern("^недельный\\s+прогресс\\s*\\??$"),
+];
+
+const WEEKLY_PROGRESS_ANALYTIC_NEGATIVE_EN = pattern(
+  "\\b(?:analy[sz]e|analysis|review|why|improve|compare|advice)\\b",
+);
+
+const WEEKLY_PROGRESS_ANALYTIC_NEGATIVE_RU = pattern(
+  "(?:проанализ|анализ|разбор|разбер|почему|повлиял|не так|улучш|сравн|посовет)",
+);
+
+const WEEKLY_PROGRESS_LONG_LOOKBACK_NEGATIVE = pattern(
+  "\\b(?:month|months|monthly|quarter|year|all[- ]?time|history)\\b" +
+    "|месяц|квартал|полгода|пол года|за год|за вс[её] время|истори",
+);
+
+const WORKOUT_PLAN_MATCH_PATTERNS = [
+  pattern(`^what(?:${APOSTROPHE}s| is)\\s+(?:in\\s+)?(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$`),
+  pattern("^show\\s+(?:me\\s+)?(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$"),
+  pattern("^(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$"),
+  pattern("^что\\s+(?:в\\s+)?(?:моём?|у меня)\\s+план(?:е)?\\s+тренировок\\s*\\??$"),
+  pattern("^покажи\\s+(?:мой\\s+)?план\\s+тренировок\\s*\\??$"),
+  pattern("^(?:мой\\s+)?план\\s+тренировок\\s*\\??$"),
+];
+
+const WORKOUT_PLAN_MUTATION_NEGATIVE_EN = pattern(
+  "\\b(?:change|modify|update|create|build|add|remove|edit|adapt|improve|make|recommend)\\b",
+);
+
+const WORKOUT_PLAN_MUTATION_NEGATIVE_RU = pattern(
+  "(?:созда|сдела|измени|адаптир|улучш|поменя|обнов|порекоменд|посовет)",
+);
+
 export const DEFAULT_DIRECT_PATH_DETECTION_ORDER: readonly DirectChatPathKind[] = [
   "mark_today_workout_done",
   "today_summary_read",
   "nutrition_plan_read",
+  "weekly_progress_read",
+  "workout_plan_read",
 ];
 
 export function buildDefaultDirectPathKindMatchers(): DirectPathKindMatcherConfig[] {
@@ -137,6 +178,32 @@ export function buildDefaultDirectPathKindMatchers(): DirectPathKindMatcherConfi
         // adviceOrImplicitMutation already covers should/could/would/can i/do i/shall i
         shared.adviceOrImplicitMutation,
         pattern("\\b(?:change|modify|update|create|build|add|remove|edit)\\b"),
+      ],
+    },
+    {
+      kind: "weekly_progress_read",
+      refreshHintsOnExecuted: [],
+      matchPatterns: WEEKLY_PROGRESS_MATCH_PATTERNS,
+      negativePatterns: [
+        // adviceOrImplicitMutation already covers should/could/would/can i/do i/shall i
+        shared.adviceOrImplicitMutation,
+        // Analytic/advice phrasing must fall through to the LLM fan-out.
+        WEEKLY_PROGRESS_ANALYTIC_NEGATIVE_EN,
+        WEEKLY_PROGRESS_ANALYTIC_NEGATIVE_RU,
+        // Longer-than-week lookbacks fall through to the fan-out (Tier 2 review path).
+        WEEKLY_PROGRESS_LONG_LOOKBACK_NEGATIVE,
+      ],
+    },
+    {
+      kind: "workout_plan_read",
+      refreshHintsOnExecuted: [],
+      matchPatterns: WORKOUT_PLAN_MATCH_PATTERNS,
+      negativePatterns: [
+        // adviceOrImplicitMutation already covers should/could/would/can i/do i/shall i
+        shared.adviceOrImplicitMutation,
+        // Create/change/adapt phrasing must fall through to the proposal fan-out.
+        WORKOUT_PLAN_MUTATION_NEGATIVE_EN,
+        WORKOUT_PLAN_MUTATION_NEGATIVE_RU,
       ],
     },
   ];

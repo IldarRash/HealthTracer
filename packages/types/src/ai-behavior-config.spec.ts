@@ -96,12 +96,14 @@ describe("ai behavior config", () => {
       "mark_today_workout_done",
       "today_summary_read",
       "nutrition_plan_read",
+      "weekly_progress_read",
+      "workout_plan_read",
     ]);
-    expect(defaults.directPaths.kinds).toHaveLength(3);
+    expect(defaults.directPaths.kinds).toHaveLength(5);
     expect(defaults.directPaths.kinds[0]?.matchPatterns.length).toBeGreaterThan(0);
   });
 
-  it("includes suggestedQuickActions in defaults with all three action ids", () => {
+  it("includes suggestedQuickActions in defaults with all five action ids", () => {
     const defaults = buildDefaultAiBehaviorConfig();
 
     expect(defaults.suggestedQuickActions).toBeDefined();
@@ -109,6 +111,8 @@ describe("ai behavior config", () => {
     expect(ids).toContain("today_summary_read");
     expect(ids).toContain("mark_today_workout_done");
     expect(ids).toContain("nutrition_plan_read");
+    expect(ids).toContain("weekly_progress_read");
+    expect(ids).toContain("workout_plan_read");
   });
 
   it("falls back to suggestedQuickActions defaults when file config omits the key", () => {

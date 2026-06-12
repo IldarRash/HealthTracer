@@ -76,6 +76,10 @@ function resolveDirectPathExecutorMode(
       return "deterministic_write";
     case "nutrition_plan_read":
       return "deterministic_read";
+    case "weekly_progress_read":
+      return "deterministic_read";
+    case "workout_plan_read":
+      return "deterministic_read";
   }
 }
 

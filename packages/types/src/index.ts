@@ -1832,6 +1832,8 @@ export {
   directPathNutritionPlanRepliesSchema,
   directPathReplyTemplatesSchema,
   directPathTodaySummaryRepliesSchema,
+  directPathWeeklyProgressRepliesSchema,
+  directPathWorkoutPlanRepliesSchema,
   formatTodaySummaryReadMessage,
   formatWorkoutMarkedDoneMessage,
   type DirectPathItemStatusLabels,
@@ -1839,6 +1841,8 @@ export {
   type DirectPathNutritionPlanReplies,
   type DirectPathReplyTemplates,
   type DirectPathTodaySummaryReplies,
+  type DirectPathWeeklyProgressReplies,
+  type DirectPathWorkoutPlanReplies,
 } from "./direct-chat-path-replies.js";
 export { interpolateBehaviorTemplate } from "./behavior-template.js";
 export {

@@ -364,6 +364,24 @@ export const DEFAULT_SUGGESTED_QUICK_ACTIONS: SuggestedQuickActionsConfig = {
         ru: "Покажи мой план питания",
       },
     },
+    {
+      id: "weekly_progress_read",
+      labelEn: "Weekly progress",
+      labelRu: "Прогресс за неделю",
+      messageText: {
+        en: "Show my weekly progress",
+        ru: "Мой прогресс за неделю",
+      },
+    },
+    {
+      id: "workout_plan_read",
+      labelEn: "My workout plan",
+      labelRu: "Мой план тренировок",
+      messageText: {
+        en: "Show my workout plan",
+        ru: "Покажи мой план тренировок",
+      },
+    },
   ],
 };
 
@@ -626,6 +644,14 @@ export function normalizeAiBehaviorConfig(
         nutritionPlan: {
           ...defaults.directPaths.replyTemplates.nutritionPlan,
           ...partial?.directPaths?.replyTemplates?.nutritionPlan,
+        },
+        weeklyProgress: {
+          ...defaults.directPaths.replyTemplates.weeklyProgress,
+          ...partial?.directPaths?.replyTemplates?.weeklyProgress,
+        },
+        workoutPlan: {
+          ...defaults.directPaths.replyTemplates.workoutPlan,
+          ...partial?.directPaths?.replyTemplates?.workoutPlan,
         },
       },
     },
