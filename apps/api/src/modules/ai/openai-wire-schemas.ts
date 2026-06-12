@@ -36,6 +36,7 @@ import {
   contextSlicePurposeSchema,
   contextTimeRangeSchema,
   hasLlmEmissionSchemaForIntent,
+  routerDirectCommandKindSchema,
   type LlmEmissionCoveredIntent,
 } from "@health/types";
 import { toOpenAiStrictJsonSchema } from "./openai-json-schema.js";
@@ -170,8 +171,17 @@ export const routerDecisionWireSchema: JsonSchema = strictObject(
     directCommand: nullable(
       strictObject(
         {
+          // Enum-or-null, derived from the authoritative Zod enum. A free-form
+          // string here let live models emit the literal "null" (learned from
+          // the prompt's shape line), which failed the Zod parse and silently
+          // degraded valid domain selections to the empty fallback.
+          kind: {
+            anyOf: [
+              { type: "string", enum: [...routerDirectCommandKindSchema.options] },
+              { type: "null" },
+            ],
+          },
           detected: { type: "boolean" },
-          kind: nullableString(),
           confidence: nullableNumber(),
         },
         ["detected", "kind", "confidence"],

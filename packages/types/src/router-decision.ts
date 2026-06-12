@@ -52,12 +52,22 @@ export type RouterSelectedDomain = z.infer<typeof routerSelectedDomainSchema>;
 // Optional direct-command signal (parallel to TurnDecision directCommand)
 // ---------------------------------------------------------------------------
 
+export const routerDirectCommandKindSchema = z.enum([
+  "today_summary_read",
+  "mark_today_workout_done",
+]);
+
+export type RouterDirectCommandKind = z.infer<typeof routerDirectCommandKindSchema>;
+
 export const routerDirectCommandSchema = z.object({
   detected: z.boolean(),
-  kind: z
-    .enum(["today_summary_read", "mark_today_workout_done"])
-    .nullable()
-    .optional(),
+  // LLM-tolerance boundary: the OpenAI wire schema can only express `kind` as a
+  // nullable enum, and live models have been observed emitting junk values
+  // (e.g. the literal string "null" for plan-creation turns). directCommand is
+  // telemetry-only, so an unknown kind degrades to null — it must NEVER fail
+  // the whole router parse and dump a valid domain selection onto the empty
+  // fallback route.
+  kind: routerDirectCommandKindSchema.nullable().catch(null).optional(),
   confidence: z.number().min(0).max(1).optional(),
 });
 

@@ -133,6 +133,51 @@ describe("RouterDecisionOutput schema", () => {
     expect(parsed.directCommand?.kind).toBe("mark_today_workout_done");
   });
 
+  it("degrades an unknown directCommand.kind to null instead of failing the parse (live regression 2026-06)", () => {
+    // Exact payload captured from a live golden-eval failure: the router LLM
+    // emitted the literal string "null" for directCommand.kind on plan-creation
+    // turns, and the enum rejection silently dumped a valid 0.95-confidence
+    // workout selection onto the empty fallback route.
+    const capturedLivePayload = {
+      selectedDomains: [
+        {
+          domain: "workout",
+          confidence: 0.95,
+          intentHints: ["create_workout_plan"],
+          toolHints: [],
+          signalHints: ["explicit_plan_request"],
+        },
+      ],
+      directCommand: { detected: true, kind: "null", confidence: 0.0 },
+      safetyFlags: [],
+      confidence: 0.95,
+    };
+
+    expect(validateRouterDecisionOutputShape(capturedLivePayload)).toEqual([]);
+
+    const parsed = routerDecisionOutputSchema.parse(capturedLivePayload);
+
+    expect(parsed.selectedDomains).toHaveLength(1);
+    expect(parsed.selectedDomains[0]?.domain).toBe("workout");
+    expect(parsed.confidence).toBe(0.95);
+    expect(parsed.directCommand?.detected).toBe(true);
+    expect(parsed.directCommand?.kind).toBeNull();
+  });
+
+  it("still parses known directCommand kinds and JSON-null kind unchanged", () => {
+    const withKnownKind = routerDecisionOutputSchema.parse({
+      ...validOutputBase,
+      directCommand: { detected: true, kind: "today_summary_read", confidence: 0.9 },
+    });
+    const withNullKind = routerDecisionOutputSchema.parse({
+      ...validOutputBase,
+      directCommand: { detected: false, kind: null },
+    });
+
+    expect(withKnownKind.directCommand?.kind).toBe("today_summary_read");
+    expect(withNullKind.directCommand?.kind).toBeNull();
+  });
+
   it("defaults selectedDomains to [] when omitted", () => {
     const parsed = routerDecisionOutputSchema.parse({
       confidence: 0.4,
