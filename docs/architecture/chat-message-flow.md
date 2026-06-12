@@ -268,6 +268,12 @@ extracted here; image bytes are loaded into a vision data URI per domain (§4g).
 - **Workout calorie estimate:** only the workout domain answer may carry
   `workoutCalorieEstimate` / `workoutCaloriePerHourRate` (enforced by the domain answer
   schema's superRefine).
+- **Structured-output branch (per turn):** the OpenAI domain-step wire schema is built
+  from the turn's clamped `allowedProposalIntents`
+  (`buildDomainStepWireSchema`, `openai-wire-schemas.ts`) — `strict: true` with typed
+  per-intent candidate envelopes when **every** allowed intent has an LLM emission
+  schema (`packages/types/src/llm-emission`), else the permissive `strict: false`
+  fallback (no behavior cliff; Zod re-validates post-receive either way).
 
 ### 4h. DecisionMaker (final LLM)
 
@@ -343,26 +349,53 @@ After the AI pipeline returns, still in `ChatService.sendMessage`:
 1. **Deterministic proposal injectors** merge into `proposalsToPersist`:
    `mergeDeterministicChatProposals` (wellbeing check-in, nutrition incident),
    weekly-review packing (`isWeeklyReviewTurn`), and a recipe-recommendation proposal
-   (`shouldTriggerRecipeRecommendationRequest`). All pass the same validation stack.
+   (`shouldTriggerRecipeRecommendationRequest`). All pass the same
+   normalize → validate (→ repair) flow in step 3.
    For explainer-`with_proposal` turns, `proposalsToPersist` is forced to `[]`.
 2. **`validating` stage** emitted — reply + proposals only become visible to the user after
    this stage (SSE `final` event); this is the safety floor.
-3. **Assistant message persisted** with content `generated.turnError ? " " : generated.output.reply`
-   and metadata `{ parseErrors, replySafetyErrors, agent, …, (turnError | turnDegraded) }`.
-4. **Proposal validation + persist:** unless it's a proposal-explainer turn, each raw proposal
-   runs the full `ProposalValidationService` stack (safety, schema, ownership, provenance,
-   progress-linkage, goal hierarchy, today source refs, recovery adaptation, habit/wellbeing
-   context, nutrition-incident image refs, recipe context, chat-attachment refs) →
-   `validationStatus` valid/invalid; all are persisted via `chatRepository.createProposal`.
-5. **suggestedQuickActions** derived for LLM-backed turns only (skipped on `turnError`):
+3. **Per-proposal normalize → validate → repair (BEFORE the assistant message is created,
+   so repair telemetry can ride its metadata):** unless it's a proposal-explainer turn,
+   each raw proposal runs `ChatService.validateAndRepairProposal`:
+   - **Normalize:** `ProposalNormalizationService.normalizeProposal`
+     (`proposal-normalization.service.ts`) — per-intent bridge run against a server-built
+     `ProposalNormalizationContext` (`userId`, server `nowIso`, turn-attachment metadata).
+     Workout intents bridge legacy name-only exercises to catalog form
+     (`normalizeLegacyWorkoutPlanExercises`; `adapt_workout_plan_from_progress` on its
+     nested `.plan`); `log_nutrition_incident` gets trusted stamping (imageRefs from the
+     turn's real image attachments, provenance coercion, `incidentDateTime` clamp). A
+     throwing normalizer returns the original changes (intent + error name logged only).
+   - **Validate:** the full `runProposalValidationStack` (safety, schema, ownership,
+     provenance, progress-linkage, goal hierarchy, today source refs, recovery adaptation,
+     habit/wellbeing context, nutrition-incident image refs, recipe context,
+     chat-attachment refs), bucketed for `classifyProposalValidationFailure`.
+   - **Branch — schema-class failure + repair provider available + budget left
+     (`MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN = 2`):** one payload-only repair LLM call
+     (`ProposalRepairService.tryRepair`, 10 s timeout, envelope preserved); the repaired
+     payload re-enters the SAME normalize + full validation stack. Safety- and
+     ownership-class failures are **never** repaired. Still-invalid persists the final
+     errors (honest invalid card).
+   - **Branch — validation stack throws (e.g. DB error in an async ownership check):**
+     only that proposal degrades to `validationStatus: "invalid"` with
+     `validationErrors: ["proposal_validation_unavailable"]`; the turn survives.
+4. **Assistant message persisted** with content `generated.turnError ? " " : generated.output.reply`
+   and metadata `{ parseErrors, replySafetyErrors, agent (+ agent.repair { attempted, succeeded }
+   when repair was attempted), …, (turnError | turnDegraded) }`.
+5. **Proposals persisted** via `chatRepository.createProposal` with their final
+   `validationStatus` / `validationErrors` (valid and invalid alike).
+6. **suggestedQuickActions** derived for LLM-backed turns only (skipped on `turnError`):
    `deriveQuickActionsForTurn` (`packages/types/src/suggested-quick-actions.ts`) over the
    fan-out selected domains:
    - always include `today_summary_read`;
    - add `mark_today_workout_done` iff `workout` is among selected domains;
    - add `nutrition_plan_read` iff `nutrition` is among selected domains.
    Definitions/labels come from `suggestedQuickActions.actions` in `ai-behavior.json`.
-6. **Response shape:** `{ thread, userMessage, assistantMessage, proposals, (attachmentOutcomes),
-   (consentRequired), (turnError), (suggestedQuickActions) }`.
+7. **Response shape:** `{ thread, userMessage, assistantMessage, proposals, (attachmentOutcomes),
+   (consentRequired), (turnError), (suggestedQuickActions) }`. The `proposals` array is
+   **element-tolerant** on the client (`tolerantArraySchema`, `chat-turn.ts`): one
+   malformed entity never fails the whole turn-response parse, and non-valid proposals
+   parse with raw `proposedChanges` and render the generic invalid card
+   (`isValidatedProposal` guard in `inline-proposal-card.tsx`).
 
 **SSE vs sync.** For fan-out turns the stream emits:
 `turn_accepted → stage(preprocessing) → stage(routing) → stage(domains_running, selectedDomains)
@@ -371,6 +404,11 @@ After the AI pipeline returns, still in `ChatService.sendMessage`:
 selected-domain names only. The `final` event carries the exact same `ChatTurnResponse` the
 sync endpoint returns. On error the stream emits a generic `error` event (no internals);
 `sendMessage` still completes so messages/proposals persist regardless of stream state.
+On the web client, a `final` frame that **arrived but failed schema validation** is the
+distinct failure reason `final_unparseable` (`apps/web/src/lib/chat-stream.ts`), and
+`shouldFallbackToSync` returns **false** for it — the backend turn succeeded, so a sync
+re-send would be a duplicate paid LLM turn; the client refetches the thread instead.
+Every other stream failure reason still falls back to the sync endpoint.
 
 ---
 
@@ -394,6 +432,7 @@ LLM-call count is the number of pipeline LLM calls (router + N domains + decisio
 | Message > 20k chars | §1 Zod `MAX_CHAT_USER_MESSAGE_CHARS` | 0 | HTTP 400 (nothing persisted) |
 | LLM provider failure (decision-maker fails after retry) | §4h → §5 `turnError: decision_failed` | router + domains + 2 decision attempts | Error card + Retry; assistant content `" "` |
 | Reply safety blocks the synthesized reply | §4j → §5 `turnError: reply_blocked` | up to 5 | Error card + Retry (+ blocked line); proposals dropped |
+| LLM emits a schema-invalid proposal payload | §6.3 normalize → validate → one payload-only repair call → full re-validate | fan-out + ≤2 repair calls/turn | Normal proposal card if repaired; honest invalid card (disabled Apply, working Reject/Modify) otherwise |
 
 ---
 

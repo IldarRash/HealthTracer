@@ -39,11 +39,14 @@ User message (+ optional attachments)
        → Domain LLMs (parallel)      workout / nutrition / health; a failed domain → safe empty output
        → DecisionMaker    (LLM N+2)  synthesizes domain outputs into typed proposals only
        → ActionResolver              resolves a typed proposal, filtered to the active allowlist
-  → ProposalValidation + persist     reviewable proposals (NOT applied)
+  → ProposalNormalization            per-intent bridge + trusted server-side stamping
+  → ProposalValidation + persist     full validation stack (schema failures: one bounded
+                                     payload-only LLM self-repair, then full re-validation);
+                                     reviewable proposals (NOT applied)
   → user accepts a valid proposal → workout/nutrition NEW REVISION
 ```
 
-**Safety floors live in code, not config:** crisis support bypasses all LLMs; per-domain context budgets deny documents + sensitive health context by default; the router is read-only and cannot reply or propose; the decision-maker emits typed proposals only and never writes domain state. YAML/JSON config can only *narrow* capability allowlists, never widen them, and loading is fail-closed. A deterministic **stub provider** mirrors every LLM method, so the whole pipeline is testable in CI without external API access.
+**Safety floors live in code, not config:** crisis support bypasses all LLMs; per-domain context budgets deny documents + sensitive health context by default; the router is read-only and cannot reply or propose; the decision-maker emits typed proposals only and never writes domain state. YAML/JSON config can only *narrow* capability allowlists, never widen them, and loading is fail-closed. Tests use the shared provider mocks from `@health/ai/testing`, so the whole pipeline is testable in CI without external API access.
 
 ## Tech stack
 

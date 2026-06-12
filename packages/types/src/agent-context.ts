@@ -853,6 +853,16 @@ export const agentTurnMetadataSchema = z.object({
   missingContextNotes: z.array(z.string().min(1).max(240)).max(5).default([]),
   /** Per-stage fan-out diagnostics (router/domains/decision/resolution). Optional/additive. */
   fanOut: agentFanOutDiagnosticsSchema.optional(),
+  /**
+   * Proposal self-repair telemetry for this turn (counts only — never payloads).
+   * Present only when at least one repair was attempted.
+   */
+  repair: z
+    .object({
+      attempted: z.number().int().min(0),
+      succeeded: z.number().int().min(0),
+    })
+    .optional(),
 });
 
 export type AgentTurnMetadata = z.infer<typeof agentTurnMetadataSchema>;

@@ -4,6 +4,8 @@ import {
   completeWorkoutSession,
   completeOnboarding,
   decideProposal,
+  getChatThread,
+  listProposals,
   sendChatMessage,
   uploadChatAttachment,
   apiQueryKeys,
@@ -3283,5 +3285,106 @@ describe("web api helpers", () => {
         apiQueryKeys.goals,
       ]),
     );
+  });
+});
+
+describe("tolerant list parsing — one bad entity never fails the response", () => {
+  const threadId = "24b19287-75b8-4a3e-9c10-691908479405";
+
+  const persistedProposal = {
+    ...acceptedProposalFixtureIds,
+    sourceMessageId: null,
+    intent: "summarize_progress",
+    targetDomain: "general",
+    title: "Review your week",
+    reason: "Weekly check-in.",
+    proposedChanges: {},
+    status: "pending",
+    validationStatus: "valid",
+    validationErrors: [],
+    userDecisionAt: null,
+    appliedReference: null,
+    createdAt: "2026-05-22T12:00:00.000Z",
+    updatedAt: "2026-05-22T12:00:00.000Z",
+  };
+
+  const invalidStatusProposal = {
+    ...persistedProposal,
+    id: "24b19287-75b8-4a3e-9c10-691908479406",
+    intent: "log_nutrition_incident",
+    targetDomain: "nutrition",
+    proposedChanges: { provenance: { source: "image_estimate" } },
+    validationStatus: "invalid",
+    validationErrors: ["proposedChanges: payload failed validation"],
+  };
+
+  it("listProposals keeps invalid-status proposals and drops only malformed rows", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify([
+            persistedProposal,
+            { totally: "malformed row" },
+            invalidStatusProposal,
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await listProposals(token, threadId);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data).toHaveLength(2);
+    expect(result.data?.[0]?.intent).toBe("summarize_progress");
+    expect(result.data?.[1]?.validationStatus).toBe("invalid");
+    expect(result.data?.[1]?.validationErrors).toEqual([
+      "proposedChanges: payload failed validation",
+    ]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain("proposals[1]");
+    warnSpy.mockRestore();
+  });
+
+  it("getChatThread drops a malformed message but keeps the rest of the thread", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const goodMessage = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      threadId,
+      role: "user",
+      content: "Hello coach",
+      metadata: {},
+      createdAt: "2026-05-22T12:00:00.000Z",
+      attachments: [],
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            thread: {
+              id: threadId,
+              userId: acceptedProposalFixtureIds.userId,
+              title: "Coaching",
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-22T12:00:00.000Z",
+            },
+            messages: [goodMessage, { broken: true }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await getChatThread(token, threadId);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.messages).toHaveLength(1);
+    expect(result.data?.messages[0]?.content).toBe("Hello coach");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 });

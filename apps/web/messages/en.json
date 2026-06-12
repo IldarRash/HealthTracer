@@ -163,6 +163,7 @@
       "nutritionPlan": "What's in my nutrition plan?"
     },
     "bodyPhotoCaption": "Here — all angles",
+    "streamRecoveredNotice": "Your message was delivered. The conversation has been refreshed to show the coach's reply — no need to resend.",
     "error": {
       "title": "Couldn't reply",
       "body": "The connection dropped while I was preparing a response. Your message is saved — you can retry.",

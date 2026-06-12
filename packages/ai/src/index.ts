@@ -13,3 +13,8 @@ export {
   type ProviderCallResult,
   type ProviderUsage,
 } from "./coach-ai-provider.js";
+export {
+  type ProposalRepairProvider,
+  type ProposalRepairRequest,
+  type ProposalRepairResult,
+} from "./proposal-repair-provider.js";

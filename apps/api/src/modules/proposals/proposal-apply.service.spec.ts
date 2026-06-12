@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { WELLBEING_CHECKIN_STALE_PROPOSAL_DATE_ERROR } from "@health/types";
 import { describe, expect, it } from "vitest";
+import { WorkoutsService } from "../workouts/workouts.service.js";
 import { ProposalApplyService } from "./proposal-apply.service.js";
 
 const auth = {
@@ -1276,5 +1277,159 @@ describe("ProposalApplyService — log_workout_activity (Part B)", () => {
     }, fakeTx);
 
     expect(capturedTx).toBe(fakeTx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part C — Slice 8: accepted repeated-ref workout proposal → NEW revision
+// (ProposalApplyService → REAL WorkoutsService.applyWorkoutPlanProposal)
+// ---------------------------------------------------------------------------
+
+describe("ProposalApplyService — accepted repeated-ref workout proposal creates a new revision (Slice 8)", () => {
+  // Live regression shape: the SAME exercise repeats on two days via one shared
+  // pendingExerciseRef with exactly ONE pendingExercises definition. Before the
+  // Slice 1 fix, workoutPlanProposalChangesSchema (parsed right here in the
+  // apply flow) rejected this plan with "pendingExerciseRef values must be
+  // unique within the plan".
+  const repeatedRefChanges = {
+    title: "Week 2 power",
+    summary: "Repeats the same exercise on two days.",
+    days: [
+      {
+        weekday: "monday" as const,
+        focus: "Power",
+        exercises: [
+          {
+            pendingExerciseRef: "pogo-jump",
+            snapshot: { name: "Pogo Jump" },
+            sets: 2,
+            reps: "20",
+          },
+        ],
+      },
+      {
+        weekday: "thursday" as const,
+        focus: "Power",
+        exercises: [
+          {
+            pendingExerciseRef: "pogo-jump",
+            snapshot: { name: "Pogo Jump" },
+            sets: 3,
+            reps: "15",
+          },
+        ],
+      },
+    ],
+    notes: [],
+    pendingExercises: {
+      "pogo-jump": {
+        name: "Pogo Jump",
+        aliases: [],
+        primaryMuscles: ["calves"],
+        secondaryMuscles: [],
+        equipment: ["bodyweight"],
+        movementPatterns: ["plyometric"],
+        modalities: ["plyometrics"],
+        difficulty: "intermediate",
+        instructions: ["Jump repeatedly with minimal ground contact time."],
+        safetyNotes: ["Land softly."],
+        source: "ai_generated",
+      },
+    },
+  };
+
+  it("resolves the repeated ref once, shares the exerciseId, strips pending fields, and APPENDS a revision to the existing plan (never overwrites)", async () => {
+    const sharedExerciseId = "d1000001-0000-4000-8000-000000000088";
+    let findOrCreateCalls = 0;
+    let appendRevisionCalls = 0;
+    let createPlanWithRevisionCalls = 0;
+    let appendedPlanId: string | undefined;
+    let appendedSource: string | undefined;
+    let persistedPayload:
+      | {
+          days: { exercises: { exerciseId?: string; pendingExerciseRef?: string }[] }[];
+          pendingExercises?: unknown;
+        }
+      | undefined;
+
+    const workoutsService = new WorkoutsService(
+      {
+        // An active plan already exists: the ONLY allowed write is appendRevision —
+        // active plan state must never be replaced or overwritten in place.
+        findActivePlanByUserId: async () => ({
+          id: "plan-active-1",
+          userId,
+          activeRevisionId: "rev-old-1",
+        }),
+        appendRevision: async (
+          planId: string,
+          payload: typeof persistedPayload,
+          _reason: string,
+          source: string,
+        ) => {
+          appendRevisionCalls += 1;
+          appendedPlanId = planId;
+          appendedSource = source;
+          persistedPayload = payload;
+          return { id: "rev-new-2" };
+        },
+        createPlanWithRevision: async () => {
+          createPlanWithRevisionCalls += 1;
+          return { revision: { id: "rev-MUST_NOT_REACH" } };
+        },
+      } as never,
+      {} as never, // usersService — not used by applyWorkoutPlanProposal
+      {
+        findInaccessibleExerciseIds: async () => [],
+        findOrCreateExercise: async (input: { name: string }) => {
+          findOrCreateCalls += 1;
+          // Yield so concurrent day resolution would race a naive value cache.
+          await Promise.resolve();
+          return { id: sharedExerciseId, name: input.name };
+        },
+      } as never,
+    );
+
+    const service = new ProposalApplyService(
+      {} as never, // profilesService
+      {} as never, // goalsService
+      workoutsService,
+      {} as never, // nutritionService
+      {} as never, // habitsService
+      {} as never, // recipesService
+      {} as never, // todayService
+      {} as never, // progressService
+      {} as never, // wellbeingCheckInsService
+      {} as never, // bodyService
+    );
+
+    const reference = await service.applyAcceptedProposal(auth, userId, {
+      ...baseProposal,
+      intent: "create_workout_plan",
+      targetDomain: "workout",
+      proposedChanges: repeatedRefChanges,
+    });
+
+    // A NEW revision was appended to the existing plan — never an overwrite.
+    expect(reference).toBe("workout_revision:rev-new-2");
+    expect(appendRevisionCalls).toBe(1);
+    expect(createPlanWithRevisionCalls).toBe(0);
+    expect(appendedPlanId).toBe("plan-active-1");
+    expect(appendedSource).toBe("ai_proposal");
+
+    // The repeated ref resolved through exactly ONE findOrCreateExercise call.
+    expect(findOrCreateCalls).toBe(1);
+
+    // Both day entries share the resulting catalog exerciseId.
+    const monday = persistedPayload?.days[0]?.exercises[0];
+    const thursday = persistedPayload?.days[1]?.exercises[0];
+    expect(monday?.exerciseId).toBe(sharedExerciseId);
+    expect(thursday?.exerciseId).toBe(sharedExerciseId);
+
+    // pendingExerciseRef and the pendingExercises map are stripped from the
+    // persisted revision payload.
+    expect(monday?.pendingExerciseRef).toBeUndefined();
+    expect(thursday?.pendingExerciseRef).toBeUndefined();
+    expect(persistedPayload?.pendingExercises).toBeUndefined();
   });
 });

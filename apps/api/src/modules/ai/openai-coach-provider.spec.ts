@@ -932,11 +932,12 @@ describe("OpenAiCoachProvider", () => {
       expect(jsonSchema["schema"]).toBeDefined();
     });
 
-    it("generateDomainStep sends json_schema response_format with strict:false and correct schema name", async () => {
+    it("generateDomainStep sends strict:false with the permissive schema when no proposal intents are allowed", async () => {
       const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
       vi.stubGlobal("fetch", fetchMock);
 
       const provider = makeProvider();
+      // validDomainStepRequest has allowedProposalIntents: [] → per-turn fallback.
       await provider.generateDomainStep(validDomainStepRequest as never);
 
       const body = getLastBody();
@@ -945,14 +946,52 @@ describe("OpenAiCoachProvider", () => {
       expect(responseFormat["type"]).toBe("json_schema");
 
       const jsonSchema = responseFormat["json_schema"] as Record<string, unknown>;
-      // strict:false is REQUIRED here: the domain step schema contains open-ended
-      // objects (tool input, per-intent candidateProposals) and OpenAI strict mode
-      // rejects any object schema with additionalProperties:true. Zod validates
-      // post-receive. Regression guard: live calls failed with
+      // The permissive fallback schema contains open-ended objects (tool input,
+      // candidateProposals records) and OpenAI strict mode rejects any object
+      // schema with additionalProperties:true, so it MUST be sent strict:false.
+      // Regression guard: live calls failed with
       // "Invalid schema for response_format 'domain_llm_step_output'" when strict was true.
       expect(jsonSchema["strict"]).toBe(false);
       expect(jsonSchema["name"]).toBe(DOMAIN_LLM_STEP_SCHEMA_NAME);
       expect(jsonSchema["schema"]).toBeDefined();
+    });
+
+    it("generateDomainStep sends strict:true with the typed schema when every allowed intent has an emission schema", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider();
+      await provider.generateDomainStep({
+        ...validDomainStepRequest,
+        allowedProposalIntents: ["create_workout_plan", "adapt_workout_plan"],
+      } as never);
+
+      const body = getLastBody();
+      const jsonSchema = (body["response_format"] as Record<string, unknown>)[
+        "json_schema"
+      ] as Record<string, unknown>;
+
+      expect(jsonSchema["strict"]).toBe(true);
+      expect(jsonSchema["name"]).toBe(DOMAIN_LLM_STEP_SCHEMA_NAME);
+      expect(jsonSchema["schema"]).toBeDefined();
+    });
+
+    it("generateDomainStep falls back to strict:false when any allowed intent lacks an emission schema", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider();
+      await provider.generateDomainStep({
+        ...validDomainStepRequest,
+        allowedProposalIntents: ["create_workout_plan", "update_profile"],
+      } as never);
+
+      const body = getLastBody();
+      const jsonSchema = (body["response_format"] as Record<string, unknown>)[
+        "json_schema"
+      ] as Record<string, unknown>;
+
+      expect(jsonSchema["strict"]).toBe(false);
     });
 
     it("generateFinalDecision sends json_schema response_format with strict:true and correct schema name", async () => {
