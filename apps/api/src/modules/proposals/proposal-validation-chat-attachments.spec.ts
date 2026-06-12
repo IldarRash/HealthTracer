@@ -30,8 +30,8 @@ function createService(options?: {
     {} as never,
     {} as never,
     {} as never,
-    {} as never,
     chatAttachmentsRepository as never,
+    {} as never, // biomarkersRepository
   );
 
   return { service };

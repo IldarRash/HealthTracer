@@ -38,10 +38,6 @@ function createService(
   habitsService: {
     getHabitTemplateReferenceErrors?: (payload: unknown) => Promise<string[]>;
   } = {},
-  documentSignalsRepository: {
-    findApprovedSignalById?: (userId: string, signalId: string) => Promise<unknown>;
-    findCorrelationEligibleSignalById?: (userId: string, signalId: string) => Promise<unknown>;
-  } = {},
   metricsAiContextService: {
     buildSummaryForUser?: (userId: string) => Promise<{
       items: Array<{ metricType: string; periodStart: string; periodEnd: string }>;
@@ -106,6 +102,12 @@ function createService(
       recipe: unknown;
     } | null>;
   } = {},
+  biomarkersRepository: {
+    findContextEligibleReadingById?: (
+      userId: string,
+      readingId: string,
+    ) => Promise<unknown>;
+  } = {},
 ) {
   return new ProposalValidationService(
     {
@@ -121,11 +123,6 @@ function createService(
     {
       getHabitTemplateReferenceErrors: async () => [],
       ...habitsService,
-    } as never,
-    {
-      findApprovedSignalById: async () => null,
-      findCorrelationEligibleSignalById: async () => null,
-      ...documentSignalsRepository,
     } as never,
     {
       buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }),
@@ -174,6 +171,10 @@ function createService(
     } as never,
     {
       listByIdsForUser: async () => [],
+    } as never,
+    {
+      findContextEligibleReadingById: async () => null,
+      ...biomarkersRepository,
     } as never,
   );
 }
@@ -277,7 +278,7 @@ describe("ProposalValidationService", () => {
 
   it("rejects create_goal proposals that exceed active quarterly caps", async () => {
     const quarterlyGoalId = "44444444-4444-4444-8444-444444444444";
-    const goalService = createService({}, {}, {}, {}, {}, {
+    const goalService = createService({}, {}, {}, {}, {
       listByUserId: async () => [
         {
           id: quarterlyGoalId,
@@ -314,7 +315,7 @@ describe("ProposalValidationService", () => {
 
   it("rejects create_goal proposals with invalid owned parent hierarchy", async () => {
     const weeklyParentId = "33333333-3333-4333-8333-333333333333";
-    const goalService = createService({}, {}, {}, {}, {}, {
+    const goalService = createService({}, {}, {}, {}, {
       listByUserId: async () => [
         {
           id: weeklyParentId,
@@ -356,7 +357,7 @@ describe("ProposalValidationService", () => {
   it("rejects update_goal proposals after merging persisted hierarchy state", async () => {
     const weeklyGoalId = "33333333-3333-4333-8333-333333333333";
     const quarterlyGoalId = "44444444-4444-4444-8444-444444444444";
-    const goalService = createService({}, {}, {}, {}, {}, {
+    const goalService = createService({}, {}, {}, {}, {
       listByUserId: async () => [
         {
           id: weeklyGoalId,
@@ -408,7 +409,7 @@ describe("ProposalValidationService", () => {
   });
 
   it("rejects update_goal proposals for goals not owned by the user", async () => {
-    const goalService = createService({}, {}, {}, {}, {}, {
+    const goalService = createService({}, {}, {}, {}, {
       listByUserId: async () => [],
     });
 
@@ -446,7 +447,7 @@ describe("ProposalValidationService", () => {
   });
 
   it("rejects today checklist proposals when goal source refs are not owned", async () => {
-    const todayService = createService({}, {}, {}, {}, {}, {
+    const todayService = createService({}, {}, {}, {}, {
       listByUserId: async () => [],
     });
 
@@ -472,7 +473,7 @@ describe("ProposalValidationService", () => {
   });
 
   it("rejects today checklist goal source refs with the wrong horizon or status", async () => {
-    const todayService = createService({}, {}, {}, {}, {}, {
+    const todayService = createService({}, {}, {}, {}, {
       listByUserId: async () => [
         {
           id: "33333333-3333-4333-8333-333333333333",
@@ -918,7 +919,7 @@ describe("ProposalValidationService", () => {
     const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
     const staleRevisionId = "ad000002-0000-4000-8000-000000000001";
     const activeRevisionId = "ad000003-0000-4000-8000-000000000001";
-    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
       findActivePlanByUserId: async () => ({ id: "plan-id-1", activeRevisionId }),
       findRevisionOwnedByUser: async (_userId, revisionId) =>
         revisionId === staleRevisionId ? { id: staleRevisionId } : null,
@@ -946,7 +947,7 @@ describe("ProposalValidationService", () => {
   it("flags owned revision references when no active nutrition plan exists", async () => {
     const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
     const ownedRevisionId = "ad000002-0000-4000-8000-000000000001";
-    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
       findActivePlanByUserId: async () => null,
       findRevisionOwnedByUser: async (_userId, revisionId) =>
         revisionId === ownedRevisionId ? { id: ownedRevisionId } : null,
@@ -975,7 +976,7 @@ describe("ProposalValidationService", () => {
   it("flags missing nutrition revision ownership for recommend_recipes proposals", async () => {
     const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
     const missingRevisionId = "ad000004-0000-4000-8000-000000000001";
-    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+    const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
       findActivePlanByUserId: async () => ({
         id: "plan-id-2",
         activeRevisionId: "ad000003-0000-4000-8000-000000000001",
@@ -1252,28 +1253,14 @@ describe("ProposalValidationService", () => {
 
   describe("correlation evidence ownership", () => {
     const userId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
-    const signalId = "14a08176-64a7-4a2d-8a44-581807368394";
     const summaryId = "24b19287-75b8-4a3e-9c10-691908479405";
 
-    it("accepts owned approved document signals and weekly progress evidence refs", async () => {
-      const evidenceService = createService(
-        {
-          summaryExistsForUser: async () => true,
-        },
-        {},
-        {},
-        {
-          findApprovedSignalById: async () => ({ id: signalId }),
-          findCorrelationEligibleSignalById: async () => ({ id: signalId }),
-        },
-      );
+    it("accepts owned weekly progress evidence refs", async () => {
+      const evidenceService = createService({
+        summaryExistsForUser: async () => true,
+      });
 
       const errors = await evidenceService.validateCorrelationEvidenceOwnership(userId, [
-        {
-          type: "document_signal",
-          id: signalId,
-          label: "Energy level from uploaded document",
-        },
         {
           type: "weekly_progress_summary",
           id: summaryId,
@@ -1285,24 +1272,11 @@ describe("ProposalValidationService", () => {
     });
 
     it("rejects evidence refs that are not owned or approved for the user", async () => {
-      const evidenceService = createService(
-        {
-          summaryExistsForUser: async () => false,
-        },
-        {},
-        {},
-        {
-          findApprovedSignalById: async () => null,
-          findCorrelationEligibleSignalById: async () => null,
-        },
-      );
+      const evidenceService = createService({
+        summaryExistsForUser: async () => false,
+      });
 
       const errors = await evidenceService.validateCorrelationEvidenceOwnership(userId, [
-        {
-          type: "document_signal",
-          id: signalId,
-          label: "Energy level from uploaded document",
-        },
         {
           type: "weekly_progress_summary",
           id: summaryId,
@@ -1311,8 +1285,7 @@ describe("ProposalValidationService", () => {
       ]);
 
       expect(errors).toEqual([
-        "evidenceRefs[0].id: Approved document signal was not found for this user.",
-        "evidenceRefs[1].id: Weekly progress summary was not found for this user.",
+        "evidenceRefs[0].id: Weekly progress summary was not found for this user.",
       ]);
     });
 
@@ -1332,9 +1305,130 @@ describe("ProposalValidationService", () => {
       ]);
     });
 
+    describe("biomarker_reading evidence refs", () => {
+      const readingId = "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+
+      // Mirrors the repository's consent-aware eligibility query: only the
+      // owner's manual readings or readings from coach-consented reports match.
+      function createBiomarkerEvidenceService(readings: ReadonlyArray<{
+        id: string;
+        userId: string;
+        source: "manual" | "extraction";
+        reportConsented: boolean | null;
+      }>) {
+        return createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+          findContextEligibleReadingById: async (ownerId: string, id: string) => {
+            const reading = readings.find(
+              (candidate) => candidate.id === id && candidate.userId === ownerId,
+            );
+
+            if (!reading) {
+              return null;
+            }
+
+            const eligible =
+              reading.source === "manual" || reading.reportConsented === true;
+
+            return eligible ? { id: reading.id } : null;
+          },
+        });
+      }
+
+      it("accepts an owned manual reading (always coach-eligible)", async () => {
+        const service = createBiomarkerEvidenceService([
+          { id: readingId, userId, source: "manual", reportConsented: null },
+        ]);
+
+        const errors = await service.validateCorrelationEvidenceOwnership(userId, [
+          { type: "biomarker_reading", id: readingId, label: "Vitamin D reading" },
+        ]);
+
+        expect(errors).toEqual([]);
+      });
+
+      it("accepts an owned extracted reading from a coach-consented report", async () => {
+        const service = createBiomarkerEvidenceService([
+          { id: readingId, userId, source: "extraction", reportConsented: true },
+        ]);
+
+        const errors = await service.validateCorrelationEvidenceOwnership(userId, [
+          { type: "biomarker_reading", id: readingId, label: "Ferritin reading" },
+        ]);
+
+        expect(errors).toEqual([]);
+      });
+
+      it("rejects a reading owned by another user", async () => {
+        const service = createBiomarkerEvidenceService([
+          {
+            id: readingId,
+            userId: "00000000-0000-4000-8000-000000000099",
+            source: "manual",
+            reportConsented: null,
+          },
+        ]);
+
+        const errors = await service.validateCorrelationEvidenceOwnership(userId, [
+          { type: "biomarker_reading", id: readingId, label: "Vitamin D reading" },
+        ]);
+
+        expect(errors).toEqual([
+          "evidenceRefs[0].id: Consented biomarker reading was not found for this user.",
+        ]);
+      });
+
+      it("rejects an extracted reading whose report lacks coach-chat consent", async () => {
+        const service = createBiomarkerEvidenceService([
+          { id: readingId, userId, source: "extraction", reportConsented: false },
+        ]);
+
+        const errors = await service.validateCorrelationEvidenceOwnership(userId, [
+          { type: "biomarker_reading", id: readingId, label: "Ferritin reading" },
+        ]);
+
+        expect(errors).toEqual([
+          "evidenceRefs[0].id: Consented biomarker reading was not found for this user.",
+        ]);
+      });
+
+      it("rejects an unknown reading id", async () => {
+        const service = createBiomarkerEvidenceService([]);
+
+        const errors = await service.validateCorrelationEvidenceOwnership(userId, [
+          {
+            type: "biomarker_reading",
+            id: "11111111-1111-4111-8111-111111111111",
+            label: "Vitamin D reading",
+          },
+        ]);
+
+        expect(errors).toEqual([
+          "evidenceRefs[0].id: Consented biomarker reading was not found for this user.",
+        ]);
+      });
+
+      it("rejects a non-UUID id without hitting the repository", async () => {
+        let repositoryCalled = false;
+        const service = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+          findContextEligibleReadingById: async () => {
+            repositoryCalled = true;
+            return { id: readingId };
+          },
+        });
+
+        const errors = await service.validateCorrelationEvidenceOwnership(userId, [
+          { type: "biomarker_reading", id: "not-a-uuid", label: "Vitamin D reading" },
+        ]);
+
+        expect(repositoryCalled).toBe(false);
+        expect(errors).toEqual([
+          "evidenceRefs[0].id: Consented biomarker reading was not found for this user.",
+        ]);
+      });
+    });
+
     it("rejects health metric aggregate refs that are not in the user context", async () => {
       const evidenceService = createService(
-        {},
         {},
         {},
         {},
@@ -1582,7 +1676,6 @@ describe("ProposalValidationService", () => {
         {},
         {},
         {},
-        {},
         {
           findActivePlanByUserId: async () => ({
             id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
@@ -1631,7 +1724,6 @@ describe("ProposalValidationService", () => {
         {},
         {},
         {},
-        {},
         {
           findActivePlanByUserId: async () => ({
             id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
@@ -1664,7 +1756,6 @@ describe("ProposalValidationService", () => {
         ],
       };
       const intentService = createService(
-        {},
         {},
         {},
         {},
@@ -1800,7 +1891,6 @@ describe("ProposalValidationService", () => {
         {},
         {},
         {},
-        {},
         {
           findActivePlanByUserId: async () => ({
             id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
@@ -1870,7 +1960,6 @@ describe("ProposalValidationService", () => {
         {},
         {},
         {},
-        {},
         {
           computeAndPersistSnapshot: async () => ({
             id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
@@ -1894,7 +1983,6 @@ describe("ProposalValidationService", () => {
 
     it("allows volume increases during prioritize_recovery when override is set", async () => {
       const recoveryService = createService(
-        {},
         {},
         {},
         {},
@@ -1934,7 +2022,6 @@ describe("ProposalValidationService", () => {
         {},
         {},
         {},
-        {},
         {
           computeAndPersistSnapshot: async () => ({
             id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b84",
@@ -1967,7 +2054,6 @@ describe("ProposalValidationService", () => {
 
     it("allows progress-derived volume increases during prioritize_recovery with top-level override", async () => {
       const recoveryService = createService(
-        {},
         {},
         {},
         {},
@@ -2011,7 +2097,6 @@ describe("ProposalValidationService", () => {
         {},
         {},
         {},
-        {},
         {
           computeAndPersistSnapshot: async () => ({
             id: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b99",
@@ -2046,7 +2131,6 @@ describe("ProposalValidationService", () => {
 
     it("rejects stale top-level recovery source refs on progress-derived adaptations", async () => {
       const recoveryService = createService(
-        {},
         {},
         {},
         {},
@@ -2153,7 +2237,7 @@ describe("ProposalValidationService", () => {
 
     it("requires saved or completed recipe recommendations for recipe-backed nutrition incidents", async () => {
       const recommendationId = "b2000001-0000-4000-8000-000000000001";
-      const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
+      const validationService = createService({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {
         findRecommendationById: async () => ({
           recommendation: { status: "pending" },
           recipe: {},
@@ -2213,7 +2297,6 @@ describe("ProposalValidationService", () => {
         {},
         {},
         {},
-        {},
         {
           findByUserId: async () => ({ timezone: "UTC" }),
         },
@@ -2238,7 +2321,6 @@ describe("ProposalValidationService", () => {
       const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
       const today = new Date().toISOString().slice(0, 10);
       const service = createService(
-        {},
         {},
         {},
         {},
@@ -2281,7 +2363,6 @@ describe("ProposalValidationService", () => {
         {},
         {},
         {},
-        {},
         {
           findByUserId: async () => ({ timezone: "UTC" }),
         },
@@ -2308,7 +2389,6 @@ describe("ProposalValidationService", () => {
     it("rejects nutrition incident payloads with unowned image references", async () => {
       const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
       const service = createService(
-        {},
         {},
         {},
         {},
@@ -2354,7 +2434,6 @@ describe("ProposalValidationService", () => {
     it("accepts nutrition incident payloads when image refs are owned analyses", async () => {
       const testUserId = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
       const service = createService(
-        {},
         {},
         {},
         {},
@@ -2429,7 +2508,6 @@ describe("ProposalValidationService", () => {
         { summaryExistsForUser: async () => true, findTrendsOwnedByUser: async () => [] } as never,
         { findInaccessibleExerciseIds: async () => [] } as never,
         { getHabitTemplateReferenceErrors: async () => [] } as never,
-        { findApprovedSignalById: async () => null, findCorrelationEligibleSignalById: async () => null } as never,
         { buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }) } as never,
         { listByUserId: async () => [] } as never,
         { computeAndPersistSnapshot: async () => ({ id: "snap-1", band: "moderate_load" }) } as never,
@@ -2445,6 +2523,7 @@ describe("ProposalValidationService", () => {
         } as never,
         { findRecommendationById: async () => null } as never,
         chatAttachmentsRepository as never,
+        { findContextEligibleReadingById: async () => null } as never,
       );
 
       const errors = await service.validateNutritionIncidentImageRefOwnership(
@@ -2466,7 +2545,6 @@ describe("ProposalValidationService", () => {
         { summaryExistsForUser: async () => true, findTrendsOwnedByUser: async () => [] } as never,
         { findInaccessibleExerciseIds: async () => [] } as never,
         { getHabitTemplateReferenceErrors: async () => [] } as never,
-        { findApprovedSignalById: async () => null, findCorrelationEligibleSignalById: async () => null } as never,
         { buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }) } as never,
         { listByUserId: async () => [] } as never,
         { computeAndPersistSnapshot: async () => ({ id: "snap-1", band: "moderate_load" }) } as never,
@@ -2482,6 +2560,7 @@ describe("ProposalValidationService", () => {
         } as never,
         { findRecommendationById: async () => null } as never,
         chatAttachmentsRepository as never,
+        { findContextEligibleReadingById: async () => null } as never,
       );
 
       const payloadWithForeignRef = {
@@ -2509,7 +2588,6 @@ describe("ProposalValidationService", () => {
         { summaryExistsForUser: async () => true, findTrendsOwnedByUser: async () => [] } as never,
         { findInaccessibleExerciseIds: async () => [] } as never,
         { getHabitTemplateReferenceErrors: async () => [] } as never,
-        { findApprovedSignalById: async () => null, findCorrelationEligibleSignalById: async () => null } as never,
         { buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }) } as never,
         { listByUserId: async () => [] } as never,
         { computeAndPersistSnapshot: async () => ({ id: "snap-1", band: "moderate_load" }) } as never,
@@ -2525,6 +2603,7 @@ describe("ProposalValidationService", () => {
         } as never,
         { findRecommendationById: async () => null } as never,
         chatAttachmentsRepository as never,
+        { findContextEligibleReadingById: async () => null } as never,
       );
 
       const errors = await service.validateNutritionIncidentImageRefOwnership(
@@ -2607,7 +2686,6 @@ describe("ProposalValidationService.validateAdjustNutritionProteinFloor", () => 
       {}, // progressRepository
       {}, // exercisesService
       {}, // habitsService
-      {}, // documentSignalsRepository
       {}, // metricsAiContextService
       {}, // goalsRepository
       {}, // recoveryContextService
@@ -2633,7 +2711,7 @@ describe("ProposalValidationService.validateAdjustNutritionProteinFloor", () => 
 
   it("returns no errors when protein is preserved and calories are lowered", async () => {
     const svc = createService(
-      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
       {
         findActivePlanByUserId: async () => ({ id: activePlanId, activeRevisionId }),
         findActiveRevisionByPlanId: async () => ({ payload: nutritionPlanBase }),
@@ -2654,7 +2732,7 @@ describe("ProposalValidationService.validateAdjustNutritionProteinFloor", () => 
 
   it("rejects when protein is cut while calories are lowered", async () => {
     const svc = createService(
-      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
       {
         findActivePlanByUserId: async () => ({ id: activePlanId, activeRevisionId }),
         findActiveRevisionByPlanId: async () => ({ payload: nutritionPlanBase }),
@@ -2681,7 +2759,7 @@ describe("ProposalValidationService.validateAdjustNutritionProteinFloor", () => 
 
   it("rejects when protein is nulled while calories are lowered", async () => {
     const svc = createService(
-      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
       {
         findActivePlanByUserId: async () => ({ id: activePlanId, activeRevisionId }),
         findActiveRevisionByPlanId: async () => ({ payload: nutritionPlanBase }),
@@ -2706,7 +2784,7 @@ describe("ProposalValidationService.validateAdjustNutritionProteinFloor", () => 
 
   it("returns no errors when fromCaloriesPerDay is absent (not a lighten proposal)", async () => {
     const svc = createService(
-      {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+      {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
       {
         findActivePlanByUserId: async () => ({ id: activePlanId, activeRevisionId }),
         findActiveRevisionByPlanId: async () => ({ payload: nutritionPlanBase }),

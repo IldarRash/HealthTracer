@@ -795,7 +795,6 @@ function buildProgressHistoryReviewSliceRequest(
     type: "progress_history_review",
     depth: resolveDefaultDepthForPurpose("progress_history_review"),
     timeRange: clampTimeRangeToLookback("1y", contextBudget.maxLookbackDays),
-    includeDocuments: false,
   };
 }
 

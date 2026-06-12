@@ -49,7 +49,6 @@ export const intentCatalogEntrySchema = z.object({
     type: z.string(),
     depth: z.string().optional(),
     timeRange: z.string().optional(),
-    includeDocuments: z.boolean().optional(),
   }),
   allowedTools: z.array(agentToolNameSchema).max(6),
   allowedProposalIntents: z.array(catalogProposalIntentSchema).max(15),
@@ -97,7 +96,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
     kind: "normal",
     description: "General wellness coaching, habits, motivation, and open questions.",
     routerGuidance:
-      "Use when the user asks for general advice, education, or guidance that does not clearly fit workout, nutrition, progress review, longevity, health documents, or today planning.",
+      "Use when the user asks for general advice, education, or guidance that does not clearly fit workout, nutrition, progress review, longevity, health context, or today planning.",
     examples: [
       "How can I stay consistent this week?",
       "Explain progressive overload.",
@@ -236,22 +235,19 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
     kind: "normal",
     description: "Health context and medical background questions.",
     routerGuidance:
-      "Use when the user references labs, medical reports, symptoms, or stored health documents outside attachment uploads.",
+      "Use when the user references labs, medical reports, symptoms, or stored biomarker readings outside attachment uploads.",
     examples: [
       "Please consider my lab results.",
       "What does my blood test mean for training?",
       "Review my medical background.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("ask_health_context"),
-    // getDocumentContext removed from allowedTools: the tool is intentionally unavailable
-    // in chat under the allowDocuments=false budget floor. Document context in chat is
-    // deferred; the consent-scoped design is not yet implemented.
     allowedTools: ["getUserContextSlice", "getRecentAdherence"],
     allowedProposalIntents: [],
     safetyGuidance: [
       "Never diagnose or interpret labs as medical treatment guidance.",
-      "Use only consent-approved document summaries.",
-      "Do not expose raw document contents.",
+      "Use only consented, structured biomarker readings from the coaching context.",
+      "Do not expose raw lab report contents.",
     ],
     promptInstructions:
       "Provide conservative wellness context. Do not create state-changing proposals from medical questions.",
@@ -276,7 +272,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Explain using stored proposal rationale and bounded evidence labels only.",
       "Do not create new proposals or mutate plans.",
       "Do not diagnose or prescribe treatment.",
-      "Do not expose raw document contents.",
+      "Do not expose raw lab report contents.",
     ],
     promptInstructions:
       "The user is asking why a specific prior proposal was made. Explain using the proposalExplainer context: title, reason, and evidence summaries. Stay supportive and coaching-oriented. Do not create proposals or suggest applying changes in this turn.",
@@ -326,22 +322,21 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
   {
     id: "attachment_medical_document",
     kind: "attachment_family",
-    description: "Medical document attachment flow with consent and provider isolation.",
+    description: "Medical document attachment flow: context-only, never persisted.",
     routerGuidance:
       "Selected automatically for medical document attachments. Do not use the generic text router for these turns.",
     examples: ["User uploaded a lab report PDF.", "User shared a medical document screenshot."],
     defaultContextSlice: buildContextSliceRequestForIntent("ask_health_context"),
-    // getDocumentContext removed: intentionally unavailable in chat; consent-scoped design deferred.
     allowedTools: [],
     allowedProposalIntents: [],
     safetyGuidance: [
-      "Medical attachments require consent before entering coaching context.",
-      "Never create proposals from medical documents.",
-      "Do not diagnose or prescribe based on uploaded documents.",
-      "Direct the user to Profile consent when documents are not approved.",
+      "Chat attachments are context-only and never create persisted records — no lab_reports or biomarker_readings rows are created from attachments.",
+      "Never create proposals from medical attachments.",
+      "Do not diagnose or prescribe based on uploaded attachments.",
+      "Direct the user to the explicit Biomarkers lab-report upload when they want results saved.",
     ],
     promptInstructions:
-      "Explain attachment status and consent requirements. Use approved document summaries only. Provide conservative wellness context without medical certainty.",
+      "Explain attachment handling: the attachment is read as turn context only and is never saved as structured health data. Point the user to the Biomarkers lab-report upload for persistence. Provide conservative wellness context without medical certainty.",
     mappedAgentIntent: "ask_health_context",
   },
 ] as const;

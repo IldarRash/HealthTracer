@@ -638,7 +638,7 @@ describe("phase 3 contracts", () => {
       ...proposal,
       evidenceRefs: [
         {
-          type: "document_signal",
+          type: "biomarker_reading",
           id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
           label: "Vitamin D from recent lab review",
         },

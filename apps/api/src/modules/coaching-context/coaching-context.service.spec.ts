@@ -44,6 +44,21 @@ const activeWorkoutPayload = {
   notes: [],
 };
 
+const biomarkerContextSummary = {
+  items: [
+    {
+      biomarkerKey: "vitamin_d" as const,
+      displayLabel: "Vitamin D (25-OH)",
+      value: 38,
+      valueText: null,
+      unit: "ng/mL",
+      observedAt: "2026-05-20",
+      source: "manual" as const,
+    },
+  ],
+  generatedAt: new Date().toISOString(),
+};
+
 const activeHabitPayload = {
   habits: [
     {
@@ -205,23 +220,7 @@ function createCoachingContextService(overrides: {
       }),
     } as never,
     {
-      buildDocumentContextSummary: async () => ({
-        items: [],
-        generatedAt: new Date().toISOString(),
-      }),
-    } as never,
-    {
-      buildSignalContextSummary: async () => ({
-        signals: [],
-        generatedAt: new Date().toISOString(),
-      }),
-    } as never,
-    {
-      previewInsights: async () => ({
-        insights: [],
-        generatedAt: new Date().toISOString(),
-        dataStatus: "insufficient",
-      }),
+      buildBiomarkerContextSummary: async () => biomarkerContextSummary,
     } as never,
     {
       buildSummaryForUser: async () => ({
@@ -331,6 +330,44 @@ describe("CoachingContextService", () => {
         tags: ["strength"],
       },
     });
+  });
+
+  it("includes the consent-gated biomarker context and drops the legacy document fields", async () => {
+    const service = createCoachingContextService();
+
+    const snapshot = await service.buildSnapshot(auth);
+    const promptContext = service.toPromptContext(snapshot);
+
+    expect(snapshot.biomarkerContext).toEqual(biomarkerContextSummary);
+    expect(promptContext.biomarkerContext).toEqual(biomarkerContextSummary);
+    // The three document-era snapshot fields were replaced by biomarkerContext (S4).
+    expect(snapshot).not.toHaveProperty("documentContext");
+    expect(snapshot).not.toHaveProperty("documentSignalContext");
+    expect(snapshot).not.toHaveProperty("correlationInsights");
+    expect(promptContext).not.toHaveProperty("documentContext");
+    expect(promptContext).not.toHaveProperty("documentSignalContext");
+    expect(promptContext).not.toHaveProperty("correlationInsights");
+    // Structured catalog data only — never reference ranges or document text.
+    expect(JSON.stringify(promptContext.biomarkerContext)).not.toMatch(
+      /referenceRange|typicalRange|snippet/i,
+    );
+  });
+
+  it("includes biomarker context in health_context agent slices with biomarker provenance", async () => {
+    const service = createCoachingContextService();
+
+    const packet = await service.buildAgentContext(auth, {
+      userMessage: "What do my labs say about my wellness?",
+      intent: "ask_health_context",
+      purpose: "health_context",
+    });
+
+    expect(packet.slice.biomarkerContext).toEqual(biomarkerContextSummary);
+    expect(packet.slice.sourceRefs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ domain: "biomarker", label: "Vitamin D (25-OH)" }),
+      ]),
+    );
   });
 
   it("keeps onboarding complete in context when legacy users are missing the timestamp", async () => {
@@ -594,7 +631,6 @@ describe("CoachingContextService", () => {
         purpose: "nutrition_adaptation",
         depth: "medium",
         timeRange: "14d",
-        includeDocuments: false,
       },
       {
         intent: "adjust_nutrition",
@@ -604,7 +640,6 @@ describe("CoachingContextService", () => {
         purpose: "nutrition_adaptation",
         depth: "medium",
         timeRange: "14d",
-        includeDocuments: false,
         routingMethod: "unified_turn_decision",
         requiredContextSlices: [
           { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
@@ -639,7 +674,6 @@ describe("CoachingContextService", () => {
         purpose: "health_context",
         depth: "large",
         timeRange: "90d",
-        includeDocuments: true,
       },
       {
         intent: "ask_health_context",
@@ -649,14 +683,12 @@ describe("CoachingContextService", () => {
         purpose: "health_context",
         depth: "large",
         timeRange: "90d",
-        includeDocuments: true,
         routingMethod: "unified_turn_decision",
         requiredContextSlices: [
           {
             type: "health_context",
             depth: "large",
             timeRange: "90d",
-            includeDocuments: true,
           },
           { type: "nutrition_adaptation", depth: "large", timeRange: "90d" },
           { type: "daily_checkin", depth: "large", timeRange: "90d" },
@@ -674,12 +706,11 @@ describe("CoachingContextService", () => {
     );
 
     expect(packet.supplementarySlices).toHaveLength(0);
-    expect(packet.slice.documentContext).toBeUndefined();
-    expect(packet.slice.ragResults).toBeUndefined();
+    // Document-derived slice fields no longer exist in the contract at all —
+    // structurally stronger than the old runtime "document expansion denied" clamp.
+    expect("documentContext" in packet.slice).toBe(false);
+    expect("ragResults" in packet.slice).toBe(false);
     expect(packet.missingContextNotes.some((note) => note.includes("truncated"))).toBe(true);
-    expect(
-      packet.missingContextNotes.some((note) => note.includes("document expansion denied")),
-    ).toBe(true);
   });
 
   it("records compression requirement for deep review budgets", async () => {
@@ -693,7 +724,6 @@ describe("CoachingContextService", () => {
         purpose: "general_chat",
         depth: "large",
         timeRange: "30d",
-        includeDocuments: false,
       },
       {
         intent: "general",
@@ -703,7 +733,6 @@ describe("CoachingContextService", () => {
         purpose: "general_chat",
         depth: "large",
         timeRange: "30d",
-        includeDocuments: false,
         routingMethod: "unified_turn_decision",
         requiredContextSlices: [{ type: "general_chat", depth: "large", timeRange: "30d" }],
         safetyFlags: [],
@@ -733,19 +762,17 @@ function createReviewRoute(
     purpose: "weekly_review",
     depth: "large",
     timeRange: "7d",
-    includeDocuments: false,
     routingMethod: "unified_turn_decision",
     requiredContextSlices: withProgressHistorySlice
       ? [
-          { type: "weekly_review", depth: "large", timeRange: "7d", includeDocuments: false },
+          { type: "weekly_review", depth: "large", timeRange: "7d" },
           {
             type: "progress_history_review",
             depth: "large",
             timeRange: "1y",
-            includeDocuments: false,
           },
         ]
-      : [{ type: "weekly_review", depth: "large", timeRange: "7d", includeDocuments: false }],
+      : [{ type: "weekly_review", depth: "large", timeRange: "7d" }],
     safetyFlags: [],
     expectedResponseMode: "recommendation_with_optional_proposal",
   };
@@ -806,18 +833,11 @@ describe("CoachingContextService — progress_history_review slice (Phase 3)", (
     expect(reviewSlice).toBeDefined();
     expect(reviewSlice?.progressHistory?.granularity).toBe("weekly");
     expect(reviewSlice?.progressHistory?.buckets).toHaveLength(1);
-    // Floors: the review slice never carries sensitive or document context.
+    // Floors: the review slice never carries sensitive context. (documentContext /
+    // ragResults no longer exist on the slice type at all post-biomarkers — the
+    // raw-document floor is now structural, not asserted per-field.)
     expect(reviewSlice?.wellbeingSummary).toBeUndefined();
     expect(reviewSlice?.recoveryContext).toBeUndefined();
-    expect(reviewSlice?.documentContext).toBeUndefined();
-    expect(reviewSlice?.ragResults).toBeUndefined();
-
-    // Phase 4 floor regression: under allowDocuments=false NO slice of the
-    // deep-review packet carries document or RAG text — not just the review slice.
-    for (const slice of [packet.slice, ...packet.supplementarySlices]) {
-      expect(slice.documentContext).toBeUndefined();
-      expect(slice.ragResults).toBeUndefined();
-    }
   });
 
   it("threads planner-injected slice requests via options for route-less domain packets", async () => {
@@ -843,7 +863,6 @@ describe("CoachingContextService — progress_history_review slice (Phase 3)", (
             type: "progress_history_review",
             depth: "large",
             timeRange: "1y",
-            includeDocuments: false,
           },
         ],
         progressHistoryLookback: {

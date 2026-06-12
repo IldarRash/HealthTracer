@@ -7,7 +7,6 @@ describe("ProposalValidationService correlation evidence", () => {
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
       { buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }) } as never,
       { listByUserId: async () => [] } as never,
       {
@@ -29,6 +28,7 @@ describe("ProposalValidationService correlation evidence", () => {
       {} as never,
       {} as never,
       { listByIdsForUser: async () => [] } as never,
+      {} as never, // biomarkersRepository
     );
 
     const result = service.validateRawProposal({
@@ -39,7 +39,7 @@ describe("ProposalValidationService correlation evidence", () => {
       proposedChanges: {},
       evidenceRefs: [
         {
-          type: "document_signal",
+          type: "biomarker_reading",
           id: "14a08176-64a7-4a2d-8a44-581807368394",
           label: "This confirms a diagnosis from your lab report",
         },

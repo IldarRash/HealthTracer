@@ -1271,8 +1271,12 @@ export {
 } from "./habits.js";
 export * from "./body-composition.js";
 export * from "./device-metrics.js";
-export * from "./document-signals.js";
-export * from "./documents.js";
+export * from "./proposal-evidence.js";
+export * from "./wellness-language.js";
+export * from "./biomarkers.js";
+export * from "./lab-reports.js";
+export * from "./biomarker-extraction.js";
+export * from "./biomarker-context.js";
 export * from "./exercises.js";
 export * from "./wellbeing-check-ins.js";
 export * from "./nutrition-incidents.js";
@@ -1619,12 +1623,10 @@ export {
   MAX_CONTEXT_SLICES,
   normalizeContextSlicePlan,
   nutritionPlanContextSummarySchema,
-  ragContextResultSchema,
   resolveDefaultDepthForPurpose,
   resolveDefaultExpectedResponseMode,
   resolveDefaultTimeRangeForPurpose,
   RULE_ROUTE_CONFIDENCE_THRESHOLD,
-  shouldIncludeDocumentsForPurpose,
   userContextSliceSchema,
   userMemoryCategorySchema,
   userMemoryItemSchema,
@@ -1690,7 +1692,6 @@ export {
   type GoalContextSummary,
   type IntentRouteResult,
   type NutritionPlanContextSummary,
-  type RagContextResult,
   type UserContextSlice,
   type UserMemoryCategory,
   type UserMemoryItem,

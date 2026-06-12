@@ -247,7 +247,8 @@ or text/Markdown file resolves to `document_file` without a category picker.
 **Lazy per-turn text extraction.** `AttachmentTextExtractionService`
 (`apps/api/src/modules/chat-attachments/attachment-text-extraction.service.ts`)
 extracts plain text from `document_file` attachments **once per turn**, before the
-fan-out, reusing `extractPdfPlainText` from the documents module for PDFs and a
+fan-out, using `extractPdfPlainText`
+(`apps/api/src/modules/chat-attachments/pdf-text-extraction.ts`) for PDFs and a
 UTF-8 read for text/Markdown. Extraction is capped at
 `MAX_ATTACHMENT_TEXT_CONTENT_CHARS` (**12 000 chars**, truncated beyond), wrapped in
 a ~5 s timeout, and degrades independently to a status of `ok` / `empty` / `failed`
@@ -262,9 +263,10 @@ attachment metadata (used as the label in the prompt; see Stage 8).
 > "medical content only when `consentState === 'granted'`" code floor, **for now**.
 > The pre-upload medical/MIME consent gate and the `needs_consent` upload disposition
 > are gone (see "Removed Legacy Paths"). Floors that still hold: the context-budget
-> `allowDocuments=false` floor (about DB `health_documents` slices, **not** the
-> uploaded attachment) stays, there is **no** auto-persist or parsing of
-> `health_documents` from an attachment, and the legacy `recognition`/`categorySource`
+> `allowDocuments=false` floor (now meaning **raw document-derived text** slices, **not**
+> the uploaded attachment; the consent-gated `biomarkerContext` slice is exempt by design)
+> stays, there is **no** auto-persist or parsing of `lab_reports` / `biomarker_readings`
+> from an attachment, and the legacy `recognition`/`categorySource`
 > DB columns remain readable but are not used for runtime branching. (`category` is
 > still read to resolve a retention policy — `mime_inferred` resolves image uploads to
 > `unclassified` and document uploads to `document_file`, both with
@@ -323,30 +325,68 @@ envelope is produced, and
 there is no consent-gated medical-save proposal variant (that is deferred — see
 below).
 
-### Document upload (LIVE) vs attachment-driven save (deferred)
+### Lab-report upload (LIVE Biomarkers feature) vs attachment-driven save (deferred)
 
 `document_file` chat attachments are **context-only**: their text is extracted
 per-turn and fed to the domain LLMs, but **no attachment path may create or parse a
-`health_document` row** — the chat-attachments path stays context-only and this
-boundary is enforced and regression-tested. Durable, parsed document **storage** is a
-separate concern.
+`lab_report` / `biomarker_reading` row** — the chat-attachments path stays
+context-only and this boundary is enforced and regression-tested. Durable, parsed
+lab-report **storage** is a separate concern.
 
-**Durable PDF/text document upload + parse is implemented** — but as a separate,
-explicit **Profile Documents** feature (`apps/api/src/modules/documents/*`,
-`apps/web/src/components/documents/*`), **not** part of the chat-attachment pipeline.
-The user explicitly uploads a PDF/plain-text file under a five-scope, per-operation
-consent model (`upload_storage`, `parse_ocr`, `ai_summarization`,
-`semantic_indexing`, `coach_chat_context`) with revoke + delete; raw bytes live on
-the storage adapter (local filesystem in dev, encrypted access-controlled store in
-prod), extracted text is never persisted or logged, summaries are governed and
-non-diagnostic, and access is ownership-scoped.
+**Durable PDF/text lab-report upload + parse is implemented** — but as a separate,
+explicit **Biomarkers** feature (`apps/api/src/modules/biomarkers/*`,
+`apps/web/src/components/biomarkers/*`, web route `apps/web/app/biomarkers`),
+**not** part of the chat-attachment pipeline, and **not** part of the chat fan-out.
+The user explicitly uploads a PDF/plain-text lab report under a **two-level consent
+model** — a structurally-required upload-time `storeAndParse` (`z.literal(true)` in
+`createLabReportSchema`) plus an optional per-report `coachChat` toggle persisted as
+`coachContextConsentAt` (revoke-able via `PATCH /lab-reports/:id/consent`) — with
+delete. Raw bytes live on the storage adapter (local filesystem in dev, encrypted
+access-controlled store in prod), **extracted document text is never persisted or
+logged**, and access is ownership-scoped. This replaces the deleted five-scope
+health-documents feature (see "Removed Legacy Paths").
+
+#### Lab extraction pipeline (out-of-band)
+
+Extraction is a **dedicated pipeline that is NOT part of the chat fan-out**. It is a
+separate provider interface (`LabExtractionProvider` in `packages/ai`, live impl
+`OpenAiLabExtractionProvider` in `apps/api/src/modules/biomarkers`) so the
+`CoachAiProvider` three-method fan-out surface stays untouched. `LabReportsService.extract`
+(triggered by `POST /lab-reports/:id/extract`) runs: storage read → parse
+(`LabDocumentParser`) → dedicated lab-extraction LLM → Zod parse
+(`labExtractionOutputSchema`) → per-reading catalog/plausibility/unsafe-language
+validation → transactional reading replacement. Properties:
+
+- **Strict structured output:** OpenAI `response_format: json_schema` with `strict: true`
+  over a closed **47-key catalog enum** (`BIOMARKER_KEYS`); `temperature: 0`; system
+  prompt is static/cacheable (built from `BIOMARKER_CATALOG`) and the document text goes
+  **only** into the user message, never the system prompt, a log line, or a persisted field.
+- **Retry/timeout:** up to **2 retries** on network/429/5xx (same policy as the coach
+  provider), wrapped in a **60s `AbortSignal.timeout`** budget.
+- **Typed failure codes (never fake-success):** `file_unreadable`, `pdf_no_text`,
+  `content_too_large`, `not_a_lab_report`, `llm_unavailable`, `llm_invalid_output`,
+  `no_readings_extracted` — persisted as `lab_reports.failure_code` (fixed enum strings so
+  no document fragment leaks).
+- **Per-reading safety:** values must sit in the catalog plausibility band
+  (`BIOMARKER_PLAUSIBILITY_FACTOR`); unit/`valueText`/`referenceRangeText` pass an EN/RU
+  `containsUnsafeMedicalLanguage` screen; an individual failing reading is **dropped** (and
+  counted into `unmappedMarkerCount`), never failing the whole batch. Markers the LLM cannot
+  map to a catalog key are counted only — their free-text labels are never returned or stored.
+- `OPENAI_MODEL_LAB_EXTRACTION` env overrides the model (falls back to `OPENAI_MODEL`);
+  with no `OPENAI_API_KEY`, extract honestly returns `llm_unavailable` rather than crashing.
+
+Coach context never sees raw lab text: the only biomarker shape that may enter chat is the
+bounded `biomarkerContext` slice (≤30 items, **no reference ranges**), assembled by
+`BiomarkersService.buildBiomarkerContextSummary` from consent-eligible readings (manual
+readings are always eligible; extracted readings require the owning report's
+`coachContextConsentAt`). Proposal evidence may reference a `biomarker_reading`.
 
 Still **not** built (deferred), and still a hard boundary:
 
-- The LLM-recognized medical **special save**: a domain recognition signal → a
-  consent-gated save **proposal** → on accept, with consent, persist a
-  `health_document`. Document persistence is **explicit-upload only**; **no
-  attachment path may create or parse a `health_document`** (context-only,
+- The LLM-recognized **special save**: a domain recognition signal → a
+  consent-gated save **proposal** → on accept, with consent, persist a reading. Reading
+  persistence is **explicit-upload / manual-entry only**; **no
+  attachment path may create or parse a `lab_report` / `biomarker_reading`** (context-only,
   enforced and regression-tested).
 
 ## Stage 2: Code-Owned Pre-AI Gates
@@ -1008,7 +1048,7 @@ Tools (read-only context only, **7**):
   (numeric-only by schema construction); allowlisted **only** on `review_progress`
   and `longevity_overview` (`packages/types/src/intent-catalog.ts`).
 
-`getDocumentContext` has been removed: document context in chat is intentionally unavailable under the `allowDocuments=false` context-budget floor. The consent-scoped design is deferred (see "Removed Legacy Paths").
+`getDocumentContext` has been removed: raw document-derived context in chat is intentionally unavailable under the `allowDocuments=false` context-budget floor (now meaning raw document-derived text slices). Structured biomarker context reaches chat **only** through the separate consent-gated `biomarkerContext` slice (≤30 items, no reference ranges) assembled by `BiomarkersService.buildBiomarkerContextSummary` — it is exempt from the `allowDocuments` floor by design (it is user-visible, user-editable, consent-gated structured state, not raw document text). There is no document-context tool.
 
 A tool request not allowed by the active domain capability is rejected.
 
@@ -1628,15 +1668,20 @@ Schemas and defaults:
   intentional relaxation (for now):** image content — including a photo of a medical
   document — reaches the LLM (OpenAI) **before any consent**, consciously removing the
   previous "medical content only when consent is granted" code floor. Floors that
-  still hold: there is **no** auto-persist or parsing of a `health_document` from an
-  attachment, and the context-budget `allowDocuments=false` floor (DB
-  `health_documents` slices, not the uploaded attachment) is unchanged.
-- Context budgets deny document and sensitive health context by default, re-applied
-  to every per-domain packet; config cannot relax these floors. The deep-review
+  still hold: there is **no** auto-persist or parsing of a `lab_report` /
+  `biomarker_reading` from an attachment, and the context-budget `allowDocuments=false`
+  floor (now meaning raw document-derived text slices, not the uploaded attachment; the
+  consent-gated `biomarkerContext` slice is exempt by design) is unchanged.
+- Context budgets deny raw document-derived text and sensitive health context by default,
+  re-applied to every per-domain packet; config cannot relax these floors. The deep-review
   `progressHistory` slice field passes those floors **by structure, not by exemption**:
   its schema is numbers/enums/ISO dates only (no unconstrained string anywhere), so
   wellbeing/recovery trends reach reviews as aggregates while `wellbeingSummary` /
   `recoveryContext` free text stays stripped.
+- **Lab extraction is an out-of-band pipeline**, separate from the chat fan-out
+  (`LabExtractionProvider` / `OpenAiLabExtractionProvider`). The document text it parses
+  never enters chat context, a log line, or a persisted field; every degradation is a typed
+  `failure_code`, never a fake success.
 - The router output is clamped to known domains, capabilities, and tools, and may
   not emit replies or proposals.
 - SystemPlanner owns final route, budget, executor modes, and allowlists, and caps
@@ -1837,6 +1882,25 @@ The following files/exports were deleted and are no longer active runtime paths:
   all router-selected domains) and the consent-gated `medical_document_save`
   action-variant (dropped from `ActionVariantCatalogService`). The
   LLM-recognized medical special save is **deferred**, not removed permanently.
+- **The entire health-documents module** (`apps/api/src/modules/documents/*` and the
+  `apps/web/src/components/documents/*` Profile UI) — replaced by the Biomarkers feature
+  (`apps/api/src/modules/biomarkers/*`). Migration `0038_biomarkers_replace_documents.sql`
+  **drops** the `health_documents`, `health_document_summaries`, and `document_signals`
+  tables (and their six `document_*` enums), and drops `chat_attachments.linked_document_id`.
+  Do not reintroduce:
+  - the `health_documents` / `health_document_summaries` / `document_signals` tables, the
+    `packages/types` `documents.ts` + `document-signals.ts` contracts, or the
+    `packages/db` documents schema file;
+  - the **five-scope per-document consent model** (`upload_storage`, `parse_ocr`,
+    `ai_summarization`, `semantic_indexing`, `coach_chat_context`) — superseded by the
+    biomarkers **two-level** consent (`storeAndParse` literal-`true` + per-report
+    `coachContextConsentAt`);
+  - the deterministic governed summaries, document-signal pattern extraction, document
+    correlations preview, semantic document search, and the `documentContext` /
+    `documentSignalContext` / `correlationInsights` chat-context slices (replaced by the
+    single `biomarkerContext` slice);
+  - the `document_signal` **proposal evidence** type (replaced by `biomarker_reading`);
+  - the `DOCUMENT_STORAGE_PATH` env var (replaced by `LAB_REPORT_STORAGE_PATH`).
 - `ProposalValidationService.normalizeWorkoutProposalExercises` — the ad-hoc workout
   normalization inside the validation service. Replaced by the per-intent
   `ProposalNormalizationService` registry

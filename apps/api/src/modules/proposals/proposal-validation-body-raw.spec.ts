@@ -25,7 +25,6 @@ const service = new ProposalValidationService(
   {} as never,  // progressRepository
   {} as never,  // exercisesService
   {} as never,  // habitsService
-  {} as never,  // documentSignalsRepository
   {} as never,  // metricsAiContextService
   {} as never,  // goalsRepository
   {} as never,  // recoveryContextService
@@ -36,6 +35,7 @@ const service = new ProposalValidationService(
   {} as never,  // nutritionRepository
   {} as never,  // recipesRepository
   {} as never,  // chatAttachmentsRepository
+  {} as never,  // biomarkersRepository
 );
 
 const validRawProposal: RawAiProposal = {
@@ -189,7 +189,7 @@ describe("ProposalValidationService.validateRawProposal — save_body_analysis",
       ...validRawProposal,
       evidenceRefs: [
         {
-          type: "document_signal",
+          type: "biomarker_reading",
           id: "a1b2c3d4-0000-4000-8000-000000000001",
           label: "Test confirms diagnosis of muscle disorder",
         },
@@ -204,7 +204,7 @@ describe("ProposalValidationService.validateRawProposal — save_body_analysis",
       ...validRawProposal,
       evidenceRefs: [
         {
-          type: "document_signal",
+          type: "biomarker_reading",
           id: "a1b2c3d4-0000-4000-8000-000000000001",
           label: "Prior body photo analysis — wellness context only",
         },

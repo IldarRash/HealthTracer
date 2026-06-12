@@ -1,13 +1,24 @@
 import { z } from "zod";
 import { isoDateTimeSchema } from "./dates.js";
 import {
-  documentConsentScopeSchema,
-  documentTypeSchema,
-  type DocumentConsentScope,
-} from "./documents.js";
-import {
   nutritionConfidenceBandSchema,
 } from "./nutrition-incidents.js";
+
+/**
+ * Per-operation consent scopes recordable on a chat attachment.
+ * Defined locally since the health-documents module (the original owner of the
+ * five-scope model) was deleted with the biomarkers feature; the explicit
+ * lab-report flow has its own two-level consent in lab-reports.ts.
+ */
+export const chatAttachmentConsentScopeSchema = z.enum([
+  "upload_storage",
+  "parse_ocr",
+  "ai_summarization",
+  "semantic_indexing",
+  "coach_chat_context",
+]);
+
+export type ChatAttachmentConsentScope = z.infer<typeof chatAttachmentConsentScopeSchema>;
 
 export const chatAttachmentCategorySchema = z.enum([
   "unclassified",
@@ -138,11 +149,9 @@ export type ChatAttachmentRef = z.infer<typeof chatAttachmentRefSchema>;
 
 export const chatAttachmentConsentSchema = z
   .object({
-    consentScopes: z.array(documentConsentScopeSchema).min(1).max(5),
+    consentScopes: z.array(chatAttachmentConsentScopeSchema).min(1).max(5),
     consentVersion: z.string().min(1).max(40),
     consentGrantedAt: isoDateTimeSchema,
-    documentType: documentTypeSchema.optional(),
-    documentTitle: z.string().min(1).max(160).optional(),
   })
   .strict();
 
@@ -180,7 +189,6 @@ export const chatAttachmentRecordSchema = z.object({
   mimeType: z.string().min(1).max(120),
   fileSizeBytes: z.number().int().nonnegative(),
   storageKey: z.string().min(1).max(500).nullable(),
-  linkedDocumentId: z.string().uuid().nullable(),
   linkedImageRefId: z.string().uuid().nullable(),
   consent: chatAttachmentConsentSchema.nullable(),
   // recognition DB column stays readable (disposable-DB; to be dropped in a later schema pass)
@@ -398,14 +406,14 @@ export function getChatAttachmentSizeError(
 }
 
 export function hasRequiredMedicalAttachmentConsent(
-  scopes: readonly DocumentConsentScope[],
+  scopes: readonly ChatAttachmentConsentScope[],
 ): boolean {
   return scopes.includes("upload_storage");
 }
 
 export function getMedicalAttachmentConsentErrors(
   category: ChatAttachmentCategory,
-  consentScopes: readonly DocumentConsentScope[] | undefined,
+  consentScopes: readonly ChatAttachmentConsentScope[] | undefined,
 ): string[] {
   if (category !== "medical_document") {
     return [];
@@ -427,7 +435,6 @@ export type OwnedChatAttachmentRef = {
   userId: string;
   category: ChatAttachmentCategory;
   status: ChatAttachmentStatus;
-  linkedDocumentId: string | null;
   linkedImageRefId: string | null;
   retentionPolicy: ChatAttachmentRetentionPolicy;
   expiresAt: string | null;

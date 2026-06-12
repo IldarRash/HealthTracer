@@ -123,7 +123,6 @@ function makeFanoutPlan(
       purpose: "workout_adaptation",
       depth: "medium",
       timeRange: "7d",
-      includeDocuments: false,
       confidence: 0.85,
       routingMethod: "unified_turn_decision",
       isConfident: true,

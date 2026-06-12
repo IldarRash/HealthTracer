@@ -97,7 +97,6 @@ function makeRoute(): IntentRouteResult {
     purpose: "workout_adaptation",
     depth: "medium",
     timeRange: "7d",
-    includeDocuments: false,
     routingMethod: "llm_router",
     requiredContextSlices: [{ purpose: "workout_adaptation", depth: "medium", timeRange: "7d" }],
     safetyFlags: [],

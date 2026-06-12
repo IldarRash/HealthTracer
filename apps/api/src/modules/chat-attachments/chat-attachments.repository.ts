@@ -22,7 +22,6 @@ export type CreateChatAttachmentRowInput = {
   mimeType: string;
   fileSizeBytes: number;
   storageKey?: string | null;
-  linkedDocumentId?: string | null;
   linkedImageRefId?: string | null;
   consent?: ChatAttachmentConsent | null;
   // recognition field removed (B3 removal, C4 cluster); DB column stays writable for
@@ -50,7 +49,6 @@ export class ChatAttachmentsRepository {
         mimeType: input.mimeType,
         fileSizeBytes: input.fileSizeBytes,
         storageKey: input.storageKey ?? null,
-        linkedDocumentId: input.linkedDocumentId ?? null,
         linkedImageRefId: input.linkedImageRefId ?? null,
         consent: input.consent ?? null,
         failureReason: input.failureReason ?? null,
@@ -115,7 +113,6 @@ export class ChatAttachmentsRepository {
       threadId: string | null;
       messageId: string | null;
       storageKey: string | null;
-      linkedDocumentId: string | null;
       linkedImageRefId: string | null;
       consent: ChatAttachmentConsent | null;
       // recognition removed from patch (B3 removal, C4 cluster)

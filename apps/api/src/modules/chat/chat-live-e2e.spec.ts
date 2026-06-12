@@ -730,8 +730,6 @@ describe.skipIf(!liveE2eEnabled)("Tier 3 — live e2e: full ChatService + real O
         {
           getHabitTemplateReferenceErrors: async () => [],
         } as never,
-        // documentSignalsRepository
-        { findCorrelationEligibleSignalById: async () => null } as never,
         // metricsAiContextService
         { buildSummaryForUser: async () => ({ items: [] }) } as never,
         // goalsRepository
@@ -764,6 +762,8 @@ describe.skipIf(!liveE2eEnabled)("Tier 3 — live e2e: full ChatService + real O
         // recipesRepository
         { findRecommendationById: async () => null } as never,
         chatAttachmentsRepo,
+        // biomarkersRepository — unused in this scenario.
+        noop,
       );
 
       // Build the AI pipeline.

@@ -99,7 +99,8 @@ export class ChatAttachmentsService {
       storageKey,
       linkedImageRefId: null,
       consent: null,
-      // linkedDocumentId is always null — no health_documents creation from the attachment path.
+      // Attachments are context-only — never linked to persisted health data
+      // (no lab_reports / biomarker_readings creation from the attachment path).
       retentionPolicy: this.resolveRetentionPolicy(inferredCategory),
     });
 

@@ -26,7 +26,6 @@ function buildRoute(
       type: "weekly_review" | "workout_adaptation" | "nutrition_adaptation" | "health_context";
       depth?: "small" | "medium" | "large";
       timeRange?: "7d" | "14d" | "30d" | "90d" | "1y";
-      includeDocuments?: boolean;
     }>;
   } = {},
 ) {
@@ -42,7 +41,6 @@ function buildRoute(
     purpose: slices[0]!.type,
     depth: slices[0]!.depth ?? ("small" as const),
     timeRange: slices[0]!.timeRange ?? ("7d" as const),
-    includeDocuments: slices[0]!.includeDocuments ?? false,
     routingMethod: "unified_turn_decision" as const,
     requiredContextSlices: slices,
     safetyFlags: [],
@@ -158,7 +156,7 @@ describe("ContextBudgetPolicyService", () => {
         intent: "review_progress",
         catalogIntentId: "review_progress",
         requiredContextSlices: [
-          { type: "weekly_review", depth: "large", timeRange: "30d", includeDocuments: true },
+          { type: "weekly_review", depth: "large", timeRange: "30d" },
         ],
       }),
     });
@@ -167,11 +165,12 @@ describe("ContextBudgetPolicyService", () => {
     expect(deepReview.contextBudget.allowSensitiveHealthContext).toBe(false);
 
     const { slicePlan } = maliciousService.applyBudgetToSlicePlan(
-      [{ type: "health_context", depth: "large", timeRange: "30d", includeDocuments: true }],
+      [{ type: "health_context", depth: "large", timeRange: "30d" }],
       deepReview.contextBudget,
     );
 
-    expect(slicePlan[0]?.includeDocuments).toBe(false);
+    // The slice-request contract no longer carries a document flag at all.
+    expect(slicePlan[0] && "includeDocuments" in slicePlan[0]).toBe(false);
 
     const builtSlice = maliciousService.applyBudgetToBuiltSlice(
       {
@@ -179,11 +178,6 @@ describe("ContextBudgetPolicyService", () => {
         depth: "large",
         timeRange: "30d",
         generatedAt: new Date().toISOString(),
-        documentContext: {
-          generatedAt: new Date().toISOString(),
-          items: [],
-        },
-        ragResults: [],
         wellbeingSummary: { windowDays: 7 } as UserContextSlice["wellbeingSummary"],
         recoveryContext: { band: "insufficient_data" } as UserContextSlice["recoveryContext"],
         relevantMemories: [],
@@ -194,8 +188,6 @@ describe("ContextBudgetPolicyService", () => {
       deepReview.contextBudget,
     );
 
-    expect(builtSlice.documentContext).toBeUndefined();
-    expect(builtSlice.ragResults).toBeUndefined();
     expect(builtSlice.wellbeingSummary).toBeUndefined();
     expect(builtSlice.recoveryContext).toBeUndefined();
   });
@@ -279,7 +271,7 @@ describe("ContextBudgetPolicyService", () => {
   it("clamps slice plan depth, lookback, slices, and documents", () => {
     const { slicePlan, notes } = service.applyBudgetToSlicePlan(
       [
-        { type: "weekly_review", depth: "large", timeRange: "1y", includeDocuments: true },
+        { type: "weekly_review", depth: "large", timeRange: "1y" },
         { type: "nutrition_adaptation", depth: "large", timeRange: "90d" },
         { type: "workout_adaptation", depth: "large", timeRange: "90d" },
         { type: "daily_checkin", depth: "small", timeRange: "7d" },
@@ -292,10 +284,8 @@ describe("ContextBudgetPolicyService", () => {
       type: "weekly_review",
       depth: "medium",
       timeRange: "30d",
-      includeDocuments: false,
     });
     expect(notes.some((note) => note.includes("truncated"))).toBe(true);
-    expect(notes.some((note) => note.includes("document expansion denied"))).toBe(true);
     expect(notes.some((note) => note.includes("depth clamped"))).toBe(true);
     expect(notes.some((note) => note.includes("lookback clamped"))).toBe(true);
   });
@@ -338,27 +328,20 @@ describe("ContextBudgetPolicyService", () => {
     const rawItemCount =
       (slice.relevantMemories?.length ?? 0) +
       (slice.snapshots?.length ?? 0) +
-      (slice.ragResults?.length ?? 0) +
-      (slice.weeklyProgress?.trends?.length ?? 0) +
-      (slice.documentContext?.items.length ?? 0);
+      (slice.weeklyProgress?.trends?.length ?? 0);
 
     expect(rawItemCount).toBeLessThanOrEqual(5);
     expect(slice.relevantMemories?.length).toBe(5);
     expect(slice.snapshots?.length ?? 0).toBe(0);
   });
 
-  it("strips documents and sensitive health fields from built slices by default", () => {
+  it("strips sensitive health fields from built slices by default", () => {
     const slice = service.applyBudgetToBuiltSlice(
       {
         purpose: "health_context",
         depth: "large",
         timeRange: "30d",
         generatedAt: new Date().toISOString(),
-        documentContext: {
-          generatedAt: new Date().toISOString(),
-          items: [],
-        },
-        ragResults: [],
         wellbeingSummary: { windowDays: 7 } as UserContextSlice["wellbeingSummary"],
         recoveryContext: { band: "insufficient_data" } as UserContextSlice["recoveryContext"],
         relevantMemories: [],
@@ -369,8 +352,6 @@ describe("ContextBudgetPolicyService", () => {
       DEFAULT_CONTEXT_BUDGET_POLICY,
     );
 
-    expect(slice.documentContext).toBeUndefined();
-    expect(slice.ragResults).toBeUndefined();
     expect(slice.wellbeingSummary).toBeUndefined();
     expect(slice.recoveryContext).toBeUndefined();
   });

@@ -73,13 +73,15 @@ export type ActionResolverFinalDecisionResult = {
   proposals: AiStructuredOutput["proposals"];
   /**
    * Whether the decision required explicit user consent (e.g. medical document save).
-   * When true, proposals will contain a consent-gated proposal and NO health_documents
-   * row is auto-persisted. The proposal must be explicitly accepted by the user.
+   * When true, proposals will contain a consent-gated proposal and NO structured
+   * health rows (lab_reports / biomarker_readings) are auto-persisted. The proposal
+   * must be explicitly accepted by the user.
    *
    * NOTE: `consentRequired` is currently produced (forwarded from the LLM output) but not
    * consumed by any client or enforced by a gate in this service. It is surfaced in the
    * ChatTurnResponse for the deferred medical special-save flow (proposal-driven,
-   * domain-LLM recognition → consent-gated proposal → accept → persist health_document).
+   * domain-LLM recognition → consent-gated proposal → accept → persist a structured
+   * health record via the explicit lab-report path).
    * Do not remove the plumbing; add enforcement when the deferred flow is implemented.
    */
   consentRequired: boolean;

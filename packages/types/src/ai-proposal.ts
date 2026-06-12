@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 import { isoDateTimeSchema, isoDateSchema } from "./dates.js";
-import { proposalCorrelationEvidenceRefsSchema } from "./document-signals.js";
+import { proposalCorrelationEvidenceRefsSchema } from "./proposal-evidence.js";
 import { habitPlanPayloadSchema } from "./habits.js";
 import { recoveryContextSourceRefSchema } from "./recovery.js";
 import { todayChecklistPayloadSchema } from "./today.js";

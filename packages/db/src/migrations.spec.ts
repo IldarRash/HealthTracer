@@ -147,6 +147,37 @@ describe("drizzle migrations", () => {
     expect(content).toContain('CREATE INDEX "nutrition_incidents_user_date_idx"');
   });
 
+  it("creates each biomarker table exactly once across all migration files", () => {
+    const sqlFiles = readRootSqlMigrationFiles();
+
+    for (const tableName of ["lab_reports", "biomarker_readings"]) {
+      const creates = sqlFiles.flatMap((file) => {
+        const content = readFileSync(join(drizzleDir, file), "utf8");
+        const matches = content.match(
+          new RegExp(`CREATE TABLE "${tableName}"`, "g"),
+        ) ?? [];
+        return matches.map(() => file);
+      });
+
+      expect(creates).toEqual(["0038_biomarkers_replace_documents.sql"]);
+    }
+  });
+
+  it("drops the document tables and link column in the biomarkers migration", () => {
+    const content = readFileSync(
+      join(drizzleDir, "0038_biomarkers_replace_documents.sql"),
+      "utf8",
+    );
+
+    expect(content).toContain('DROP TABLE IF EXISTS "document_signals"');
+    expect(content).toContain('DROP TABLE IF EXISTS "health_document_summaries"');
+    expect(content).toContain('DROP TABLE IF EXISTS "health_documents"');
+    expect(content).toContain(
+      'ALTER TABLE "chat_attachments" DROP COLUMN IF EXISTS "linked_document_id"',
+    );
+    expect(content).toContain('CREATE TYPE "public"."lab_report_status"');
+  });
+
   it("adds nutrition plan invariant indexes mirroring the workout pattern", () => {
     const content = readFileSync(
       join(drizzleDir, "0035_nutrition_plan_invariants.sql"),

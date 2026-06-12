@@ -16,8 +16,8 @@
 
 import { Injectable, Logger } from "@nestjs/common";
 import { isChatAttachmentDocumentMimeType, MAX_ATTACHMENT_TEXT_CONTENT_CHARS } from "@health/types";
-import { extractPdfPlainText } from "../documents/document-processing.js";
 import { ChatAttachmentsService } from "./chat-attachments.service.js";
+import { extractPdfPlainText } from "./pdf-text-extraction.js";
 
 /** Per-attachment extraction timeout in milliseconds. */
 const EXTRACTION_TIMEOUT_MS = 5_000;

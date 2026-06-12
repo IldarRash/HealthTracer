@@ -91,7 +91,6 @@ export function buildContextCompressionRequest(
     reviewKind: resolveReviewKind(input.reviewSignals),
     slicePurposes,
     lookbackDays: input.budget.maxLookbackDays,
-    includeDocuments: input.budget.allowDocuments,
     domainBuckets: slicePurposes.map(mapPurposeToDomainBucket),
   });
 }

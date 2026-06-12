@@ -34,6 +34,12 @@ export const contextBudgetPolicySchema = z.object({
     .int()
     .min(1)
     .max(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxLookbackDays),
+  /**
+   * Code-level safety floor (always false). `allowDocuments` governs raw
+   * document-derived text in chat context — none exists post-biomarkers.
+   * `biomarkerContext` is structured, user-visible, consent-gated data and is
+   * exempt from this floor by design.
+   */
   allowDocuments: z.boolean().default(false),
   allowSensitiveHealthContext: z.boolean().default(false),
   requiresCompression: z.boolean().default(false),
@@ -98,7 +104,12 @@ export const DEEP_HISTORY_CONTEXT_BUDGET_POLICY: ContextBudgetPolicy = {
   maxSlicesPerExpansionRound: 3,
 };
 
-/** Config cannot relax document or sensitive-health exposure; enforced after load and resolve. */
+/**
+ * Config cannot relax document or sensitive-health exposure; enforced after load
+ * and resolve. `allowDocuments` governs raw document-derived text (none exists
+ * post-biomarkers); `biomarkerContext` is structured, user-visible, consent-gated
+ * data and is exempt by design.
+ */
 export const CONTEXT_BUDGET_CONFIG_SAFETY_FLOOR = {
   allowDocuments: false,
   allowSensitiveHealthContext: false,
@@ -218,7 +229,6 @@ export const contextCompressionRequestSchema = z
       .int()
       .min(1)
       .max(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxLookbackDays),
-    includeDocuments: z.boolean().default(false),
     domainBuckets: z.array(z.string().min(1).max(80)).max(10).default([]),
   })
   .strict();
@@ -476,15 +486,6 @@ export function evaluateContextExpansionRequest(input: {
     );
   }
 
-  for (const slice of request.requestedSlices) {
-    if (slice.includeDocuments === true && !budget.allowDocuments) {
-      errors.push(
-        `requestedSlices: Document expansion is not allowed by the active context budget policy.`,
-      );
-      break;
-    }
-  }
-
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -495,8 +496,6 @@ export function evaluateContextExpansionRequest(input: {
       depth: slice.depth
         ? clampContextDepth(slice.depth, budget.maxDepth)
         : undefined,
-      includeDocuments:
-        slice.includeDocuments === true ? budget.allowDocuments : slice.includeDocuments,
     }),
   );
 

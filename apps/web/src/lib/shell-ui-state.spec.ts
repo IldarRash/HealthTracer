@@ -31,10 +31,12 @@ describe("shell UI state", () => {
     ]);
   });
 
-  it("shows secondary wayfinding only on Training and Nutrition routes", () => {
+  it("shows secondary wayfinding only on Training, Nutrition, and Biomarkers routes", () => {
     expect(shouldShowRouteWayfinding("/training")).toBe(true);
     expect(shouldShowRouteWayfinding("/training/session-1")).toBe(true);
     expect(shouldShowRouteWayfinding("/nutrition")).toBe(true);
+    expect(shouldShowRouteWayfinding("/biomarkers")).toBe(true);
+    expect(shouldShowRouteWayfinding("/biomarkers/vitamin_d")).toBe(true);
     expect(shouldShowRouteWayfinding("/recipes")).toBe(true);
     expect(shouldShowRouteWayfinding("/nutrition/meal-plan")).toBe(true);
     expect(shouldShowRouteWayfinding("/today")).toBe(false);
@@ -66,6 +68,8 @@ describe("shell UI state", () => {
       expect(resolveRouteTheme("/nutrition/grocery-list")).toBe("dark");
       expect(resolveRouteTheme("/recipes")).toBe("dark");
       expect(resolveRouteTheme("/recipes/my-recipe")).toBe("dark");
+      expect(resolveRouteTheme("/biomarkers")).toBe("dark");
+      expect(resolveRouteTheme("/biomarkers/vitamin_d")).toBe("dark");
     });
 
     it("returns light for chat, profile, onboarding, billing, and root", () => {

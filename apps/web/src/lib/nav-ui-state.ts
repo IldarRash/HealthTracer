@@ -5,6 +5,11 @@ export type NavLink = {
   featured?: true;
   /** Legacy routes that should highlight this nav item. */
   aliases?: readonly string[];
+  /**
+   * Breadcrumb parent for secondary routes. Defaults to Today per IA;
+   * Biomarkers sits under Nutrition.
+   */
+  wayfindingParent?: { href: string; labelKey: string };
 };
 
 /** Primary web tabs: Chat, Today, Longevity, Profile. */
@@ -23,6 +28,11 @@ export const PRIMARY_NAV_LINKS: readonly NavLink[] = [
 export const SECONDARY_ROUTE_LINKS: readonly NavLink[] = [
   { href: "/training", labelKey: "Nav.workouts" },
   { href: "/nutrition", labelKey: "Nav.nutrition", aliases: ["/recipes"] },
+  {
+    href: "/biomarkers",
+    labelKey: "Nav.biomarkers",
+    wayfindingParent: { href: "/nutrition", labelKey: "Nav.nutrition" },
+  },
 ] as const;
 
 export function isActivePath(
@@ -73,7 +83,7 @@ export function resolveSecondaryRouteWayfinding(
   }
 
   return {
-    parent: { href: "/today", labelKey: "Nav.today" },
+    parent: route.wayfindingParent ?? { href: "/today", labelKey: "Nav.today" },
     current: { labelKey: route.labelKey },
   };
 }

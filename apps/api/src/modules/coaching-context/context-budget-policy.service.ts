@@ -228,13 +228,11 @@ export class ContextBudgetPolicyService {
       slice.timeRange != null
         ? clampTimeRangeToLookback(slice.timeRange, budget.maxLookbackDays)
         : undefined;
-    const includeDocuments = budget.allowDocuments && slice.includeDocuments === true;
 
     return {
       type: slice.type,
       ...(depth ? { depth } : {}),
       ...(timeRange ? { timeRange } : {}),
-      includeDocuments,
     };
   }
 
@@ -246,16 +244,6 @@ export class ContextBudgetPolicyService {
         ...next,
         wellbeingSummary: undefined,
         recoveryContext: undefined,
-        documentContext: undefined,
-        ragResults: undefined,
-      };
-    }
-
-    if (!budget.allowDocuments) {
-      next = {
-        ...next,
-        documentContext: undefined,
-        ragResults: undefined,
       };
     }
 
@@ -299,12 +287,6 @@ export class ContextBudgetPolicyService {
     if (before.timeRange && after.timeRange && before.timeRange !== after.timeRange) {
       notes.push(
         `Slice "${before.type}" lookback clamped from ${before.timeRange} to ${after.timeRange} (maxLookbackDays=${budget.maxLookbackDays}).`,
-      );
-    }
-
-    if (before.includeDocuments === true && after.includeDocuments !== true) {
-      notes.push(
-        `Slice "${before.type}" document expansion denied by context budget (allowDocuments=false).`,
       );
     }
 
@@ -375,9 +357,8 @@ function countRawItemsInSlice(slice: UserContextSlice): number {
     (slice.activeGoals?.length ?? 0) +
     (slice.relevantMemories?.length ?? 0) +
     (slice.snapshots?.length ?? 0) +
-    (slice.ragResults?.length ?? 0) +
     (slice.weeklyProgress?.trends?.length ?? 0) +
-    (slice.documentContext?.items.length ?? 0) +
+    (slice.biomarkerContext?.items.length ?? 0) +
     (slice.progressHistory?.buckets.length ?? 0)
   );
 }
@@ -425,10 +406,6 @@ function truncateSliceRawItems(slice: UserContextSlice, maxRawItems: number): Us
     next.snapshots = take(next.snapshots) ?? [];
   }
 
-  if (next.ragResults) {
-    next.ragResults = take(next.ragResults);
-  }
-
   if (next.weeklyProgress?.trends) {
     next.weeklyProgress = {
       ...next.weeklyProgress,
@@ -436,10 +413,10 @@ function truncateSliceRawItems(slice: UserContextSlice, maxRawItems: number): Us
     };
   }
 
-  if (next.documentContext?.items) {
-    next.documentContext = {
-      ...next.documentContext,
-      items: take(next.documentContext.items) ?? [],
+  if (next.biomarkerContext?.items) {
+    next.biomarkerContext = {
+      ...next.biomarkerContext,
+      items: take(next.biomarkerContext.items) ?? [],
     };
   }
 

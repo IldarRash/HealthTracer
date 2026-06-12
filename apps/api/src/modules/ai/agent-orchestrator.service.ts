@@ -226,7 +226,6 @@ export class AgentOrchestratorService {
         purpose: route.purpose,
         depth: route.depth,
         timeRange: route.timeRange,
-        includeDocuments: route.includeDocuments,
       },
       route,
       { contextBudget: plan.contextBudget, progressHistoryLookback },
@@ -905,7 +904,6 @@ export class AgentOrchestratorService {
 
 }
 
-
 // ---------------------------------------------------------------------------
 // Module-level helpers
 // ---------------------------------------------------------------------------
@@ -1159,7 +1157,6 @@ function buildDomainContextRequest(
     intent: CAPABILITY_TO_INTENT[cap] ?? "general",
     depth: CAPABILITY_TO_DEPTH[cap] ?? "medium",
     timeRange: CAPABILITY_TO_TIME_RANGE[cap] ?? "14d",
-    includeDocuments: false,
   };
 }
 

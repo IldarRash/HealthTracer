@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm";
 import {
   aiProposals,
+  biomarkerReadings,
   chatAiUsageDaily,
   chatMessages,
   chatThreads,
@@ -8,9 +9,7 @@ import {
   deviceConnections,
   deviceConsents,
   exercises,
-  healthDocumentSummaries,
-  healthDocuments,
-  documentSignals,
+  labReports,
   goals,
   healthMetricAggregates,
   healthMetricSnapshots,
@@ -287,36 +286,21 @@ export const healthMetricAggregatesRelations = relations(healthMetricAggregates,
   }),
 }));
 
-export const healthDocumentsRelations = relations(healthDocuments, ({ many, one }) => ({
+export const labReportsRelations = relations(labReports, ({ many, one }) => ({
   user: one(users, {
-    fields: [healthDocuments.userId],
+    fields: [labReports.userId],
     references: [users.id],
   }),
-  summaries: many(healthDocumentSummaries),
-  signals: many(documentSignals),
+  readings: many(biomarkerReadings),
 }));
 
-export const documentSignalsRelations = relations(documentSignals, ({ one }) => ({
+export const biomarkerReadingsRelations = relations(biomarkerReadings, ({ one }) => ({
   user: one(users, {
-    fields: [documentSignals.userId],
+    fields: [biomarkerReadings.userId],
     references: [users.id],
   }),
-  document: one(healthDocuments, {
-    fields: [documentSignals.healthDocumentId],
-    references: [healthDocuments.id],
+  labReport: one(labReports, {
+    fields: [biomarkerReadings.labReportId],
+    references: [labReports.id],
   }),
 }));
-
-export const healthDocumentSummariesRelations = relations(
-  healthDocumentSummaries,
-  ({ one }) => ({
-    user: one(users, {
-      fields: [healthDocumentSummaries.userId],
-      references: [users.id],
-    }),
-    document: one(healthDocuments, {
-      fields: [healthDocumentSummaries.healthDocumentId],
-      references: [healthDocuments.id],
-    }),
-  }),
-);

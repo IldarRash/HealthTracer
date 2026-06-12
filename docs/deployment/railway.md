@@ -69,9 +69,11 @@ Create a new service from the GitHub repo (or empty service + connect repo).
 | `AI_COACH_PROVIDER`      | `openai` or `stub`                                  | Use `stub` for non-AI smoke tests          |
 | `OPENAI_API_KEY`         | Railway secret                                      | Required when `AI_COACH_PROVIDER=openai`   |
 | `OPENAI_MODEL`           | `gpt-4o-mini` (or chosen model)                     | Optional; defaults in code                 |
-| `DOCUMENT_STORAGE_PATH`  | `/app/.data/documents`                              | Local container path; see storage note     |
+| `OPENAI_MODEL_LAB_EXTRACTION` | `gpt-4o-mini` (or chosen model)                | Optional; overrides the model for the out-of-band lab-report biomarker extraction stage. Falls back to `OPENAI_MODEL` |
+| `LAB_REPORT_STORAGE_PATH` | `/app/.data/lab-reports`                           | Local container path for uploaded lab-report bytes; see storage note |
+| `CHAT_ATTACHMENT_STORAGE_PATH` | `/app/.data/chat-attachments`                 | Local container path for chat attachment bytes; see storage note |
 | `CORS_ORIGINS`           | `https://<web-service-public-domain>`               | **Required in production.** API startup fails closed (no CORS) when unset. Safari also requires explicit origins for Bearer auth. |
-| `STORAGE_ALLOW_LOCAL_IN_PRODUCTION` | `true`                               | **Required** when using local-volume document/attachment storage on Railway. Omit or set to `false` when object storage is used instead. |
+| `STORAGE_ALLOW_LOCAL_IN_PRODUCTION` | `true`                               | **Required** when using local-volume lab-report/attachment storage on Railway. Omit or set to `false` when object storage is used instead. |
 | `STRIPE_SECRET_KEY`      | Stripe → Developers → API keys → **Secret key**     | Billing. `sk_live_...` (prod) / `sk_test_...` (test). Without it checkout/portal fail closed |
 | `STRIPE_PRICE_PRO`       | Stripe → Products → Pro price → **Price ID**        | Billing. `price_...` (the recurring price, **not** the `prod_...` id) |
 | `STRIPE_WEBHOOK_SECRET`  | Stripe → Developers → Webhooks → endpoint signing secret | Billing. `whsec_...`; see "Stripe billing setup" below |
@@ -103,6 +105,14 @@ curl -sS https://<api-domain>/health/ready
 ### 3. Run database migrations (MVP: manual)
 
 Do **not** run migrations automatically on every API start for MVP. Apply them explicitly after Postgres is available and before or after the first API deploy.
+
+> **Pending migration — `0038_biomarkers_replace_documents`.** This migration replaces the
+> health-documents tables with the biomarkers model: it **drops** `health_documents`,
+> `health_document_summaries`, `document_signals` (and their six `document_*` enums) plus
+> `chat_attachments.linked_document_id`, and creates `lab_reports` + `biomarker_readings`.
+> Like every Drizzle migration under `packages/db/drizzle`, the Railway deploy is **not
+> complete until `0038` is applied manually via the Railway CLI** (Option A below). Because it
+> drops tables, take a backup first.
 
 **Option A — Railway CLI one-off (recommended)**
 
@@ -180,16 +190,16 @@ The Web Dockerfile uses Next.js `output: "standalone"`. The container runs `node
 - The API allows only the origins listed in `CORS_ORIGINS`. This is required for Safari on iOS, which blocks cross-origin `fetch()` calls that send `Authorization: Bearer ...` when the API responds with a wildcard origin.
 - If mobile shows `... could not be loaded` while `GET /health` works in the phone browser, check both `NEXT_PUBLIC_API_BASE_URL` (web rebuild) and `CORS_ORIGINS` (api redeploy).
 
-## Document storage caveat
+## Lab-report / attachment storage caveat
 
-The API stores uploaded documents on the local filesystem at `DOCUMENT_STORAGE_PATH` (default under `/app/.data/documents` in the container).
+The API stores uploaded lab-report bytes on the local filesystem at `LAB_REPORT_STORAGE_PATH` (default `/app/.data/lab-reports`) and chat attachment bytes at `CHAT_ATTACHMENT_STORAGE_PATH` (default `/app/.data/chat-attachments`).
 
 Railway container filesystem is **ephemeral** unless a volume is attached. Uploads are lost on redeploy or restart unless you:
 
-- Attach a Railway volume mounted at `/app/.data/documents`, or
-- Move document storage to object storage (S3/R2) in a future slice.
+- Attach a Railway volume mounted at `/app/.data` (covering both paths), or
+- Move storage to an access-controlled, encrypted object store (S3/R2) in a future slice.
 
-For MVP, treat document persistence as a known limitation unless a volume is configured.
+For MVP, treat upload persistence as a known limitation unless a volume is configured. (Extracted lab-report text is never persisted — only the structured biomarker readings and the raw file bytes are stored.)
 
 ## Logs and incident runbook
 
@@ -277,7 +287,8 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 - [ ] Authenticated flows reach API; request ids appear in both `health-web` and `health-api` logs
 - [ ] `CORS_ORIGINS` set on `health-api` to the web public URL (required — API fails closed without it)
 - [ ] `STORAGE_ALLOW_LOCAL_IN_PRODUCTION=true` set on `health-api` when using Railway local-volume storage
-- [ ] Document upload expectations documented (ephemeral storage unless volume added)
+- [ ] Lab-report / attachment upload expectations documented (ephemeral storage unless volume added)
+- [ ] Migration `0038_biomarkers_replace_documents` applied via Railway CLI (drops document tables, creates lab_reports + biomarker_readings)
 
 ## Troubleshooting
 
@@ -302,6 +313,6 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 - Clerk production keys and allowed redirect URLs for Railway domains
 - OpenAI billing and rate limits
 - Optional staging environment (`staging` vs `production` Railway environments)
-- Volume or object storage for durable document uploads
+- Volume or object storage for durable lab-report / attachment uploads
 
 See also: root `package.json` scripts (`db:migrate`), `apps/api/.env.example`, and `apps/web/.env.example`.

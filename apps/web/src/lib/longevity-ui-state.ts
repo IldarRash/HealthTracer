@@ -1,7 +1,7 @@
 import type {
+  BiomarkersDashboardResponse,
   DeviceConnection,
   Goal,
-  HealthDocument,
   HealthMetricAggregate,
   HealthMetricSnapshot,
   HabitAdherenceResponse,
@@ -12,7 +12,6 @@ import type {
   WeeklyProgressSummaryResponse,
   WorkoutSession,
 } from "@health/types";
-import { hasDocumentConsentScope } from "@health/types";
 import {
   computeWeeklyConsistency,
   goalStatusLabel,
@@ -21,11 +20,7 @@ import {
   type WeeklyConsistency,
 } from "./dashboard-ui-state";
 import { buildHabitAdherenceSummaryView } from "./habit-ui-state";
-import {
-  formatDocumentTimestamp,
-  isDocumentRevoked,
-  parseStatusLabel,
-} from "./documents-ui-state";
+import { buildBiomarkersHeroView } from "./biomarkers-ui-state";
 import {
   findActiveConnection,
   formatAggregateSummary,
@@ -109,7 +104,7 @@ export const LONGEVITY_CTA_ROUTES = {
   nutrition: "/nutrition",
   profile: "/profile",
   profileGoals: "/profile#goals",
-  profileDocuments: "/profile#documents",
+  biomarkers: "/biomarkers",
   profileConsent: "/profile#data-consent",
 } as const;
 
@@ -662,40 +657,43 @@ export function buildWellnessSignalsPanelView(input: {
   return { status: "ready", signals };
 }
 
-export type DocumentContextItem = {
-  id: string;
-  title: string;
-  uploadedLabel: string;
-  parseStatusLabel: string;
-  consentLabel: string;
-};
+export type BiomarkersLabsCardView =
+  | { status: "empty"; message: string }
+  | {
+      status: "ready";
+      trackedValue: string;
+      outsideRangeDetail: string;
+    };
 
-export function buildDocumentsContextView(
-  documents: readonly HealthDocument[],
-): { status: "empty"; message: string } | { status: "ready"; items: DocumentContextItem[] } {
-  const activeDocuments = documents
-    .filter((document) => !document.deletedAt && !isDocumentRevoked(document))
-    .sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt))
-    .slice(0, 3);
-
-  if (activeDocuments.length === 0) {
+/** Compact Labs summary for the Longevity overview, linking to /biomarkers. */
+export function buildBiomarkersLabsCardView(
+  dashboard: BiomarkersDashboardResponse | null,
+): BiomarkersLabsCardView {
+  if (!dashboard) {
     return {
       status: "empty",
-      message: "No documents uploaded yet. Add context from Profile when you want your coach to reference it.",
+      message:
+        "No lab results yet. Upload a lab report on Biomarkers to see values and trends here.",
+    };
+  }
+
+  const hero = buildBiomarkersHeroView(dashboard, []);
+
+  if (hero.trackedCount === 0) {
+    return {
+      status: "empty",
+      message:
+        "No lab results yet. Upload a lab report on Biomarkers to see values and trends here.",
     };
   }
 
   return {
     status: "ready",
-    items: activeDocuments.map((document) => ({
-      id: document.id,
-      title: document.title,
-      uploadedLabel: formatDocumentTimestamp(document.uploadedAt),
-      parseStatusLabel: parseStatusLabel(document.parseStatus),
-      consentLabel: hasDocumentConsentScope(document.consentScopes, "coach_chat_context")
-        ? "Coach context consented"
-        : "Coach context not shared",
-    })),
+    trackedValue: `${hero.trackedCount} tracked`,
+    outsideRangeDetail:
+      hero.outsideRangeCount > 0
+        ? `${hero.outsideRangeCount} outside typical range`
+        : "All within typical range",
   };
 }
 

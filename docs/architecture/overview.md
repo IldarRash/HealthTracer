@@ -67,7 +67,7 @@ See `docs/architecture/product-surface-architecture.md` for the complete surface
 - Backend services validate and apply proposals.
 - The AI layer must not write directly to domain tables.
 - Chat attachments use the same unified LLM pipeline as text turns: upload creates ownership-scoped image refs, attachment stages perform plumbing only, and selected multimodal domain LLMs read image content directly as context.
-- There is no attachment recognition/classification side channel and no attachment-created proposal candidate path. Medical document persistence from LLM-recognized images is deferred; no attachment path may auto-create `health_documents`.
+- There is no attachment recognition/classification side channel and no attachment-created proposal candidate path. Lab data persistence is explicit-upload only (the biomarkers module); no attachment path may insert `lab_reports` or `biomarker_readings` rows.
 
 ## Clients
 

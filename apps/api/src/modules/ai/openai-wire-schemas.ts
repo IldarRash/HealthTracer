@@ -279,9 +279,8 @@ const TOOL_INPUT_WIRE_SCHEMAS: Record<AgentToolNameValue, JsonSchema> = {
       depth: nullable({ type: "string", enum: [...contextDepthSchema.options] }),
       timeRange: nullable({ type: "string", enum: [...contextTimeRangeSchema.options] }),
       includeRawData: nullableBoolean(),
-      includeDocuments: nullableBoolean(),
     },
-    ["purpose", "depth", "timeRange", "includeRawData", "includeDocuments"],
+    ["purpose", "depth", "timeRange", "includeRawData"],
   ),
   // Input is ignored by the executor — an empty strict object keeps the wire honest.
   getWeeklyProgressContext: strictObject({}, []),

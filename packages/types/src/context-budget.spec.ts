@@ -256,7 +256,9 @@ describe("context expansion contracts", () => {
     }
   });
 
-  it("rejects document expansion when policy disallows documents", () => {
+  it("slice requests cannot carry a document flag — includeDocuments is no longer part of the contract", () => {
+    // Document expansion is structurally impossible now: the legacy
+    // includeDocuments key is stripped by the slice-request schema.
     const result = evaluateContextExpansionRequest({
       budget: {
         ...budget,
@@ -264,19 +266,21 @@ describe("context expansion contracts", () => {
       },
       request: {
         roundIndex: 0,
-        reason: "Need medical documents.",
+        reason: "Need health context.",
         requestedSlices: [
           {
             type: "health_context",
             includeDocuments: true,
-          },
+          } as Record<string, unknown> as { type: "health_context" },
         ],
       },
     });
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.errors.some((error) => error.includes("Document expansion"))).toBe(true);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(
+        result.decision.approvedSlices.every((slice) => !("includeDocuments" in slice)),
+      ).toBe(true);
     }
   });
 
