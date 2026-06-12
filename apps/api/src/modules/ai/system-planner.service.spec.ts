@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   getCapabilityConfig,
+  preprocessMessage,
   routerDecisionOutputSchema,
   normalizeAiBehaviorConfig,
   RULE_ROUTE_CONFIDENCE_THRESHOLD,
@@ -1010,5 +1011,65 @@ describe("SystemPlannerService", () => {
 
       expect(plan.fanout.lowConfidenceRoute).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — preprocessor threading into budget-profile selection
+// ---------------------------------------------------------------------------
+
+describe("SystemPlannerService — preprocessor budget threading (Phase 2)", () => {
+  it("selects deep_history with compression for «проанализируй последние полгода»", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(plan.requiresCompression).toBe(true);
+    expect(plan.requestedLookbackDays).toBe(180);
+    expect(plan.grantedLookbackDays).toBe(180);
+    // Per-domain fan-out budgets must see the same deterministic hints.
+    expect(plan.fanout.selectedDomains[0]?.contextBudget.profile).toBe("deep_history");
+    // Floors stay denied on the review budget.
+    expect(plan.contextBudget.allowDocuments).toBe(false);
+    expect(plan.contextBudget.allowSensitiveHealthContext).toBe(false);
+  });
+
+  it("keeps a plan-creation turn on the default budget even with preprocessorResult", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "составь план тренировок";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("default");
+    expect(plan.requestedLookbackDays).toBeNull();
+    expect(plan.grantedLookbackDays).toBeNull();
+  });
+
+  it("behaves as no-lookback when preprocessorResult is omitted (focused-test compat)", async () => {
+    const { planner } = createPlannerHarness();
+
+    const plan = await planner.planTurn({
+      userMessage: "проанализируй последние полгода",
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+    });
+
+    // Review phrasing alone (trigger regex) may still select deep_review, but
+    // without the preprocessor lookback hint deep_history must not engage.
+    expect(plan.contextBudget.profile).not.toBe("deep_history");
+    expect(plan.requestedLookbackDays).toBeNull();
+    expect(plan.grantedLookbackDays).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ import type {
 import {
   clampContextDepth,
   clampContextBudgetPolicy,
+  clampProgressHistoryLookback,
   buildDefaultAiBehaviorConfig,
   resolveContextBudgetProfilePolicy,
   tryCompileContextBudgetMessagePattern,
@@ -31,11 +32,28 @@ export interface ContextPlanReviewSignals {
   isMultiDomainReview: boolean;
   isProgressReview: boolean;
   hasExtendedLookback: boolean;
+  /** Preprocessor review_request signal (deterministic; false when absent). */
+  reviewRequest: boolean;
+  /** Preprocessor-detected lookback ask in days (null when no period phrase matched). */
+  requestedLookbackDays: number | null;
+}
+
+/** Deterministic preprocessor hints consumed by budget-profile selection. */
+export interface ContextBudgetPreprocessorHints {
+  requestedLookbackDays: number | null;
+  reviewRequest: boolean;
 }
 
 export interface ContextBudgetPlanMetadata extends ContextPlanReviewSignals {
   contextBudget: ContextBudgetPolicy;
   requiresCompression: boolean;
+  /**
+   * Lookback actually granted for this turn: the Phase 1 granularity-ladder
+   * clamp of requestedLookbackDays, further capped by the selected profile's
+   * maxLookbackDays. Null when no lookback was requested. Phase 3 threads this
+   * into the progress_history_review slice request.
+   */
+  grantedLookbackDays: number | null;
 }
 
 export interface ApplyContextBudgetResult {
@@ -56,6 +74,7 @@ export class ContextBudgetPolicyService {
   private readonly progressReviewSlicePurposes: ReadonlySet<ContextSliceRequest["type"]>;
   private readonly monthlyReviewCatalogIntentIds: ReadonlySet<CatalogIntentId>;
   private readonly monthlyReviewAgentIntents: ReadonlySet<IntentRouteResult["intent"]>;
+  private readonly deepHistoryMinLookbackDays: number;
 
   constructor(private readonly aiBehaviorConfigService: AiBehaviorConfigService) {
     const triggers = this.aiBehaviorConfigService.getContextBudgets().triggers;
@@ -78,12 +97,14 @@ export class ContextBudgetPolicyService {
     this.progressReviewSlicePurposes = new Set(triggers.progressReviewSlicePurposes);
     this.monthlyReviewCatalogIntentIds = new Set(triggers.monthlyReviewCatalogIntentIds);
     this.monthlyReviewAgentIntents = new Set(triggers.monthlyReviewAgentIntents);
+    this.deepHistoryMinLookbackDays = triggers.deepHistoryMinLookbackDays;
   }
 
   detectReviewSignals(input: {
     userMessage: string;
     route: IntentRouteResult;
     selectedCapabilities?: readonly CatalogIntentId[];
+    preprocessor?: ContextBudgetPreprocessorHints;
   }): ContextPlanReviewSignals {
     const slicePlan = input.route.requiredContextSlices;
     const isProgressReview =
@@ -112,27 +133,41 @@ export class ContextBudgetPolicyService {
       isMultiDomainReview,
       isProgressReview,
       hasExtendedLookback,
+      reviewRequest: input.preprocessor?.reviewRequest ?? false,
+      requestedLookbackDays: input.preprocessor?.requestedLookbackDays ?? null,
     };
   }
 
+  /**
+   * Deterministic budget-profile selection:
+   * 1. review-ish turn (any review signal OR the preprocessor review_request)
+   *    with a requested lookback beyond deepHistoryMinLookbackDays → deep_history;
+   * 2. otherwise the existing deep_review triggers (monthly / multi-domain /
+   *    progress review with extended lookback) → deep_review;
+   * 3. everything else → default.
+   */
   resolveBudgetForTurn(signals: ContextPlanReviewSignals): ContextBudgetPolicy {
     const contextBudgets = this.aiBehaviorConfigService.getContextBudgets();
     const useDeepReview =
       signals.isMonthlyReview ||
       signals.isMultiDomainReview ||
       (signals.isProgressReview && signals.hasExtendedLookback);
+    const isReviewishTurn =
+      useDeepReview || signals.isProgressReview || signals.reviewRequest;
+    const useDeepHistory =
+      isReviewishTurn &&
+      signals.requestedLookbackDays !== null &&
+      signals.requestedLookbackDays > this.deepHistoryMinLookbackDays;
+    const profile = useDeepHistory ? "deep_history" : useDeepReview ? "deep_review" : "default";
 
-    return clampContextBudgetPolicy(
-      useDeepReview
-        ? resolveContextBudgetProfilePolicy(contextBudgets, "deep_review")
-        : resolveContextBudgetProfilePolicy(contextBudgets, "default"),
-    );
+    return clampContextBudgetPolicy(resolveContextBudgetProfilePolicy(contextBudgets, profile));
   }
 
   buildPlanMetadata(input: {
     userMessage: string;
     route: IntentRouteResult;
     selectedCapabilities?: readonly CatalogIntentId[];
+    preprocessor?: ContextBudgetPreprocessorHints;
   }): ContextBudgetPlanMetadata {
     const signals = this.detectReviewSignals(input);
     const contextBudget = this.resolveBudgetForTurn(signals);
@@ -141,6 +176,10 @@ export class ContextBudgetPolicyService {
       ...signals,
       contextBudget,
       requiresCompression: contextBudget.requiresCompression,
+      grantedLookbackDays: resolveGrantedLookbackDays(
+        signals.requestedLookbackDays,
+        contextBudget,
+      ),
     };
   }
 
@@ -253,6 +292,24 @@ export class ContextBudgetPolicyService {
 
     return notes;
   }
+}
+
+/**
+ * Granted lookback = Phase 1 granularity-ladder clamp, further capped by the
+ * selected profile's maxLookbackDays. Null when nothing was requested.
+ */
+export function resolveGrantedLookbackDays(
+  requestedLookbackDays: number | null,
+  budget: ContextBudgetPolicy,
+): number | null {
+  if (requestedLookbackDays === null) {
+    return null;
+  }
+
+  return Math.min(
+    clampProgressHistoryLookback(requestedLookbackDays).grantedPeriodDays,
+    budget.maxLookbackDays,
+  );
 }
 
 export function clampTimeRangeToLookback(

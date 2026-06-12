@@ -276,10 +276,22 @@
         "requiresCompression": true,
         "maxExpansionRounds": 2,
         "maxSlicesPerExpansionRound": 3
+      },
+      "deep_history": {
+        "profile": "deep_history",
+        "maxSlices": 6,
+        "maxDepth": "large",
+        "maxRawItems": 60,
+        "maxLookbackDays": 731,
+        "allowDocuments": false,
+        "allowSensitiveHealthContext": false,
+        "requiresCompression": true,
+        "maxExpansionRounds": 2,
+        "maxSlicesPerExpansionRound": 3
       }
     },
     "triggers": {
-      "monthlyReviewMessagePattern": "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day)\\b",
+      "monthlyReviewMessagePattern": "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day|half a year|six months|6 months|12 months|last year|past year|all[- ]?time|entire history|full history)\\b|месяц|квартал|полгода|пол года|шесть месяцев|12 месяцев|за вс[её] время|вс(?:я|ю) истори|за (?:последний )?год",
       "multiDomainMessagePattern": "\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b.*\\b(and|plus|also|versus|vs)\\b.*\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b",
       "extendedLookbackTimeRanges": [
         "30d",
@@ -309,7 +321,14 @@
       ],
       "monthlyReviewAgentIntents": [
         "longevity_overview"
-      ]
+      ],
+      "deepHistoryMinLookbackDays": 91
+    },
+    "degradationNotes": {
+      "lookbackClamped": {
+        "en": "Showing the last {{grantedMonths}} months of the requested {{requestedMonths}} — older data is summarized monthly.",
+        "ru": "Показаны последние {{grantedMonths}} мес. из запрошенных {{requestedMonths}} — более старые данные сведены в помесячную сводку."
+      }
     }
   },
   "promptTemplates": {

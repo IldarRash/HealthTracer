@@ -140,6 +140,11 @@ describe("ai behavior safety invariants", () => {
                 allowDocuments: true,
                 allowSensitiveHealthContext: true,
               },
+              deep_history: {
+                ...defaults.contextBudgets.profiles.deep_history,
+                allowDocuments: true,
+                allowSensitiveHealthContext: true,
+              },
             },
           },
         },
@@ -147,14 +152,13 @@ describe("ai behavior safety invariants", () => {
       });
 
       expect(loaded.source).toBe("file");
-      expect(loaded.config.contextBudgets.profiles.default.allowDocuments).toBe(false);
-      expect(loaded.config.contextBudgets.profiles.default.allowSensitiveHealthContext).toBe(
-        false,
-      );
-      expect(loaded.config.contextBudgets.profiles.deep_review.allowDocuments).toBe(false);
-      expect(loaded.config.contextBudgets.profiles.deep_review.allowSensitiveHealthContext).toBe(
-        false,
-      );
+
+      for (const profile of ["default", "deep_review", "deep_history"] as const) {
+        expect(loaded.config.contextBudgets.profiles[profile].allowDocuments).toBe(false);
+        expect(loaded.config.contextBudgets.profiles[profile].allowSensitiveHealthContext).toBe(
+          false,
+        );
+      }
       expect(
         loaded.warnings.some((warning) => warning.includes("document/sensitive-health")),
       ).toBe(true);

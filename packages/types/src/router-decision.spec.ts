@@ -29,8 +29,10 @@ const basePreprocessor = {
     document: false,
     attachment: false,
     plan_request: false,
+    review_request: false,
   },
   directPathCandidate: null,
+  requestedLookbackDays: null,
 };
 
 const validOutputBase = {

@@ -17,8 +17,11 @@ import {
   CONTEXT_BUDGET_ABSOLUTE_LIMITS,
   applyContextBudgetSafetyFloor,
   clampContextBudgetPolicy,
+  contextBudgetDegradationNotesSchema,
   contextBudgetPolicySchema,
   contextBudgetProfileSchema,
+  DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+  DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
   DEFAULT_CONTEXT_BUDGET_POLICY,
   DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
   tryCompileContextBudgetMessagePattern,
@@ -69,6 +72,15 @@ export const proposalRevisionIntentSchema = z.enum([
 ]);
 
 export type ProposalRevisionIntent = z.infer<typeof proposalRevisionIntentSchema>;
+
+/**
+ * Default monthly/long-period review trigger pattern (EN + RU).
+ * Cyrillic alternatives sit OUTSIDE the \b(...)\b group because JS \b
+ * boundaries only work for ASCII word characters.
+ */
+export const DEFAULT_MONTHLY_REVIEW_MESSAGE_PATTERN =
+  "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day|half a year|six months|6 months|12 months|last year|past year|all[- ]?time|entire history|full history)\\b" +
+  "|месяц|квартал|полгода|пол года|шесть месяцев|12 месяцев|за вс[её] время|вс(?:я|ю) истори|за (?:последний )?год";
 
 export const AI_BEHAVIOR_CONFIG_VERSION = 1 as const;
 
@@ -166,7 +178,14 @@ export type ResponseModesBehaviorConfig = z.infer<typeof responseModesBehaviorCo
 export const contextBudgetProfilesConfigSchema = z.object({
   default: contextBudgetPolicySchema,
   deep_review: contextBudgetPolicySchema,
+  deep_history: contextBudgetPolicySchema,
 });
+
+export const CONTEXT_BUDGET_PROFILE_IDS = [
+  "default",
+  "deep_review",
+  "deep_history",
+] as const satisfies readonly z.infer<typeof contextBudgetProfileSchema>[];
 
 export type ContextBudgetProfilesConfig = z.infer<typeof contextBudgetProfilesConfigSchema>;
 
@@ -192,6 +211,12 @@ export const contextBudgetTriggersConfigSchema = z.object({
   monthlyReviewAgentIntents: z.array(agentIntentSchema).min(1).max(10).default([
     "longevity_overview",
   ]),
+  /**
+   * Review-ish turns with a detected requestedLookbackDays above this value
+   * select the deep_history profile (monthly granularity, mandatory
+   * compression). Defaults to 91 so 90-day/quarter reviews stay deep_review.
+   */
+  deepHistoryMinLookbackDays: z.number().int().min(1).max(3650).default(91),
 });
 
 export type ContextBudgetTriggersConfig = z.infer<typeof contextBudgetTriggersConfigSchema>;
@@ -199,6 +224,10 @@ export type ContextBudgetTriggersConfig = z.infer<typeof contextBudgetTriggersCo
 export const contextBudgetsBehaviorConfigSchema = z.object({
   profiles: contextBudgetProfilesConfigSchema,
   triggers: contextBudgetTriggersConfigSchema,
+  /** EN/RU degradation note templates; fail-closed to built-in defaults. */
+  degradationNotes: contextBudgetDegradationNotesSchema.default(
+    DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
+  ),
 });
 
 export type ContextBudgetsBehaviorConfig = z.infer<typeof contextBudgetsBehaviorConfigSchema>;
@@ -427,10 +456,10 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
       profiles: {
         default: DEFAULT_CONTEXT_BUDGET_POLICY,
         deep_review: DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
+        deep_history: DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
       },
       triggers: {
-        monthlyReviewMessagePattern:
-          "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day)\\b",
+        monthlyReviewMessagePattern: DEFAULT_MONTHLY_REVIEW_MESSAGE_PATTERN,
         multiDomainMessagePattern:
           "\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b.*\\b(and|plus|also|versus|vs)\\b.*\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b",
         extendedLookbackTimeRanges: ["30d", "90d", "1y"],
@@ -448,7 +477,9 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
         progressReviewSlicePurposes: ["weekly_review"],
         monthlyReviewCatalogIntentIds: ["longevity_overview"],
         monthlyReviewAgentIntents: ["longevity_overview"],
+        deepHistoryMinLookbackDays: 91,
       },
+      degradationNotes: DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
     },
     promptTemplates: {
       templates: buildDefaultPromptTemplateEntries(),
@@ -511,6 +542,7 @@ export function sanitizeContextBudgetProfiles(
   return {
     default: applyContextBudgetSafetyFloor(clampContextBudgetPolicy(profiles.default)),
     deep_review: applyContextBudgetSafetyFloor(clampContextBudgetPolicy(profiles.deep_review)),
+    deep_history: applyContextBudgetSafetyFloor(clampContextBudgetPolicy(profiles.deep_history)),
   };
 }
 
@@ -552,6 +584,7 @@ export function sanitizeContextBudgetsBehaviorConfig(
     contextBudgets: {
       profiles,
       triggers,
+      degradationNotes: contextBudgets.degradationNotes,
     },
     warnings,
   };
@@ -615,10 +648,20 @@ export function normalizeAiBehaviorConfig(
           ...defaults.contextBudgets.profiles.deep_review,
           ...partial?.contextBudgets?.profiles?.deep_review,
         },
+        deep_history: {
+          ...defaults.contextBudgets.profiles.deep_history,
+          ...partial?.contextBudgets?.profiles?.deep_history,
+        },
       },
       triggers: {
         ...defaults.contextBudgets.triggers,
         ...partial?.contextBudgets?.triggers,
+      },
+      degradationNotes: {
+        lookbackClamped: {
+          ...defaults.contextBudgets.degradationNotes.lookbackClamped,
+          ...partial?.contextBudgets?.degradationNotes?.lookbackClamped,
+        },
       },
     },
     promptTemplates: {
@@ -717,7 +760,7 @@ export function resolveLoadedAiBehaviorConfig(input: {
       }
     }
 
-    for (const profile of ["default", "deep_review"] as const) {
+    for (const profile of CONTEXT_BUDGET_PROFILE_IDS) {
       const fileProfile = parsed.data.contextBudgets.profiles[profile];
 
       if (
@@ -776,10 +819,7 @@ export function resolveContextBudgetProfilePolicy(
   config: ContextBudgetsBehaviorConfig,
   profile: z.infer<typeof contextBudgetProfileSchema>,
 ): ContextBudgetPolicy {
-  const policy =
-    profile === "deep_review" ? config.profiles.deep_review : config.profiles.default;
-
-  return applyContextBudgetSafetyFloor(clampContextBudgetPolicy(policy));
+  return applyContextBudgetSafetyFloor(clampContextBudgetPolicy(config.profiles[profile]));
 }
 
 export function mergeCapabilityConfigOverrides(

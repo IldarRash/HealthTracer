@@ -185,6 +185,7 @@ export class AgentOrchestratorService {
       proposalRevision: input.proposalRevision,
       attachmentTurn: input.attachmentTurn,
       routerResult,
+      preprocessorResult,
     });
     const { route } = plan;
     const capabilityTurnMetadata = toAgentTurnCapabilityPresentation(plan.presentationMetadata);

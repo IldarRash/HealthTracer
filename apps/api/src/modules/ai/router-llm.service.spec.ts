@@ -50,9 +50,11 @@ function makePreprocessorResult(overrides: Partial<{
       document: overrides.simpleSignals?.["document"] ?? false,
       attachment: overrides.simpleSignals?.["attachment"] ?? false,
       plan_request: overrides.simpleSignals?.["plan_request"] ?? false,
+      review_request: overrides.simpleSignals?.["review_request"] ?? false,
       ...overrides.simpleSignals,
     },
     directPathCandidate: null,
+    requestedLookbackDays: null,
   };
 }
 

@@ -23,6 +23,7 @@ import {
   resolveProposalRevisionCapabilityId,
   resolveResponseModeExecutorMode,
   type DirectChatPathCandidate,
+  type MessagePreprocessorResult,
   type RouterDomain,
 } from "@health/types";
 import type { RouterLlmResult } from "./router-llm.service.js";
@@ -33,6 +34,7 @@ import { CapabilityRegistryService } from "./capability-registry.service.js";
 import {
   ContextBudgetPolicyService,
   type ContextBudgetPlanMetadata,
+  type ContextBudgetPreprocessorHints,
 } from "../coaching-context/context-budget-policy.service.js";
 import { DirectChatPathMatcherService } from "./direct-chat-path-matcher.service.js";
 import { ProposalExplainerMatcherService } from "./proposal-explainer-matcher.service.js";
@@ -77,6 +79,12 @@ export interface SystemPlannerTurnInput {
   proposalRevision?: SystemPlannerProposalRevisionContext;
   attachmentTurn?: SystemPlannerAttachmentTurnContext;
   routerResult?: RouterLlmResult;
+  /**
+   * Deterministic preprocessor output for this turn. The planner reads only
+   * requestedLookbackDays + simpleSignals.review_request to drive budget-profile
+   * selection (deep_review / deep_history) — the router/LLM never decides the tier.
+   */
+  preprocessorResult?: MessagePreprocessorResult;
 }
 
 export interface CapabilityPlanResult extends ContextBudgetPlanMetadata {
@@ -201,6 +209,7 @@ export class SystemPlannerService {
         expectedResponseMode,
       },
       selectedCapabilities,
+      preprocessor: resolvePreprocessorBudgetHints(input.preprocessorResult),
     });
     const resolvedRoute = {
       ...route,
@@ -352,6 +361,7 @@ export class SystemPlannerService {
         userMessage: input.userMessage,
         route: domainRoute,
         selectedCapabilities: [capabilityId],
+        preprocessor: resolvePreprocessorBudgetHints(input.preprocessorResult),
       });
       const contextBudget = domainBudgetMetadata.contextBudget;
 
@@ -695,6 +705,25 @@ export class SystemPlannerService {
 // ---------------------------------------------------------------------------
 // Module-level helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Extract the deterministic budget hints the ContextBudgetPolicyService reads
+ * from the preprocessor result. Returns undefined when no preprocessor result
+ * was threaded (e.g. focused planner unit tests) — selection then behaves as
+ * if no lookback/review signal was detected.
+ */
+function resolvePreprocessorBudgetHints(
+  preprocessorResult: MessagePreprocessorResult | undefined,
+): ContextBudgetPreprocessorHints | undefined {
+  if (!preprocessorResult) {
+    return undefined;
+  }
+
+  return {
+    requestedLookbackDays: preprocessorResult.requestedLookbackDays,
+    reviewRequest: preprocessorResult.simpleSignals.review_request,
+  };
+}
 
 /**
  * Map a CatalogIntentId to the closest RouterDomain for single-entry fanout cases
