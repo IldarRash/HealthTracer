@@ -8,6 +8,7 @@ import type {
   BuildAgentContextRequest,
   CoachingHierarchySummary,
   ContextBudgetPolicy,
+  ContextSliceRequest,
   CorrelationInsightPreviewResponse,
   GetUserContextSliceInput,
   Goal,
@@ -16,6 +17,7 @@ import type {
   IntentRouteResult,
   NutritionPlanPayload,
   PersonalContextSummary,
+  ProgressHistoryReviewSummary,
   User,
   UserContextSlice,
   UserProfile,
@@ -56,6 +58,7 @@ import { MetricsAiContextService } from "../health-metrics/metrics-ai-context.se
 import { RecoveryAiContextService } from "../recovery/recovery-ai-context.service.js";
 import { WellbeingAiContextService } from "../wellbeing-check-ins/wellbeing-ai-context.service.js";
 import { NutritionRepository } from "../nutrition/nutrition.repository.js";
+import { ProgressHistoryAggregateService } from "../progress/progress-history-aggregate.service.js";
 import { ProgressService } from "../progress/progress.service.js";
 import { ProfilesService } from "../profiles/profiles.service.js";
 import { UsersService } from "../users/users.service.js";
@@ -81,10 +84,33 @@ export interface CoachingContextSnapshot {
   metricsSummary: AiMetricsContextSummary;
   wellbeingSummary: AiWellbeingContextSummary;
   recoveryContext: AiRecoveryContextSummary;
+  /**
+   * Deep-review numeric aggregates. Populated LAZILY by buildAgentContext —
+   * only when the resolved slice plan contains progress_history_review.
+   * Default turns never trigger the aggregation query.
+   */
+  progressHistory?: ProgressHistoryReviewSummary;
+}
+
+/** Turn-level lookback grant threaded by the planner/orchestrator (Phase 3). */
+export interface ProgressHistoryLookbackOptions {
+  /** Preprocessor-detected ask in days; null when no period phrase matched. */
+  requestedLookbackDays: number | null;
+  /** Ladder + profile clamped grant; null when nothing was requested. */
+  grantedLookbackDays: number | null;
+  /** Resolved response language for the config-sourced clamp note (EN fallback). */
+  responseLanguage: string | null;
 }
 
 export interface BuildAgentContextOptions {
   contextBudget?: ContextBudgetPolicy;
+  /**
+   * Planner-injected slice requests appended after the route-derived plan
+   * (per-domain fan-out packets have no route, so the injected
+   * progress_history_review request arrives here).
+   */
+  supplementarySliceRequests?: readonly ContextSliceRequest[];
+  progressHistoryLookback?: ProgressHistoryLookbackOptions;
 }
 
 @Injectable()
@@ -105,6 +131,7 @@ export class CoachingContextService {
     private readonly metricsAiContextService: MetricsAiContextService,
     private readonly wellbeingAiContextService: WellbeingAiContextService,
     private readonly recoveryAiContextService: RecoveryAiContextService,
+    private readonly progressHistoryAggregateService: ProgressHistoryAggregateService,
   ) {}
 
   async buildSnapshot(auth: ClerkAuthContext): Promise<CoachingContextSnapshot> {
@@ -316,16 +343,19 @@ export class CoachingContextService {
   ): Promise<AgentContextPacket> {
     const intent = route?.intent ?? request.intent ?? "general";
     const budget = options?.contextBudget ?? DEFAULT_CONTEXT_BUDGET_POLICY;
-    const normalizedSlicePlan = normalizeContextSlicePlan(
-      route?.requiredContextSlices ?? [
+    const normalizedSlicePlan = normalizeContextSlicePlan([
+      ...(route?.requiredContextSlices ?? [
         {
           type: request.purpose ?? INTENT_TO_SLICE_PURPOSE[intent],
           depth: request.depth,
           timeRange: request.timeRange,
           includeDocuments: request.includeDocuments,
         },
-      ],
-    );
+      ]),
+      // Planner-injected requests (e.g. progress_history_review on review
+      // profiles). normalizeContextSlicePlan dedupes and caps the plan.
+      ...(options?.supplementarySliceRequests ?? []),
+    ]);
     const { slicePlan, notes: budgetNotes } = this.contextBudgetPolicyService.applyBudgetToSlicePlan(
       normalizedSlicePlan,
       budget,
@@ -341,6 +371,25 @@ export class CoachingContextService {
       slicePlan.some((slice) => slice.type === "nutrition_adaptation")
         ? await this.getActiveNutritionPlanPayload(auth)
         : null;
+    // LAZY: the aggregation query runs only when the resolved slice plan
+    // actually contains progress_history_review — never on default turns.
+    const wantsProgressHistory = slicePlan.some(
+      (slice) => slice.type === "progress_history_review",
+    );
+
+    if (wantsProgressHistory) {
+      // The granted lookback is already ladder- and profile-clamped by the
+      // planner; without an explicit ask, fall back to the budget's horizon.
+      const lookbackDays =
+        options?.progressHistoryLookback?.grantedLookbackDays ?? budget.maxLookbackDays;
+
+      snapshot.progressHistory = await this.progressHistoryAggregateService.buildReviewSummary(
+        snapshot.user.id,
+        lookbackDays,
+        new Date(),
+        snapshot.user.timezone,
+      );
+    }
 
     const primarySlice = this.contextBudgetPolicyService.applyBudgetToBuiltSlice(
       await this.buildSliceFromRequest(snapshot, primaryRequest, activeNutritionPlan, budget),
@@ -358,6 +407,23 @@ export class CoachingContextService {
       ...collectMissingContextNotes([primarySlice, ...supplementarySlices], slicePlan),
       ...budgetNotes,
     ];
+    const lookback = options?.progressHistoryLookback;
+
+    if (
+      wantsProgressHistory &&
+      lookback?.requestedLookbackDays != null &&
+      lookback.grantedLookbackDays != null &&
+      lookback.requestedLookbackDays > lookback.grantedLookbackDays
+    ) {
+      // Honest clamp note — typed copy from contextBudgets.degradationNotes.
+      missingContextNotes.push(
+        this.contextBudgetPolicyService.renderLookbackClampNote(
+          lookback.grantedLookbackDays,
+          lookback.requestedLookbackDays,
+          lookback.responseLanguage,
+        ),
+      );
+    }
 
     if (budget.requiresCompression) {
       missingContextNotes.push(

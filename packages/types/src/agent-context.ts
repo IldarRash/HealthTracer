@@ -7,6 +7,7 @@ import { habitAdherencePlanSummarySchema } from "./habits.js";
 import { aiRecoveryContextSummarySchema } from "./recovery.js";
 import { aiWellbeingContextSummarySchema } from "./wellbeing-check-ins.js";
 import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
+import { progressHistoryReviewSummarySchema } from "./progress-history.js";
 
 const progressDataStatusValues = ["sufficient", "partial", "insufficient"] as const;
 const trendDirectionValues = ["up", "down", "stable", "unknown"] as const;
@@ -19,6 +20,8 @@ export const contextSlicePurposeSchema = z.enum([
   "weekly_review",
   "longevity_overview",
   "health_context",
+  // Deep-review numeric aggregates (planner-injected on review budget profiles).
+  "progress_history_review",
 ]);
 
 export type ContextSlicePurpose = z.infer<typeof contextSlicePurposeSchema>;
@@ -293,6 +296,12 @@ export const userContextSliceSchema = z.object({
   recentHabitAdherence: habitAdherencePlanSummarySchema.nullable().optional(),
   weeklyProgress: weeklyProgressContextSummarySchema.nullable().optional(),
   recentWorkoutExecution: workoutExecutionSummarySchema.nullable().optional(),
+  /**
+   * Deep-review numeric aggregates (progress_history_review slices only).
+   * Numbers/enums/ISO dates by construction — structurally unable to carry
+   * free text, so it is NOT gated by allowSensitiveHealthContext.
+   */
+  progressHistory: progressHistoryReviewSummarySchema.optional(),
   metricsSummary: aiMetricsContextSummarySchema.optional(),
   wellbeingSummary: aiWellbeingContextSummarySchema.optional(),
   recoveryContext: aiRecoveryContextSummarySchema.optional(),
@@ -906,6 +915,7 @@ export function resolveDefaultDepthForPurpose(purpose: ContextSlicePurpose): Con
     case "weekly_review":
     case "longevity_overview":
     case "health_context":
+    case "progress_history_review":
       return "large";
   }
 }
@@ -926,6 +936,10 @@ export function resolveDefaultTimeRangeForPurpose(
       return "90d";
     case "health_context":
       return "30d";
+    // Display metadata only — the real review lookback is the turn-level
+    // grantedLookbackDays threaded by the planner (clamped per budget profile).
+    case "progress_history_review":
+      return "90d";
   }
 }
 

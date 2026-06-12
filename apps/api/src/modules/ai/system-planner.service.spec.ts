@@ -1073,3 +1073,117 @@ describe("SystemPlannerService — preprocessor budget threading (Phase 2)", () 
     expect(plan.grantedLookbackDays).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3 — planner injection of the progress_history_review slice
+// ---------------------------------------------------------------------------
+
+function createMultiDomainRouterResult(
+  domains: ReadonlyArray<"workout" | "nutrition" | "health">,
+  confidence = 0.84,
+): RouterLlmResult {
+  return {
+    output: routerDecisionOutputSchema.parse({
+      selectedDomains: domains.map((domain) => ({
+        domain,
+        confidence,
+        intentHints: [],
+        toolHints: [],
+        signalHints: [],
+      })),
+      safetyFlags: [],
+      confidence,
+    }),
+    source: "llm",
+    validationErrors: [],
+  };
+}
+
+describe("SystemPlannerService — progress_history_review injection (Phase 3)", () => {
+  it("appends the slice to the route and to EVERY selected fan-out domain on a deep_history turn", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода — тренировки, питание и состояние";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createMultiDomainRouterResult(["workout", "nutrition", "health"]),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(true);
+    expect(plan.fanout.selectedDomains.length).toBeGreaterThan(1);
+
+    for (const entry of plan.fanout.selectedDomains) {
+      expect(
+        entry.supplementaryContextSlices?.some(
+          (slice) => slice.type === "progress_history_review",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("threads the slice into the single-entry fanout for a deep_history turn without a confident router", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.35, "fallback"),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(true);
+    expect(plan.fanout.selectedDomains).toHaveLength(1);
+    expect(
+      plan.fanout.selectedDomains[0]?.supplementaryContextSlices?.some(
+        (slice) => slice.type === "progress_history_review",
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT inject the slice on a default-budget turn", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "составь план тренировок";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("default");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(false);
+
+    for (const entry of plan.fanout.selectedDomains) {
+      expect(entry.supplementaryContextSlices ?? []).toHaveLength(0);
+    }
+  });
+
+  it("keeps the primary slice first so the packet purpose is unchanged by injection", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.route.requiredContextSlices[0]?.type).not.toBe("progress_history_review");
+    expect(plan.route.requiredContextSlices[1]?.type).toBe("progress_history_review");
+    // deep_history grants up to 24 months, so the display timeRange is "1y".
+    expect(plan.route.requiredContextSlices[1]?.timeRange).toBe("1y");
+  });
+});

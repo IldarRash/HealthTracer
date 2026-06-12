@@ -11,6 +11,7 @@ import {
   clampTimeRangeToLookback,
   ContextBudgetPolicyService,
   resolveGrantedLookbackDays,
+  shouldInjectProgressHistoryReview,
 } from "./context-budget-policy.service.js";
 import { normalizeAiBehaviorConfig } from "@health/types";
 import { buildDefaultAiBehaviorConfig } from "@health/types";
@@ -558,5 +559,154 @@ describe("resolveGrantedLookbackDays", () => {
     expect(resolveGrantedLookbackDays(180, DEEP_HISTORY_CONTEXT_BUDGET_POLICY)).toBe(180);
     expect(resolveGrantedLookbackDays(180, DEEP_REVIEW_CONTEXT_BUDGET_POLICY)).toBe(90);
     expect(resolveGrantedLookbackDays(14, DEFAULT_CONTEXT_BUDGET_POLICY)).toBe(14);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — progress-history bucket budgeting + injection predicate
+// ---------------------------------------------------------------------------
+
+function buildProgressHistoryBucket(bucketStart: string) {
+  return {
+    bucketStart,
+    workout: {
+      plannedCount: 3,
+      completedCount: 2,
+      skippedCount: 1,
+      adherencePercent: 66.7,
+      activeDays: 2,
+      avgFatigue: null,
+    },
+    habits: { adherencePercent: null },
+    recovery: {
+      wellSupportedDays: 1,
+      moderateLoadDays: 2,
+      prioritizeRecoveryDays: 0,
+      insufficientDataDays: 4,
+    },
+    wellbeing: { avgMoodScore: null, avgStressScore: null, checkInCount: 0 },
+  };
+}
+
+function buildProgressHistorySlice(bucketStarts: readonly string[]): UserContextSlice {
+  return {
+    purpose: "progress_history_review",
+    depth: "large",
+    timeRange: "90d",
+    generatedAt: new Date().toISOString(),
+    relevantMemories: [],
+    snapshots: [],
+    recommendationConstraints: [],
+    sourceRefs: [],
+    progressHistory: {
+      requestedPeriodDays: bucketStarts.length * 7,
+      grantedPeriodDays: bucketStarts.length * 7,
+      granularity: "weekly",
+      buckets: bucketStarts.map(buildProgressHistoryBucket),
+      planChangeMarkers: [],
+      dataSufficiency: {
+        workout: "partial",
+        habits: "insufficient",
+        recovery: "insufficient",
+        wellbeing: "insufficient",
+      },
+      coveredDays: bucketStarts.length * 7,
+      noteCodes: [],
+    },
+  } as UserContextSlice;
+}
+
+describe("ContextBudgetPolicyService — progress-history buckets (Phase 3)", () => {
+  const service = new ContextBudgetPolicyService(createDefaultAiBehaviorConfigService());
+
+  it("counts buckets as raw items and keeps the slice intact under the cap", () => {
+    const slice = service.applyBudgetToBuiltSlice(
+      buildProgressHistorySlice(["2026-05-04", "2026-05-11", "2026-05-18"]),
+      { ...DEEP_HISTORY_CONTEXT_BUDGET_POLICY, maxRawItems: 3 },
+    );
+
+    expect(slice.progressHistory?.buckets).toHaveLength(3);
+  });
+
+  it("drops the OLDEST buckets first when maxRawItems is exceeded", () => {
+    const slice = service.applyBudgetToBuiltSlice(
+      buildProgressHistorySlice(["2026-04-27", "2026-05-04", "2026-05-11", "2026-05-18"]),
+      { ...DEEP_HISTORY_CONTEXT_BUDGET_POLICY, maxRawItems: 2 },
+    );
+
+    expect(slice.progressHistory?.buckets.map((bucket) => bucket.bucketStart)).toEqual([
+      "2026-05-11",
+      "2026-05-18",
+    ]);
+  });
+
+  it("keeps the numeric progressHistory packet under the sensitive-context floor", () => {
+    const base = buildProgressHistorySlice(["2026-05-18"]);
+    const slice = service.applyBudgetToBuiltSlice(
+      {
+        ...base,
+        wellbeingSummary: { windowDays: 7 } as UserContextSlice["wellbeingSummary"],
+        recoveryContext: { band: "insufficient_data" } as UserContextSlice["recoveryContext"],
+      },
+      DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+    );
+
+    // Floors strip the free-text-bearing sensitive fields…
+    expect(slice.wellbeingSummary).toBeUndefined();
+    expect(slice.recoveryContext).toBeUndefined();
+    // …while the numbers-only aggregate survives (structurally safe by schema).
+    expect(slice.progressHistory?.buckets).toHaveLength(1);
+  });
+});
+
+describe("shouldInjectProgressHistoryReview", () => {
+  const service = new ContextBudgetPolicyService(createDefaultAiBehaviorConfigService());
+
+  it("injects on a deep_history review turn", () => {
+    const metadata = service.buildPlanMetadata({
+      userMessage: "проанализируй последние полгода",
+      route: buildRoute(),
+      preprocessor: { requestedLookbackDays: 180, reviewRequest: true },
+    });
+
+    expect(shouldInjectProgressHistoryReview(metadata)).toBe(true);
+  });
+
+  it("injects on a deep_review progress-review turn", () => {
+    const metadata = service.buildPlanMetadata({
+      userMessage: "как прошёл месяц",
+      route: buildRoute({ intent: "review_progress", catalogIntentId: "review_progress" }),
+      preprocessor: { requestedLookbackDays: 30, reviewRequest: true },
+    });
+
+    expect(shouldInjectProgressHistoryReview(metadata)).toBe(true);
+  });
+
+  it("does NOT inject on a default-profile turn", () => {
+    const metadata = service.buildPlanMetadata({
+      userMessage: "составь план тренировок",
+      route: buildRoute(),
+      preprocessor: { requestedLookbackDays: null, reviewRequest: false },
+    });
+
+    expect(shouldInjectProgressHistoryReview(metadata)).toBe(false);
+  });
+
+  it("does NOT inject on a multi-domain deep_review turn without review signals", () => {
+    const metadata = service.buildPlanMetadata({
+      userMessage: "помоги с тренировками, питанием и привычками сразу",
+      route: buildRoute({
+        requiredContextSlices: [
+          { type: "workout_adaptation", depth: "medium", timeRange: "14d" },
+          { type: "nutrition_adaptation", depth: "medium", timeRange: "14d" },
+          { type: "health_context", depth: "large", timeRange: "30d" },
+        ],
+      }),
+      preprocessor: { requestedLookbackDays: null, reviewRequest: false },
+    });
+
+    // Multi-domain alone may select deep_review, but it is not review-ish.
+    expect(metadata.isMultiDomainReview).toBe(true);
+    expect(shouldInjectProgressHistoryReview(metadata)).toBe(false);
   });
 });

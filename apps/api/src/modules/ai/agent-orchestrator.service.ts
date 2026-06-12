@@ -26,7 +26,10 @@ import {
 } from "@health/types";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
-import { CoachingContextService } from "../coaching-context/coaching-context.service.js";
+import {
+  CoachingContextService,
+  type ProgressHistoryLookbackOptions,
+} from "../coaching-context/coaching-context.service.js";
 import { ContextCompressionService } from "../coaching-context/context-compression.service.js";
 import { ContextExpansionPolicyService } from "../coaching-context/context-expansion-policy.service.js";
 import { mapContextSourceRefsToAgentCitations } from "../coaching-context/agent-prompt-context.js";
@@ -192,6 +195,15 @@ export class AgentOrchestratorService {
 
     // Build primary context packet for the current route (used as a fallback
     // for fan-out path metadata and for domain context building).
+    // Turn-level lookback grant for the planner-injected progress_history_review
+    // slice (Phase 3). Threaded into every packet build; CoachingContextService
+    // runs the aggregation lazily — only when the slice plan contains the purpose.
+    const progressHistoryLookback = {
+      requestedLookbackDays: plan.requestedLookbackDays,
+      grantedLookbackDays: plan.grantedLookbackDays,
+      responseLanguage: preprocessorResult.responseLanguage,
+    };
+
     const contextStart = Date.now();
     const contextPacket = await this.coachingContextService.buildAgentContext(
       input.auth,
@@ -204,7 +216,7 @@ export class AgentOrchestratorService {
         includeDocuments: route.includeDocuments,
       },
       route,
-      { contextBudget: plan.contextBudget },
+      { contextBudget: plan.contextBudget, progressHistoryLookback },
     );
     const contextLatencyMs = Date.now() - contextStart;
 
@@ -349,6 +361,11 @@ export class AgentOrchestratorService {
       input,
       selectedDomains,
       contextPacket,
+      {
+        requestedLookbackDays: plan.requestedLookbackDays,
+        grantedLookbackDays: plan.grantedLookbackDays,
+        responseLanguage,
+      },
     );
 
     // Run selected domain LLMs concurrently.
@@ -663,6 +680,7 @@ export class AgentOrchestratorService {
     input: OrchestrateCoachTurnInput,
     selectedDomains: readonly DomainFanoutEntry[],
     primaryContextPacket: AgentContextPacket,
+    progressHistoryLookback: ProgressHistoryLookbackOptions,
   ): Promise<AgentContextPacket[]> {
     return Promise.all(
       selectedDomains.map(async (domainEntry) => {
@@ -681,8 +699,13 @@ export class AgentOrchestratorService {
             // No route passed: CoachingContextService derives context slices from
             // the request's purpose/depth/timeRange and the contextBudget options.
             undefined,
-            // Re-apply per-domain context budget (safety floors are enforced at build time).
-            { contextBudget: domainEntry.contextBudget },
+            // Re-apply per-domain context budget (safety floors are enforced at build
+            // time) and thread the planner-injected review slices + lookback grant.
+            {
+              contextBudget: domainEntry.contextBudget,
+              supplementarySliceRequests: domainEntry.supplementaryContextSlices,
+              progressHistoryLookback,
+            },
           );
         } catch {
           // Degrade gracefully — reuse the primary packet for this domain.

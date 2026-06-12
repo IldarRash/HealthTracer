@@ -7,6 +7,7 @@ import type {
   UserContextSlice,
 } from "@health/types";
 import {
+  buildLookbackClampNote,
   clampContextDepth,
   clampContextBudgetPolicy,
   clampProgressHistoryLookback,
@@ -267,6 +268,23 @@ export class ContextBudgetPolicyService {
     return truncateSliceRawItems(next, budget.maxRawItems);
   }
 
+  /**
+   * Render the honest lookback-clamp note from the config-sourced degradation
+   * templates (contextBudgets.degradationNotes — never hardcoded prose).
+   */
+  renderLookbackClampNote(
+    grantedLookbackDays: number,
+    requestedLookbackDays: number,
+    responseLanguage: string | null | undefined,
+  ): string {
+    return buildLookbackClampNote(
+      this.aiBehaviorConfigService.getContextBudgets().degradationNotes,
+      grantedLookbackDays,
+      requestedLookbackDays,
+      responseLanguage,
+    );
+  }
+
   private describeSliceClamp(
     before: ContextSliceRequest,
     after: ContextSliceRequest,
@@ -292,6 +310,25 @@ export class ContextBudgetPolicyService {
 
     return notes;
   }
+}
+
+/**
+ * Phase 3 injection predicate: the progress_history_review slice is appended
+ * only on a review budget profile (deep_review / deep_history) AND when the
+ * turn is review-ish per the Phase 2 signals (monthly review, progress review,
+ * or the preprocessor review_request). A purely multi-domain deep_review turn
+ * (e.g. "help with training and nutrition") is deliberately excluded — it is
+ * not a retrospective and must not trigger the history aggregation query.
+ */
+export function shouldInjectProgressHistoryReview(
+  metadata: ContextBudgetPlanMetadata,
+): boolean {
+  const profile = metadata.contextBudget.profile;
+  const isReviewProfile = profile === "deep_review" || profile === "deep_history";
+  const isReviewish =
+    metadata.isMonthlyReview || metadata.isProgressReview || metadata.reviewRequest;
+
+  return isReviewProfile && isReviewish;
 }
 
 /**
@@ -340,7 +377,8 @@ function countRawItemsInSlice(slice: UserContextSlice): number {
     (slice.snapshots?.length ?? 0) +
     (slice.ragResults?.length ?? 0) +
     (slice.weeklyProgress?.trends?.length ?? 0) +
-    (slice.documentContext?.items.length ?? 0)
+    (slice.documentContext?.items.length ?? 0) +
+    (slice.progressHistory?.buckets.length ?? 0)
   );
 }
 
@@ -357,6 +395,23 @@ function truncateSliceRawItems(slice: UserContextSlice, maxRawItems: number): Us
     remaining -= taken.length;
     return taken;
   };
+
+  // Progress-history buckets first (they are the core review data) and from the
+  // OLDEST end: buckets are ordered ascending by bucketStart, so keeping the
+  // tail keeps the most recent periods.
+  if (next.progressHistory?.buckets.length) {
+    const buckets = next.progressHistory.buckets;
+    const keep = Math.min(buckets.length, Math.max(0, remaining));
+
+    if (keep < buckets.length) {
+      next.progressHistory = {
+        ...next.progressHistory,
+        buckets: buckets.slice(buckets.length - keep),
+      };
+    }
+
+    remaining -= keep;
+  }
 
   if (next.activeGoals) {
     next.activeGoals = take(next.activeGoals);

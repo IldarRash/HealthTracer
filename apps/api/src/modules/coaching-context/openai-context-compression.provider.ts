@@ -157,6 +157,13 @@ function buildCompressionUserContent(
     appendBoundedSliceFindings(slice, findings, risks, allowSensitiveHealth);
   }
 
+  // Deep-review numeric aggregates: numbers/enums/ISO dates only by schema
+  // construction, so deliberately NOT gated by allowSensitiveHealth (the
+  // wellbeing/recovery free-text gates above stay exactly as they are). The
+  // payload is already bounded by the per-granularity bucket caps. All slices
+  // in a turn share the same turn-level summary, so the first one suffices.
+  const progressHistory = slices.find((slice) => slice.progressHistory)?.progressHistory;
+
   const content = {
     sliceSummaries: findings.slice(0, 20),
     risks: risks.slice(0, 10),
@@ -167,6 +174,7 @@ function buildCompressionUserContent(
       label: ref.label,
       ...(ref.referenceId ? { referenceId: ref.referenceId } : {}),
     })),
+    ...(progressHistory ? { progressHistory } : {}),
   };
 
   return `Health context for compression:\n${JSON.stringify(content, null, 2)}`;
@@ -246,6 +254,8 @@ function mapPurposeToFocusArea(purpose: ContextSlicePurpose): string {
       return "Nutrition alignment";
     case "weekly_review":
       return "Weekly progress";
+    case "progress_history_review":
+      return "Long-range progress history";
     case "longevity_overview":
       return "Long-term wellness";
     case "health_context":
@@ -264,6 +274,7 @@ function mapPurposeToDomain(purpose: ContextSlicePurpose): string {
     case "nutrition_adaptation":
       return "nutrition";
     case "weekly_review":
+    case "progress_history_review":
       return "progress";
     case "longevity_overview":
       return "longevity";
