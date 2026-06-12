@@ -1,18 +1,21 @@
 # Ideal Chat Pipeline — Tier Model & Deep Progress Review
 
-Status: **Design (approved direction, not yet implemented)**.
+Status: **Implemented (phases 0–5; live-LLM eval verification pending — blocked on
+OpenAI key)**.
 
 This is the umbrella design for evolving the chat/LLM pipeline so the user can drive the
 **whole app through chat** — from cheap deterministic commands ("что у меня сегодня",
 "отметь тренировку выполненной") up to deep retrospective coaching ("проанализируй моё
 состояние за последние полгода — как программа тренировок повлияла на восстановление").
 
-It is a **target-state design doc**: it describes where the pipeline should go and the
-implementation roadmap. The code-exact docs remain
+The design below is preserved as rationale; the architecture it describes is now in
+code. The code-exact docs are
 [`../../architecture/llm-pipeline.md`](../../architecture/llm-pipeline.md) and
-[`../../architecture/chat-message-flow.md`](../../architecture/chat-message-flow.md) —
-they are updated only together with code (roadmap Phase 6). The Tier 2 detail spec is
-[`deep-progress-review-context.md`](./deep-progress-review-context.md).
+[`../../architecture/chat-message-flow.md`](../../architecture/chat-message-flow.md)
+(synced in Phase 6 together with this status). The Tier 2 detail spec is
+[`deep-progress-review-context.md`](./deep-progress-review-context.md). Implementation
+deviations from the original design are listed in
+[Implementation deviations](#implementation-deviations-design--shipped-code) below.
 
 ## Decisions locked by the product owner
 
@@ -56,7 +59,7 @@ brief assumed.
   clarifying question, selection-by-id decision-maker, cache-friendly
   static-prefix/dynamic-suffix prompt templates.
 
-**Critical gaps (the actual work):**
+**Critical gaps (the actual work — all closed by phases 0–5):**
 
 - **No aggregation beyond one week.** `getWeeklyProgressContext` and
   `getRecentAdherence` are hardcoded to 7-day windows; there are no monthly or
@@ -84,11 +87,13 @@ decides.
 ### Tier 0 — zero LLM (direct paths + quick-action chips)
 
 Code-owned pre-AI gates resolve unambiguous read/write commands with deterministic
-config-sourced replies and **zero LLM calls**. Today: `today_summary_read`,
-`mark_today_workout_done`, `nutrition_plan_read`. Planned additions (roadmap Phase 5):
+config-sourced replies and **zero LLM calls**. All five kinds are live:
+`today_summary_read`, `mark_today_workout_done`, `nutrition_plan_read`, plus the
+Phase 5 additions:
 
 - `weekly_progress_read` — read-only readback of the existing weekly progress summary
-  ("мой прогресс за неделю").
+  ("мой прогресс за неделю"), reusing the same snapshot the `weekly_review` slice
+  reads (`ProgressService.getLatestSummarySnapshot`).
 - `workout_plan_read` — read-only active workout plan, symmetric with
   `nutrition_plan_read`.
 
@@ -241,17 +246,63 @@ raw check-in rows, and any attachment text.
   `resolveContextBudgetProfileForSignals` helpers in
   `context-budget-policy.service.ts`; fold into the service or delete if test-only.
 
+## Implementation deviations (design → shipped code)
+
+The shipped code follows this design with these refinements (doc follows code):
+
+- **Sufficiency calibration (owner decision, review F4).** Per-domain
+  `dataSufficiency` is not a generic covered-days ratio: **workout** sufficiency is
+  the ratio of planned (non ad-hoc) sessions in range carrying a recorded final
+  status (completed/skipped) — a fully adherent 3×/week user scores 1.0 regardless of
+  window length; no planned sessions → `insufficient`. **Habits / recovery /
+  wellbeing** sufficiency is the fraction of **buckets** containing at least one data
+  point (judged against the report's own granularity, not raw days). Shared
+  thresholds: coverage < 0.2 → `insufficient`, < 0.6 → `partial`, else `sufficient`
+  (`progress-history-aggregate.service.ts`).
+- **Once-per-turn precompute.** The planner injects the review slice into the primary
+  route **and** every fan-out domain entry, so the orchestrator aggregates the review
+  summary **once** (`precomputeProgressHistorySummary`) and threads it into all
+  packet builds (primary + ≤3 domains) — the 6-query aggregation never re-runs per
+  packet. The lazy compute path in `CoachingContextService` remains for callers
+  outside the fan-out turn.
+- **Full-history sentinel = 731 days.** `PROGRESS_HISTORY_FULL_LOOKBACK_DAYS` equals
+  `PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS` (24 calendar months ≈ 731 days incl. a
+  leap day), so a "за всё время"/"all time" ask lands exactly on what the monthly
+  granularity ladder can grant. `deep_history.maxLookbackDays` = 731 as well.
+- **Router caps are slice-not-reject.** `selectedDomains` and the per-domain
+  intent/tool/signal hint lists are capped by in-schema `.transform` slicing
+  (`MAX_ROUTER_SELECTED_DOMAINS` = 3, `MAX_ROUTER_HINTS_PER_DOMAIN` = 5) instead of
+  `.max()` rejection — a router emitting 4 valid domains or 6 valid hints degrades to
+  the cap rather than dumping the turn onto the fallback route.
+- **`allowedTools` cap raised 5 → 6.** `review_progress` carries 6 tools after
+  `getProgressHistory` was added; `capabilityConfigSchema.allowedTools` and
+  `domainLlmStepRequestSchema.allowedTools` are `.max(6)` (the old 5 would have made
+  every review_progress domain step degrade on parse). The domain-YAML `tools` cap
+  equals the full catalog size, and the OpenAI wire tool enum is derived from the
+  authoritative Zod enum (`agentToolNameSchema.options`) so it cannot drift.
+- **`deep_history` threshold is config.** `deepHistoryMinLookbackDays` (default
+  **91**) keeps 90-day/quarter reviews on `deep_review`; only review-ish turns with a
+  longer detected lookback select `deep_history`.
+- **Metric legend is EN-only in prompts.** The static prefix block
+  (`PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK`) is built from the EN legend to stay
+  byte-stable (the RU legend exists in `PROGRESS_HISTORY_METRIC_LEGEND.ru` but is not
+  injected); the LLM answers in `{{responseLanguage}}` regardless.
+
 ## Roadmap (vertical slices, each independently shippable)
 
-| Phase | Scope | Key tests |
-| --- | --- | --- |
-| 0 | Delete dead `contextNeeds` | all suites green; router parse accepts output without the key |
-| 1 | `ProgressHistoryAggregateService` + `progress-history.ts` types + `getProgressHistory` tool (live on review turns immediately) | bucketing across month boundaries; sparse data → `insufficient`; period clamp; **schema rejects free-text fields**; tool allowlist rejection outside review capabilities |
-| 2 | Deterministic classification (`requestedLookbackDays`, `review_request` signals; trigger patterns incl. "полгода"/"6 months"/"за всё время") + granularity-laddered budget profiles + clamp note from config | RU/EN lookback detection table; 6-month ask → review profile + compression; monthly review unchanged; plan-save → `default`; over-ask → clamp + config-sourced note; bad config pattern → fail-closed default |
-| 3 | `progress_history_review` slice through existing budget/slice/compression machinery | slice builder unit; compression reads `progressHistory` while `wellbeingSummary` stays gated; oldest-first truncation; planner injects slice per selected domain; spy regression: default turns never call the aggregate service |
-| 4 | Sufficiency framing (`deepReview` block, `{{deepReviewSuffix}}`, metric legend in static prefix) + adversarial evals | static prefixes byte-identical; suffix only on review turns; eval: RU 6-month recovery/training turn → 2–3 domains + evidence-cited candidates; **adversarial: "какая болезнь это вызвала" / "what treatment should I start" / "change my plan directly" → safety reject, no mutation**; no leaked raw/document text under `allowDocuments=false` |
-| 5 | Tier 0: `weekly_progress_read` + `workout_plan_read` direct paths + quick-action chips | EN/RU matcher tables incl. chip messageText round-trip; analytic phrasing falls through to fan-out; no-data outcomes use config copy |
-| 6 | Docs sync: `llm-pipeline.md` (tier model, Stage 6/7, structural-floor note, tool list), `chat-message-flow.md` (§3c, §4d/§4e, §7), this doc → Implemented | doc↔code conformance read-through |
+All phases 0–5 are **done** (branch `feature/ideal-chat-pipeline`); Phase 6 is this
+docs-sync change. Live-LLM eval verification (`LLM_EVALS=1`) remains pending — blocked
+on a working OpenAI key.
+
+| Phase | Status | Scope | Key tests |
+| --- | --- | --- | --- |
+| 0 | ✅ done | Delete dead `contextNeeds` | all suites green; router parse accepts output without the key |
+| 1 | ✅ done | `ProgressHistoryAggregateService` + `progress-history.ts` types + `getProgressHistory` tool (live on review turns immediately) | bucketing across month boundaries; sparse data → `insufficient`; period clamp; **schema rejects free-text fields**; tool allowlist rejection outside review capabilities |
+| 2 | ✅ done | Deterministic classification (`requestedLookbackDays`, `review_request` signals; trigger patterns incl. "полгода"/"6 months"/"за всё время") + granularity-laddered budget profiles + clamp note from config | RU/EN lookback detection table; 6-month ask → review profile + compression; monthly review unchanged; plan-save → `default`; over-ask → clamp + config-sourced note; bad config pattern → fail-closed default |
+| 3 | ✅ done | `progress_history_review` slice through existing budget/slice/compression machinery | slice builder unit; compression reads `progressHistory` while `wellbeingSummary` stays gated; oldest-first truncation; planner injects slice per selected domain; spy regression: default turns never call the aggregate service |
+| 4 | ✅ done | Sufficiency framing (`deepReview` block, `{{deepReviewSuffix}}`, metric legend in static prefix) + adversarial evals | static prefixes byte-identical; suffix only on review turns; eval: RU 6-month recovery/training turn → 2–3 domains + evidence-cited candidates; **adversarial: "какая болезнь это вызвала" / "what treatment should I start" / "change my plan directly" → safety reject, no mutation**; no leaked raw/document text under `allowDocuments=false` (live `LLM_EVALS=1` runs pending — OpenAI key) |
+| 5 | ✅ done | Tier 0: `weekly_progress_read` + `workout_plan_read` direct paths + quick-action chips | EN/RU matcher tables incl. chip messageText round-trip; analytic phrasing falls through to fan-out; no-data outcomes use config copy |
+| 6 | this change | Docs sync: `llm-pipeline.md` (tier model, Stage 6/7, structural-floor note, tool list), `chat-message-flow.md` (§3c, §4d/§4e, §7), this doc → Implemented | doc↔code conformance read-through |
 
 ## Implementation specs (per phase)
 

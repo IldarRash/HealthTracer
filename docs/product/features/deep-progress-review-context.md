@@ -1,9 +1,10 @@
 # Deep Progress Review Context Pipeline
 
-Status: **Planning — Tier 2 detail spec.** The umbrella design (tier model, adaptive
-lookback, roadmap phases) lives in
-[`ideal-chat-pipeline.md`](./ideal-chat-pipeline.md); this doc details the deep-review
-turn itself and stays aligned with the decisions locked there.
+Status: **Implemented (live-LLM eval verification pending — blocked on OpenAI key).**
+The umbrella design (tier model, adaptive lookback, roadmap phases, and the
+[implementation deviations](./ideal-chat-pipeline.md#implementation-deviations-design--shipped-code))
+lives in [`ideal-chat-pipeline.md`](./ideal-chat-pipeline.md); this doc details the
+deep-review turn itself and stays aligned with the decisions locked there.
 
 ## Goal
 
@@ -62,8 +63,10 @@ sensitive-context floor blocking wellbeing/recovery data (resolved structurally 
    - Quota is checked only after non-LLM gates miss.
 
 2. **Preprocessor (deterministic floor)**
-   - New signals: `requestedLookbackDays` (RU/EN phrase table — "сегодня"→1,
-     "полгода"→180, "за всё время"→full) and `review_request`.
+   - Signals: `requestedLookbackDays` (RU/EN phrase table — "сегодня"→1,
+     "полгода"→180, "за всё время"→the 731-day full-history sentinel
+     `PROGRESS_HISTORY_FULL_LOOKBACK_DAYS`; numeric forms like "за 3 месяца"/"6 weeks"
+     also match; the longest mentioned period wins) and `review_request`.
    - Existing language detection and wellbeing/fatigue signals unchanged.
 
 3. **Router LLM**
@@ -75,23 +78,33 @@ sensitive-context floor blocking wellbeing/recovery data (resolved structurally 
 
 4. **SystemPlanner**
    - Backend has the final word on budget and context shape.
-   - Review signals select a review profile (`deep_review` for 30–90d; `deep_history`
-     for longer/full-history periods) with `requiresCompression=true`.
+   - Review signals select a review profile with `requiresCompression=true`:
+     `deep_history` when a review-ish turn carries a detected lookback over
+     `deepHistoryMinLookbackDays` (config, default 91 — so quarter reviews stay
+     `deep_review`); otherwise the monthly/multi-domain/progress-review triggers
+     select `deep_review`.
    - `maxLookbackDays` acts as a **clamp with an honest typed note** (copy in config,
      `contextBudgets.degradationNotes`), not a refusal; the granularity ladder bounds
-     cost by bucket count.
-   - The planner injects the `progress_history_review` slice into each selected
-     domain's context request.
+     cost by bucket count (`grantedLookbackDays` = ladder clamp, further capped by the
+     profile).
+   - The planner injects the `progress_history_review` slice into the primary route
+     and each selected domain's context request (review-ish turns only — a purely
+     multi-domain `deep_review` turn never triggers the history aggregation).
 
 5. **Context collection — numeric aggregates only**
-   - `ProgressHistoryAggregateService` (new,
-     `apps/api/src/modules/progress/progress-history-aggregate.service.ts`) computes
+   - `ProgressHistoryAggregateService`
+     (`apps/api/src/modules/progress/progress-history-aggregate.service.ts`) computes
      on-demand bucketed aggregates from `workout_sessions`, `recovery_check_ins`,
-     `wellbeing_check_ins`, `habit_plan_completions` (all date-indexed), reusing the
-     pure helpers of `progress-aggregate.service.ts`.
+     `wellbeing_check_ins`, `habit_plan_completions`, plus workout/nutrition revision
+     dates for plan-change markers. The orchestrator **precomputes the summary once
+     per turn** and threads it into every packet build (primary + ≤3 domains) — the
+     aggregation never re-runs per packet; default turns never invoke it.
    - Output `ProgressHistoryReviewSummary`: per-bucket workout adherence/volume/avg
      fatigue, habit adherence, recovery score bands, wellbeing avg scores + counts;
      `planChangeMarkers[]`; per-domain `dataSufficiency`; typed `noteCodes[]`.
+   - **Sufficiency calibration:** workout = recorded final statuses over planned
+     (non ad-hoc) sessions; habits/recovery/wellbeing = fraction of buckets with any
+     data. Coverage < 0.2 → `insufficient`, < 0.6 → `partial`, else `sufficient`.
    - **The Zod schema structurally cannot carry free text** (numbers/enums/ISO dates
      only) — that is how wellbeing/recovery *trends* reach the review while the
      sensitive-context floor stays untouched. The service never selects note columns.
@@ -115,8 +128,10 @@ sensitive-context floor blocking wellbeing/recovery data (resolved structurally 
 8. **Decision-maker LLM**
    - Synthesizes domain summaries into one answer; selects candidate proposal IDs only
      — it must not invent payloads (already structurally enforced).
-   - New optional `deepReview` block on `finalDecisionRequestSchema`
-     (`requestedPeriodDays`, `grantedPeriodDays`, `dataQuality`) and a conditional
+   - Optional `deepReview` block on `finalDecisionRequestSchema` **and**
+     `domainLlmStepRequestSchema` (`requestedPeriodDays`, `grantedPeriodDays`,
+     `dataQuality` — the **worst-of** of the summary's per-domain sufficiency values
+     and the compression summary's `dataQuality`) and a conditional
      `{{deepReviewSuffix}}` template placeholder (the `lowConfidenceRouteSuffix`
      mechanism): state what is observed vs uncertain, name the analyzed range, and when
      data is not `sufficient`, offer **one** narrowing follow-up (period or domain).
