@@ -383,7 +383,10 @@ turn-error variant it renders `Chat.turnError.*` copy and a **Retry** button onl
 
 `degraded` (`turnDegraded`) is a separate, weaker signal: a usable reply was produced but a
 stage degraded (`AiService.generateCoachResponse` maps `safety.status` to a presentation-safe
-`ChatTurnDegradedReason`).
+`ChatTurnDegradedReason`). The split is **permanent and disjoint by contract**: `turnError` =
+reply ABSENT (`decision_failed | reply_blocked`, error card + Retry); `turnDegraded` = reply
+PRESENT (`parse_failed | provider_error`, telemetry-only marker — no web card or resolver; the
+former second error-card branch was removed).
 
 ---
 

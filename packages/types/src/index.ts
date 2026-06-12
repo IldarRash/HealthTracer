@@ -1180,6 +1180,7 @@ export {
   suggestedQuickActionSchema,
   parseChatMessageTurnError,
   parseChatMessageDegradedTurn,
+  parseChatMessageSuggestedQuickActions,
 } from "./chat-turn.js";
 export type {
   ChatTurnResponse,
@@ -1906,6 +1907,10 @@ export {
   chatBehaviorConfigSchema,
   buildDefaultAiBehaviorConfig,
   DEFAULT_CHAT_BEHAVIOR,
+  DEFAULT_QUOTA_LIMIT_REPLY,
+  localizedSystemReplySchema,
+  resolveQuotaLimitReply,
+  type LocalizedSystemReply,
   contextBudgetProfilesConfigSchema,
   contextBudgetTriggersConfigSchema,
   contextBudgetsBehaviorConfigSchema,

@@ -1,10 +1,12 @@
 import type {
   ChatMessage,
   ChatThread,
+  SuggestedQuickAction,
   WellbeingCrisisSupportCopy,
 } from "@health/types";
 import type { ChatMessageAttachmentPreview } from "./chat-message-attachments.js";
 import {
+  parseChatMessageSuggestedQuickActions,
   WELLBEING_CRISIS_SUPPORT_COPY,
   wellbeingCrisisEvaluationSchema,
 } from "@health/types";
@@ -120,6 +122,24 @@ export function resolveChatMessageCrisisSupport(
   }
 
   return WELLBEING_CRISIS_SUPPORT_COPY;
+}
+
+/**
+ * Resolve persisted quick-action chips from an assistant message's metadata
+ * (metadata.suggestedQuickActions). The persisted metadata is the single source
+ * of truth — the live turn renders its assistant message only after the thread
+ * query refetch, so chips appear immediately on live turns AND survive a thread
+ * reload. Returns null for user messages, missing/invalid metadata, and
+ * turnError turns (the backend omits the key on those).
+ */
+export function resolveChatMessageSuggestedQuickActions(
+  message: Pick<ChatMessage, "role" | "metadata">,
+): SuggestedQuickAction[] | null {
+  if (message.role !== "assistant") {
+    return null;
+  }
+
+  return parseChatMessageSuggestedQuickActions(message.metadata);
 }
 
 export function resolveChatMessageWeeklyReview(

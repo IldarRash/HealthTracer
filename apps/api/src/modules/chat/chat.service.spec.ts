@@ -3,6 +3,7 @@ import { BadRequestException } from "@nestjs/common";
 import { ProposalNormalizationService } from "../proposals/proposal-normalization.service.js";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
 import {
+  DEFAULT_QUOTA_LIMIT_REPLY,
   WELLBEING_CRISIS_SUPPORT_COPY,
   WEEKLY_REVIEW_CHAT_PROMPT,
   getTodayIsoDateInTimezone,
@@ -133,6 +134,7 @@ function createDirectChatPathServiceForChatTests(todayService: {
 const noopAiBehaviorConfigService = {
   getChat: () => ({
     emptyAttachmentMessage: "Shared attachment(s) for coaching review.",
+    quotaLimitReply: DEFAULT_QUOTA_LIMIT_REPLY,
   }),
   getDeterministicProposalTriggers: () => ({
     maxMergedProposals: 5,
@@ -3287,6 +3289,7 @@ describe("ChatService", () => {
       assertAiMessageAllowed?: () => Promise<void>;
       recordAiMessageUsage?: () => Promise<void>;
       generateCoachResponse?: (...args: unknown[]) => Promise<unknown>;
+      userOverride?: Record<string, unknown>;
     } = {}) {
       const generateCoachResponse = deps.generateCoachResponse ?? vi.fn(async () => ({
         output: { reply: "Here is a coaching reply.", proposals: [] },
@@ -3339,7 +3342,7 @@ describe("ChatService", () => {
           touchThread: async () => undefined,
         },
         usersService: {
-          resolveFromAuth: async () => user,
+          resolveFromAuth: async () => deps.userOverride ?? user,
         },
         aiService: { generateCoachResponse },
         proposalValidationService: minimalProposalValidationService,
@@ -3369,6 +3372,60 @@ describe("ChatService", () => {
       expect(capturedAssistant[0]?.metadata).toMatchObject({
         quota: { limitReached: true, tier: "free" },
       });
+    });
+
+    it("quota reply uses the EN config copy for an English message (config-sourced, not hardcoded)", async () => {
+      const { AiMessageQuotaExceededError } = await import("../billing/entitlements.service.js");
+
+      const { service, capturedAssistant } = createQuotaChatService({
+        assertAiMessageAllowed: vi.fn(async () => {
+          throw new AiMessageQuotaExceededError();
+        }),
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "How can I improve my workout?",
+      });
+
+      expect(capturedAssistant[0]?.content).toBe(DEFAULT_QUOTA_LIMIT_REPLY.en);
+    });
+
+    it("quota reply uses the RU config copy for a Russian message (detected language)", async () => {
+      const { AiMessageQuotaExceededError } = await import("../billing/entitlements.service.js");
+
+      const { service, capturedAssistant } = createQuotaChatService({
+        assertAiMessageAllowed: vi.fn(async () => {
+          throw new AiMessageQuotaExceededError();
+        }),
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "Как мне улучшить мою тренировку на этой неделе?",
+      });
+
+      expect(capturedAssistant[0]?.content).toBe(DEFAULT_QUOTA_LIMIT_REPLY.ru);
+      expect(capturedAssistant[0]?.metadata).toMatchObject({
+        quota: { limitReached: true, tier: "free" },
+      });
+    });
+
+    it("persisted user locale takes precedence over detected language for the quota reply", async () => {
+      const { AiMessageQuotaExceededError } = await import("../billing/entitlements.service.js");
+
+      const { service, capturedAssistant } = createQuotaChatService({
+        assertAiMessageAllowed: vi.fn(async () => {
+          throw new AiMessageQuotaExceededError();
+        }),
+        // English message text, but the persisted locale hint is ru — hint wins,
+        // mirroring the MessagePreprocessor resolution used by the LLM pipeline.
+        userOverride: { ...user, locale: "ru" },
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "How can I improve my workout?",
+      });
+
+      expect(capturedAssistant[0]?.content).toBe(DEFAULT_QUOTA_LIMIT_REPLY.ru);
     });
 
     it("allowed turn calls generateCoachResponse and then recordAiMessageUsage", async () => {
@@ -3618,6 +3675,140 @@ describe("ChatService", () => {
 
       expect(result.turnError).toEqual({ reason: "reply_blocked" });
       expect(getAssistantContent()).toBe(" ");
+    });
+
+    it("does not persist suggestedQuickActions in assistant metadata on turnError turns", async () => {
+      const { service, getAssistantMetadata } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      expect(getAssistantMetadata().suggestedQuickActions).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // suggestedQuickActions persistence — chips ride assistant message metadata
+  // so they survive a thread reload (live turn-response field unchanged).
+  // -------------------------------------------------------------------------
+
+  describe("suggestedQuickActions persistence", () => {
+    const quickActionsConfig = {
+      actions: [
+        {
+          id: "today_summary_read",
+          labelEn: "Today's summary",
+          labelRu: "Сводка на сегодня",
+          messageText: { en: "What's today?", ru: "Что у меня на сегодня?" },
+        },
+        {
+          id: "workout_plan_read",
+          labelEn: "My workout plan",
+          labelRu: "Мой план тренировок",
+          messageText: { en: "Show my workout plan", ru: "Покажи мой план тренировок" },
+        },
+      ],
+    };
+
+    function buildQuickActionsChatService(options: {
+      actions: typeof quickActionsConfig | { actions: [] };
+      fanOutDomains: readonly string[];
+    }) {
+      let assistantMessageMetadata: Record<string, unknown> = {};
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "assistant") {
+              assistantMessageMetadata = metadata;
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            };
+          },
+          createProposal: async () => {
+            throw new Error("createProposal should not be called");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "Here is a coaching reply.", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+            agentMetadata: {
+              ...createDefaultAgentMetadataForTests(),
+              fanOut: {
+                domains: options.fanOutDomains.map((domain) => ({
+                  domain,
+                  status: "ok",
+                  degradedReasons: [],
+                  tokenUsage: null,
+                })),
+                router: null,
+                decision: null,
+                resolution: null,
+              },
+            },
+          }),
+        },
+        proposalValidationService: createProposalValidationServiceMock(),
+        aiBehaviorConfigService: {
+          ...(noopAiBehaviorConfigService as Record<string, unknown>),
+          getSuggestedQuickActions: () => options.actions,
+        } as never,
+      });
+
+      return { service, getAssistantMetadata: () => assistantMessageMetadata };
+    }
+
+    it("persists the derived chips in assistant message metadata and mirrors them on the response", async () => {
+      const { service, getAssistantMetadata } = buildQuickActionsChatService({
+        actions: quickActionsConfig,
+        fanOutDomains: ["workout"],
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "How should I train this week?",
+      });
+
+      const persisted = getAssistantMetadata().suggestedQuickActions;
+      expect(persisted).toBeDefined();
+      expect((persisted as Array<{ id: string }>).map((a) => a.id)).toEqual([
+        "today_summary_read",
+        "workout_plan_read",
+      ]);
+      // Live turn-response field unchanged and identical to the persisted chips.
+      expect(result.suggestedQuickActions).toEqual(persisted);
+    });
+
+    it("omits the metadata key entirely when no chips are derived", async () => {
+      const { service, getAssistantMetadata } = buildQuickActionsChatService({
+        actions: { actions: [] },
+        fanOutDomains: ["workout"],
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "How should I train this week?",
+      });
+
+      expect(getAssistantMetadata()).not.toHaveProperty("suggestedQuickActions");
+      expect(result.suggestedQuickActions).toBeUndefined();
     });
   });
 

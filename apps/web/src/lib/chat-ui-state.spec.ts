@@ -5,6 +5,7 @@ import {
   isOptimisticMessage,
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
+  resolveChatMessageSuggestedQuickActions,
   resolveChatMessageWeeklyReview,
   resolvePrimaryThreadId,
   SUGGESTED_CHAT_PROMPT_DEFINITIONS,
@@ -210,5 +211,50 @@ describe("chat UI state", () => {
     expect(pack?.droppedLanes[0]?.reason).toContain("conflict");
     expect(WEEKLY_REVIEW_CHAT_ACTION_NOTICE).toContain("proposal cards");
     expect(WEEKLY_REVIEW_CHAT_ACTION_NOTICE.toLowerCase()).not.toContain("automatically");
+  });
+
+  it("resolves quick-action chips from persisted assistant message metadata (survives reload)", () => {
+    // Fixture mirrors a persisted assistant message as returned by the thread
+    // query after reload — the chips source of truth is metadata, not live state.
+    const quickAction = {
+      id: "today_summary_read",
+      labelEn: "Today's summary",
+      labelRu: "Сводка дня",
+      messageText: {
+        en: "Show me today's summary",
+        ru: "Покажи сводку за сегодня",
+      },
+    };
+
+    expect(
+      resolveChatMessageSuggestedQuickActions({
+        role: "assistant",
+        metadata: { suggestedQuickActions: [quickAction] },
+      }),
+    ).toEqual([quickAction]);
+
+    // User messages never produce chips, even with metadata present.
+    expect(
+      resolveChatMessageSuggestedQuickActions({
+        role: "user",
+        metadata: { suggestedQuickActions: [quickAction] },
+      }),
+    ).toBeNull();
+
+    // Absent key (e.g. turnError turns or no chips produced) resolves to null.
+    expect(
+      resolveChatMessageSuggestedQuickActions({
+        role: "assistant",
+        metadata: { turnError: { reason: "decision_failed" } },
+      }),
+    ).toBeNull();
+
+    // Invalid persisted shape is tolerated, never thrown.
+    expect(
+      resolveChatMessageSuggestedQuickActions({
+        role: "assistant",
+        metadata: { suggestedQuickActions: [{ id: "not_a_kind" }] },
+      }),
+    ).toBeNull();
   });
 });

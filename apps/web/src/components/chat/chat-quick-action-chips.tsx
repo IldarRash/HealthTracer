@@ -16,8 +16,9 @@ type ChatQuickActionChipsProps = {
  * Clicking a chip sends the chip's localized messageText as a normal user message
  * via the chat send mutation — it hits a deterministic direct path and answers instantly.
  *
- * Only rendered under the LATEST assistant message when the live turn response
- * includes non-empty suggestedQuickActions and there is no turnError.
+ * Only rendered under the LATEST assistant message when its persisted metadata
+ * includes non-empty suggestedQuickActions (absent on turnError turns), so the
+ * chips survive a thread reload.
  */
 export function ChatQuickActionChips({
   actions,

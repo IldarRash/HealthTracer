@@ -140,15 +140,52 @@ export const directPathsBehaviorConfigSchema = z.object({
   replyTemplates: directPathReplyTemplatesSchema,
 });
 
+/**
+ * Bilingual deterministic system reply (EN/RU). Same shape pattern as the
+ * context-budget degradation notes: config can override copy, never remove it.
+ */
+export const localizedSystemReplySchema = z.object({
+  en: z.string().min(1).max(500),
+  ru: z.string().min(1).max(500),
+});
+
+export type LocalizedSystemReply = z.infer<typeof localizedSystemReplySchema>;
+
+/** Built-in fail-closed default for the free-tier daily AI quota gate reply. */
+export const DEFAULT_QUOTA_LIMIT_REPLY: LocalizedSystemReply = {
+  en: "You've reached today's free AI message limit — upgrade to Pro for unlimited coaching.",
+  ru: "Вы достигли дневного лимита бесплатных сообщений ИИ-коуча — перейдите на Pro для безлимитного коучинга.",
+};
+
 export const chatBehaviorConfigSchema = z.object({
   emptyAttachmentMessage: z.string().min(1).max(500),
+  /**
+   * Deterministic system reply persisted when the free-tier daily AI message
+   * quota is exhausted (no-stubs rule: deterministic product copy lives in
+   * repo config, not hardcoded in services). Selected by the turn's response
+   * language via resolveQuotaLimitReply.
+   */
+  quotaLimitReply: localizedSystemReplySchema.default(DEFAULT_QUOTA_LIMIT_REPLY),
 });
 
 export type ChatBehaviorConfig = z.infer<typeof chatBehaviorConfigSchema>;
 
 export const DEFAULT_CHAT_BEHAVIOR: ChatBehaviorConfig = {
   emptyAttachmentMessage: "Shared attachment(s) for coaching review.",
+  quotaLimitReply: DEFAULT_QUOTA_LIMIT_REPLY,
 };
+
+/**
+ * Resolve the quota-limit system reply for the turn's response language.
+ * Pure; falls back to English for unknown/null languages (same convention as
+ * buildLookbackClampNote in context-budget.ts).
+ */
+export function resolveQuotaLimitReply(
+  chat: ChatBehaviorConfig,
+  language: string | null | undefined,
+): string {
+  return language === "ru" ? chat.quotaLimitReply.ru : chat.quotaLimitReply.en;
+}
 
 export type DirectPathsBehaviorConfig = z.infer<typeof directPathsBehaviorConfigSchema>;
 
@@ -618,6 +655,10 @@ export function normalizeAiBehaviorConfig(
     chat: {
       ...defaults.chat,
       ...partial?.chat,
+      quotaLimitReply: {
+        ...defaults.chat.quotaLimitReply,
+        ...partial?.chat?.quotaLimitReply,
+      },
     },
     directPaths: {
       ...defaults.directPaths,

@@ -35,10 +35,12 @@ export interface GeneratedCoachResponse {
   replySafetyErrors: string[];
   agentMetadata: AgentTurnMetadata;
   /**
-   * Whether the AI pipeline resolved a consent-gated outcome (e.g. a medical
-   * document save proposal). When true, ChatService surfaces a distinct consent
-   * prompt flag in the turn response. Nothing is auto-persisted.
-   * Only set on fan-out turns; undefined otherwise.
+   * COMPATIBILITY CODE (kept intentionally, per refactor-cleanup.md): plumbing
+   * held for the deferred medical special-save flow. When true, the pipeline
+   * resolved a consent-gated outcome; no client consumes the flag yet and
+   * nothing is auto-persisted. Removal condition: remove end-to-end if the
+   * special-save flow is descoped, or wire the client consent prompt when it
+   * ships. Only set on fan-out turns; undefined otherwise.
    */
   consentRequired?: boolean;
   /**
@@ -70,17 +72,17 @@ export class AiService {
     });
 
     const safetyStatus = orchestrated.agentMetadata.safety?.status;
-    // Also mark decision_failed from turnError as a degraded reason.
-    const degradedReason: ChatTurnDegradedReason | undefined =
-      orchestrated.turnError?.reason === "decision_failed"
-        ? "decision_failed"
-        : safetyStatus === "reply_blocked"
-          ? "reply_blocked"
-          : safetyStatus === "parse_failed"
-            ? "parse_failed"
-            : safetyStatus === "provider_error"
-              ? "provider_error"
-              : undefined;
+    // turnError (reply absent) and degraded (reply present) are disjoint by
+    // contract: when turnError is set there is no usable reply and ChatService
+    // persists the error marker, so no quality marker is derived. Only the
+    // reply-present degradations (parse_failed, provider_error) map to degraded.
+    const degradedReason: ChatTurnDegradedReason | undefined = orchestrated.turnError
+      ? undefined
+      : safetyStatus === "parse_failed"
+        ? "parse_failed"
+        : safetyStatus === "provider_error"
+          ? "provider_error"
+          : undefined;
 
     return {
       output: orchestrated.output,

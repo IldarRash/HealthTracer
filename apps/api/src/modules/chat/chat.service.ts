@@ -12,11 +12,15 @@ import type {
 import {
   classifyProposalValidationFailure,
   deriveQuickActionsForTurn,
+  detectPreprocessorLanguage,
   evaluateWellbeingCrisisFromText,
   formatWellbeingCrisisSupportReply,
   getTodayIsoDateInTimezone,
   isWeeklyReviewChatMessage,
   mergeDeterministicChatProposals,
+  normalizePreprocessorText,
+  resolvePreprocessorResponseLanguage,
+  resolveQuotaLimitReply,
   shouldTriggerRecipeRecommendationRequest,
 } from "@health/types";
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
@@ -285,8 +289,17 @@ export class ChatService {
       await this.entitlementsService.assertAiMessageAllowed(user.id, todayIsoDate);
     } catch (error) {
       if (error instanceof AiMessageQuotaExceededError) {
-        const quotaReply =
-          "You've reached today's free AI message limit — upgrade to Pro for unlimited coaching.";
+        // Deterministic system reply — copy lives in repo config (no-stubs rule),
+        // selected by the turn's response language using the same resolution the
+        // AI pipeline uses (MessagePreprocessor): persisted locale hint takes
+        // precedence, then script detection on the message text.
+        const quotaReply = resolveQuotaLimitReply(
+          this.aiBehaviorConfigService.getChat(),
+          resolvePreprocessorResponseLanguage(
+            detectPreprocessorLanguage(normalizePreprocessorText(messageContent)),
+            user.locale ?? null,
+          ),
+        );
         const assistantMessage = await this.chatRepository.createMessage(
           threadId,
           "assistant",
@@ -477,6 +490,17 @@ export class ChatService {
     // so the frontend can render an error card instead of coach prose.
     const assistantMessageContent = generated.turnError ? " " : generated.output.reply;
 
+    // Derive suggested quick actions for LLM-backed turns only.
+    // Excluded: turnError turns (honest degradation — no coach text to follow up).
+    // Selected domains come from the fan-out diagnostics on the agent metadata.
+    // Persisted in assistant message metadata so chips survive a thread reload,
+    // and mirrored on the turn response for the live path.
+    const suggestedQuickActions = generated.turnError
+      ? undefined
+      : deriveQuickActionsForTurn({
+          selectedDomains: (generated.agentMetadata.fanOut?.domains ?? []).map((d) => d.domain),
+          quickActionsConfig: this.aiBehaviorConfigService.getSuggestedQuickActions(),
+        });
     const assistantMessage = await this.chatRepository.createMessage(
       threadId,
       "assistant",
@@ -490,15 +514,21 @@ export class ChatService {
             ? { ...generated.agentMetadata, repair: { ...repairStats } }
             : generated.agentMetadata,
         ...(weeklyReviewMetadata ?? {}),
-        // turnError and turnDegraded are mutually exclusive:
-        //   turnError  = no usable reply (error card + retry); content is " ".
-        //   turnDegraded = usable reply persisted but a pipeline stage degraded (quality marker).
-        // When turnError is set, skip turnDegraded so the frontend only sees one signal.
+        // turnError and turnDegraded are a PERMANENT split with disjoint reasons
+        // (see packages/types/src/chat-turn.ts):
+        //   turnError    = reply ABSENT (decision_failed | reply_blocked); content is " "
+        //                  and the frontend renders an error card + retry.
+        //   turnDegraded = reply PRESENT but a stage degraded (parse_failed |
+        //                  provider_error); quality/telemetry marker only, no card.
+        // When turnError is set, turnDegraded is never written.
         ...(generated.turnError
           ? { turnError: generated.turnError }
           : generated.degraded
             ? { turnDegraded: { degraded: true, reason: generated.degraded.reason } }
             : {}),
+        ...(suggestedQuickActions && suggestedQuickActions.length > 0
+          ? { suggestedQuickActions }
+          : {}),
       },
     );
 
@@ -525,26 +555,18 @@ export class ChatService {
 
     const updatedThread = await this.chatRepository.findThreadById(user.id, threadId);
 
-    // Derive suggested quick actions for LLM-backed turns only.
-    // Excluded: turnError turns (honest degradation — no coach text to follow up).
-    // Selected domains come from the fan-out diagnostics on the agent metadata.
-    const suggestedQuickActions = generated.turnError
-      ? undefined
-      : deriveQuickActionsForTurn({
-          selectedDomains: (generated.agentMetadata.fanOut?.domains ?? []).map((d) => d.domain),
-          quickActionsConfig: this.aiBehaviorConfigService.getSuggestedQuickActions(),
-        });
-
     return {
       thread: toChatThread(updatedThread ?? thread),
       userMessage: toChatMessage(userMessage, await getUserMessageDisplayAttachments()),
       assistantMessage: toChatMessage(assistantMessage),
       proposals: createdProposals,
       ...(attachmentOutcomes.length > 0 ? { attachmentOutcomes } : {}),
-      // consentRequired is produced (from ActionResolver → LLM output) but not currently
-      // consumed by any client gate. It is surfaced here for the deferred medical special-save
-      // flow (proposal-driven recognition → consent-gated proposal → accept → persist
-      // health_document). Do not remove — add enforcement when that flow is implemented.
+      // COMPATIBILITY CODE (kept intentionally, per refactor-cleanup.md):
+      // consentRequired is produced (ActionResolver → decision-maker LLM output) but no
+      // client consumes it yet. It is plumbing held for the deferred medical special-save
+      // flow (attachment recognition → consent-gated save proposal → accept → persist
+      // health_document). Removal condition: remove this flag end-to-end if the
+      // special-save flow is descoped, or wire the client consent prompt when it ships.
       ...(generated.consentRequired === true ? { consentRequired: true } : {}),
       // S2: thread the turn-level error to the response so SSE final event and sync
       // response both carry it. The frontend renders an error card instead of coach prose.

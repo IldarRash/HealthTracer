@@ -111,11 +111,14 @@ export interface OrchestratedCoachTurnResult {
   replySafetyErrors: string[];
   agentMetadata: AgentTurnMetadata;
   /**
-   * When true, the pipeline resolved a consent-gated outcome (e.g. a medical
-   * document save proposal from the decision-maker). The caller (ChatService)
-   * should surface a distinct consent prompt to the user. Nothing is
-   * auto-persisted — the proposal must be accepted through the normal
-   * proposal-accept flow.
+   * COMPATIBILITY CODE (kept intentionally, per refactor-cleanup.md): plumbing
+   * held for the deferred medical special-save flow (attachment recognition →
+   * consent-gated save proposal → accept → persist health_document). When true,
+   * the pipeline resolved a consent-gated outcome; no client consumes the flag
+   * yet and nothing is auto-persisted — any proposal must still be accepted
+   * through the normal proposal-accept flow. Removal condition: remove this
+   * flag end-to-end if the special-save flow is descoped, or wire the client
+   * consent prompt when it ships.
    */
   consentRequired?: boolean;
   /**
@@ -541,10 +544,13 @@ export class AgentOrchestratorService {
     const replySafetyErrors = decisionFailed ? [] : validateReplySafety(resolved.reply);
     const replyBlocked = !decisionFailed && replySafetyErrors.length > 0;
 
-    // Carry the consent-required flag from ActionResolver: this is the LLM boolean
-    // forwarded from the decision-maker output (consentRequired). No consent-gated
-    // action variant currently exists in the catalog — medical-save is deferred.
-    // Surface it to ChatService for the ChatTurnResponse flag; nothing is auto-persisted.
+    // COMPATIBILITY CODE (kept intentionally, per refactor-cleanup.md): carry the
+    // consent-required flag from ActionResolver — the LLM boolean forwarded from the
+    // decision-maker output (consentRequired). This is plumbing held for the deferred
+    // medical special-save flow; no consent-gated action variant exists in the catalog
+    // and no client consumes the flag yet. Nothing is auto-persisted. Removal
+    // condition: remove end-to-end if the special-save flow is descoped, or wire the
+    // client consent prompt when it ships.
     const consentRequired = (replyBlocked || decisionFailed) ? false : resolved.consentRequired;
 
     // S2: honest degradation — no fake coach reply.

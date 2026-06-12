@@ -14,14 +14,25 @@ describe("chat degraded metadata contract", () => {
   it("parseChatMessageDegradedTurn reads turnDegraded from message metadata correctly", () => {
     // Simulates the exact shape chat.service.ts writes to createMessage metadata
     const metadata = {
-      parseErrors: [],
-      replySafetyErrors: ["unsafe reply"],
-      agent: { safety: { status: "reply_blocked", blockedReasons: ["unsafe reply"], constraintsApplied: [] } },
-      turnDegraded: { degraded: true, reason: "reply_blocked" },
+      parseErrors: ["Fan-out: domains degraded to fallback: [workout]."],
+      replySafetyErrors: [],
+      agent: { safety: { status: "parse_failed", blockedReasons: [], constraintsApplied: [] } },
+      turnDegraded: { degraded: true, reason: "parse_failed" },
     };
 
     const result = parseChatMessageDegradedTurn(metadata);
-    expect(result).toEqual({ degraded: true, reason: "reply_blocked" });
+    expect(result).toEqual({ degraded: true, reason: "parse_failed" });
+  });
+
+  it("returns null for turnError reasons — they are never valid turnDegraded reasons", () => {
+    // reply_blocked / decision_failed are reply-absent turnError reasons; the
+    // degraded enum excludes them (disjoint by contract).
+    expect(
+      parseChatMessageDegradedTurn({ turnDegraded: { degraded: true, reason: "reply_blocked" } }),
+    ).toBeNull();
+    expect(
+      parseChatMessageDegradedTurn({ turnDegraded: { degraded: true, reason: "decision_failed" } }),
+    ).toBeNull();
   });
 
   it("returns null for a clean (non-degraded) assistant message metadata", () => {

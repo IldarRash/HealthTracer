@@ -8376,15 +8376,6 @@ details.ds-revision-history[open] .ds-revision-history__chevron {
   background: var(--color-surface-card, #ffffff);
 }
 
-.chat-turn-error-card__btn--edit {
-  background: transparent;
-  color: var(--color-text-muted);
-}
-
-.chat-turn-error-card__btn--edit:hover {
-  color: var(--color-text-primary);
-}
-
 /* ── chat-markdown ── */
 /* Coach reply markdown — constrained element set, ink tokens. */
 .chat-markdown {
