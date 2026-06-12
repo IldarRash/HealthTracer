@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "node --watch --import @swc-node/register/esm-register src/main.ts",
+    "dev": "node --watch-path=src --import @swc-node/register/esm-register src/main.ts",
     "lint": "eslint . --max-warnings=0",
     "start": "node --import @swc-node/register/esm-register src/main.ts",
     "test": "vitest run",

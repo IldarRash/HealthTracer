@@ -9,13 +9,19 @@ decision-maker LLM synthesizes their output into one reply plus typed proposals.
 > codebase locked and must not deviate from. The phased migration is complete: every
 > component described below exists in code. The multi-domain fan-out path
 > (RouterLlm → SystemPlanner `DomainFanoutPlan` → parallel `DomainLlmExecutorService`
-> → `DecisionMakerExecutorService` → `ActionResolverService`) owns **all** turn types
-> — proposal-revision, proposal-explainer (with proposal), low-confidence fallback,
-> and the deterministic gate-miss (handled inline in
-> `AgentOrchestratorService.buildDeterministicGateMissResult` — no additional LLM calls,
-> though the router may already have run for eligible turns).
-> `ResponseModeExecutorService`, `resolveProposalOnlyOutput`, and the provider methods
-> `generateAgentLoopStep`/`generateCoachResponse` no longer exist.
+> → `DecisionMakerExecutorService` → `ActionResolverService`) owns **all** orchestrated
+> turn types — proposal-revision, proposal-explainer (with proposal), and low-confidence
+> fallback. **Every turn that reaches the orchestrator fans out**: there is no
+> orchestrator-level deterministic branch. `SystemPlannerService` coerces any would-be
+> deterministic executor mode to the fan-out default (logging `pre_ai_gate.miss`), and the
+> router's `directCommand` output is **telemetry-only**.
+> `ResponseModeExecutorService`, `resolveProposalOnlyOutput`,
+> `buildDeterministicGateMissResult`, the `DETERMINISTIC_PRE_AI_GATE_REPLY` canned reply,
+> and the provider methods `generateAgentLoopStep`/`generateCoachResponse` no longer exist.
+
+> **Related:** for a chronological message-journey / decision-tree (one user message,
+> every branch point and the condition that selects it), see
+> [`chat-message-flow.md`](./chat-message-flow.md).
 
 Attachments are **context** for this same pipeline — there is no separate attachment
 recognition/classification pipeline and no attachment proposal side channel. The old
@@ -63,27 +69,26 @@ flowchart TD
   aiService --> orchestrator["AgentOrchestratorService"]
   orchestrator --> preprocessor["MessagePreprocessorService (message normalization)"]
   preprocessor --> router["RouterLlmService (first LLM): select domains\n(skipped for revision/explainer turns)"]
-  router --> planner["SystemPlannerService (fan-out planner)\nproduces executorMode"]
-  planner --> deterministicMode{"executorMode == deterministic?\n(safety-net: router may already have run)"}
-  deterministicMode -- yes --> gateMiss["buildDeterministicGateMissResult\n(canned reply, no additional LLM calls)"]
-  deterministicMode -- no --> context["CoachingContextService (one bounded packet per selected domain)"]
+  router --> planner["SystemPlannerService (fan-out planner)\ncoerces any deterministic mode → fan-out default"]
+  planner --> context["CoachingContextService (one bounded packet per selected domain)"]
   context --> domainLlms["Parallel domain LLMs (only-selected): workout / nutrition / health"]
-  domainLlms --> decision["DecisionMakerExecutorService (final synthesis LLM)"]
+  domainLlms --> decision["DecisionMakerExecutorService (final synthesis LLM)\nretries once; double failure → turnError"]
   decision --> actionResolver["ActionResolverService"]
   actionResolver --> validation["Proposal safety and domain validation"]
   validation --> persistence["ChatRepository message and proposal persistence"]
 ```
 
 LLM call budget per eligible turn: **1 router (skipped for revision/explainer) + N
-selected domain LLMs (N ≤ 3, run in parallel) + 1 decision-maker**. Crisis, direct-path,
-and quota-exceeded turns make **zero LLM calls** — they return in ChatService before
-AiService is reached. The orchestrator-level deterministic gate-miss is a rare safety-net: the check is on the
-top-level `plan.executorMode` (derived from the primary capability policy,
-`classifyDirectPathCandidate`, and the router's `directCommand.detected` signal —
-`turnDecisionDirectCommand → resolveResponseModeExecutorMode` returns `deterministic_write`),
-which is distinct from each `DomainFanoutEntry.executorMode` (per-domain). By the time `buildDeterministicGateMissResult` runs, the router **may
-already have made one LLM call** (for eligible turns); no additional LLM calls are made
-from that point.
+selected domain LLMs (N ≤ 3, run in parallel) + 1 decision-maker (which retries once on
+failure, so up to 2 decision calls)**. Crisis, direct-path, and quota-exceeded turns make
+**zero LLM calls** — they return in ChatService before AiService is reached. **Every turn
+that reaches the orchestrator fans out**: there is no orchestrator-level deterministic
+branch. If `resolveResponseModeExecutorMode` ever returns a deterministic executor mode
+(e.g. `classifyDirectPathCandidate` matched a candidate the pre-AI gate should already
+have handled, or the router emitted a `directCommand`), `SystemPlannerService` coerces it
+to the fan-out default via `mapExpectedResponseModeToDefaultExecutorMode` and logs
+`pre_ai_gate.miss` (warn). The router's `directCommand` output is **telemetry-only** — it
+never short-circuits the LLM path.
 
 ## Stage 0: Chat Entry
 
@@ -376,10 +381,19 @@ Files:
 - `apps/api/src/modules/chat/direct-chat-path-formatters.ts`
 - `apps/api/src/modules/ai/direct-chat-path-matcher.service.ts`
 
-Handles explicit deterministic actions such as reading today's summary or
-marking today's workout done. Direct paths resolve only when the message is
-clearly understood **and there is no attachment**; otherwise the turn falls
-through to the router. Plan changes remain proposal-only.
+Handles explicit deterministic actions. There are **three** direct-path kinds
+(`directChatPathKindSchema` in `packages/types/src/direct-chat-path.ts`):
+
+- `today_summary_read` — read-only Today summary (formatter
+  `formatTodaySummaryReadMessage`).
+- `mark_today_workout_done` — the one narrow **write** (marks today's workout done).
+- `nutrition_plan_read` — read-only active-nutrition-plan readback (formatter
+  `formatNutritionPlanReadMessage` in `direct-chat-path-formatters.ts`, RU/EN match
+  patterns + `replyTemplates.nutritionPlan` in `ai-behavior.json`).
+
+Direct paths resolve only when the message is clearly understood **and there is no
+attachment**; otherwise the turn falls through to the router. Two are read-only; only
+`mark_today_workout_done` writes. Plan changes remain proposal-only.
 
 ### Free-Tier AI Message Quota Gate
 
@@ -412,23 +426,21 @@ Responsibilities (`orchestrateCoachTurn`):
 - Run `RouterLlmService` for eligible turns to select relevant domains (proposal-revision
   and proposal-explainer turns skip the router).
 - Ask `SystemPlannerService` for the deterministic `DomainFanoutPlan`.
-- **All LLM turns** route through `runFanOutTurn`: build one bounded coaching-context
-  packet per selected domain through `CoachingContextService`, run the **selected domain
-  LLMs in parallel** through `DomainLlmExecutorService`, synthesize via
+- **Every orchestrated turn** routes through `runFanOutTurn`: build one bounded
+  coaching-context packet per selected domain through `CoachingContextService`, run the
+  **selected domain LLMs in parallel** through `DomainLlmExecutorService`, synthesize via
   `DecisionMakerExecutorService`, and resolve through `ActionResolverService`.
   Proposal-revision and proposal-explainer turns skip the router but still execute the
-  full fan-out path (router is not a prerequisite for `runFanOutTurn`).
-- **Deterministic gate-miss** turns (executorMode deterministic) are handled inline by
-  `buildDeterministicGateMissResult` — a rare safety-net for deterministic modes that
-  somehow reach the orchestrator. The top-level `executorMode` is derived from the primary
-  capability policy, `classifyDirectPathCandidate`, and the router's `directCommand.detected`
-  signal (`turnDecisionDirectCommand → resolveResponseModeExecutorMode` returns
-  `deterministic_write`). No additional LLM calls are made at this point; however, for
-  eligible turns the router will have already run before `SystemPlannerService` determined
-  the executor mode. The genuine zero-LLM path is the pre-AI gate in
-  `ChatService` (crisis, direct-path, quota), which returns before `AiService` is called.
-- Return structured AI output, parse errors, reply safety errors, the
-  `consentRequired` flag, and agent metadata.
+  full fan-out path (router is not a prerequisite for `runFanOutTurn`). There is **no
+  orchestrator-level deterministic branch** — `SystemPlannerService` guarantees
+  `plan.executorMode` is never deterministic by coercing any deterministic mode to the
+  fan-out default (logged `pre_ai_gate.miss`). The genuine zero-LLM path is the pre-AI gate
+  in `ChatService` (crisis, direct-path, quota), which returns before `AiService` is called.
+- Return structured AI output, parse errors, reply safety errors, the `consentRequired`
+  flag, an optional typed `turnError` (`decision_failed` | `reply_blocked`), and agent
+  metadata. On a `turnError`, `finalOutput` is an empty reply marker with no proposals;
+  ChatService persists the empty assistant message + `turnError` metadata instead of fake
+  coach prose.
 
 `RouterLlmService` is the only first-LLM routing stage for eligible turns. Proposal
 revision and proposal explainer turns are the explicit non-router exceptions.
@@ -444,10 +456,38 @@ problem:
   `Fan-out: domains degraded to fallback: [workout]`.
 - `parseErrors` includes `Decision-maker degraded: ...` when final synthesis fell back.
 - `replySafetyErrors` and `agent.safety.status === "reply_blocked"` mean the
-  orchestrator replaced the reply and dropped proposals.
+  orchestrator **dropped proposals and emitted an empty reply marker** with
+  `turnError: { reason: "reply_blocked" }` — there is no canned safety prose.
 - An otherwise clean turn with text but no cards usually means the decision-maker chose
   `plain_reply` or `null`, and `ActionResolverService` correctly returned
   `proposals: []`.
+
+#### Honest degradation: typed `turnError`, no fake coach prose
+
+When the pipeline cannot produce an honest reply, it surfaces a **typed turn error**
+instead of canned coach text (the old canned fallback strings are gone):
+
+- **Decision-maker retry.** `DecisionMakerExecutorService.execute` runs once; on any
+  failure (provider error, shape guard, or Zod parse failure) it **retries once** with the
+  same inputs (logs `decision_maker.retry`). If the retry also fails it logs
+  `decision_maker.failed_after_retry` and returns a degraded result carrying
+  `turnError: { reason: "decision_failed" }`.
+- **`decision_failed`.** The orchestrator skips reply-safety validation (there is no reply
+  to validate), sets `finalOutput = { reply: " ", proposals: [] }`, and threads
+  `turnError: { reason: "decision_failed" }` to ChatService. `agent.safety.status` is
+  `provider_error`.
+- **`reply_blocked`.** When `validateReplySafety(resolved.reply)` fails on a synthesized
+  reply, the orchestrator drops all proposals, sets the same empty reply marker, and emits
+  `turnError: { reason: "reply_blocked" }`. Reply-safety still drops proposals; it no
+  longer substitutes a safe canned reply.
+- **Contract + persistence.** `chatTurnErrorSchema` (`packages/types/src/chat-turn.ts`,
+  `reason: "decision_failed" | "reply_blocked"`) rides on `ChatTurnResponse.turnError` and
+  the SSE `final` event, and is stored in assistant-message
+  `metadata.turnError` (parsed back via `parseChatMessageTurnError`). The assistant message
+  is persisted with empty content. The web renders an **error card with Retry**
+  (`apps/web/src/components/chat/chat-turn-error-card.tsx`) instead of coach prose. Crisis,
+  quota, direct-path, and proposal-explainer replies are product features and **never** set
+  `turnError`.
 
 Per-stage token/latency **usage** is now recorded in the optional fan-out diagnostics
 block (`agent.fanOut`, schema in `packages/types/src/agent-context.ts`): the
@@ -953,6 +993,30 @@ nested `.plan` (`adapt_workout_plan_from_progress`), and the top-level
 proposal downstream (fail-closed). The `displayContract` itself is carried through as a
 non-authoritative render hint; the decision-maker can never fabricate the trusted rate.
 
+## Suggested Quick Actions
+
+After an **LLM-backed (fan-out) turn**, `ChatService` attaches config-driven
+`suggestedQuickActions` chips to the turn response. They are derived **deterministically**
+from the fan-out's selected domains by the pure helper
+`deriveQuickActionsForTurn` (`packages/types/src/suggested-quick-actions.ts`):
+
+- `today_summary_read` is always eligible.
+- `mark_today_workout_done` is added when `workout` is among the selected domains.
+- `nutrition_plan_read` is added when `nutrition` is among the selected domains.
+
+The chip labels and localized `messageText` (`{ en, ru }`) come from the
+`suggestedQuickActions.actions[]` block in
+`packages/ai-behavior/config/ai-behavior.json` (loaded via
+`AiBehaviorConfigService.getSuggestedQuickActions`). Each chip's `id` is a
+`DirectChatPathKind`, so tapping a chip **sends the localized `messageText`** as a new user
+message — which then matches the corresponding deterministic direct path (see Stage 2).
+
+Quick actions are **not** attached on `turnError` turns (honest degradation — no coach text
+to follow up) or on pre-AI gate turns (crisis, quota, direct-path, explainer-no-proposal,
+which return before the orchestrator). The contract field is `ChatTurnResponse.suggestedQuickActions`
+(`packages/types/src/chat-turn.ts`); the web renders chips in
+`apps/web/src/components/chat/chat-quick-action-chips.tsx`.
+
 ## Per-Turn Telemetry (`ai.turn_summary`)
 
 After each fan-out turn completes, `AgentOrchestratorService.runFanOutTurn` emits one structured
@@ -1377,10 +1441,20 @@ The following files/exports were deleted and are no longer active runtime paths:
 
 - `ResponseModeExecutorService` (+ spec) and `ActionResolverService.resolveProposalOnlyOutput`
   — the single bounded-loop executor path. All turn types (proposal-revision,
-  proposal-explainer, low-confidence fallback, deterministic gate-miss) now route
-  exclusively through `runFanOutTurn`. The deterministic gate-miss is handled inline
-  in `AgentOrchestratorService.buildDeterministicGateMissResult` (no additional LLM
-  calls after that point, though the router may have already run for eligible turns).
+  proposal-explainer, low-confidence fallback) now route exclusively through
+  `runFanOutTurn`.
+- **The deterministic gate-miss branch + canned gate-miss reply.**
+  `AgentOrchestratorService.buildDeterministicGateMissResult` and the
+  `DETERMINISTIC_PRE_AI_GATE_REPLY` canned string are **deleted**, and the
+  `turnDecisionDirectCommand → deterministic_write` mapping in
+  `packages/types/src/response-mode-executor.ts` is removed (the router's `directCommand`
+  output is now telemetry-only). There is no longer an orchestrator branch that returns a
+  canned reply for a deterministic executor mode — `SystemPlannerService` instead coerces
+  any would-be deterministic mode to the fan-out default and logs `pre_ai_gate.miss`, so
+  **every orchestrated turn fans out**. Do **not** reintroduce a deterministic
+  orchestrator branch or any canned gate-miss / safety-fallback coach string: degradations
+  must surface a typed `turnError` (`decision_failed` | `reply_blocked`), never fabricated
+  coach prose.
 - `provider.generateAgentLoopStep` and `provider.generateCoachResponse` — the
   provider methods that backed the single-executor path. The `CoachAiProvider` surface
   is now `generateRouterDecision` / `generateDomainStep` / `generateFinalDecision` only.

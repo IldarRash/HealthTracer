@@ -140,7 +140,7 @@ describe("NutritionWorkspace read-only contracts", () => {
     expect(workspaceSource).not.toContain("RECIPE_INGREDIENTS");
     expect(workspaceSource).toContain("recipe.preparationSteps");
     expect(workspaceSource).toContain("recipe.ingredients");
-    expect(workspaceSource).toContain("recipe.macroEstimates");
+    expect(workspaceSource).toContain("recipe.perServingMacros");
     expect(workspaceSource).toContain("PlayBadge");
     expect(workspaceSource).toContain("Log in Today");
   });

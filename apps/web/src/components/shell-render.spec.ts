@@ -90,20 +90,11 @@ describe("Modern Health OS shell render", () => {
     expect(html).toContain('aria-current="page"');
   });
 
-  it("mounts Workouts wayfinding for legacy progress alias routes", () => {
+  it("does not mount wayfinding for deleted /progress alias route", () => {
     const pathname = "/progress";
-    expect(shouldShowRouteWayfinding(pathname)).toBe(true);
-
-    const trail = resolveSecondaryRouteWayfinding(pathname);
-    expect(trail?.current.labelKey).toBe("Nav.workouts");
-
-    const displayTrail = resolveTrailLabels(trail);
-    const html = renderShellMarkup(
-      createElement(RouteWayfindingTrail, { trail: displayTrail! }),
-    );
-
-    expect(html).toContain("Workouts");
-    expect(html).toContain('href="/today"');
+    // /progress alias route deleted — wayfinding no longer applies.
+    expect(shouldShowRouteWayfinding(pathname)).toBe(false);
+    expect(resolveSecondaryRouteWayfinding(pathname)).toBeUndefined();
   });
 
   it("does not mount wayfinding on primary Today routes", () => {

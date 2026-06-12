@@ -63,6 +63,10 @@ import { WorkoutsRepository } from "../workouts/workouts.repository.js";
 import { ChatAttachmentsRepository } from "../chat-attachments/chat-attachments.repository.js";
 import { toOwnedChatAttachmentRef } from "../chat-attachments/chat-attachment.mapper.js";
 import {
+  hasLegacyExerciseEntries,
+  normalizeLegacyWorkoutPlanExercises,
+} from "../workouts/workout-exercise-normalizer.js";
+import {
   captureWellbeingCheckinProposalPayloadSchema,
   getLogWorkoutActivityDomainErrors,
   getNutritionIncidentDomainErrors,
@@ -127,6 +131,50 @@ export class ProposalValidationService {
     }
 
     return { valid: true, errors: [] };
+  }
+
+  /**
+   * Bridge legacy `{name, reps, sets}` exercise entries in a create_workout_plan or
+   * adapt_workout_plan raw proposal to the structured catalog-backed form before
+   * schema + domain validation runs.
+   *
+   * Must be called BEFORE validateRawProposal for workout-plan intents when the
+   * proposedChanges may contain LLM-emitted name-only exercise entries.
+   *
+   * Returns the proposal unchanged when:
+   *  - the intent is not a workout plan intent
+   *  - proposedChanges does not parse as WorkoutPlanProposalChanges
+   *  - all exercises are already in the structured form
+   *
+   * Callers (ChatService) should replace the rawProposal.proposedChanges with the
+   * returned object before calling validateRawProposal.
+   */
+  async normalizeWorkoutProposalExercises(
+    userId: string,
+    intent: ProposalIntent,
+    proposedChanges: unknown,
+  ): Promise<unknown> {
+    if (intent !== "create_workout_plan" && intent !== "adapt_workout_plan") {
+      return proposedChanges;
+    }
+
+    const parsed = workoutPlanProposalChangesSchema.safeParse(proposedChanges);
+
+    if (!parsed.success) {
+      return proposedChanges;
+    }
+
+    if (!hasLegacyExerciseEntries(parsed.data)) {
+      return proposedChanges;
+    }
+
+    const { changes } = await normalizeLegacyWorkoutPlanExercises(
+      this.exercisesService,
+      userId,
+      parsed.data,
+    );
+
+    return changes;
   }
 
   async validateWellbeingCheckinProposalContext(

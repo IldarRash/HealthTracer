@@ -37,6 +37,7 @@ export const ICONS = {
   star: "M12 3l2.6 5.6 6.1.7-4.5 4.1 1.2 6L12 16.8 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z",
   pause: "M9 5v14M15 5v14",
   sun: "M12 4V2M12 22v-2M4 12H2M22 12h-2M6 6 4.5 4.5M19.5 19.5 18 18M6 18l-1.5 1.5M19.5 4.5 18 6M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
+  menu: "M4 7h16M4 12h16M4 17h16",
 } as const;
 
 export type IconName = keyof typeof ICONS;

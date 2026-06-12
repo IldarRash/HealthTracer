@@ -133,7 +133,7 @@ function ItemRow({ item, isBought, onToggle, isLast }: ItemRowProps): ReactEleme
         style={{
           flex: 1,
           fontSize: 13.5,
-          color: isBought ? "#9a9a92" : "var(--color-text-primary)",
+          color: isBought ? "var(--color-text-muted)" : "var(--color-text-primary)",
           textDecoration: isBought ? "line-through" : "none",
           minWidth: 0,
           overflow: "hidden",
@@ -166,9 +166,7 @@ function ItemRow({ item, isBought, onToggle, isLast }: ItemRowProps): ReactEleme
           fontSize: 12.5,
           fontWeight: 600,
           fontVariantNumeric: "tabular-nums",
-          color: isBought
-            ? "#9a9a92"
-            : "var(--color-text-muted)",
+          color: "var(--color-text-muted)",
           whiteSpace: "nowrap",
           flexShrink: 0,
         }}
@@ -227,7 +225,7 @@ function CategoryCard({ group, bought, onToggle }: CategoryCardProps): ReactElem
         <span
           style={{
             fontSize: 12,
-            color: "#9a9a92",
+            color: "var(--color-text-muted)",
           }}
         >
           {group.items.length}
@@ -332,7 +330,7 @@ function SummaryCard({
           <div style={{ marginTop: 10, width: 120 }}>
             <ProgressBar
               value={progressValue}
-              color="#19c37d"
+              color="var(--color-metric-green)"
               height={8}
             />
           </div>
@@ -397,7 +395,7 @@ function ChatBanner(): ReactElement {
       <Icon
         name="spark"
         size={18}
-        stroke="#5b5bd6"
+        stroke="var(--color-metric-indigo)"
         aria-hidden
       />
       <p
@@ -423,9 +421,9 @@ function ChatBanner(): ReactElement {
           gap: 6,
           padding: "8px 14px",
           borderRadius: 10,
-          background: "rgba(91,91,214,0.14)",
-          border: "1px solid rgba(91,91,214,0.28)",
-          color: "#7b7bff",
+          background: "rgba(123,123,255,0.14)",
+          border: "1px solid rgba(123,123,255,0.28)",
+          color: "var(--color-metric-indigo)",
           fontSize: 13,
           fontWeight: 600,
           textDecoration: "none",
@@ -433,7 +431,7 @@ function ChatBanner(): ReactElement {
           flexShrink: 0,
         }}
       >
-        <Icon name="chat" size={14} stroke="#7b7bff" aria-hidden />
+        <Icon name="chat" size={14} stroke="var(--color-metric-indigo)" aria-hidden />
         Поменять блюдо
       </Link>
     </div>

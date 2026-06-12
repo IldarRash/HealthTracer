@@ -22,10 +22,7 @@ import type {
 } from "@health/types";
 import {
   agentTurnTelemetrySchema,
-  buildResponseModeExecutionMetadata,
   createFallbackDomainAnswer,
-  isDeterministicResponseModeExecutorMode,
-  resolveResponseModeExecutorLoopPolicy,
 } from "@health/types";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
@@ -47,7 +44,7 @@ import { MessagePreprocessorService } from "./message-preprocessor.service.js";
 import { RouterLlmService } from "./router-llm.service.js";
 import type { RouterLlmResult } from "./router-llm.service.js";
 import { SystemPlannerService } from "./system-planner.service.js";
-import type { CapabilityPlanResult, DomainFanoutEntry, DomainFanoutPlan } from "./system-planner.service.js";
+import type { DomainFanoutEntry, DomainFanoutPlan } from "./system-planner.service.js";
 
 /**
  * Bounded attachment metadata passed into the orchestrator.
@@ -106,17 +103,17 @@ export interface OrchestratedCoachTurnResult {
    * should surface a distinct consent prompt to the user. Nothing is
    * auto-persisted — the proposal must be accepted through the normal
    * proposal-accept flow.
-   *
-   * Only set on fan-out turns; undefined on deterministic gate-miss turns.
    */
   consentRequired?: boolean;
+  /**
+   * Present when the AI pipeline could not produce an honest reply.
+   * reason=decision_failed: decision-maker failed after one retry.
+   * reason=reply_blocked: reply safety validation blocked the synthesized reply.
+   * When set, ChatService persists an empty message + turnError metadata instead
+   * of fake coach text.
+   */
+  turnError?: { reason: "decision_failed" | "reply_blocked" };
 }
-
-const FAN_OUT_SAFE_FALLBACK_REPLY =
-  "I could not safely process that response. Please try again with a wellness-focused question.";
-
-const DETERMINISTIC_PRE_AI_GATE_REPLY =
-  "That quick action should have been handled before the AI coach ran. Please try your request again.";
 
 @Injectable()
 export class AgentOrchestratorService {
@@ -271,37 +268,17 @@ export class AgentOrchestratorService {
     }
 
     // ---------------------------------------------------------------------------
-    // Route selection
-    //
-    // S4: deterministic gate-miss (deterministic_read / deterministic_write) is
-    // handled INLINE by buildDeterministicGateMissResult — a rare safety-net for
-    // the case where a deterministic executor mode somehow reaches the orchestrator
-    // without the pre-AI gate having handled it. No ADDITIONAL LLM calls are made
-    // from this point; however, for eligible turns the router will already have run
-    // above (before SystemPlannerService produced the executorMode). The genuine
-    // zero-LLM path is the pre-AI gate in chat.service.ts (crisis, direct-path,
-    // quota), which returns before AiService is called.
-    //
-    // All other turns fan out through runFanOutTurn:
+    // All turns fan out through runFanOutTurn:
     //   - revision turns (router skipped; single-domain fan-out via the revision capability)
     //   - explainer-with-proposal turns (router skipped; read-only single-domain fan-out)
     //   - low-confidence / fallback turns (single-domain fan-out via "general" capability)
     //   - confident multi-domain turns (parallel fan-out; the primary case)
     //
     // Pre-AI gates (crisis, no-proposal explainer, direct-path, quota) never reach the
-    // orchestrator, so they are never in scope here (S4 holds at chat.service.ts).
+    // orchestrator — they return in ChatService before AiService is called.
+    // SystemPlannerService guarantees plan.executorMode is never deterministic by
+    // coercing any deterministic mode to the fan-out default (logged as pre_ai_gate.miss).
     // ---------------------------------------------------------------------------
-    if (isDeterministicResponseModeExecutorMode(plan.executorMode)) {
-      return this.buildDeterministicGateMissResult({
-        plan,
-        contextPacket,
-        capabilityTurnMetadata,
-        routerResult,
-        shouldRunRouter,
-      });
-    }
-
-    // Every non-deterministic turn fans out.
     return this.runFanOutTurn(input, {
       plan,
       contextPacket,
@@ -314,99 +291,6 @@ export class AgentOrchestratorService {
       routerLatencyMs,
       contextLatencyMs,
     });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private — deterministic gate-miss safety-net
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Handles deterministic gate-miss turns (executorMode = deterministic_read |
-   * deterministic_write) INLINE — a safety-net for turns that reach the orchestrator
-   * without the pre-AI gate having handled them (S4). No additional LLM calls are
-   * made from this point; for eligible turns the router may already have run above.
-   *
-   * Returns a canned reply with responseModeExecution.delegatedToPreAiGate=true
-   * and preAiGateDelegationMissed=true so downstream telemetry can flag the miss.
-   * The metadata shape mirrors what the pre-C6 ResponseModeExecutorService.buildDelegatedResult emitted.
-   */
-  private buildDeterministicGateMissResult(params: {
-    plan: CapabilityPlanResult;
-    contextPacket: AgentContextPacket;
-    capabilityTurnMetadata: AgentTurnCapabilityPresentation;
-    routerResult: RouterLlmResult | undefined;
-    shouldRunRouter: boolean;
-  }): OrchestratedCoachTurnResult {
-    const { plan, contextPacket, capabilityTurnMetadata, routerResult, shouldRunRouter } = params;
-    const { route } = plan;
-
-    const loopPolicy = resolveResponseModeExecutorLoopPolicy(plan.executorMode);
-    const providerMode = resolveAiCoachProviderMode();
-
-    // llmRouterInvoked is true when the router ran and returned a source="llm" result.
-    const llmRouterInvoked =
-      shouldRunRouter && routerResult?.source === "llm";
-
-    const responseModeExecution = buildResponseModeExecutionMetadata({
-      executorMode: plan.executorMode,
-      llmInvoked: false,
-      expectedResponseMode: plan.expectedResponseMode,
-      delegatedToPreAiGate: true,
-      preAiGateDelegationMissed: true,
-    });
-
-    const routing: AgentTurnMetadata["routing"] = {
-      confidence: route.confidence,
-      routingMethod: route.routingMethod,
-      llmRouterInvoked: llmRouterInvoked ?? false,
-      unifiedTurnDecisionInvoked: shouldRunRouter,
-      catalogIntentId: route.catalogIntentId,
-      safetyFlags: route.safetyFlags,
-      expectedResponseMode: route.expectedResponseMode,
-      contextSliceCount: route.requiredContextSlices.length,
-      loopIterations: 0,
-      maxLoopIterations: loopPolicy.maxLoopIterations,
-    };
-
-    const unifiedTurnDecision: AgentTurnMetadata["unifiedTurnDecision"] = routerResult
-      ? {
-          ran: shouldRunRouter,
-          source: routerResult.source,
-          confidence: routerResult.output.confidence,
-          routingMethod: "unified_turn_decision" as const,
-          ...(routerResult.validationErrors.length > 0
-            ? { validationErrorCount: routerResult.validationErrors.length }
-            : {}),
-        }
-      : { ran: shouldRunRouter };
-
-    return {
-      output: { reply: DETERMINISTIC_PRE_AI_GATE_REPLY, proposals: [] },
-      parseErrors: [],
-      replySafetyErrors: [],
-      agentMetadata: {
-        provider: providerMode,
-        intent: route.intent,
-        catalogIntentId: route.catalogIntentId,
-        primaryCapabilityId: capabilityTurnMetadata.primaryCapabilityId,
-        selectedCapabilityIds: [...capabilityTurnMetadata.selectedCapabilityIds],
-        capabilityPresentation: capabilityTurnMetadata,
-        purpose: contextPacket.purpose,
-        depth: contextPacket.depth,
-        timeRange: contextPacket.timeRange,
-        toolsInvoked: [],
-        citations: mapContextSourceRefsToAgentCitations(contextPacket.sourceRefs),
-        routing,
-        unifiedTurnDecision,
-        missingContextNotes: contextPacket.missingContextNotes,
-        responseModeExecution,
-        safety: {
-          status: "passed",
-          blockedReasons: [],
-          constraintsApplied: contextPacket.safetyConstraints,
-        },
-      },
-    };
   }
 
   // ---------------------------------------------------------------------------
@@ -598,21 +482,38 @@ export class AgentOrchestratorService {
       workoutCaloriePerHourRate,
     });
 
+    // Decision-failed: decision-maker exhausted retries and could not produce an honest reply.
+    // Skip reply safety check (there is no reply to validate) and produce a typed error outcome.
+    const decisionFailed = Boolean(decisionResult.turnError?.reason === "decision_failed");
+
     // Safety floor: validate the decision-maker's synthesized reply for diagnosis/treatment language.
-    // This covers all turn types now (revision, explainer, fallback, confident multi-domain) — S9/R2.
-    // On failure, replace the reply with a safe fallback and drop all proposals (reply_blocked).
-    const replySafetyErrors = validateReplySafety(resolved.reply);
-    const replyBlocked = replySafetyErrors.length > 0;
+    // This covers all turn types (revision, explainer, fallback, confident multi-domain).
+    // On failure: reply replaced with empty content, proposals dropped (reply_blocked).
+    // Skip when decision already failed — there is no synthesized reply to validate.
+    const replySafetyErrors = decisionFailed ? [] : validateReplySafety(resolved.reply);
+    const replyBlocked = !decisionFailed && replySafetyErrors.length > 0;
 
     // Carry the consent-required flag from ActionResolver: this is the LLM boolean
     // forwarded from the decision-maker output (consentRequired). No consent-gated
     // action variant currently exists in the catalog — medical-save is deferred.
     // Surface it to ChatService for the ChatTurnResponse flag; nothing is auto-persisted.
-    const consentRequired = replyBlocked ? false : resolved.consentRequired;
+    const consentRequired = (replyBlocked || decisionFailed) ? false : resolved.consentRequired;
 
-    const finalOutput: AiStructuredOutput = replyBlocked
-      ? { reply: FAN_OUT_SAFE_FALLBACK_REPLY, proposals: [] }
-      : { reply: resolved.reply, proposals: resolved.proposals };
+    // S2: honest degradation — no fake coach reply.
+    // - decision_failed: empty content marker (ChatService persists turnError metadata instead)
+    // - reply_blocked: empty content marker + safety metadata preserved
+    // - normal: the validated reply and proposals
+    const finalOutput: AiStructuredOutput =
+      decisionFailed || replyBlocked
+        ? { reply: " ", proposals: [] }
+        : { reply: resolved.reply, proposals: resolved.proposals };
+
+    // Build the turn-level error for persistence.
+    const turnError: OrchestratedCoachTurnResult["turnError"] = decisionFailed
+      ? { reason: "decision_failed" }
+      : replyBlocked
+        ? { reason: "reply_blocked" }
+        : undefined;
 
     // Separate the two drop categories:
     //  - idResolutionDropCount: ids selected by decision-maker that were unknown or duplicate
@@ -662,9 +563,11 @@ export class AgentOrchestratorService {
 
     const safetyStatus = replyBlocked
       ? ("reply_blocked" as const)
-      : degradedDomains.length === domainResults.length
-        ? ("parse_failed" as const)
-        : ("passed" as const);
+      : decisionFailed
+        ? ("provider_error" as const)
+        : degradedDomains.length === domainResults.length
+          ? ("parse_failed" as const)
+          : ("passed" as const);
 
     const totalLatencyMs = Date.now() - turnStart;
 
@@ -731,6 +634,7 @@ export class AgentOrchestratorService {
       parseErrors,
       replySafetyErrors,
       consentRequired,
+      ...(turnError !== undefined ? { turnError } : {}),
       agentMetadata: {
         ...fanOutMetadata,
         safety: {
@@ -1100,8 +1004,6 @@ function buildFanOutTurnMetadata(params: {
       executorMode: plan.executorMode,
       llmInvoked: true,
       expectedResponseMode: route.expectedResponseMode,
-      delegatedToPreAiGate: false,
-      preAiGateDelegationMissed: false,
     },
     fanOut,
     safety: {

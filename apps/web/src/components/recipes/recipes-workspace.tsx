@@ -6,13 +6,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { apiQueryKeys, getActiveNutritionPlan, listRecipes } from "../../lib/api";
 import {
+  buildRecipeTagChips,
   formatIngredientLine,
   formatMacroEstimateSummary,
   formatMealTypeLabel,
   formatPrepTime,
-  formatRecipeProvenanceMeta,
-  formatRecipeProviderLabel,
-  RECIPE_CONFIDENCE_LABELS,
+  formatRecipeProvenanceHuman,
   recipeConfidenceNotice,
 } from "../../lib/recipes-ui-state";
 import { EmptyState, ErrorState, LoadingState } from "../ui";
@@ -29,6 +28,7 @@ function RecipeCatalogCard({
 }) {
   const prepTime = formatPrepTime(recipe);
   const confidenceNotice = recipeConfidenceNotice(recipe.confidence);
+  const tagChips = buildRecipeTagChips(recipe);
 
   return (
     <li className="recipe-card nested-card">
@@ -49,8 +49,6 @@ function RecipeCatalogCard({
       <p className="recipe-macro-copy">{formatMacroEstimateSummary(recipe)}</p>
 
       <dl className="training-meta recipe-meta">
-        <dt>Servings</dt>
-        <dd>{recipe.servings}</dd>
         {prepTime ? (
           <>
             <dt>Time</dt>
@@ -58,11 +56,7 @@ function RecipeCatalogCard({
           </>
         ) : null}
         <dt>Source</dt>
-        <dd>{formatRecipeProviderLabel(recipe)}</dd>
-        <dt>Confidence</dt>
-        <dd>{RECIPE_CONFIDENCE_LABELS[recipe.confidence]}</dd>
-        <dt>Provenance</dt>
-        <dd>{formatRecipeProvenanceMeta(recipe)}</dd>
+        <dd>{formatRecipeProvenanceHuman(recipe.provenance)}</dd>
       </dl>
 
       {confidenceNotice ? (
@@ -71,26 +65,14 @@ function RecipeCatalogCard({
         </div>
       ) : null}
 
-      {recipe.tags.length > 0 ? (
+      {tagChips.length > 0 ? (
         <div className="recipe-tag-row">
-          {recipe.tags.map((tag) => (
-            <span key={tag} className="badge badge-neutral">
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      {recipe.restrictionTags.length > 0 || recipe.allergenTags.length > 0 ? (
-        <div className="recipe-tag-row">
-          {recipe.restrictionTags.map((tag) => (
-            <span key={`restriction-${tag}`} className="badge badge-amber">
-              {tag}
-            </span>
-          ))}
-          {recipe.allergenTags.map((tag) => (
-            <span key={`allergen-${tag}`} className="badge badge-red">
-              Contains {tag}
+          {tagChips.map((chip) => (
+            <span
+              key={chip.key}
+              className={`badge badge-${chip.tone === "red" ? "red" : chip.tone === "amber" ? "amber" : chip.tone === "green" ? "green" : "neutral"}`}
+            >
+              {chip.fallbackLabel}
             </span>
           ))}
         </div>

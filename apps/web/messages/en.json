@@ -29,7 +29,9 @@
     "primaryNavLabel": "Primary navigation",
     "plansNavLabel": "Plans navigation",
     "completeOnboarding": "Complete onboarding to unlock navigation",
-    "brandName": "AI Health Coach"
+    "brandName": "AI Health Coach",
+    "openNavigation": "Open navigation",
+    "closeNavigation": "Close navigation"
   },
   "Settings": {
     "title": "Settings",
@@ -141,6 +143,97 @@
       "coachNotesText": "Good dynamics: fat is slowly decreasing, muscle is growing — exactly what's needed for the energy goal. Main focus for the next month: catching up upper body: chest, arms, back.",
       "updateButton": "Update from photo",
       "disclaimer": "Visual estimate from photos — not a body-composition measurement and not a diagnosis."
+    }
+  },
+  "Chat": {
+    "emptyStateTitle": "What shall we start with?",
+    "emptyStateDescription": "Tell me about your day, what you ate, or how you slept. I'll suggest a next step — whether to act on it is always up to you.",
+    "composerPlaceholder": "Message your coach or attach a photo…",
+    "disclaimer": "Your coach suggests — the decision is always yours. This is lifestyle support, not medical advice.",
+    "enterHint": "Enter — send · Shift+Enter — new line",
+    "thinkingLabel": "Your coach is thinking…",
+    "jumpToLatest": "Jump to latest",
+    "attachmentUnavailable": "No longer available",
+    "dateToday": "Today",
+    "dateYesterday": "Yesterday",
+    "suggestedPrompts": {
+      "reviewWeekly": "Review my weekly progress",
+      "reviewWorkouts": "Review my workout week",
+      "adjustGoals": "Help me adjust my goals",
+      "nutritionPlan": "What's in my nutrition plan?"
+    },
+    "bodyPhotoCaption": "Here — all angles",
+    "error": {
+      "title": "Couldn't reply",
+      "body": "The connection dropped while I was preparing a response. Your message is saved — you can retry.",
+      "retry": "Retry",
+      "editRequest": "Edit request"
+    },
+    "turnError": {
+      "title": "Couldn't process this request",
+      "body": "Couldn't process this request — please try again.",
+      "bodyBlocked": "The answer didn't pass the safety check.",
+      "retry": "Retry"
+    },
+    "quickActions": {
+      "label": "Quick actions"
+    }
+  },
+  "Recipes": {
+    "provenance": {
+      "seed_curated": "Curated starter recipe",
+      "external_provider": "Community recipe (approximate nutrition)"
+    },
+    "tags": {
+      "high_protein": "High protein",
+      "quick": "Quick",
+      "plant_based": "Plant-based",
+      "balanced": "Balanced",
+      "omega_3": "Omega-3",
+      "vegan": "Vegan",
+      "vegetarian": "Vegetarian",
+      "contains_dairy": "Contains dairy",
+      "contains_gluten": "Contains gluten",
+      "contains_soy": "Contains soy",
+      "contains_egg": "Contains egg",
+      "contains_fish": "Contains fish",
+      "contains_meat": "Contains meat",
+      "contains_shellfish": "Contains shellfish",
+      "contains_peanuts": "Contains peanuts",
+      "contains_tree_nuts": "Contains tree nuts",
+      "contains_sesame": "Contains sesame"
+    },
+    "allergens": {
+      "dairy": "Contains dairy",
+      "gluten": "Contains gluten",
+      "soy": "Contains soy",
+      "egg": "Contains egg",
+      "fish": "Contains fish",
+      "shellfish": "Contains shellfish",
+      "peanuts": "Contains peanuts",
+      "tree_nuts": "Contains tree nuts",
+      "sesame": "Contains sesame"
+    }
+  },
+  "Proposals": {
+    "eyebrow": "COACH SUGGESTION",
+    "accept": "Accept",
+    "edit": "Modify",
+    "decline": "Reject",
+    "stateBandAccepted": "Accepted · plan updated",
+    "stateBandRejected": "Rejected · no changes",
+    "stateBandSuperseded": "Revised · see updated suggestion",
+    "viewUpdatedPlan": "View updated plan →",
+    "invalidValidationNotice": "This suggestion didn't pass validation and can't be applied — ask the coach to regenerate it.",
+    "intentLabels": {
+      "adapt_workout_plan_from_progress": "Progress-based workout adaptation",
+      "create_habit_plan": "New daily habit plan",
+      "adapt_habit_plan": "Habit plan adjustment",
+      "capture_wellbeing_checkin": "Wellbeing check-in",
+      "log_nutrition_incident": "Nutrition note",
+      "log_workout_activity": "Log activity",
+      "recommend_recipes": "Recipe recommendations",
+      "save_body_analysis": "Body analysis"
     }
   }
 }

@@ -1920,7 +1920,7 @@ function EmptyHero() {
         </div>
         <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
           <Link
-            href="/goals"
+            href="/profile#goals"
             style={{
               display: "inline-flex",
               alignItems: "center",

@@ -33,6 +33,7 @@ function createService(
       exerciseIds: readonly string[],
       userId: string,
     ) => Promise<string[]>;
+    findExerciseByNormalizedName?: (name: string, userId: string) => Promise<unknown>;
   } = {},
   habitsService: {
     getHabitTemplateReferenceErrors?: (payload: unknown) => Promise<string[]>;
@@ -114,6 +115,7 @@ function createService(
     } as never,
     {
       findInaccessibleExerciseIds: async () => [],
+      findExerciseByNormalizedName: async () => null,
       ...exercisesService,
     } as never,
     {
@@ -2734,5 +2736,156 @@ describe("ProposalValidationService.validateAdjustNutritionProteinFloor", () => 
       { invalid: "payload" },
     );
     expect(errors).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeWorkoutProposalExercises
+// ---------------------------------------------------------------------------
+
+describe("ProposalValidationService.normalizeWorkoutProposalExercises", () => {
+  const USER_ID = "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81";
+
+  const CATALOG_EXERCISE = {
+    id: "e1000001-0000-4000-8000-000000000001",
+    name: "Pogo Jump",
+    normalizedName: "pogo jump",
+    aliases: [],
+    primaryMuscles: ["calves"],
+    secondaryMuscles: [],
+    equipment: ["bodyweight"],
+    movementPatterns: ["plyometric"],
+    modalities: ["plyometrics"],
+    difficulty: "intermediate",
+    instructions: ["Jump."],
+    safetyNotes: ["Land softly."],
+    media: { refs: [], fallbackLabel: null },
+    source: "system_seed",
+    validationStatus: "validated",
+    status: "active",
+    userId: null,
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  };
+
+  const LEGACY_PAYLOAD = {
+    title: "Plyometric plan",
+    summary: "Short cardio burst.",
+    days: [
+      {
+        weekday: "monday" as const,
+        focus: "Cardio",
+        exercises: [{ name: "Pogo Jump", reps: "20", sets: 2 }],
+      },
+    ],
+    notes: [] as string[],
+  };
+
+  it("returns proposedChanges unchanged for non-workout intents", async () => {
+    const svc = createService();
+    const changes = { plan: {} };
+    const result = await svc.normalizeWorkoutProposalExercises(USER_ID, "create_nutrition_plan", changes);
+    expect(result).toBe(changes);
+  });
+
+  it("returns proposedChanges unchanged when it does not parse as WorkoutPlanProposalChanges", async () => {
+    const svc = createService();
+    const changes = { invalid: true };
+    const result = await svc.normalizeWorkoutProposalExercises(USER_ID, "create_workout_plan", changes);
+    expect(result).toBe(changes);
+  });
+
+  it("returns proposedChanges by reference when no legacy entries exist", async () => {
+    const svc = createService();
+    const structured = {
+      title: "Strength plan",
+      summary: "No legacy entries.",
+      days: [
+        {
+          weekday: "tuesday" as const,
+          focus: "Strength",
+          exercises: [
+            {
+              exerciseId: "e1000001-0000-4000-8000-000000000001",
+              snapshot: { name: "Goblet Squat" },
+              sets: 3,
+              reps: "8",
+            },
+          ],
+        },
+      ],
+      notes: [] as string[],
+    };
+    const result = await svc.normalizeWorkoutProposalExercises(USER_ID, "create_workout_plan", structured);
+    expect(result).toBe(structured);
+  });
+
+  it("resolves legacy exercise to catalog exerciseId when found by normalized name", async () => {
+    const svc = createService({}, {
+      findExerciseByNormalizedName: async () => CATALOG_EXERCISE,
+    });
+
+    const result = await svc.normalizeWorkoutProposalExercises(
+      USER_ID,
+      "create_workout_plan",
+      LEGACY_PAYLOAD,
+    ) as typeof LEGACY_PAYLOAD;
+
+    const ex = result.days[0]?.exercises[0] as Record<string, unknown>;
+    expect(ex.exerciseId).toBe(CATALOG_EXERCISE.id);
+    expect((ex.snapshot as { name: string }).name).toBe("Pogo Jump");
+    expect(ex.sets).toBe(2);
+    expect(ex.reps).toBe("20");
+  });
+
+  it("resolves legacy exercise to pendingExerciseRef when not in catalog", async () => {
+    const svc = createService({}, {
+      findExerciseByNormalizedName: async () => null,
+    });
+
+    const result = await svc.normalizeWorkoutProposalExercises(
+      USER_ID,
+      "adapt_workout_plan",
+      LEGACY_PAYLOAD,
+    ) as { days: Array<{ exercises: Array<Record<string, unknown>> }>; pendingExercises?: Record<string, unknown> };
+
+    const ex = result.days[0]?.exercises[0];
+    expect(ex?.pendingExerciseRef).toBe("pogo-jump");
+    expect(result.pendingExercises?.["pogo-jump"]).toMatchObject({
+      name: "Pogo Jump",
+      source: "ai_generated",
+    });
+  });
+
+  it("after normalization the payload passes validateStoredProposal (catalog match)", async () => {
+    const svc = createService({}, {
+      findExerciseByNormalizedName: async () => CATALOG_EXERCISE,
+    });
+
+    const normalized = await svc.normalizeWorkoutProposalExercises(
+      USER_ID,
+      "create_workout_plan",
+      LEGACY_PAYLOAD,
+    );
+
+    const validation = svc.validateStoredProposal("create_workout_plan", normalized);
+    expect(validation.valid).toBe(true);
+    expect(validation.errors).toEqual([]);
+  });
+
+  it("after normalization the payload passes validateStoredProposal (pending ref path)", async () => {
+    const svc = createService({}, {
+      findExerciseByNormalizedName: async () => null,
+    });
+
+    const normalized = await svc.normalizeWorkoutProposalExercises(
+      USER_ID,
+      "create_workout_plan",
+      LEGACY_PAYLOAD,
+    );
+
+    const validation = svc.validateStoredProposal("create_workout_plan", normalized);
+    expect(validation.valid).toBe(true);
+    expect(validation.errors).toEqual([]);
   });
 });

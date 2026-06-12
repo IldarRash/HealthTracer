@@ -11,23 +11,22 @@ const previewsSource = readFileSync(
 );
 
 describe("ChatMessageAttachmentPreviews component", () => {
-  it("renders an img element for viewable image attachments (Case 1)", () => {
-    // The component should render an <img> (via AttachmentPreviewThumb) when
-    // isImageAttachmentPreview is true and previewUrl is present.
+  it("renders an image card for viewable image attachments (Case 1)", () => {
+    // The component should render a ChatAttachmentCard with variant="image"
+    // when isImageAttachmentPreview is true and previewUrl is present.
     expect(previewsSource).toContain("isImageAttachmentPreview");
-    expect(previewsSource).toContain("AttachmentPreviewThumb");
+    expect(previewsSource).toContain("ChatAttachmentCard");
+    expect(previewsSource).toContain('variant="image"');
     expect(previewsSource).toContain("preview.previewUrl");
   });
 
-  it("renders a plain chip for non-image present files (Case 2 — AC #2)", () => {
+  it("renders a file card for non-image present files (Case 2 — AC #2)", () => {
     // A ready PDF/text file has hasViewableContent=false by design (not an image),
-    // but must NOT show a status label — it falls to the plain chip case.
-    // The component must have a chip path without a status element for these.
-    expect(previewsSource).toContain("chat-message-attachments__chip");
-    expect(previewsSource).toContain("chat-message-attachments__chip-name");
-    expect(previewsSource).toContain("chat-message-attachments__chip-category");
-    // The plain chip path exists alongside the unavailable chip path.
-    expect(previewsSource).toContain("chat-message-attachments__chip-status");
+    // but must NOT show a status label — it falls to the plain file card case.
+    expect(previewsSource).toContain('variant="file"');
+    expect(previewsSource).toContain("ChatAttachmentCard");
+    // The unavailable card path also exists
+    expect(previewsSource).toContain('variant="unavailable"');
   });
 
   it("distinguishes unavailable attachments from present non-image files via isGenuinelyUnavailable", () => {
@@ -72,8 +71,10 @@ describe("ChatMessageAttachmentPreviews component", () => {
     expect(previewsSource).toContain('aria-label="Message attachments"');
   });
 
-  it("provides accessible aria-labels on chip items", () => {
-    expect(previewsSource).toContain("aria-label={");
+  it("passes accessible aria-labels down to the card primitives via props", () => {
+    // ChatAttachmentCard receives fileName and categoryLabel/statusLabel for aria-labels
+    expect(previewsSource).toContain("fileName={filename}");
+    expect(previewsSource).toContain("categoryLabel={categoryLabel}");
   });
 
   it("does not render raw medical content, storage keys, or recognition payloads", () => {
@@ -81,7 +82,7 @@ describe("ChatMessageAttachmentPreviews component", () => {
     expect(previewsSource).not.toContain("storageKey");
     expect(previewsSource).not.toContain("recognition");
     // "consentScope" / consent details must not be rendered here
-    // (the consent grant flow lives in ChatAttachmentOutcomePanel, not here).
+    // (consent flows live in the Profile documents feature, not in chat attachment previews).
     expect(previewsSource).not.toContain("consentScope");
     expect(previewsSource).not.toContain("documentText");
     // Should not import or call the full attachment record API

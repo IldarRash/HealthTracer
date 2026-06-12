@@ -197,10 +197,17 @@ export function validateFinalDecisionOutputShape(value: unknown): string[] {
 // Fallback factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Fallback final decision — used when the decision-maker degrades before the
+ * retry policy fires (first attempt fallback), and as the placeholder output
+ * when retry also fails (turnError.reason="decision_failed" is set on
+ * DecisionMakerResult). The reply is a minimal non-coaching marker that
+ * ChatService ignores in favor of persisting empty content + turnError metadata
+ * when turnError is present.
+ */
 export function createFallbackFinalDecision(): FinalDecisionOutput {
   return finalDecisionOutputSchema.parse({
-    reply:
-      "I can help with wellness coaching, habit planning, and structured suggestions you can review before anything changes.",
+    reply: "[degraded]",
     selectedAction: null,
     selectedProposalIds: [],
     consentRequired: false,

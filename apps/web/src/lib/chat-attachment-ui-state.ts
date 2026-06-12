@@ -1,6 +1,5 @@
 import type {
   ChatAttachmentCategory,
-  ChatAttachmentOutcome,
   ChatAttachmentRecord,
   ChatAttachmentStatus,
   DocumentConsentScope,
@@ -13,7 +12,6 @@ import {
   isChatAttachmentPendingMessageFirstSend,
   isChatAttachmentSendEligibleStatus,
 } from "@health/types";
-import type { BadgeProps } from "../components/ui";
 import {
   DOCUMENT_CONSENT_SCOPE_OPTIONS,
   DOCUMENT_CONSENT_VERSION,
@@ -36,20 +34,6 @@ export const MESSAGE_FIRST_ATTACHMENT_COPY =
 export const MEDICAL_ATTACHMENT_WELLNESS_NOTICE =
   "Wellness documents are used for coaching context only. They are not reviewed for medical advice or care instructions.";
 
-export const FOOD_PHOTO_LOW_CONFIDENCE_COPY =
-  "Meal estimates may be approximate. Review and edit the nutrition proposal before applying, or describe your meal in a message.";
-
-export const WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY =
-  "Your workout attachment was read as coaching context. For best results, describe your session in a message. Plans are not changed until you accept a proposal.";
-
-export const MEDICAL_ATTACHMENT_NEEDS_REVIEW_COPY =
-  "Your document summary and signals need review in Profile before they can inform coaching context.";
-
-export const CHAT_ATTACHMENT_UNSUPPORTED_COPY =
-  "This file type is not supported for chat attachments. Choose a supported format or describe the item in a message.";
-
-export const CHAT_ATTACHMENT_FAILED_COPY =
-  "This attachment could not be processed. Remove it and try again, or describe what you meant in a message.";
 
 /**
  * Accepted MIME types and extensions for chat attachment uploads.
@@ -253,31 +237,6 @@ export function chatAttachmentStatusLabel(
   }
 }
 
-export function chatAttachmentStatusBadgeTone(
-  status: ChatAttachmentStatus | "local" | "uploading",
-): NonNullable<BadgeProps["tone"]> {
-  switch (status) {
-    case "local":
-      return "neutral";
-    // "recognizing" is a valid ChatAttachmentStatus from the backend contract; treat it as pending.
-    case "queued":
-    case "uploading":
-    case "recognizing":
-      return "pending";
-    case "needs_consent":
-      return "info";
-    case "needs_review":
-      return "info";
-    case "ready":
-      return "success";
-    case "low_confidence":
-      return "info";
-    case "unsupported":
-    case "failed":
-      return "error";
-  }
-}
-
 export function isChatAttachmentSendEligible(
   record: ChatAttachmentRecord | null,
   draft: ChatComposerAttachmentDraft,
@@ -394,35 +353,5 @@ export function buildOptimisticAttachmentSummary(
   return `[${ready.length} attachments: ${ready.map((attachment) => attachment.file.name).join(", ")}]`;
 }
 
-export type ChatAttachmentOutcomeDisplay = ChatAttachmentOutcome;
 
-export function resolveAttachmentOutcomeFallbackCopy(
-  outcome: ChatAttachmentOutcome,
-): string | null {
-  if (outcome.status === "unsupported") {
-    return CHAT_ATTACHMENT_UNSUPPORTED_COPY;
-  }
-
-  if (outcome.status === "failed") {
-    return CHAT_ATTACHMENT_FAILED_COPY;
-  }
-
-  if (outcome.status === "low_confidence" && outcome.category === "food_photo") {
-    return FOOD_PHOTO_LOW_CONFIDENCE_COPY;
-  }
-
-  if (outcome.category === "workout_attachment") {
-    // B3 removal: recognition field removed from ChatAttachmentOutcome.
-    // manualFallbackNotice was part of the deleted workoutAttachmentRecognitionEnvelopeSchema.
-    if (outcome.status === "low_confidence") {
-      return WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY;
-    }
-  }
-
-  if (outcome.category === "medical_document" && outcome.status === "needs_review") {
-    return MEDICAL_ATTACHMENT_NEEDS_REVIEW_COPY;
-  }
-
-  return null;
-}
 

@@ -837,11 +837,8 @@ export const agentTurnMetadataSchema = z.object({
       ]),
       llmInvoked: z.boolean(),
       expectedResponseMode: expectedResponseModeSchema,
-      delegatedToPreAiGate: z.boolean().optional(),
-      preAiGateDelegationMissed: z.boolean().optional(),
       handlerPath: z
         .enum([
-          "pre_ai_gate_delegation",
           "single_final_answer",
           "bounded_tool_loop",
           "proposal_bounded_loop",

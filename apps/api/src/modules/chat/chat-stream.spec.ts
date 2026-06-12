@@ -483,6 +483,7 @@ describe("ChatService.sendMessage — onProgress threading", () => {
           nutritionIncident: { enabled: false, phrases: [], skipWhenCrisis: true },
           recipeRecommendation: { enabled: false, phrases: [], excludeWhenNutritionIncidentSignal: false, skipWhenCrisis: true },
         }),
+        getSuggestedQuickActions: vi.fn().mockReturnValue({ actions: [] }),
       } as never,
       {
         assertAiMessageAllowed: vi.fn().mockResolvedValue(undefined),

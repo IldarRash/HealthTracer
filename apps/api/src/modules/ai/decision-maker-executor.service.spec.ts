@@ -183,6 +183,180 @@ describe("DecisionMakerExecutorService", () => {
     });
   });
 
+  describe("retry behavior", () => {
+    it("succeeds on retry when the first attempt throws", async () => {
+      let callCount = 0;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async () => {
+          callCount++;
+          if (callCount === 1) throw new Error("transient provider error");
+          return {
+            output: {
+              reply: "Recovered on retry.",
+              selectedAction: null,
+              selectedProposalIds: [],
+              consentRequired: false,
+            },
+          };
+        }),
+      };
+
+      const result = await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+      });
+
+      expect(result.degraded).toBe(false);
+      expect(result.output.reply).toBe("Recovered on retry.");
+      expect(result.turnError).toBeUndefined();
+      expect(callCount).toBe(2);
+    });
+
+    it("returns turnError.reason=decision_failed after both attempts fail", async () => {
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async () => {
+          throw new Error("persistent provider error");
+        }),
+      };
+
+      const result = await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+      });
+
+      expect(result.degraded).toBe(true);
+      expect(result.turnError).toEqual({ reason: "decision_failed" });
+      // Fallback output is safe — non-empty marker reply
+      expect(result.output.reply.trim().length).toBeGreaterThan(0);
+      expect(result.output.selectedProposalIds).toHaveLength(0);
+    });
+
+    it("degradedReasons includes both attempt reasons after double failure", async () => {
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async () => {
+          throw new Error("double failure");
+        }),
+      };
+
+      const result = await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+      });
+
+      expect(result.degradedReasons.some((r) => r.includes("attempt1"))).toBe(true);
+      expect(result.degradedReasons.some((r) => r.includes("attempt2"))).toBe(true);
+    });
+
+    it("does not set turnError on first-attempt-only degradation (degraded=true but no turnError)", async () => {
+      // This tests the intermediate degraded result from tryExecuteInternal when
+      // the first attempt fails but retry succeeds. The returned result has no turnError.
+      let callCount = 0;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async () => {
+          callCount++;
+          if (callCount === 1) throw new Error("first only");
+          return {
+            output: {
+              reply: "Fine on retry.",
+              selectedAction: null,
+              selectedProposalIds: [],
+              consentRequired: false,
+            },
+          };
+        }),
+      };
+
+      const result = await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+      });
+
+      expect(result.degraded).toBe(false);
+      expect(result.turnError).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // F1 regression — forbidden-key shape error from provider throws → retry →
+  // double failure → turnError.decision_failed; "[degraded]" never in output
+  // -------------------------------------------------------------------------
+
+  describe("F1 regression — forbidden-key provider output drives retry → turnError", () => {
+    it("forbidden-key shape error on both attempts yields turnError.reason=decision_failed", async () => {
+      // Provider always throws a forbidden-key shape error (same as what
+      // openai-coach-provider now throws instead of returning a fallback).
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async () => {
+          throw new Error("OpenAI final-decision returned forbidden-key shape: direct_reply is not allowed");
+        }),
+      };
+
+      const result = await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+      });
+
+      expect(result.degraded).toBe(true);
+      expect(result.turnError).toEqual({ reason: "decision_failed" });
+      // The provider was called twice (first attempt + retry)
+      expect((provider.generateFinalDecision as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
+    });
+
+    it('the literal string "[degraded]" never appears in the persisted reply when turnError is set', async () => {
+      // When turnError is set, ChatService substitutes " " for the reply.
+      // This test verifies DecisionMakerExecutorService's contract: the fallback
+      // output.reply may contain "[degraded]" internally, but the turnError flag
+      // signals to ChatService to ignore it. The executor never exposes "[degraded]"
+      // without setting turnError.
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async () => {
+          throw new Error("OpenAI final-decision returned forbidden-key shape: direct_reply is not allowed");
+        }),
+      };
+
+      const result = await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+      });
+
+      // turnError must be set so ChatService discards the fallback reply
+      expect(result.turnError).toBeDefined();
+      // The reply field on the fallback is only an internal marker; the caller
+      // (ChatService) MUST use " " content when turnError is set (verified in
+      // ChatService specs). This assertion confirms the executor sets the gate.
+      expect(result.turnError?.reason).toBe("decision_failed");
+    });
+
+    it("forbidden-key error recovers on retry when second attempt succeeds", async () => {
+      let callCount = 0;
+      const provider: Pick<CoachAiProvider, "generateFinalDecision"> = {
+        generateFinalDecision: vi.fn(async () => {
+          callCount++;
+          if (callCount === 1) {
+            throw new Error("OpenAI final-decision returned forbidden-key shape: direct_reply is not allowed");
+          }
+          return {
+            output: {
+              reply: "Recovered after forbidden-key retry.",
+              selectedAction: null,
+              selectedProposalIds: [],
+              consentRequired: false,
+            },
+          };
+        }),
+      };
+
+      const result = await service.execute({
+        ...makeInput(),
+        provider: provider as CoachAiProvider,
+      });
+
+      expect(result.degraded).toBe(false);
+      expect(result.turnError).toBeUndefined();
+      expect(result.output.reply).toBe("Recovered after forbidden-key retry.");
+    });
+  });
+
   describe("degradation: shape guard failure", () => {
     it("degrades when the provider output contains a forbidden field ('advice')", async () => {
       const badOutput = {

@@ -7,8 +7,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { apiQueryKeys, getCurrentUserState, getSubscription } from "../lib/api";
 import { isNavLinkActive, PRIMARY_NAV_LINKS, SECONDARY_ROUTE_LINKS } from "../lib/nav-ui-state";
-import { shouldHidePrimaryNavDuringOnboarding } from "../lib/onboarding-ui-state";
+import { resolvePrimaryNavState } from "../lib/onboarding-ui-state";
 import { Icon, Mark, type IconName } from "./ui/icon";
+import { Skeleton } from "./ui/skeleton";
 
 /** Map each nav href to its icon name */
 const NAV_ICON_MAP: Record<string, IconName> = {
@@ -77,9 +78,11 @@ export function AppSidebar() {
     },
   });
 
-  const hidePrimaryNav = shouldHidePrimaryNavDuringOnboarding(
-    userStateQuery.data?.onboardingCompleted,
-  );
+  const navState = resolvePrimaryNavState({
+    isLoading: userStateQuery.isLoading,
+    isError: userStateQuery.isError,
+    onboardingCompleted: userStateQuery.data?.onboardingCompleted,
+  });
 
   const displayName = userStateQuery.data?.user.displayName ?? null;
   const longevityStatement =
@@ -95,12 +98,23 @@ export function AppSidebar() {
         <span className="app-sidebar__brand-name">{t("Nav.brandName")}</span>
       </div>
 
-      {hidePrimaryNav ? (
+      {navState === "loading" && (
+        <div className="app-sidebar__nav-skeleton" aria-hidden="true" aria-busy="true">
+          <Skeleton h={32} r={8} />
+          <Skeleton h={32} r={8} />
+          <Skeleton h={32} r={8} />
+          <Skeleton h={32} r={8} />
+        </div>
+      )}
+
+      {navState === "locked" && (
         <p className="app-sidebar__onboarding-hint" aria-live="polite">
           <Icon name="lock" size={16} aria-hidden />
           {t("Nav.completeOnboarding")}
         </p>
-      ) : (
+      )}
+
+      {navState === "ready" && (
         <>
           {/* Primary nav */}
           <nav aria-label={t("Nav.primaryNavLabel")} className="app-sidebar__nav-group">

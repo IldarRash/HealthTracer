@@ -30,13 +30,13 @@ export function getProposalIntentLabel(
     case "capture_wellbeing_checkin":
       return "Wellbeing check-in";
     case "log_nutrition_incident":
-      return "Nutrition incident log";
+      return "Nutrition note";
     case "log_workout_activity":
       return "Log activity";
     case "recommend_recipes":
       return "Recipe recommendations";
     case "save_body_analysis":
-      return "Анализ тела";
+      return "Body analysis";
     default:
       return null;
   }
@@ -285,6 +285,19 @@ export function canDecideProposal(
   proposal: Pick<AiProposal, "status" | "validationStatus">,
 ): boolean {
   return proposal.status === "pending";
+}
+
+/**
+ * Returns true when the proposal is invalid AND not a habit intent.
+ * Habit proposals carry translated, human-readable validation errors
+ * (via formatHabitProposalValidationErrors) so those continue to show
+ * the formatted error list. Non-habit invalid proposals carry raw Zod
+ * path strings that must be suppressed in favour of one localized notice.
+ */
+export function shouldShowInvalidValidationNotice(
+  proposal: Pick<AiProposal, "validationStatus" | "intent">,
+): boolean {
+  return proposal.validationStatus === "invalid" && !isHabitPlanProposalIntent(proposal.intent);
 }
 
 export function canAcceptProposal(

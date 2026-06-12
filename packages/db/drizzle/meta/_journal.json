@@ -260,6 +260,13 @@
       "when": 1781110200962,
       "tag": "0036_careless_pandemic",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1781110300000,
+      "tag": "0037_recipe_per_serving_macros",
+      "breakpoints": true
     }
   ]
 }

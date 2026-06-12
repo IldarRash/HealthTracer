@@ -48,6 +48,7 @@ import { RecipesRepository } from "./recipes.repository.js";
 import { GENERIC_RECIPE_CATALOG_CATEGORIES } from "./generic-recipe-catalog-categories.js";
 import type { RecipeCatalogProvider } from "./recipe-catalog-provider.js";
 import { RECIPE_CATALOG_PROVIDER } from "./recipe-catalog.tokens.js";
+import { dedupeRecipesByCanonicalName, normalizeRecipeNameKey } from "./recipe-dedup.js";
 
 const GENERATED_RECOMMENDATION_LIMIT = 5;
 /** After an empty or failed provider fetch, skip re-hydration on browse for this window. */
@@ -84,7 +85,7 @@ export class RecipesService {
     }
 
     const rows = await this.recipesRepository.listActiveRecipes(filters);
-    let recipes = rows.map(toRecipe);
+    let recipes = dedupeRecipesByCanonicalName(rows.map(toRecipe));
 
     if (filters.compatibleWithRestrictions?.length) {
       const hardFilters = collectHardFilters(filters.compatibleWithRestrictions, [], []);
@@ -136,15 +137,29 @@ export class RecipesService {
     const hardFilters = await this.resolveHardFilters(user.id, activeContext.payload);
     await this.ensureProviderCatalogLoaded();
     const catalog = await this.recipesRepository.listActiveRecipes({});
-    const compatible = catalog
+    const ranked = catalog
       .map((row) => ({ row, recipe: toRecipe(row) }))
       .filter(({ recipe }) => isRecipeCompatibleWithHardFilters(recipe, hardFilters))
       .sort(
         (left, right) =>
-          scoreRecipeMacroFit(right.recipe.macroEstimates, activeContext.targets) -
-          scoreRecipeMacroFit(left.recipe.macroEstimates, activeContext.targets),
-      )
-      .slice(0, GENERATED_RECOMMENDATION_LIMIT);
+          scoreRecipeMacroFit(right.recipe.perServingMacros, activeContext.targets) -
+          scoreRecipeMacroFit(left.recipe.perServingMacros, activeContext.targets),
+      );
+
+    // Dedup by canonical name after ranking; prefer curated over provider within each key.
+    const seen = new Map<string, typeof ranked[number]>();
+    for (const item of ranked) {
+      const key = normalizeRecipeNameKey(item.recipe.name);
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, item);
+      } else if (item.recipe.provider == null && existing.recipe.provider != null) {
+        // Prefer curated (no provider) over provider rows.
+        seen.set(key, item);
+      }
+    }
+
+    const compatible = [...seen.values()].slice(0, GENERATED_RECOMMENDATION_LIMIT);
 
     if (compatible.length === 0) {
       return {
@@ -162,8 +177,8 @@ export class RecipesService {
         reason: "Rule-based recommendation from your active nutrition plan.",
         fitSummary: buildRuleBasedFitSummary(
           {
-            estimatedCalories: recipe.macroEstimates.estimatedCalories,
-            proteinGrams: recipe.macroEstimates.proteinGrams,
+            caloriesPerServing: recipe.perServingMacros.caloriesPerServing,
+            proteinGramsPerServing: recipe.perServingMacros.proteinGramsPerServing,
             mealTypes: recipe.mealTypes,
           },
           activeContext.targets,
@@ -331,23 +346,24 @@ export class RecipesService {
     recipe: Recipe,
     recommendationId: string,
   ): LogNutritionIncidentProposalPayload {
+    // Log exactly 1 serving with per-serving macro values.
     return logNutritionIncidentProposalPayloadSchema.parse({
       incidentDateTime: new Date().toISOString(),
       items: [
         {
           name: recipe.name,
-          quantity: `${recipe.servings} serving${recipe.servings === 1 ? "" : "s"}`,
-          calories: recipe.macroEstimates.estimatedCalories,
-          proteinGrams: recipe.macroEstimates.proteinGrams,
-          carbsGrams: recipe.macroEstimates.carbsGrams,
-          fatGrams: recipe.macroEstimates.fatGrams,
+          quantity: "1 serving",
+          calories: recipe.perServingMacros.caloriesPerServing,
+          proteinGrams: recipe.perServingMacros.proteinGramsPerServing,
+          carbsGrams: recipe.perServingMacros.carbsGramsPerServing,
+          fatGrams: recipe.perServingMacros.fatGramsPerServing,
         },
       ],
-      estimatedCalories: recipe.macroEstimates.estimatedCalories,
+      estimatedCalories: recipe.perServingMacros.caloriesPerServing,
       estimatedMacros: {
-        proteinGrams: recipe.macroEstimates.proteinGrams,
-        carbsGrams: recipe.macroEstimates.carbsGrams,
-        fatGrams: recipe.macroEstimates.fatGrams,
+        proteinGrams: recipe.perServingMacros.proteinGramsPerServing,
+        carbsGrams: recipe.perServingMacros.carbsGramsPerServing,
+        fatGrams: recipe.perServingMacros.fatGramsPerServing,
       },
       confidence: recipe.confidence,
       provenance: {
@@ -517,7 +533,20 @@ export class RecipesService {
       );
 
       if (drafts.length > 0) {
-        await this.recipesRepository.upsertProviderRecipes(drafts);
+        // Skip provider drafts whose canonical name collides with an existing active curated recipe.
+        const curatedNames = await this.recipesRepository.listActiveCuratedRecipeNames();
+        const curatedKeys = new Set(curatedNames.map(normalizeRecipeNameKey));
+        const filteredDrafts = drafts.filter(
+          (draft) => !curatedKeys.has(normalizeRecipeNameKey(draft.name)),
+        );
+
+        if (filteredDrafts.length > 0) {
+          await this.recipesRepository.upsertProviderRecipes(filteredDrafts);
+        }
+
+        if (filteredDrafts.length === 0) {
+          this.lastEmptyHydrationAt = Date.now();
+        }
       } else {
         // Provider returned no rows — record cooldown so sequential browses skip re-fetch.
         this.lastEmptyHydrationAt = Date.now();

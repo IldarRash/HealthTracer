@@ -17,15 +17,10 @@ const composerAttachmentInputSource = readFileSync(
   join(chatDir, "chat-composer-attachment-input.tsx"),
   "utf8",
 );
-const outcomePanelSource = readFileSync(
-  join(chatDir, "chat-attachment-outcome-panel.tsx"),
-  "utf8",
-);
 
 const ATTACHMENT_USER_VISIBLE_SOURCES = [
   chatWorkspaceSource,
   composerAttachmentsSource,
-  outcomePanelSource,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
 ];
 
@@ -48,7 +43,8 @@ describe("chat composer attachments wiring", () => {
     expect(chatWorkspaceSource).toContain("ChatMessageAttachmentPreviews");
     expect(chatWorkspaceSource).toContain("chat-composer-controls");
     expect(chatWorkspaceSource).toContain("buildOptimisticAttachmentDisplays");
-    expect(chatWorkspaceSource).toContain("ChatAttachmentOutcomePanel");
+    // Outcome panel removed — chat-attachment-outcome-panel.tsx deleted (W3)
+    expect(chatWorkspaceSource).not.toContain("ChatAttachmentOutcomePanel");
     expect(chatWorkspaceSource).toContain("canSendChatComposer");
     expect(chatWorkspaceSource).toContain('phase: "uploaded"');
     expect(chatWorkspaceSource).not.toContain("enrichAttachmentOutcomesWithProposalContext");
@@ -107,19 +103,11 @@ describe("chat composer attachments wiring", () => {
     expect(composerAttachmentsSource).toContain('aria-live="polite"');
   });
 
-  it("renders attachment outcomes with inferred category and fallback copy", () => {
-    expect(outcomePanelSource).toContain("ChatMetadataPanel");
-    expect(outcomePanelSource).toContain("Attachment results");
-    expect(outcomePanelSource).toContain("resolveAttachmentOutcomeFallbackCopy");
-    expect(outcomePanelSource).not.toContain("resolveAttachmentOutcomeConfidenceLabel");
-    expect(outcomePanelSource).not.toContain("Meal context:");
-    expect(outcomePanelSource).not.toContain("Classification confidence:");
-    expect(outcomePanelSource).not.toContain("Nothing changes until you apply");
-    expect(outcomePanelSource).not.toContain('aria-label="Attachment recognition results"');
-    expect(outcomePanelSource).toContain('aria-label="Attachment results"');
-    // Post-send consent path removed — never reached since backend always returns unclassified
-    expect(outcomePanelSource).not.toContain("Grant consent and process");
-    expect(outcomePanelSource).not.toContain("ConsentScopeChecklist");
+  it("workspace has no attachment outcome panel (dead noise — panel deleted in W3)", () => {
+    // chat-attachment-outcome-panel.tsx was deleted: attachment status never leaves
+    // "queued" at runtime so the panel was dead noise.
+    expect(chatWorkspaceSource).not.toContain("ChatAttachmentOutcomePanel");
+    expect(chatWorkspaceSource).not.toContain("attachmentOutcomesByMessageId");
     expect(chatWorkspaceSource).not.toContain("pendingMedicalConsentByAttachmentId");
     expect(chatWorkspaceSource).not.toContain("buildGrantMedicalAttachmentConsentInput");
   });
@@ -144,19 +132,7 @@ describe("chat composer attachments wiring", () => {
     expect(composerAttachmentsSource).not.toContain("categoryOverride");
   });
 
-  it("does not render medical summary snippets, profile review links, or consent forms", () => {
-    // Medical summary snippets and profile review links were in the removed consent path.
-    expect(outcomePanelSource).not.toContain("summarySnippet");
-    expect(outcomePanelSource).not.toContain("Review document in Profile");
-    expect(outcomePanelSource).not.toContain("available in Profile after review");
-    // Consent form elements removed (backend never produces needs_consent outcomes).
-    expect(outcomePanelSource).not.toContain("Grant consent and process");
-    expect(outcomePanelSource).not.toContain("ConsentScopeChecklist");
-  });
-
-  it("has no consent form in either the outcome panel or the composer (post-send consent path removed)", () => {
-    // Post-send consent path removed: backend never produces needs_consent outcomes (always unclassified).
-    expect(outcomePanelSource).not.toContain("ConsentScopeChecklist");
+  it("does not grant consent or render medical summary snippets in the composer", () => {
     expect(composerAttachmentsSource).not.toContain("ConsentScopeChecklist");
     expect(composerAttachmentsSource).not.toContain("onGrantConsentAndRecognize");
     expect(chatWorkspaceSource).not.toContain("grantChatAttachmentConsent");

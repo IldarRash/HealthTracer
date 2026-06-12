@@ -15,6 +15,7 @@ import {
   summarizeWorkoutPlanForCoaching,
   workoutAdaptationIncreasesVolumeOrLoad,
   updateWorkoutSessionExerciseSchema,
+  workoutExerciseSchema,
   workoutPlanExerciseSchema,
   workoutPlanPayloadSchema,
   workoutPlanProposalChangesSchema,
@@ -738,5 +739,34 @@ describe("workoutSessionExerciseExecutionSchema — userCompletionTimeMinutes (u
     };
     const payload = workoutPlanPayloadSchema.parse(rawInput);
     expect((payload as Record<string, unknown>)["userCompletionTimeMinutes"]).toBeUndefined();
+  });
+});
+
+describe("workoutExerciseSchema reps tolerance (LLM numeric reps)", () => {
+  it("normalizes numeric reps to a string", () => {
+    const exercise = workoutExerciseSchema.parse({ name: "Pogo Jump", sets: 2, reps: 20 });
+    expect(exercise.reps).toBe("20");
+  });
+
+  it("keeps string reps as-is", () => {
+    const exercise = workoutExerciseSchema.parse({ name: "Squat", reps: "8-12" });
+    expect(exercise.reps).toBe("8-12");
+  });
+
+  it("a full plan payload with numeric reps parses (regression: live LLM proposal was marked invalid)", () => {
+    const payload = workoutPlanPayloadSchema.parse({
+      title: "Week 2",
+      summary: "Stiffness and power.",
+      days: [
+        {
+          weekday: "monday",
+          focus: "Power",
+          exercises: [{ name: "Pogo Jump", reps: 20, sets: 2 }],
+        },
+      ],
+      notes: [],
+    });
+    const exercise = payload.days[0]!.exercises[0]! as { reps?: string | null };
+    expect(exercise.reps).toBe("20");
   });
 });

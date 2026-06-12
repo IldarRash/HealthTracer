@@ -813,6 +813,18 @@ export function ProfileWorkspace() {
     }
   }, [profileQuery.data?.user.locale, locale, router]);
 
+  // Hash-anchor deep links: once data is available, scroll the matching element
+  // into view so /profile#goals, /profile#documents, /profile#data-consent land correctly.
+  useEffect(() => {
+    if (!profileQuery.isSuccess) return;
+    const hash = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
+    if (!hash) return;
+    const el = document.getElementById(hash);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [profileQuery.isSuccess]);
+
   // ── Async states ──
   if (profileQuery.isLoading) return <ProfileLoading message={t("loading")} />;
 
@@ -879,6 +891,7 @@ export function ProfileWorkspace() {
       <div
         style={{
           display: "flex",
+          flexWrap: "wrap",
           gap: 18,
           alignItems: "flex-start",
         }}
@@ -888,7 +901,7 @@ export function ProfileWorkspace() {
           id="profile-left-col"
           style={{
             flex: "1 1 0",
-            minWidth: 0,
+            minWidth: "min(100%, 22rem)",
             display: "flex",
             flexDirection: "column",
             gap: 16,
@@ -911,7 +924,7 @@ export function ProfileWorkspace() {
           id="profile-right-col"
           style={{
             flex: "1 1 0",
-            minWidth: 0,
+            minWidth: "min(100%, 22rem)",
             display: "flex",
             flexDirection: "column",
             gap: 16,

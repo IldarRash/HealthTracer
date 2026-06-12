@@ -93,9 +93,36 @@ describe("ai behavior config", () => {
     expect(defaults.directPaths.detectionOrder).toEqual([
       "mark_today_workout_done",
       "today_summary_read",
+      "nutrition_plan_read",
     ]);
-    expect(defaults.directPaths.kinds).toHaveLength(2);
+    expect(defaults.directPaths.kinds).toHaveLength(3);
     expect(defaults.directPaths.kinds[0]?.matchPatterns.length).toBeGreaterThan(0);
+  });
+
+  it("includes suggestedQuickActions in defaults with all three action ids", () => {
+    const defaults = buildDefaultAiBehaviorConfig();
+
+    expect(defaults.suggestedQuickActions).toBeDefined();
+    const ids = defaults.suggestedQuickActions.actions.map((a) => a.id);
+    expect(ids).toContain("today_summary_read");
+    expect(ids).toContain("mark_today_workout_done");
+    expect(ids).toContain("nutrition_plan_read");
+  });
+
+  it("falls back to suggestedQuickActions defaults when file config omits the key", () => {
+    const defaults = buildDefaultAiBehaviorConfig();
+    const fileWithoutQuickActions = { ...defaults };
+    // Remove the key to simulate an older JSON file
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (fileWithoutQuickActions as any).suggestedQuickActions;
+
+    const loaded = resolveLoadedAiBehaviorConfig({
+      fileValue: fileWithoutQuickActions,
+      defaults,
+    });
+
+    expect(loaded.source).toBe("file");
+    expect(loaded.config.suggestedQuickActions).toEqual(defaults.suggestedQuickActions);
   });
 
   it("exposes deep review profile parity with legacy constants", () => {

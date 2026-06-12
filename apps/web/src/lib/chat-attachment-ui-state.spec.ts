@@ -1,26 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { ChatAttachmentOutcome, ChatAttachmentRecord } from "@health/types";
+import type { ChatAttachmentRecord } from "@health/types";
 import {
   buildOptimisticAttachmentDisplays,
   canSendChatComposer,
   CHAT_ATTACHMENT_ACCEPT,
-  CHAT_ATTACHMENT_FAILED_COPY,
   CHAT_ATTACHMENT_PRIVACY_NOTICE,
-  CHAT_ATTACHMENT_UNSUPPORTED_COPY,
   chatAttachmentCategoryLabel,
   chatAttachmentStatusLabel,
   createChatComposerAttachmentDraft,
-  FOOD_PHOTO_LOW_CONFIDENCE_COPY,
   isChatAttachmentSendEligible,
   isChatComposerAttachmentProcessing,
-  MEDICAL_ATTACHMENT_NEEDS_REVIEW_COPY,
   MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
   MESSAGE_FIRST_ATTACHMENT_COPY,
   normalizeAttachmentMimeType,
   resolveAttachmentDisplayStatus,
-  resolveAttachmentOutcomeFallbackCopy,
   validateChatAttachmentFile,
-  WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY,
   type ChatComposerAttachmentDraft,
 } from "./chat-attachment-ui-state.js";
 
@@ -215,20 +209,6 @@ describe("chat attachment UI state", () => {
     );
   });
 
-  it("returns category-specific fallback copy without clinical language", () => {
-    const foodOutcome: ChatAttachmentOutcome = {
-      attachmentRefId: "a1000001-0000-4000-8000-000000000001",
-      category: "food_photo",
-      status: "low_confidence",
-      // recognition field removed (B3 removal, C4 cluster)
-    };
-
-    const fallback = resolveAttachmentOutcomeFallbackCopy(foodOutcome);
-    expect(fallback).toMatch(/nutrition proposal/i);
-    expect(fallback?.toLowerCase()).not.toContain("diagnosis");
-    expect(fallback?.toLowerCase()).not.toContain("treatment");
-  });
-
   it("uses context-only, wellness-only copy for attachments", () => {
     expect(MEDICAL_ATTACHMENT_WELLNESS_NOTICE.toLowerCase()).toContain("wellness");
     expect(MEDICAL_ATTACHMENT_WELLNESS_NOTICE.toLowerCase()).toContain("coaching context");
@@ -240,15 +220,10 @@ describe("chat attachment UI state", () => {
 
   // --- Context-only invariant regression guards ---
 
-  it("all user-facing composer copy constants are free of recognition/classification wording", () => {
+  it("context-only composer copy constants are free of recognition/classification wording", () => {
     const copyConstants = [
       CHAT_ATTACHMENT_PRIVACY_NOTICE,
       MEDICAL_ATTACHMENT_WELLNESS_NOTICE,
-      FOOD_PHOTO_LOW_CONFIDENCE_COPY,
-      WORKOUT_ATTACHMENT_MANUAL_FALLBACK_COPY,
-      MEDICAL_ATTACHMENT_NEEDS_REVIEW_COPY,
-      CHAT_ATTACHMENT_UNSUPPORTED_COPY,
-      CHAT_ATTACHMENT_FAILED_COPY,
       MESSAGE_FIRST_ATTACHMENT_COPY,
     ];
 

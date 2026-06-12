@@ -14,7 +14,6 @@ import type {
 } from "@health/types";
 import {
   clampRouterDecisionOutput,
-  createFallbackFinalDecision,
   createFallbackRouterDecision,
   domainLlmStepOutputSchema,
   finalDecisionOutputSchema,
@@ -172,6 +171,16 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     // (preserves the cacheable static prefix).
     const hasMultimodalContent = imageDataUris.length > 0 || textBlocks.length > 0;
 
+    // strict:false — the domain step schema has open-ended objects (tool input,
+    // per-intent candidateProposals) and OpenAI strict mode rejects any object
+    // with additionalProperties:true. The schema still guides generation; Zod
+    // validates post-receive and the executor degrades safely on mismatch.
+    const domainStepSchema = {
+      name: DOMAIN_LLM_STEP_SCHEMA_NAME,
+      schema: domainLlmStepWireSchema,
+      strict: false,
+    };
+
     const { payload, usage } =
       hasMultimodalContent
         ? await this.requestMultimodalJsonCompletion(
@@ -180,7 +189,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
             request.recentMessages,
             imageDataUris,
             textBlocks,
-            { name: DOMAIN_LLM_STEP_SCHEMA_NAME, schema: domainLlmStepWireSchema },
+            domainStepSchema,
             this.stageModels.domain,
             options?.signal,
           )
@@ -188,15 +197,25 @@ export class OpenAiCoachProvider implements CoachAiProvider {
             systemPrompt,
             request.userMessage,
             request.recentMessages,
-            { name: DOMAIN_LLM_STEP_SCHEMA_NAME, schema: domainLlmStepWireSchema },
+            domainStepSchema,
             this.stageModels.domain,
             options?.signal,
           );
 
+    // The wire schema wraps the tool_request/domain_answer union in a root
+    // `result` object (OpenAI requires a type:"object" root). Unwrap it, with a
+    // flat-payload fallback for models/tests that emit the union directly.
+    const unwrappedPayload =
+      payload !== null &&
+      typeof payload === "object" &&
+      "result" in payload
+        ? (payload as { result: unknown }).result
+        : payload;
+
     // Strip OpenAI strict-mode explicit nulls so all three methods' payloads are
     // normalised consistently before Zod parse. This covers every nullable-required
     // wire field (directCommand, calorie fields, tool_request.rationale, etc.).
-    const normalizedPayload = stripExplicitNulls(payload);
+    const normalizedPayload = stripExplicitNulls(unwrappedPayload);
 
     const shapeErrors = validateDomainLlmStepOutputShape(normalizedPayload);
 
@@ -231,7 +250,14 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     const shapeErrors = validateFinalDecisionOutputShape(normalizedPayload);
 
     if (shapeErrors.length > 0) {
-      return { output: createFallbackFinalDecision(), usage };
+      // Throw rather than returning a fallback so that DecisionMakerExecutorService's
+      // catch → retry-once → turnError path owns the degradation. This mirrors the
+      // malformed-JSON path below (line ~237) which also throws.
+      // The "[degraded]" fallback reply must never reach persisted/streamed output;
+      // the orchestrator substitutes " " content when turnError is set.
+      throw new Error(
+        `OpenAI final-decision returned forbidden-key shape: ${shapeErrors.join(" ")}`,
+      );
     }
 
     return { output: finalDecisionOutputSchema.parse(normalizedPayload), usage };
@@ -255,7 +281,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
       role: "user" | "assistant" | "system";
       content: string;
     }>,
-    jsonSchema: { name: string; schema: unknown },
+    jsonSchema: { name: string; schema: unknown; strict?: boolean },
     model: string,
     signal?: AbortSignal,
   ): Promise<{ payload: unknown; usage: ProviderUsage }> {
@@ -273,7 +299,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
           type: "json_schema",
           json_schema: {
             name: jsonSchema.name,
-            strict: true,
+            strict: jsonSchema.strict ?? true,
             schema: jsonSchema.schema,
           },
         },
@@ -304,7 +330,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     }>,
     imageDataUris: readonly string[],
     textBlocks: readonly string[],
-    jsonSchema: { name: string; schema: unknown },
+    jsonSchema: { name: string; schema: unknown; strict?: boolean },
     model: string,
     signal?: AbortSignal,
   ): Promise<{ payload: unknown; usage: ProviderUsage }> {
@@ -329,7 +355,7 @@ export class OpenAiCoachProvider implements CoachAiProvider {
           type: "json_schema",
           json_schema: {
             name: jsonSchema.name,
-            strict: true,
+            strict: jsonSchema.strict ?? true,
             schema: jsonSchema.schema,
           },
         },

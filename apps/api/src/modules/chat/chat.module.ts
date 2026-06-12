@@ -3,6 +3,7 @@ import { DatabaseModule } from "../../database/database.module.js";
 import { AiModule } from "../ai/ai.module.js";
 import { BillingModule } from "../billing/billing.module.js";
 import { ChatAttachmentsModule } from "../chat-attachments/chat-attachments.module.js";
+import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { ProgressModule } from "../progress/progress.module.js";
 import { ProposalsModule } from "../proposals/proposals.module.js";
 import { RecipesModule } from "../recipes/recipes.module.js";
@@ -26,6 +27,7 @@ import { ProposalExplainerService } from "./proposal-explainer.service.js";
     WellbeingCheckInsModule,
     RecipesModule,
     TodayModule,
+    NutritionModule,
     forwardRef(() => ChatAttachmentsModule),
   ],
   controllers: [ChatController],

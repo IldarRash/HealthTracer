@@ -35,6 +35,7 @@ import {
   getProgressProvenanceFromProposal,
   getProgressLinkedProvenanceRequiredErrors,
   weeklyProgressSummaryResponseSchema,
+  recipePerServingMacrosSchema,
 } from "./index.js";
 
 describe("phase 2 contracts", () => {
@@ -852,21 +853,28 @@ describe("phase 4 contracts", () => {
     expect(result.activeRevision?.payload.title).toBe("Balanced base");
   });
 
-  it("rejects nutrition plan revisions with incomplete payloads", () => {
-    expect(() =>
-      nutritionPlanRevisionSchema.parse({
-        id: revisionId,
-        nutritionPlanId: planId,
-        revisionNumber: 1,
-        reason: "Initial plan",
-        source: "ai_proposal",
-        payload: {
-          title: "Incomplete",
-          summary: "Missing required nutrition targets.",
-        },
-        createdAt: timestamp,
-      }),
-    ).toThrow();
+  it("parses nutrition plan revisions with omitted targets (fields default to null after LLM null-stripping)", () => {
+    // After stripExplicitNulls, the LLM may omit caloriesPerDay/macros.
+    // The Zod schema now defaults these to null (requiredNullable) instead of failing,
+    // matching the full tolerance pass. Domain validation (getNutritionPlanDomainErrors)
+    // is the correct layer to enforce "at least one target".
+    const result = nutritionPlanRevisionSchema.safeParse({
+      id: revisionId,
+      nutritionPlanId: planId,
+      revisionNumber: 1,
+      reason: "Initial plan",
+      source: "ai_proposal",
+      payload: {
+        title: "Incomplete",
+        summary: "Missing required nutrition targets.",
+      },
+      createdAt: timestamp,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.payload.caloriesPerDay).toBeNull();
+      expect(result.data.payload.proteinGrams).toBeNull();
+    }
   });
 });
 
@@ -903,11 +911,11 @@ describe("phase 7 recipe contracts", () => {
         ingredients: [{ name: "Greek yogurt", quantity: 1, unit: "cup" }],
         preparationSteps: ["Add yogurt to a bowl.", "Top with berries."],
         servings: 1,
-        macroEstimates: {
-          estimatedCalories: 320,
-          proteinGrams: 24,
-          carbsGrams: 36,
-          fatGrams: 8,
+        perServingMacros: {
+          caloriesPerServing: 320,
+          proteinGramsPerServing: 24,
+          carbsGramsPerServing: 36,
+          fatGramsPerServing: 8,
         },
         mealTypes: ["breakfast"],
         tags: ["high_protein"],
@@ -1227,5 +1235,86 @@ describe("phase 10A progress contracts", () => {
       sourceSummaryId: summaryId,
       sourceTrendObservationIds: [trendId],
     });
+  });
+});
+
+describe("recipePerServingMacrosSchema", () => {
+  it("accepts valid per-serving macro values", () => {
+    expect(() =>
+      recipePerServingMacrosSchema.parse({
+        caloriesPerServing: 520,
+        proteinGramsPerServing: 38,
+        carbsGramsPerServing: 60,
+        fatGramsPerServing: 14,
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts optional fiberGramsPerServing when present", () => {
+    const result = recipePerServingMacrosSchema.parse({
+      caloriesPerServing: 320,
+      proteinGramsPerServing: 24,
+      carbsGramsPerServing: 36,
+      fatGramsPerServing: 8,
+      fiberGramsPerServing: 6,
+    });
+    expect(result.fiberGramsPerServing).toBe(6);
+  });
+
+  it("rejects caloriesPerServing of 0 (must be positive)", () => {
+    expect(() =>
+      recipePerServingMacrosSchema.parse({
+        caloriesPerServing: 0,
+        proteinGramsPerServing: 24,
+        carbsGramsPerServing: 36,
+        fatGramsPerServing: 8,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects caloriesPerServing above the 10000 ceiling", () => {
+    expect(() =>
+      recipePerServingMacrosSchema.parse({
+        caloriesPerServing: 10001,
+        proteinGramsPerServing: 24,
+        carbsGramsPerServing: 36,
+        fatGramsPerServing: 8,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects negative protein grams", () => {
+    expect(() =>
+      recipePerServingMacrosSchema.parse({
+        caloriesPerServing: 400,
+        proteinGramsPerServing: -1,
+        carbsGramsPerServing: 36,
+        fatGramsPerServing: 8,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects old field names (estimatedCalories, proteinGrams etc.)", () => {
+    // Old schema field names must NOT silently parse — they should cause parse failure
+    // because the new schema requires caloriesPerServing (mandatory, positive).
+    expect(() =>
+      recipePerServingMacrosSchema.parse({
+        estimatedCalories: 320,
+        proteinGrams: 24,
+        carbsGrams: 36,
+        fatGrams: 8,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects non-integer macro values", () => {
+    expect(() =>
+      recipePerServingMacrosSchema.parse({
+        caloriesPerServing: 320.5,
+        proteinGramsPerServing: 24,
+        carbsGramsPerServing: 36,
+        fatGramsPerServing: 8,
+      }),
+    ).toThrow();
   });
 });

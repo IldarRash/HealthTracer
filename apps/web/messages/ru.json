@@ -29,7 +29,9 @@
     "primaryNavLabel": "Основная навигация",
     "plansNavLabel": "Навигация по планам",
     "completeOnboarding": "Завершите настройку для доступа к навигации",
-    "brandName": "AI Health Coach"
+    "brandName": "AI Health Coach",
+    "openNavigation": "Открыть навигацию",
+    "closeNavigation": "Закрыть навигацию"
   },
   "Settings": {
     "title": "Настройки",
@@ -141,6 +143,97 @@
       "coachNotesText": "Хорошая динамика: жир медленно снижается, мышцы растут — это именно то, что нужно для цели «энергия». Главный фокус на ближайший месяц — догнать верх тела: грудь, руки, спина.",
       "updateButton": "Обновить по фото",
       "disclaimer": "Оценка визуальная, по фотографиям — не замер состава тела и не диагноз."
+    }
+  },
+  "Chat": {
+    "emptyStateTitle": "С чего начнём?",
+    "emptyStateDescription": "Расскажите, как прошёл день, что съели или как спали. Я предложу следующий шаг — применять или нет, решаете вы.",
+    "composerPlaceholder": "Напишите коучу или прикрепите фото…",
+    "disclaimer": "Коуч предлагает — решение всегда за вами. Это поддержка по образу жизни, не медицинская консультация.",
+    "enterHint": "Enter — отправить · Shift+Enter — новая строка",
+    "thinkingLabel": "Коуч думает…",
+    "jumpToLatest": "К последнему сообщению",
+    "attachmentUnavailable": "Больше недоступно",
+    "dateToday": "Сегодня",
+    "dateYesterday": "Вчера",
+    "suggestedPrompts": {
+      "reviewWeekly": "Обзор моей недели",
+      "reviewWorkouts": "Итоги тренировочной недели",
+      "adjustGoals": "Помоги скорректировать цели",
+      "nutritionPlan": "Что в моём плане питания?"
+    },
+    "bodyPhotoCaption": "Вот, со всех сторон",
+    "error": {
+      "title": "Не получилось ответить",
+      "body": "Соединение прервалось, пока я готовил предложение. Ваше сообщение сохранено — можно повторить.",
+      "retry": "Повторить",
+      "editRequest": "Изменить запрос"
+    },
+    "turnError": {
+      "title": "Не получилось обработать запрос",
+      "body": "Не получилось обработать запрос — попробуйте ещё раз.",
+      "bodyBlocked": "Ответ не прошёл проверку безопасности.",
+      "retry": "Повторить"
+    },
+    "quickActions": {
+      "label": "Быстрые действия"
+    }
+  },
+  "Recipes": {
+    "provenance": {
+      "seed_curated": "Проверенный базовый рецепт",
+      "external_provider": "Рецепт сообщества (приблизительная пищевая ценность)"
+    },
+    "tags": {
+      "high_protein": "Богато белком",
+      "quick": "Быстрый",
+      "plant_based": "Растительное",
+      "balanced": "Сбалансированный",
+      "omega_3": "Омега-3",
+      "vegan": "Веганский",
+      "vegetarian": "Вегетарианский",
+      "contains_dairy": "Содержит молочное",
+      "contains_gluten": "Содержит глютен",
+      "contains_soy": "Содержит сою",
+      "contains_egg": "Содержит яйца",
+      "contains_fish": "Содержит рыбу",
+      "contains_meat": "Содержит мясо",
+      "contains_shellfish": "Содержит моллюски",
+      "contains_peanuts": "Содержит арахис",
+      "contains_tree_nuts": "Содержит орехи",
+      "contains_sesame": "Содержит кунжут"
+    },
+    "allergens": {
+      "dairy": "Содержит молочное",
+      "gluten": "Содержит глютен",
+      "soy": "Содержит сою",
+      "egg": "Содержит яйца",
+      "fish": "Содержит рыбу",
+      "shellfish": "Содержит моллюски",
+      "peanuts": "Содержит арахис",
+      "tree_nuts": "Содержит орехи",
+      "sesame": "Содержит кунжут"
+    }
+  },
+  "Proposals": {
+    "eyebrow": "ПРЕДЛОЖЕНИЕ КОУЧА",
+    "accept": "Принять",
+    "edit": "Изменить",
+    "decline": "Отклонить",
+    "stateBandAccepted": "Принято · план обновлён",
+    "stateBandRejected": "Отклонено · план без изменений",
+    "stateBandSuperseded": "Пересмотрено · см. обновлённое предложение",
+    "viewUpdatedPlan": "Открыть обновлённый план →",
+    "invalidValidationNotice": "Это предложение не прошло проверку и не может быть применено — попросите коуча сформировать его заново.",
+    "intentLabels": {
+      "adapt_workout_plan_from_progress": "Адаптация тренировок по прогрессу",
+      "create_habit_plan": "Новый план привычек",
+      "adapt_habit_plan": "Корректировка плана привычек",
+      "capture_wellbeing_checkin": "Отметка самочувствия",
+      "log_nutrition_incident": "Заметка о питании",
+      "log_workout_activity": "Записать активность",
+      "recommend_recipes": "Рекомендации рецептов",
+      "save_body_analysis": "Анализ тела"
     }
   }
 }

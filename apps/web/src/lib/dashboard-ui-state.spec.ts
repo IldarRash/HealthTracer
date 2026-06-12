@@ -41,7 +41,7 @@ describe("dashboard UI state", () => {
     expect(summarizeWorkoutAdherence(sessions, now)).toEqual({
       completed: 1,
       planned: 2,
-      label: "1 of 2 sessions completed",
+      label: "1 of 2 planned sessions completed",
     });
   });
 

@@ -15,13 +15,13 @@ export const PRIMARY_NAV_LINKS: readonly NavLink[] = [
   {
     href: "/profile",
     labelKey: "Nav.profile",
-    aliases: ["/goals", "/documents", "/metrics", "/billing"],
+    aliases: ["/billing"],
   },
 ] as const;
 
 /** Secondary read-only plan views — routeable but not primary nav tabs. */
 export const SECONDARY_ROUTE_LINKS: readonly NavLink[] = [
-  { href: "/training", labelKey: "Nav.workouts", aliases: ["/progress"] },
+  { href: "/training", labelKey: "Nav.workouts" },
   { href: "/nutrition", labelKey: "Nav.nutrition", aliases: ["/recipes"] },
 ] as const;
 

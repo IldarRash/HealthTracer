@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { llmInt, requiredNullable } from "./llm-coerce.js";
 
 // ---------------------------------------------------------------------------
 // Nutrition meal slot schemas
@@ -30,14 +31,14 @@ export const nutritionMealSlotSchema = z.object({
   label: z.string().min(1).max(80),
   timingHint: z.string().min(1).max(120).nullable().default(null),
   // --- C1: per-meal kcal + macros + time + dish (all optional — old plans lack these) ---
-  /** Estimated kcal for this meal slot. */
-  kcal: z.number().int().nonnegative().max(5000).optional(),
-  /** Protein estimate for this meal slot in grams. */
-  proteinGrams: z.number().int().nonnegative().max(500).optional(),
-  /** Carbohydrate estimate for this meal slot in grams. */
-  carbsGrams: z.number().int().nonnegative().max(1000).optional(),
-  /** Fat estimate for this meal slot in grams. */
-  fatGrams: z.number().int().nonnegative().max(500).optional(),
+  /** Estimated kcal for this meal slot. LLMs may emit decimals; round to int. */
+  kcal: llmInt(z.number().nonnegative().max(5000)).optional(),
+  /** Protein estimate for this meal slot in grams. LLMs may emit decimals; round to int. */
+  proteinGrams: llmInt(z.number().nonnegative().max(500)).optional(),
+  /** Carbohydrate estimate for this meal slot in grams. LLMs may emit decimals; round to int. */
+  carbsGrams: llmInt(z.number().nonnegative().max(1000)).optional(),
+  /** Fat estimate for this meal slot in grams. LLMs may emit decimals; round to int. */
+  fatGrams: llmInt(z.number().nonnegative().max(500)).optional(),
   /** Suggested meal time, e.g. "08:00". */
   mealTime: z.string().min(1).max(20).optional(),
   /** Suggested dish or meal description for this slot. */
@@ -59,8 +60,8 @@ export const nutritionWeekDaySchema = z.object({
   lunch: z.string().min(1).max(240).optional(),
   snack: z.string().min(1).max(240).optional(),
   dinner: z.string().min(1).max(240).optional(),
-  /** Total kcal target for this day (optional override). */
-  kcal: z.number().int().positive().max(10000).optional(),
+  /** Total kcal target for this day (optional override). LLMs may emit decimals; round to int. */
+  kcal: llmInt(z.number().positive().max(10000)).optional(),
 });
 
 export type NutritionWeekDay = z.infer<typeof nutritionWeekDaySchema>;
@@ -72,11 +73,13 @@ export type NutritionWeekDay = z.infer<typeof nutritionWeekDaySchema>;
 export const nutritionPlanPayloadSchema = z.object({
   title: z.string().min(1).max(160),
   summary: z.string().min(1).max(1000),
-  caloriesPerDay: z.number().int().positive().max(10000).nullable(),
-  proteinGrams: z.number().int().nonnegative().max(1000).nullable(),
-  carbsGrams: z.number().int().nonnegative().max(1500).nullable(),
-  fatGrams: z.number().int().nonnegative().max(1000).nullable(),
-  hydrationLiters: z.number().positive().max(20).nullable(),
+  // LLMs emit decimals; round to int. stripExplicitNulls removes null keys so
+  // fields must default to null when the key is absent (.default(null) via requiredNullable).
+  caloriesPerDay: requiredNullable(llmInt(z.number().positive().max(10000))),
+  proteinGrams: requiredNullable(llmInt(z.number().nonnegative().max(1000))),
+  carbsGrams: requiredNullable(llmInt(z.number().nonnegative().max(1500))),
+  fatGrams: requiredNullable(llmInt(z.number().nonnegative().max(1000))),
+  hydrationLiters: requiredNullable(z.number().positive().max(20)),
   mealStructure: z.array(nutritionMealSlotSchema).max(8).default([]),
   preferences: z.array(z.string().min(1).max(160)).max(20).default([]),
   restrictions: z.array(z.string().min(1).max(160)).max(20).default([]),

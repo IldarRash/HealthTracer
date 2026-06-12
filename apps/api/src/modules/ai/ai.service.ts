@@ -1,4 +1,4 @@
-import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, ProgressReporter, UserLocale } from "@health/types";
+import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, ProgressReporter, UserLocale, ChatTurnDegradedReason, ChatTurnError } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
@@ -41,6 +41,19 @@ export interface GeneratedCoachResponse {
    * Only set on fan-out turns; undefined otherwise.
    */
   consentRequired?: boolean;
+  /**
+   * Present when the AI pipeline produced a degraded/fallback reply.
+   * Maps from agentMetadata.safety.status to a presentation-safe reason code.
+   * Absent when the pipeline completed cleanly (safety.status === "passed").
+   */
+  degraded?: { reason: ChatTurnDegradedReason };
+  /**
+   * Present when the AI pipeline could not produce an honest reply.
+   * reason=decision_failed: decision-maker failed after retry.
+   * reason=reply_blocked: reply safety validation blocked the synthesized reply.
+   * ChatService should persist an error marker instead of fake coach text.
+   */
+  turnError?: ChatTurnError;
 }
 
 @Injectable()
@@ -56,6 +69,19 @@ export class AiService {
       onProgress: input.onProgress,
     });
 
+    const safetyStatus = orchestrated.agentMetadata.safety?.status;
+    // Also mark decision_failed from turnError as a degraded reason.
+    const degradedReason: ChatTurnDegradedReason | undefined =
+      orchestrated.turnError?.reason === "decision_failed"
+        ? "decision_failed"
+        : safetyStatus === "reply_blocked"
+          ? "reply_blocked"
+          : safetyStatus === "parse_failed"
+            ? "parse_failed"
+            : safetyStatus === "provider_error"
+              ? "provider_error"
+              : undefined;
+
     return {
       output: orchestrated.output,
       parseErrors: orchestrated.parseErrors,
@@ -64,6 +90,8 @@ export class AiService {
       ...(orchestrated.consentRequired !== undefined
         ? { consentRequired: orchestrated.consentRequired }
         : {}),
+      ...(degradedReason !== undefined ? { degraded: { reason: degradedReason } } : {}),
+      ...(orchestrated.turnError !== undefined ? { turnError: orchestrated.turnError } : {}),
     };
   }
 

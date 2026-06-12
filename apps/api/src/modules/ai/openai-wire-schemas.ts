@@ -209,9 +209,21 @@ const domainAnswerWireSchema: JsonSchema = strictObject(
   ],
 );
 
-/** Wire schema for DomainLlmStepOutput (generateDomainStep response). */
+/**
+ * Wire schema for DomainLlmStepOutput (generateDomainStep response).
+ *
+ * OpenAI's json_schema response_format requires the ROOT schema to be
+ * `type: "object"` (even with strict:false), so the tool_request/domain_answer
+ * union is wrapped in a single required `result` key. The provider unwraps
+ * `payload.result` before shape validation and Zod parse.
+ */
 export const domainLlmStepWireSchema: JsonSchema = {
-  anyOf: [toolRequestWireSchema, domainAnswerWireSchema],
+  type: "object",
+  properties: {
+    result: { anyOf: [toolRequestWireSchema, domainAnswerWireSchema] },
+  },
+  required: ["result"],
+  additionalProperties: false,
 };
 
 // ---------------------------------------------------------------------------
