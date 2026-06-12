@@ -205,6 +205,16 @@ function makeFanoutPlan(
   } as unknown as DomainFanoutPlan;
 }
 
+/** ProviderUsage-shaped fixture type for stage token usage in tests. */
+interface TestProviderUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  latencyMs: number;
+  retries: number;
+  model?: string;
+}
+
 /**
  * Build the minimal mock orchestrator with every service mocked except
  * ActionResolverService and DecisionMakerExecutorService, which use their
@@ -238,6 +248,10 @@ function makeOrchestrator(opts: {
   };
   /** F5: capture every CoachingContextService.buildAgentContext options arg. */
   captureBuildAgentContextOptions?: (options: unknown) => void;
+  /** Observability: token usage returned by the mocked router LLM call. */
+  routerUsage?: TestProviderUsage;
+  /** Observability: token usage returned by the mocked decision-maker call. */
+  decisionUsage?: TestProviderUsage;
 }): AgentOrchestratorService {
   const contextPacket = makeContextPacket({ withProgressHistory: opts.withProgressHistory });
 
@@ -294,6 +308,7 @@ function makeOrchestrator(opts: {
         selectedDomains: opts.selectedDomains.map((d) => ({ domain: d.domain, confidence: 0.9 })),
       },
       validationErrors: [],
+      ...(opts.routerUsage !== undefined ? { usage: opts.routerUsage } : {}),
     }),
   } as unknown as RouterLlmService;
 
@@ -341,6 +356,7 @@ function makeOrchestrator(opts: {
       output: opts.decisionOutput,
       degraded: false,
       degradedReasons: [],
+      ...(opts.decisionUsage !== undefined ? { usage: opts.decisionUsage } : {}),
     };
   });
 
@@ -950,5 +966,185 @@ describe("AgentOrchestratorService — fan-out: deepReview block (Phase 4)", () 
           .progressHistoryLookback?.precomputedSummary,
       ).toBe(PROGRESS_HISTORY_SUMMARY);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pipeline observability — token/cost fields on stage logs + ai.turn_summary
+// ---------------------------------------------------------------------------
+
+describe("AgentOrchestratorService — stage log token usage (pipeline observability)", () => {
+  const ROUTER_USAGE: TestProviderUsage = {
+    promptTokens: 100,
+    completionTokens: 20,
+    totalTokens: 120,
+    latencyMs: 180,
+    retries: 0,
+    model: "gpt-4o-mini",
+  };
+  const WORKOUT_USAGE: TestProviderUsage = {
+    promptTokens: 800,
+    completionTokens: 150,
+    totalTokens: 950,
+    latencyMs: 1500,
+    retries: 0,
+    model: "gpt-4o-mini",
+  };
+  // Unknown model: tokens are logged but NO cost estimate is derived.
+  const DECISION_USAGE: TestProviderUsage = {
+    promptTokens: 400,
+    completionTokens: 90,
+    totalTokens: 490,
+    latencyMs: 900,
+    retries: 0,
+    model: "custom-unpriced-model",
+  };
+
+  function makeUsageDomainResult(usage?: TestProviderUsage): DomainLlmExecutorResult {
+    return {
+      domainAnswer: {
+        ...createFallbackDomainAnswer("workout"),
+        domain: "workout",
+        summary: "Workout reviewed.",
+        candidateProposals: [],
+      },
+      candidateMap: new Map(),
+      degraded: usage === undefined,
+      degradedReasons: usage === undefined ? ["Provider call failed."] : [],
+      loopIterations: usage === undefined ? 0 : 1,
+      toolsInvoked: [],
+      ...(usage !== undefined ? { usage } : {}),
+    };
+  }
+
+  function captureStageLogs(orchestrator: AgentOrchestratorService) {
+    const logSpy = vi.spyOn(
+      (orchestrator as unknown as Record<string, unknown>)["logger"] as {
+        log: (value: unknown) => void;
+      },
+      "log",
+    );
+
+    const findStage = (stage: string) =>
+      logSpy.mock.calls
+        .map((call) => call[0] as Record<string, unknown>)
+        .filter((line) => line != null && typeof line === "object")
+        .find((line) => line["stage"] === stage || line["event"] === stage);
+
+    return { logSpy, findStage };
+  }
+
+  it("router_done / domain_done / decision_done carry tokens, model, and cost estimate", async () => {
+    const orchestrator = makeOrchestrator({
+      domainResults: [makeUsageDomainResult(WORKOUT_USAGE)],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "All good.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      routerUsage: ROUTER_USAGE,
+      decisionUsage: DECISION_USAGE,
+    });
+    const { findStage } = captureStageLogs(orchestrator);
+
+    await orchestrator.orchestrateCoachTurn(makeOrchestratorInput());
+
+    expect(findStage("router_done")).toMatchObject({
+      promptTokens: 100,
+      completionTokens: 20,
+      totalTokens: 120,
+      model: "gpt-4o-mini",
+      // (100 * 0.15 + 20 * 0.6) / 1e6
+      estimatedCostUsd: 0.000027,
+    });
+    expect(findStage("domain_done")).toMatchObject({
+      domain: "workout",
+      promptTokens: 800,
+      completionTokens: 150,
+      totalTokens: 950,
+      model: "gpt-4o-mini",
+      // (800 * 0.15 + 150 * 0.6) / 1e6
+      estimatedCostUsd: 0.00021,
+    });
+    // Unknown model: tokens present, cost omitted (null) — never guessed.
+    expect(findStage("decision_done")).toMatchObject({
+      promptTokens: 400,
+      completionTokens: 90,
+      totalTokens: 490,
+      model: "custom-unpriced-model",
+      estimatedCostUsd: null,
+    });
+  });
+
+  it("ai.turn_summary aggregates turn token totals and sums cost only over priced models", async () => {
+    const orchestrator = makeOrchestrator({
+      domainResults: [makeUsageDomainResult(WORKOUT_USAGE)],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "All good.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      routerUsage: ROUTER_USAGE,
+      decisionUsage: DECISION_USAGE,
+    });
+    const { findStage } = captureStageLogs(orchestrator);
+
+    await orchestrator.orchestrateCoachTurn(makeOrchestratorInput());
+
+    const summary = findStage("ai.turn_summary");
+    expect(summary).toMatchObject({
+      totalPromptTokens: 1300,
+      totalCompletionTokens: 260,
+      totalTokens: 1560,
+      // Router + workout domain only — the unpriced decision model adds no cost.
+      estimatedCostUsd: 0.000237,
+    });
+    expect(summary?.["domainLatencies"]).toEqual([
+      { domain: "workout", latencyMs: 1500, totalTokens: 950 },
+    ]);
+  });
+
+  it("is null-safe for degraded domains with no usage: stage line carries nulls, totals exclude it", async () => {
+    const orchestrator = makeOrchestrator({
+      domainResults: [makeUsageDomainResult(undefined)],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "All good.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      routerUsage: ROUTER_USAGE,
+      // Decision degrades silently with no usage either.
+    });
+    const { findStage } = captureStageLogs(orchestrator);
+
+    const result = await orchestrator.orchestrateCoachTurn(makeOrchestratorInput());
+
+    // The degraded domain still logs a stage line with explicit null usage fields.
+    expect(findStage("domain_done")).toMatchObject({
+      domain: "workout",
+      degraded: true,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      model: null,
+      estimatedCostUsd: null,
+    });
+
+    // Turn totals fall back to the router-only usage — no NaN, no crash.
+    const summary = findStage("ai.turn_summary");
+    expect(summary).toMatchObject({
+      totalPromptTokens: 100,
+      totalCompletionTokens: 20,
+      totalTokens: 120,
+      estimatedCostUsd: 0.000027,
+    });
+    expect(summary?.["domainLatencies"]).toEqual([{ domain: "workout", latencyMs: 0 }]);
+    expect(result.agentMetadata.fanOut?.domains[0]?.degraded).toBe(true);
   });
 });

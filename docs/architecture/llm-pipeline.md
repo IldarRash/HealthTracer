@@ -1265,9 +1265,21 @@ The schema is runtime-validated (`agentTurnTelemetrySchema.safeParse`) before lo
 mismatch emits a warn and falls back to raw object logging without failing the turn.
 
 Fields: `totalLatencyMs`, `routerLatencyMs`, `contextLatencyMs`, `decisionLatencyMs`,
-`domainLatencies[]`, `selectedDomains[]`, `routerConfidence`, `routerSource`,
-`toolsRequestedPerDomain[]`, `degradedDomains[]`, `finalActionType`, `proposalCount`,
-`validationFailureClasses[]`.
+`domainLatencies[]` (each with `totalTokens`), `selectedDomains[]`, `routerConfidence`,
+`routerSource`, `toolsRequestedPerDomain[]`, `degradedDomains[]`, `finalActionType`,
+`proposalCount`, `validationFailureClasses[]`, plus turn-level token/cost totals:
+`totalPromptTokens`, `totalCompletionTokens`, `totalTokens`, `estimatedCostUsd`.
+
+The per-stage stdout logs (`router_done` / `domain_done` / `decision_done`) carry the same
+usage fields per stage (`promptTokens`, `completionTokens`, `totalTokens`, `model`,
+`estimatedCostUsd`; explicit nulls when a stage degraded or the model has no price entry).
+Cost figures come from the code-owned, estimates-only price map in
+`apps/api/src/modules/ai/llm-cost-estimator.ts` — unknown models log tokens with
+`estimatedCostUsd: null`, never a guess. `AiDailyUsageTelemetryService`
+(`apps/api/src/modules/ai/ai-daily-usage-telemetry.service.ts`) additionally emits one
+`ai.daily_usage` line per LLM-backed turn with the user-day's running token/cost totals
+(in-process rollup — resets on API restart; `messageCount` is DB-backed via the
+`chat_ai_usage_daily` upsert return value).
 
 ## Stage 11: Proposal Normalization, Validation And Persistence
 
@@ -1279,6 +1291,13 @@ the assistant message is persisted, so repair telemetry can ride
 stack itself (e.g. a DB error in an async ownership check) degrades only THAT proposal to
 `validationStatus: "invalid"` with `validationErrors: ["proposal_validation_unavailable"]` —
 it never kills the whole paid turn.
+
+Each processed proposal emits one structured `proposal.validation` outcome line on stdout
+(`{ intent, targetDomain, validationStatus, errorCount, failureClass?, repairAttempted,
+repairSucceeded, normalized }` — counts/enums/booleans only, never error strings or payload
+contents). In-flight repair signals remain separate (`proposal_repair.attempted`,
+`proposal_repair.budget_exhausted`); the former `proposal_repair.succeeded` /
+`proposal_repair.still_invalid` lines were folded into this outcome event.
 
 ### `ProposalNormalizationService` (runs BEFORE the validation stack)
 

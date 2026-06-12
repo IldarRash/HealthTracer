@@ -55,7 +55,7 @@ const noopChatAttachmentsService = {
 /** Entitlements stub: always allows AI messages (no quota enforcement in existing tests). */
 const noopEntitlementsService = {
   assertAiMessageAllowed: async () => undefined,
-  recordAiMessageUsage: async () => undefined,
+  recordAiMessageUsage: async () => 1,
   getEntitlement: async () => ({
     tier: "free" as const,
     aiMessagesPerDay: 10,
@@ -101,6 +101,11 @@ const noopProposalRepairService = {
 
 const noopProposalExplainerService = {
   resolvePreAiTurn: async () => ({ kind: "not_explainer" as const }),
+} as never;
+
+/** Daily-usage telemetry stub: swallow recordTurn (asserted explicitly where relevant). */
+const noopAiDailyUsageTelemetryService = {
+  recordTurn: () => undefined,
 } as never;
 
 function createDirectChatPathServiceForChatTests(todayService: {
@@ -258,6 +263,7 @@ function createChatService(deps: {
   proposalExplainerService?: unknown;
   aiBehaviorConfigService?: unknown;
   entitlementsService?: unknown;
+  aiDailyUsageTelemetryService?: unknown;
 }) {
   return new ChatService(
     deps.chatRepository as never,
@@ -275,6 +281,7 @@ function createChatService(deps: {
     (deps.proposalExplainerService ?? noopProposalExplainerService) as never,
     (deps.aiBehaviorConfigService ?? noopAiBehaviorConfigService) as never,
     (deps.entitlementsService ?? noopEntitlementsService) as never,
+    (deps.aiDailyUsageTelemetryService ?? noopAiDailyUsageTelemetryService) as never,
   );
 }
 
@@ -3817,6 +3824,10 @@ describe("ChatService proposal self-repair", () => {
     proposals: unknown[];
     proposalRepairService: unknown;
     proposalValidationServiceOverrides?: Record<string, unknown>;
+    /** Optional agent metadata returned by the mocked AI service (e.g. with fanOut usage). */
+    agentMetadata?: Record<string, unknown>;
+    aiDailyUsageTelemetryService?: unknown;
+    entitlementsService?: unknown;
   }) {
     const capturedProposals: Array<{
       proposal: { intent: string; title: string; reason: string; proposedChanges: unknown };
@@ -3891,6 +3902,7 @@ describe("ChatService proposal self-repair", () => {
           },
           parseErrors: [],
           replySafetyErrors: [],
+          ...(options.agentMetadata ? { agentMetadata: options.agentMetadata } : {}),
         }),
       },
       proposalValidationService: {
@@ -3909,15 +3921,41 @@ describe("ChatService proposal self-repair", () => {
         ...(options.proposalValidationServiceOverrides ?? {}),
       },
       proposalRepairService: options.proposalRepairService,
+      ...(options.aiDailyUsageTelemetryService
+        ? { aiDailyUsageTelemetryService: options.aiDailyUsageTelemetryService }
+        : {}),
+      ...(options.entitlementsService ? { entitlementsService: options.entitlementsService } : {}),
     });
 
     return { service, capturedProposals, assistantMessages };
   }
 
+  /** Capture every proposal.validation outcome event the service logs (log + warn levels). */
+  function captureProposalValidationEvents(service: unknown): Array<Record<string, unknown>> {
+    const events: Array<Record<string, unknown>> = [];
+    const logger = (service as Record<string, unknown>)["logger"] as {
+      log: (value: unknown, ...rest: unknown[]) => void;
+      warn: (value: unknown, ...rest: unknown[]) => void;
+    };
+    const record = (value: unknown) => {
+      if (
+        value != null &&
+        typeof value === "object" &&
+        (value as Record<string, unknown>)["event"] === "proposal.validation"
+      ) {
+        events.push(value as Record<string, unknown>);
+      }
+    };
+
+    vi.spyOn(logger, "log").mockImplementation(record);
+    vi.spyOn(logger, "warn").mockImplementation(record);
+
+    return events;
+  }
+
   it("repairs an eligible schema-invalid proposal and persists it as valid with repair telemetry", async () => {
     const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
-      ...proposal,
-      proposedChanges: { marker: "fixed" },
+      proposal: { ...proposal, proposedChanges: { marker: "fixed" } },
     }));
     const { service, capturedProposals, assistantMessages } = createRepairChatService({
       proposals: [repairableProposal],
@@ -3964,8 +4002,7 @@ describe("ChatService proposal self-repair", () => {
 
   it("persists the FINAL validation errors when the repaired proposal is still invalid", async () => {
     const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
-      ...proposal,
-      proposedChanges: { marker: "still-bad" },
+      proposal: { ...proposal, proposedChanges: { marker: "still-bad" } },
     }));
     const { service, capturedProposals, assistantMessages } = createRepairChatService({
       proposals: [repairableProposal],
@@ -4051,8 +4088,7 @@ describe("ChatService proposal self-repair", () => {
   it("caps repair at 2 attempts per turn — proposals beyond the budget skip repair and persist invalid", async () => {
     // Repaired payloads stay schema-invalid so every proposal would want a repair.
     const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
-      ...proposal,
-      proposedChanges: { marker: "still-bad" },
+      proposal: { ...proposal, proposedChanges: { marker: "still-bad" } },
     }));
     const { service, capturedProposals, assistantMessages } = createRepairChatService({
       proposals: [repairableProposal, repairableProposal, repairableProposal],
@@ -4109,5 +4145,225 @@ describe("ChatService proposal self-repair", () => {
 
     // Repair is never attempted on a degraded proposal (the throw happens first).
     expect(tryRepair).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // proposal.validation outcome events (pipeline observability)
+  // ---------------------------------------------------------------------------
+
+  describe("proposal.validation outcome events", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("emits one valid outcome event for a first-pass valid proposal", async () => {
+      const validProposal = { ...repairableProposal, proposedChanges: { marker: "ok" } };
+      const { service } = createRepairChatService({
+        proposals: [validProposal],
+        proposalRepairService: { isAvailable: true, tryRepair: vi.fn() },
+      });
+      const events = captureProposalValidationEvents(service);
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toEqual({
+        event: "proposal.validation",
+        intent: "adapt_workout_plan",
+        targetDomain: "workout",
+        validationStatus: "valid",
+        errorCount: 0,
+        repairAttempted: false,
+        repairSucceeded: false,
+        normalized: false,
+      });
+    });
+
+    it("emits a repaired valid outcome event with no error strings or payload contents", async () => {
+      const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+        proposal: { ...proposal, proposedChanges: { marker: "fixed" } },
+      }));
+      const { service } = createRepairChatService({
+        proposals: [repairableProposal],
+        proposalRepairService: { isAvailable: true, tryRepair },
+      });
+      const events = captureProposalValidationEvents(service);
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        validationStatus: "valid",
+        errorCount: 0,
+        repairAttempted: true,
+        repairSucceeded: true,
+      });
+      // Privacy floor: enums/counts/booleans only — never error strings or payloads.
+      const serialized = JSON.stringify(events[0]);
+      expect(serialized).not.toContain(ORIGINAL_SCHEMA_ERROR);
+      expect(serialized).not.toContain("proposedChanges");
+      expect(serialized).not.toContain("marker");
+    });
+
+    it("emits an invalid outcome event with the FINAL failure class when repair leaves the proposal invalid", async () => {
+      const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+        proposal: { ...proposal, proposedChanges: { marker: "still-bad" } },
+      }));
+      const { service } = createRepairChatService({
+        proposals: [repairableProposal],
+        proposalRepairService: { isAvailable: true, tryRepair },
+      });
+      const events = captureProposalValidationEvents(service);
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        validationStatus: "invalid",
+        errorCount: 1,
+        failureClass: "schema",
+        repairAttempted: true,
+        repairSucceeded: false,
+      });
+      expect(JSON.stringify(events[0])).not.toContain(REPAIRED_SCHEMA_ERROR);
+    });
+
+    it("emits an invalid outcome event with failureClass safety and repair never attempted", async () => {
+      const tryRepair = vi.fn();
+      const unsafeProposal = {
+        ...repairableProposal,
+        title: "Diagnose your fatigue and adapt the plan",
+      };
+      const { service } = createRepairChatService({
+        proposals: [unsafeProposal],
+        proposalRepairService: { isAvailable: true, tryRepair },
+      });
+      const events = captureProposalValidationEvents(service);
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(tryRepair).not.toHaveBeenCalled();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        validationStatus: "invalid",
+        failureClass: "safety",
+        repairAttempted: false,
+        repairSucceeded: false,
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ai.daily_usage wiring (pipeline observability)
+  // ---------------------------------------------------------------------------
+
+  describe("daily usage telemetry wiring", () => {
+    const ROUTER_USAGE = {
+      promptTokens: 100,
+      completionTokens: 20,
+      totalTokens: 120,
+      latencyMs: 200,
+      retries: 0,
+      model: "gpt-4o-mini",
+    };
+    const DOMAIN_USAGE = {
+      promptTokens: 800,
+      completionTokens: 150,
+      totalTokens: 950,
+      latencyMs: 1500,
+      retries: 0,
+      model: "gpt-4o-mini",
+    };
+    const DECISION_USAGE = {
+      promptTokens: 400,
+      completionTokens: 90,
+      totalTokens: 490,
+      latencyMs: 900,
+      retries: 0,
+      model: "gpt-4o",
+    };
+    const REPAIR_USAGE = {
+      promptTokens: 60,
+      completionTokens: 30,
+      totalTokens: 90,
+      latencyMs: 700,
+      retries: 0,
+      model: "gpt-4o",
+    };
+
+    it("records the turn with the upserted day count and all stage usages including repair", async () => {
+      const recordTurn = vi.fn();
+      const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+        proposal: { ...proposal, proposedChanges: { marker: "fixed" } },
+        usage: REPAIR_USAGE,
+      }));
+      const { service } = createRepairChatService({
+        proposals: [repairableProposal],
+        proposalRepairService: { isAvailable: true, tryRepair },
+        agentMetadata: createDefaultAgentMetadataForTests({
+          fanOut: {
+            router: { ran: true, selectedDomains: [], usage: ROUTER_USAGE },
+            domains: [
+              {
+                domain: "workout",
+                degraded: false,
+                degradedReasons: [],
+                candidateProposalCount: 1,
+                loopIterations: 1,
+                toolsInvoked: [],
+                toolsDeniedCount: 0,
+                hasWorkoutCalorieEstimate: false,
+                usage: DOMAIN_USAGE,
+              },
+            ],
+            decision: {
+              degraded: false,
+              selectedAction: "adapt_workout_plan",
+              selectedProposalIdCount: 1,
+              consentRequired: false,
+              usage: DECISION_USAGE,
+            },
+          },
+        }),
+        aiDailyUsageTelemetryService: { recordTurn },
+        entitlementsService: {
+          assertAiMessageAllowed: async () => undefined,
+          recordAiMessageUsage: async () => 7,
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(recordTurn).toHaveBeenCalledTimes(1);
+      expect(recordTurn).toHaveBeenCalledWith({
+        userId: user.id,
+        usageDate: getTodayIsoDateInTimezone(user.timezone),
+        messageCount: 7,
+        usages: [ROUTER_USAGE, DOMAIN_USAGE, DECISION_USAGE, REPAIR_USAGE],
+      });
+    });
+
+    it("records the turn with messageCount null when the usage increment fails", async () => {
+      const recordTurn = vi.fn();
+      const { service } = createRepairChatService({
+        proposals: [],
+        proposalRepairService: { isAvailable: false, tryRepair: vi.fn() },
+        aiDailyUsageTelemetryService: { recordTurn },
+        entitlementsService: {
+          assertAiMessageAllowed: async () => undefined,
+          recordAiMessageUsage: async () => {
+            throw new Error("db down");
+          },
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(recordTurn).toHaveBeenCalledTimes(1);
+      expect(recordTurn.mock.calls[0]?.[0]).toMatchObject({
+        userId: user.id,
+        messageCount: null,
+      });
+    });
   });
 });

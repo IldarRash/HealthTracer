@@ -1,10 +1,17 @@
-import type { ProposalRepairProvider } from "@health/ai";
+import type { ProposalRepairProvider, ProviderUsage } from "@health/ai";
 import type { RawAiProposal } from "@health/types";
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { PROPOSAL_REPAIR_PROVIDER } from "./proposal-repair.tokens.js";
 
 /** Hard wall-clock budget for one repair call, including its HTTP retries. */
 const PROPOSAL_REPAIR_TIMEOUT_MS = 10_000;
+
+/** Successful repair outcome: the repaired proposal plus the repair call's usage. */
+export interface ProposalRepairOutcome {
+  proposal: RawAiProposal;
+  /** Token + latency usage for the repair LLM call. Absent when the provider reports none. */
+  usage?: ProviderUsage;
+}
 
 /**
  * Proposal self-repair: one bounded, payload-only LLM call per invalid proposal.
@@ -40,7 +47,7 @@ export class ProposalRepairService {
   async tryRepair(
     rawProposal: RawAiProposal,
     validationErrors: readonly string[],
-  ): Promise<RawAiProposal | null> {
+  ): Promise<ProposalRepairOutcome | null> {
     if (!this.provider) {
       return null;
     }
@@ -70,10 +77,14 @@ export class ProposalRepairService {
 
       // Cast is safe: only the intent-owned payload is replaced, the envelope is
       // preserved, and the caller re-runs the full validation stack before persisting.
+      // Usage is threaded through (tokens/model only) for daily usage telemetry.
       return {
-        ...rawProposal,
-        proposedChanges: result.proposedChanges,
-      } as RawAiProposal;
+        proposal: {
+          ...rawProposal,
+          proposedChanges: result.proposedChanges,
+        } as RawAiProposal,
+        ...(result.usage !== undefined ? { usage: result.usage } : {}),
+      };
     } catch (error) {
       // Privacy floor: intent + error name only — never payload contents
       // (raw error messages from providers/drivers can embed payload values).

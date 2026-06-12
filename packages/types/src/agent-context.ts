@@ -805,10 +805,23 @@ export const agentTurnTelemetrySchema = z.object({
       z.object({
         domain: fanOutDomainEnumSchema,
         latencyMs: z.number().int().nonnegative(),
+        /** Accumulated token count for this domain's LLM loop. Absent on fallback paths. */
+        totalTokens: z.number().int().nonnegative().optional(),
       }),
     )
     .max(3)
     .default([]),
+  // Token usage — aggregated across router + domain + decision stage ProviderUsage.
+  // Numbers only; degraded/missing stages contribute zero.
+  totalPromptTokens: z.number().int().nonnegative().optional(),
+  totalCompletionTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  /**
+   * ESTIMATE ONLY — derived from the code-owned per-model price map
+   * (apps/api llm-cost-estimator). Absent when no stage reported a priced model.
+   * Never a billing source of truth.
+   */
+  estimatedCostUsd: z.number().nonnegative().optional(),
   // Routing
   selectedDomains: z.array(fanOutDomainEnumSchema).max(3).default([]),
   routerConfidence: z.number().min(0).max(1).optional(),

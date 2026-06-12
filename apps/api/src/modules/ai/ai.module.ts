@@ -11,6 +11,7 @@ import { ActionResolverService } from "./action-resolver.service.js";
 import { ActionVariantCatalogService } from "./action-variant-catalog.service.js";
 import { AgentOrchestratorService } from "./agent-orchestrator.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
+import { AiDailyUsageTelemetryService } from "./ai-daily-usage-telemetry.service.js";
 import { AiBehaviorModule } from "./ai-behavior.module.js";
 import { AiService } from "./ai.service.js";
 import { CapabilityRegistryService } from "./capability-registry.service.js";
@@ -41,6 +42,7 @@ import { SystemPlannerService } from "./system-planner.service.js";
     ActionResolverService,
     ActionVariantCatalogService,
     AgentToolRegistryService,
+    AiDailyUsageTelemetryService,
     CapabilityRegistryService,
     DecisionMakerExecutorService,
     DirectChatPathMatcherService,
@@ -72,6 +74,7 @@ import { SystemPlannerService } from "./system-planner.service.js";
   ],
   exports: [
     AiService,
+    AiDailyUsageTelemetryService,
     ProposalRepairService,
     AgentOrchestratorService,
     AgentToolRegistryService,

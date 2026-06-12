@@ -65,10 +65,11 @@ export class EntitlementsService {
   }
 
   /**
-   * Atomically increments today's usage counter.
+   * Atomically increments today's usage counter and returns the day's running
+   * message count from the upsert (feeds the ai.daily_usage telemetry line).
    * Call after a successful LLM response — not before.
    */
-  async recordAiMessageUsage(userId: string, todayIsoDate: string): Promise<void> {
-    await this.billingRepository.incrementAiUsage(userId, todayIsoDate);
+  async recordAiMessageUsage(userId: string, todayIsoDate: string): Promise<number> {
+    return this.billingRepository.incrementAiUsage(userId, todayIsoDate);
   }
 }

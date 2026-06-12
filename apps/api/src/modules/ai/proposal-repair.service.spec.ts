@@ -27,11 +27,13 @@ describe("ProposalRepairService", () => {
     const repaired = await service.tryRepair(baseProposal, validationErrors);
 
     expect(repaired).toEqual({
-      intent: "adapt_workout_plan",
-      targetDomain: "workout",
-      title: "Adapt your workout plan",
-      reason: "Recent sessions looked heavy.",
-      proposedChanges: correctedChanges,
+      proposal: {
+        intent: "adapt_workout_plan",
+        targetDomain: "workout",
+        title: "Adapt your workout plan",
+        reason: "Recent sessions looked heavy.",
+        proposedChanges: correctedChanges,
+      },
     });
     expect(repairProposal).toHaveBeenCalledTimes(1);
     expect(repairProposal).toHaveBeenCalledWith(
@@ -42,6 +44,26 @@ describe("ProposalRepairService", () => {
       },
       { signal: expect.any(AbortSignal) },
     );
+  });
+
+  it("threads the provider's usage through to the repair outcome", async () => {
+    const usage = {
+      promptTokens: 120,
+      completionTokens: 45,
+      totalTokens: 165,
+      latencyMs: 900,
+      retries: 0,
+      model: "gpt-4o-mini",
+    };
+    const service = new ProposalRepairService({
+      repairProposal: vi
+        .fn()
+        .mockResolvedValue({ proposedChanges: { title: "Plan", days: [] }, usage }),
+    });
+
+    const repaired = await service.tryRepair(baseProposal, validationErrors);
+
+    expect(repaired?.usage).toEqual(usage);
   });
 
   it("returns null when the provider throws", async () => {

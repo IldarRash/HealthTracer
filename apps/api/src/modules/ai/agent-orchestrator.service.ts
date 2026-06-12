@@ -48,6 +48,7 @@ import { DecisionMakerExecutorService } from "./decision-maker-executor.service.
 import type { DecisionMakerResult } from "./decision-maker-executor.service.js";
 import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import type { DomainLlmExecutorResult } from "./domain-llm-executor.service.js";
+import { aggregateUsageTotals, toUsageLogFields } from "./llm-cost-estimator.js";
 import { MessagePreprocessorService } from "./message-preprocessor.service.js";
 import { RouterLlmService } from "./router-llm.service.js";
 import type { RouterLlmResult } from "./router-llm.service.js";
@@ -409,7 +410,7 @@ export class AgentOrchestratorService {
     );
     const domainsLatencyMs = Date.now() - domainsStart;
 
-    // Structured log: router stage done (counts/ids/flags only — no message text).
+    // Structured log: router stage done (counts/ids/flags/tokens only — no message text).
     if (routerResult !== undefined) {
       this.logger.log({
         stage: "router_done",
@@ -421,10 +422,11 @@ export class AgentOrchestratorService {
           confidence: d.confidence,
         })),
         validationErrorCount: routerResult.validationErrors.length,
+        ...toUsageLogFields(routerResult.usage),
       });
     }
 
-    // Structured log: each domain done (counts/ids/flags only — no health content).
+    // Structured log: each domain done (counts/ids/flags/tokens only — no health content).
     for (const { domain, result } of domainResults) {
       this.logger.log({
         stage: "domain_done",
@@ -438,6 +440,7 @@ export class AgentOrchestratorService {
           result.domainAnswer.workoutCalorieEstimate !== undefined,
         hasWorkoutCaloriePerHourRate:
           result.domainAnswer.workoutCaloriePerHourRate !== undefined,
+        ...toUsageLogFields(result.usage),
       });
     }
 
@@ -495,7 +498,7 @@ export class AgentOrchestratorService {
     });
     const decisionLatencyMs = Date.now() - decisionStart;
 
-    // Structured log: decision stage done (counts/ids/flags only — no text/health content).
+    // Structured log: decision stage done (counts/ids/flags/tokens only — no text/health content).
     this.logger.log({
       stage: "decision_done",
       degraded: decisionResult.degraded,
@@ -505,6 +508,7 @@ export class AgentOrchestratorService {
       consentRequired: decisionResult.output.consentRequired,
       lowConfidenceRoute: plan.fanout.lowConfidenceRoute === true,
       deepReview: deepReview !== undefined,
+      ...toUsageLogFields(decisionResult.usage),
     });
 
     // Extract the workout domain calorie estimate and rate from the fan-out results.
@@ -640,8 +644,16 @@ export class AgentOrchestratorService {
     // ---------------------------------------------------------------------------
     // Slice D: per-turn telemetry — one structured log per eligible turn.
     // Safety floor: no user message text, no reply text, no health data.
-    // Counts, enums, and durations only.
+    // Counts, enums, durations, and token numbers only.
     // ---------------------------------------------------------------------------
+    // Null-safe turn token aggregation from the same per-stage usage values that
+    // feed persisted metadata — no second usage source. Cost is an ESTIMATE from
+    // the code-owned price map; absent when no stage reported a priced model.
+    const turnUsageTotals = aggregateUsageTotals([
+      routerResult?.usage,
+      ...domainResults.map(({ result }) => result.usage),
+      decisionResult.usage,
+    ]);
     const telemetry: AgentTurnTelemetry = {
       event: "ai.turn_summary",
       totalLatencyMs,
@@ -651,7 +663,14 @@ export class AgentOrchestratorService {
       domainLatencies: domainResults.map(({ domain, result }) => ({
         domain,
         latencyMs: result.usage?.latencyMs ?? 0,
+        ...(result.usage !== undefined ? { totalTokens: result.usage.totalTokens } : {}),
       })),
+      totalPromptTokens: turnUsageTotals.promptTokens,
+      totalCompletionTokens: turnUsageTotals.completionTokens,
+      totalTokens: turnUsageTotals.totalTokens,
+      ...(turnUsageTotals.estimatedCostUsd !== undefined
+        ? { estimatedCostUsd: turnUsageTotals.estimatedCostUsd }
+        : {}),
       selectedDomains: selectedDomains.map((d) => d.domain),
       routerConfidence: routerResult?.output.confidence,
       routerSource: routerResult?.source,
