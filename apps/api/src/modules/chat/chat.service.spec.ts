@@ -306,6 +306,8 @@ describe("ChatService", () => {
         validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
         validateRecipeRecommendationProposalContext: async () => [],
+
+        normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
       },
     });
 
@@ -402,6 +404,8 @@ describe("ChatService", () => {
         validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
         validateRecipeRecommendationProposalContext: async () => [],
+
+        normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
       },
     });
 
@@ -494,6 +498,8 @@ describe("ChatService", () => {
         validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
         validateRecipeRecommendationProposalContext: async () => [],
+
+        normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
       },
     });
 
@@ -733,6 +739,8 @@ describe("ChatService", () => {
         validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
         validateRecipeRecommendationProposalContext: async () => [],
+
+        normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
       },
     });
 
@@ -808,6 +816,8 @@ describe("ChatService", () => {
         validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
         validateRecipeRecommendationProposalContext: async () => [],
+
+        normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
       },
     });
 
@@ -950,6 +960,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         directChatPathService: createDirectChatPathServiceForChatTests(
           options?.todayService ?? {
@@ -1535,6 +1547,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => ({
@@ -1652,6 +1666,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => {
@@ -1888,6 +1904,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         wellbeingCheckInsService: {
           getCheckInForDate: async () => ({
@@ -2021,6 +2039,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
         validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
       });
 
@@ -2165,6 +2185,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
@@ -2285,6 +2307,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
       });
 
@@ -2404,6 +2428,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
@@ -2563,6 +2589,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => {
@@ -2640,6 +2668,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend,
@@ -2717,6 +2747,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
@@ -2823,6 +2855,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
@@ -3133,6 +3167,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
@@ -3260,6 +3296,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
       });
     }
@@ -3421,6 +3459,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
@@ -3494,6 +3534,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
       });
 
@@ -3519,6 +3561,8 @@ describe("ChatService", () => {
       validateNutritionIncidentImageRefOwnership: async () => [],
       validateChatAttachmentProposalRefs: async () => [],
       validateRecipeRecommendationProposalContext: async () => [],
+
+      normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
     };
 
     function createQuotaChatService(deps: {
@@ -3813,6 +3857,8 @@ describe("ChatService", () => {
           validateNutritionIncidentImageRefOwnership: async () => [],
           validateChatAttachmentProposalRefs: async () => [],
           validateRecipeRecommendationProposalContext: async () => [],
+
+          normalizeWorkoutProposalExercises: async (_userId: string, _intent: unknown, changes: unknown) => changes,
         },
       });
 
