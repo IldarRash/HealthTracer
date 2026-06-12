@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Historical .cursor/mcp.json leak — file is now untracked; allowlist prevents full-history scan failures"
+paths = ['''\.cursor/mcp\.json''']
