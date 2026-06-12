@@ -5,8 +5,9 @@
  * on the selected domains and the configured action definitions.
  *
  * Rules (from the product spec):
- * - Always include `today_summary_read`.
- * - Include `mark_today_workout_done` when "workout" is among the selected domains.
+ * - Always include `today_summary_read` and `weekly_progress_read`.
+ * - Include `mark_today_workout_done` and `workout_plan_read` when "workout" is
+ *   among the selected domains.
  * - Include `nutrition_plan_read` when "nutrition" is among the selected domains.
  * - Do NOT attach quick actions on pre-AI gate turns or turnError turns
  *   (the caller is responsible for not calling this helper in those cases).
@@ -39,9 +40,11 @@ export function deriveQuickActionsForTurn(
 
   const eligibleIds = new Set<DirectChatPathKind>();
   eligibleIds.add("today_summary_read");
+  eligibleIds.add("weekly_progress_read");
 
   if (domainSet.has("workout")) {
     eligibleIds.add("mark_today_workout_done");
+    eligibleIds.add("workout_plan_read");
   }
 
   if (domainSet.has("nutrition")) {

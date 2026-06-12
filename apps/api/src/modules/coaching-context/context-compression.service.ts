@@ -119,6 +119,7 @@ function mapPurposeToDomainBucket(purpose: ContextSlicePurpose): string {
     case "nutrition_adaptation":
       return "nutrition";
     case "weekly_review":
+    case "progress_history_review":
       return "progress";
     case "longevity_overview":
       return "longevity";

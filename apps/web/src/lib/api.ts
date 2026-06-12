@@ -51,6 +51,7 @@ import {
   entitlementSchema,
   createCheckoutSessionResponseSchema,
   createPortalSessionResponseSchema,
+  tolerantArraySchema,
   type ActiveHabitPlanResponse,
   type ActiveNutritionPlanResponse,
   type GroceryListResponse,
@@ -252,7 +253,9 @@ export type SyncHealthMetricsResult = z.infer<typeof syncHealthMetricsResultSche
 
 const chatThreadDetailSchema = z.object({
   thread: chatThreadSchema,
-  messages: z.array(chatMessageSchema),
+  // Tolerant: one malformed persisted message must never make the whole
+  // conversation unloadable.
+  messages: tolerantArraySchema(chatMessageSchema, "chatThread.message"),
 });
 
 export async function getCurrentUser(token: string): Promise<ApiResult<User>> {
@@ -382,7 +385,12 @@ export async function listProposals(
   threadId?: string,
 ): Promise<ApiResult<AiProposal[]>> {
   const query = threadId ? `?threadId=${encodeURIComponent(threadId)}` : "";
-  return apiFetch(`/proposals${query}`, token, aiProposalSchema.array());
+  // Tolerant: a single malformed proposal row must not hide the rest.
+  return apiFetch(
+    `/proposals${query}`,
+    token,
+    tolerantArraySchema(aiProposalSchema, "proposals"),
+  );
 }
 
 export async function decideProposal(

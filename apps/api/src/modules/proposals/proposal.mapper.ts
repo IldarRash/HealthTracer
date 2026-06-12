@@ -26,7 +26,14 @@ export function toAiProposal(row: AiProposalRow): AiProposal {
 
   const parsed = aiProposalSchema.safeParse(mapped);
 
-  // Preserve previously persisted invalid proposals for downstream error rendering.
+  // aiProposalSchema is validation-status aware, so rows persisted as
+  // invalid/pending_validation parse cleanly with their raw payload. This
+  // fallback guards two cases: (1) rows whose persisted enum values fall
+  // outside the current contract (e.g. an intent removed from
+  // proposalIntentSchema), and (2) rows that claim validationStatus "valid"
+  // but whose payload no longer parses under the current per-intent contract —
+  // such a row passes through typed as validated; safety floors hold because
+  // accept fully re-validates before applying.
   if (!parsed.success) {
     return mapped as AiProposal;
   }

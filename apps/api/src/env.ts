@@ -27,6 +27,8 @@ export const apiEnvSchema = z.object({
   OPENAI_MODEL_DECISION: z.string().min(1).optional(),
   /** Override model for the out-of-band lab-extraction stage. Falls back to OPENAI_MODEL. */
   OPENAI_MODEL_LAB_EXTRACTION: z.string().min(1).optional(),
+  /** Override model for the proposal self-repair call. Falls back to OPENAI_MODEL_DECISION, then OPENAI_MODEL. */
+  OPENAI_REPAIR_MODEL: z.string().min(1).optional(),
   CORS_ORIGINS: z.string().min(1).optional(),
   STORAGE_ALLOW_LOCAL_IN_PRODUCTION: z
     .enum(["true", "false"])

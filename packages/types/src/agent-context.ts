@@ -7,6 +7,7 @@ import { habitAdherencePlanSummarySchema } from "./habits.js";
 import { aiRecoveryContextSummarySchema } from "./recovery.js";
 import { aiWellbeingContextSummarySchema } from "./wellbeing-check-ins.js";
 import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
+import { progressHistoryReviewSummarySchema } from "./progress-history.js";
 
 const progressDataStatusValues = ["sufficient", "partial", "insufficient"] as const;
 const trendDirectionValues = ["up", "down", "stable", "unknown"] as const;
@@ -19,6 +20,8 @@ export const contextSlicePurposeSchema = z.enum([
   "weekly_review",
   "longevity_overview",
   "health_context",
+  // Deep-review numeric aggregates (planner-injected on review budget profiles).
+  "progress_history_review",
 ]);
 
 export type ContextSlicePurpose = z.infer<typeof contextSlicePurposeSchema>;
@@ -280,6 +283,12 @@ export const userContextSliceSchema = z.object({
   recentHabitAdherence: habitAdherencePlanSummarySchema.nullable().optional(),
   weeklyProgress: weeklyProgressContextSummarySchema.nullable().optional(),
   recentWorkoutExecution: workoutExecutionSummarySchema.nullable().optional(),
+  /**
+   * Deep-review numeric aggregates (progress_history_review slices only).
+   * Numbers/enums/ISO dates by construction — structurally unable to carry
+   * free text, so it is NOT gated by allowSensitiveHealthContext.
+   */
+  progressHistory: progressHistoryReviewSummarySchema.optional(),
   metricsSummary: aiMetricsContextSummarySchema.optional(),
   wellbeingSummary: aiWellbeingContextSummarySchema.optional(),
   recoveryContext: aiRecoveryContextSummarySchema.optional(),
@@ -376,6 +385,7 @@ export const agentToolNameSchema = z.enum([
   "searchRecipeCatalog",
   "getActivePlanDetail",
   "getRecentAdherence",
+  "getProgressHistory",
 ]);
 
 export type AgentToolName = z.infer<typeof agentToolNameSchema>;
@@ -507,6 +517,20 @@ export const recentAdherenceResultSchema = z.object({
 });
 
 export type RecentAdherenceResult = z.infer<typeof recentAdherenceResultSchema>;
+
+/**
+ * getProgressHistory — adaptive-lookback numeric progress aggregates.
+ * periodDays is clamped server-side (min 7, granularity-ladder cap); the result
+ * is a ProgressHistoryReviewSummary (numbers/enums/ISO dates only — see
+ * progress-history.ts). Allowlisted only on review capabilities.
+ */
+export const getProgressHistoryInputSchema = z
+  .object({
+    periodDays: z.number().int().min(1).max(36500),
+  })
+  .strict();
+
+export type GetProgressHistoryInput = z.input<typeof getProgressHistoryInputSchema>;
 
 export const agentToolCallRequestSchema = z.object({
   tool: agentToolNameSchema,
@@ -728,6 +752,12 @@ export const agentFanOutDecisionDiagnosticsSchema = z.object({
    * turns with decision-maker outputs. Optional/back-compat: absent on pre-Slice-5 rows.
    */
   lowConfidenceRoute: z.boolean().optional(),
+  /**
+   * True when this turn carried a deep-review sufficiency block (Phase 4) into
+   * the domain/decision requests. Boolean only — never period numbers or any
+   * health data. Absent on non-review turns.
+   */
+  deepReview: z.boolean().optional(),
   /** Token + latency usage for the decision-maker LLM call. Absent on fallback paths. */
   usage: agentProviderUsageSchema.optional(),
 });
@@ -847,6 +877,16 @@ export const agentTurnMetadataSchema = z.object({
   missingContextNotes: z.array(z.string().min(1).max(240)).max(5).default([]),
   /** Per-stage fan-out diagnostics (router/domains/decision/resolution). Optional/additive. */
   fanOut: agentFanOutDiagnosticsSchema.optional(),
+  /**
+   * Proposal self-repair telemetry for this turn (counts only — never payloads).
+   * Present only when at least one repair was attempted.
+   */
+  repair: z
+    .object({
+      attempted: z.number().int().min(0),
+      succeeded: z.number().int().min(0),
+    })
+    .optional(),
 });
 
 export type AgentTurnMetadata = z.infer<typeof agentTurnMetadataSchema>;
@@ -885,6 +925,7 @@ export function resolveDefaultDepthForPurpose(purpose: ContextSlicePurpose): Con
     case "weekly_review":
     case "longevity_overview":
     case "health_context":
+    case "progress_history_review":
       return "large";
   }
 }
@@ -905,6 +946,10 @@ export function resolveDefaultTimeRangeForPurpose(
       return "90d";
     case "health_context":
       return "30d";
+    // Display metadata only — the real review lookback is the turn-level
+    // grantedLookbackDays threaded by the planner (clamped per budget profile).
+    case "progress_history_review":
+      return "90d";
   }
 }
 

@@ -94,10 +94,12 @@ code-owned pre-AI gates (crisis, proposal explainer, direct chat paths) →
 → `CoachingContextService` (one bounded `AgentContextPacket` per selected domain) →
 **parallel domain LLMs** via `DomainLlmExecutorService` (only-selected: workout /
 nutrition / health) → `DecisionMakerExecutorService` (final synthesis LLM) →
-`ActionResolverService` (typed proposal/action, allowlist-filtered) → proposal
-validation and persistence. LLM budget per turn: 1 router + N≤3 parallel domain LLMs +
-1 decision-maker. `docs/architecture/llm-pipeline.md` is the canonical, file-by-file map
-and must be read before changing the AI/chat subsystem.
+`ActionResolverService` (typed proposal/action, allowlist-filtered) → per-intent
+proposal normalization (`ProposalNormalizationService`) → full validation stack
+(schema-class failures get one bounded payload-only self-repair, then full
+re-validation) → persistence. LLM budget per turn: 1 router + N≤3 parallel domain LLMs
++ 1 decision-maker (+ ≤2 proposal-repair calls). `docs/architecture/llm-pipeline.md` is
+the canonical, file-by-file map and must be read before changing the AI/chat subsystem.
 
 ## Useful Docs
 
@@ -121,9 +123,11 @@ and must be read before changing the AI/chat subsystem.
 - SystemPlanner consumes RouterLlm output when confident into a deterministic `DomainFanoutPlan`, otherwise rule-routes from repo config; it caps selected domains at 3 and never widens catalog allowlists.
 - Domain LLMs run only-selected and in parallel; each enforces its own read-only tool allowlist and reply safety, and a failed/timed-out domain degrades to a safe empty output. The decision-maker LLM synthesizes their outputs and emits typed proposals only.
 - Future AI/chat and domain behavior changes should prefer repo config plus focused tests over service hardcoding; safety floors stay in code.
-- Direct chat paths are deterministic and explicit only: today summary read and marking today's workout done; they resolve only when there is no attachment, and plan changes remain proposal-only.
+- Direct chat paths are deterministic and explicit only — three kinds: today summary read, nutrition plan read, and marking today's workout done (the one narrow write); they resolve only when there is no attachment, and plan changes remain proposal-only.
 - Proposal explainer is read-only, rule-routed, excluded from router domain selection, and must not create proposals or mutations.
 - Context budgets deny documents and sensitive health context by default, re-applied to every per-domain packet; config cannot enable those contexts because code-level safety floors remain authoritative.
 - Preserve chat safety invariants in code when changing orchestration: schemas, fail-closed config loading, safety floors, proposal validation, permissions, consent, no raw documents, no direct LLM mutation, executor guards, crisis boundaries, and provider isolation.
 - Runtime verification for the unified AI pipeline: AppModule/API startup OK, config sources are `file`, health/ready pass, and authenticated chat E2E requires a Clerk bearer token.
 - Image attachments, including photos of medical documents, are currently sent to the LLM as context without an upfront upload consent gate; the consent-gated medical special-save proposal is deferred, and no attachment path may auto-persist a `health_document`.
+- Raw proposals are normalized per intent before the validation stack (`ProposalNormalizationService` — legacy workout exercises bridged to catalog form; `log_nutrition_incident` gets trusted server-side stamping of imageRefs/provenance/incidentDateTime from turn state, never LLM authority); schema-class validation failures get one budgeted payload-only LLM self-repair (`ProposalRepairService`, 2/turn, 10s, `OPENAI_REPAIR_MODEL` override) that re-enters the full normalize+validate stack — safety-/ownership-class failures are never repaired. Proposals are processed before the assistant message so `metadata.agent.repair {attempted, succeeded}` rides it; a validation-stack crash degrades only that proposal to `["proposal_validation_unavailable"]`.
+- The client proposal contract is tolerant: `aiProposalSchema` checks `proposedChanges` per intent only when `validationStatus === "valid"` (`AiProposal = ValidatedAiProposal | UnvalidatedAiProposal`, `isValidatedProposal` guard), `tolerantArraySchema` keeps a turn/thread/proposals response renderable when one entity is malformed, and the web SSE path never falls back to sync on a `final_unparseable` frame (the backend turn already succeeded — re-send would duplicate a paid LLM turn).

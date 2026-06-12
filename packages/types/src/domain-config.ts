@@ -48,7 +48,10 @@ export const domainConfigSchema = z
     domain: domainConfigDomainSchema,
     llmId: z.string().min(1).max(120),
     intents: z.array(domainIntentEntrySchema).max(20).default([]),
-    tools: z.array(agentToolNameSchema).max(5).default([]),
+    // Cap = the full catalog of agent tool names: YAML narrows the catalog, so a
+    // valid narrowing can legitimately list every catalog tool. A tighter cap
+    // (the old 5) made the schema reject narrowings the runtime would accept.
+    tools: z.array(agentToolNameSchema).max(agentToolNameSchema.options.length).default([]),
     safetyNotes: z.array(z.string().min(1).max(500)).max(20).default([]),
   })
   .strict();

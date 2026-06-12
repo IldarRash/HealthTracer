@@ -12,23 +12,31 @@ import type {
   BuildAgentContextRequest,
   CandidateProposalSummary,
   ChatAttachmentCategory,
+  ChatProposalRevisionOriginal,
+  ContextCompressionQuality,
   ContextDepth,
   ContextTimeRange,
+  DeepReviewPromptContext,
   ProposalExplainerTurnContext,
+  ProgressHistoryReviewSummary,
   ProgressReporter,
-  RawAiProposal,
   ResolvedCapabilityPresentationMetadata,
   UserLocale,
 } from "@health/types";
 import {
   agentTurnTelemetrySchema,
   createFallbackDomainAnswer,
+  deriveDeepReviewDataQuality,
 } from "@health/types";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
-import { CoachingContextService } from "../coaching-context/coaching-context.service.js";
+import {
+  CoachingContextService,
+  type ProgressHistoryLookbackOptions,
+} from "../coaching-context/coaching-context.service.js";
 import { ContextCompressionService } from "../coaching-context/context-compression.service.js";
 import { ContextExpansionPolicyService } from "../coaching-context/context-expansion-policy.service.js";
+import { ProgressHistoryAggregateService } from "../progress/progress-history-aggregate.service.js";
 import { mapContextSourceRefsToAgentCitations } from "../coaching-context/agent-prompt-context.js";
 import { AttachmentTextExtractionService } from "../chat-attachments/attachment-text-extraction.service.js";
 import type { AttachmentTextExtractionResult } from "../chat-attachments/attachment-text-extraction.service.js";
@@ -68,7 +76,12 @@ export interface AttachmentTurnContext {
 
 export interface ProposalRevisionContext {
   supersededProposalId: string;
-  originalProposal: RawAiProposal;
+  /**
+   * Loose snapshot of the proposal being revised (proposedChanges is untyped).
+   * Modify must also work for proposals persisted as invalid; the payload is
+   * read-only LLM context here and is never applied without full validation.
+   */
+  originalProposal: ChatProposalRevisionOriginal;
   modificationFeedback: string;
 }
 
@@ -133,6 +146,7 @@ export class AgentOrchestratorService {
     private readonly decisionMakerExecutorService: DecisionMakerExecutorService,
     private readonly actionVariantCatalogService: ActionVariantCatalogService,
     private readonly attachmentTextExtractionService: AttachmentTextExtractionService,
+    private readonly progressHistoryAggregateService: ProgressHistoryAggregateService,
   ) {
     this.provider = createCoachAiProvider(
       this.aiBehaviorConfigService.getCompiledPromptTemplates(),
@@ -185,12 +199,24 @@ export class AgentOrchestratorService {
       proposalRevision: input.proposalRevision,
       attachmentTurn: input.attachmentTurn,
       routerResult,
+      preprocessorResult,
     });
     const { route } = plan;
     const capabilityTurnMetadata = toAgentTurnCapabilityPresentation(plan.presentationMetadata);
 
     // Build primary context packet for the current route (used as a fallback
     // for fan-out path metadata and for domain context building).
+    // Turn-level lookback grant for the planner-injected progress_history_review
+    // slice (Phase 3). The SAME options object (including the once-per-turn
+    // precomputed summary on review turns) is threaded into every packet build
+    // — primary + ≤3 domains — so the 6-query aggregation never runs per packet.
+    const progressHistoryLookback: ProgressHistoryLookbackOptions = {
+      requestedLookbackDays: plan.requestedLookbackDays,
+      grantedLookbackDays: plan.grantedLookbackDays,
+      responseLanguage: preprocessorResult.responseLanguage,
+      precomputedSummary: await this.precomputeProgressHistorySummary(input.auth, plan),
+    };
+
     const contextStart = Date.now();
     const contextPacket = await this.coachingContextService.buildAgentContext(
       input.auth,
@@ -202,7 +228,7 @@ export class AgentOrchestratorService {
         timeRange: route.timeRange,
       },
       route,
-      { contextBudget: plan.contextBudget },
+      { contextBudget: plan.contextBudget, progressHistoryLookback },
     );
     const contextLatencyMs = Date.now() - contextStart;
 
@@ -211,12 +237,17 @@ export class AgentOrchestratorService {
       plan.contextBudget,
     );
 
+    // Compression dataQuality feeds the deepReview sufficiency block (worst-of).
+    let compressionDataQuality: ContextCompressionQuality | undefined;
+
     if (plan.requiresCompression) {
       const compression = await this.contextCompressionService.compressForTurn({
         packet: contextPacket,
         reviewSignals: plan,
         budget: plan.contextBudget,
       });
+
+      compressionDataQuality = compression.summary?.dataQuality;
 
       if (compression.summary) {
         coachingContext.contextCompressionSummary = compression.summary;
@@ -278,6 +309,13 @@ export class AgentOrchestratorService {
     // SystemPlannerService guarantees plan.executorMode is never deterministic by
     // coercing any deterministic mode to the fan-out default (logged as pre_ai_gate.miss).
     // ---------------------------------------------------------------------------
+
+    // Phase 4: deep-review sufficiency block — built only when the plan selected a
+    // review budget profile AND the packet carries the progress_history_review slice.
+    // Threaded into every domain request and the final-decision request so the
+    // {{deepReviewSuffix}} instruction frames observed vs uncertain + analyzed range.
+    const deepReview = buildDeepReviewPromptContext(plan, contextPacket, compressionDataQuality);
+
     return this.runFanOutTurn(input, {
       plan,
       contextPacket,
@@ -285,6 +323,8 @@ export class AgentOrchestratorService {
       capabilityTurnMetadata,
       routerResult,
       responseLanguage: preprocessorResult.responseLanguage,
+      progressHistoryLookback,
+      deepReview,
       onProgress,
       turnStart,
       routerLatencyMs,
@@ -308,6 +348,10 @@ export class AgentOrchestratorService {
       routerResult: RouterLlmResult | undefined;
       /** Resolved response language (hint ?? detected). Null = fall back to message detection. */
       responseLanguage: string | null;
+      /** Shared per-turn lookback options (incl. the once-per-turn precomputed summary). */
+      progressHistoryLookback: ProgressHistoryLookbackOptions;
+      /** Deep-review sufficiency block (Phase 4). Undefined on non-review turns. */
+      deepReview: DeepReviewPromptContext | undefined;
       onProgress?: ProgressReporter;
       /** Turn entry timestamp for total latency calculation. */
       turnStart: number;
@@ -317,7 +361,7 @@ export class AgentOrchestratorService {
       contextLatencyMs: number;
     },
   ): Promise<OrchestratedCoachTurnResult> {
-    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
+    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, progressHistoryLookback, deepReview, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
     const selectedDomains = plan.fanout.selectedDomains;
 
     // Emit domains_running stage with the selected domain names (structural info only,
@@ -347,6 +391,7 @@ export class AgentOrchestratorService {
       input,
       selectedDomains,
       contextPacket,
+      progressHistoryLookback,
     );
 
     // Run selected domain LLMs concurrently.
@@ -360,6 +405,7 @@ export class AgentOrchestratorService {
       primaryCoachingContext,
       responseLanguage,
       attachmentTextMap,
+      deepReview,
     );
     const domainsLatencyMs = Date.now() - domainsStart;
 
@@ -444,6 +490,8 @@ export class AgentOrchestratorService {
       // Thread low-confidence flag from planner fanout so the decision template can
       // ask a clarifying question rather than guess the domain (Change 2 / Slice 5).
       lowConfidenceRoute: plan.fanout.lowConfidenceRoute,
+      // Phase 4: deep-review sufficiency framing for the decision template.
+      ...(deepReview !== undefined ? { deepReview } : {}),
     });
     const decisionLatencyMs = Date.now() - decisionStart;
 
@@ -456,6 +504,7 @@ export class AgentOrchestratorService {
       selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
       lowConfidenceRoute: plan.fanout.lowConfidenceRoute === true,
+      deepReview: deepReview !== undefined,
     });
 
     // Extract the workout domain calorie estimate and rate from the fan-out results.
@@ -577,6 +626,7 @@ export class AgentOrchestratorService {
       routerResult,
       domainResults,
       decisionResult,
+      deepReviewApplied: deepReview !== undefined,
       resolvedProposalCount,
       droppedByAllowlist,
       idResolutionDropCount,
@@ -646,6 +696,41 @@ export class AgentOrchestratorService {
   }
 
   /**
+   * Aggregate the deep-review progress history ONCE per turn.
+   *
+   * On review turns the planner injects the progress_history_review slice into
+   * the primary route and into every fan-out domain entry — without this, each
+   * of up to four buildAgentContext calls would re-run the identical 6-query
+   * aggregation with its own `new Date()`. Non-review turns return undefined
+   * (and CoachingContextService keeps its lazy compute path for other callers).
+   */
+  private async precomputeProgressHistorySummary(
+    auth: ClerkAuthContext,
+    plan: DomainFanoutPlan,
+  ): Promise<ProgressHistoryReviewSummary | undefined> {
+    const wantsProgressHistory =
+      (plan.route.requiredContextSlices ?? []).some(
+        (slice) => slice.type === "progress_history_review",
+      ) ||
+      plan.fanout.selectedDomains.some((entry) =>
+        (entry.supplementaryContextSlices ?? []).some(
+          (slice) => slice.type === "progress_history_review",
+        ),
+      );
+
+    if (!wantsProgressHistory) {
+      return undefined;
+    }
+
+    // Mirrors CoachingContextService's lazy fallback: the planner grant when
+    // present, otherwise the plan budget's horizon.
+    return this.progressHistoryAggregateService.buildReviewSummaryForAuth(
+      auth,
+      plan.grantedLookbackDays ?? plan.contextBudget.maxLookbackDays,
+    );
+  }
+
+  /**
    * Build one bounded AgentContextPacket per selected domain.
    *
    * Phase 5: each domain's packet is built from the domain's OWN capability route
@@ -661,6 +746,7 @@ export class AgentOrchestratorService {
     input: OrchestrateCoachTurnInput,
     selectedDomains: readonly DomainFanoutEntry[],
     primaryContextPacket: AgentContextPacket,
+    progressHistoryLookback: ProgressHistoryLookbackOptions,
   ): Promise<AgentContextPacket[]> {
     return Promise.all(
       selectedDomains.map(async (domainEntry) => {
@@ -679,8 +765,13 @@ export class AgentOrchestratorService {
             // No route passed: CoachingContextService derives context slices from
             // the request's purpose/depth/timeRange and the contextBudget options.
             undefined,
-            // Re-apply per-domain context budget (safety floors are enforced at build time).
-            { contextBudget: domainEntry.contextBudget },
+            // Re-apply per-domain context budget (safety floors are enforced at build
+            // time) and thread the planner-injected review slices + lookback grant.
+            {
+              contextBudget: domainEntry.contextBudget,
+              supplementarySliceRequests: domainEntry.supplementaryContextSlices,
+              progressHistoryLookback,
+            },
           );
         } catch {
           // Degrade gracefully — reuse the primary packet for this domain.
@@ -707,6 +798,7 @@ export class AgentOrchestratorService {
     primaryCoachingContext: Record<string, unknown>,
     responseLanguage: string | null,
     attachmentTextMap: ReadonlyMap<string, AttachmentTextExtractionResult>,
+    deepReview: DeepReviewPromptContext | undefined,
   ): Promise<Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>> {
     try {
       const results = await Promise.all(
@@ -781,6 +873,8 @@ export class AgentOrchestratorService {
             provider: this.provider,
             responseLanguage,
             attachmentTextMap,
+            // Phase 4: same deepReview block for every selected domain.
+            ...(deepReview !== undefined ? { deepReview } : {}),
           });
 
           return { domain: domainEntry.domain, result: domainResult };
@@ -856,6 +950,8 @@ function buildFanOutTurnMetadata(params: {
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>;
   /** The full decision-maker result (output + degraded flag). */
   decisionResult: DecisionMakerResult;
+  /** True when the turn carried a deepReview block (Phase 4). Boolean only — no health data. */
+  deepReviewApplied: boolean;
   /** Proposal count after ActionResolver (union-allowlist filtering applied). */
   resolvedProposalCount: number;
   /** Proposals dropped by ActionResolver allowlist (resolved but outside union allowlist). */
@@ -880,6 +976,7 @@ function buildFanOutTurnMetadata(params: {
     routerResult,
     domainResults,
     decisionResult,
+    deepReviewApplied,
     resolvedProposalCount,
     droppedByAllowlist,
     idResolutionDropCount,
@@ -957,6 +1054,8 @@ function buildFanOutTurnMetadata(params: {
       ...(plan.fanout.lowConfidenceRoute === true
         ? { lowConfidenceRoute: true as const }
         : {}),
+      // Phase 4: boolean-only deep-review marker (mirrors lowConfidenceRoute surfacing).
+      ...(deepReviewApplied ? { deepReview: true as const } : {}),
       ...(decisionResult.usage !== undefined ? { usage: decisionResult.usage } : {}),
     },
     resolution: {
@@ -1058,6 +1157,54 @@ function buildDomainContextRequest(
     intent: CAPABILITY_TO_INTENT[cap] ?? "general",
     depth: CAPABILITY_TO_DEPTH[cap] ?? "medium",
     timeRange: CAPABILITY_TO_TIME_RANGE[cap] ?? "14d",
+  };
+}
+
+/**
+ * Build the deep-review sufficiency block for this turn (Phase 4).
+ *
+ * Built ONLY when:
+ *  - the planner selected a review budget profile (deep_review / deep_history), AND
+ *  - the primary context packet carries the progress_history_review slice
+ *    (its numeric-only ProgressHistoryReviewSummary).
+ *
+ * Field sources (per the Phase 4 spec):
+ *  - requestedPeriodDays ← plan.requestedLookbackDays (null when none was asked)
+ *  - grantedPeriodDays   ← plan.grantedLookbackDays, falling back to the
+ *    summary's own grantedPeriodDays when the plan grant is null (e.g. a review
+ *    profile triggered without an explicit lookback phrase)
+ *  - dataQuality         ← worst of the summary's per-domain dataSufficiency
+ *    values and the compression summary's dataQuality when present
+ *
+ * Returns undefined on every non-review turn — the suffix stays empty and the
+ * static prompt prefixes remain untouched.
+ */
+function buildDeepReviewPromptContext(
+  plan: DomainFanoutPlan,
+  contextPacket: AgentContextPacket,
+  compressionDataQuality: ContextCompressionQuality | undefined,
+): DeepReviewPromptContext | undefined {
+  const profile = plan.contextBudget.profile;
+
+  if (profile !== "deep_review" && profile !== "deep_history") {
+    return undefined;
+  }
+
+  const progressHistory = [contextPacket.slice, ...contextPacket.supplementarySlices]
+    .map((slice) => slice.progressHistory)
+    .find((summary) => summary !== undefined);
+
+  if (!progressHistory) {
+    return undefined;
+  }
+
+  return {
+    requestedPeriodDays: plan.requestedLookbackDays,
+    grantedPeriodDays: plan.grantedLookbackDays ?? progressHistory.grantedPeriodDays,
+    dataQuality: deriveDeepReviewDataQuality(
+      progressHistory.dataSufficiency,
+      compressionDataQuality ?? null,
+    ),
   };
 }
 

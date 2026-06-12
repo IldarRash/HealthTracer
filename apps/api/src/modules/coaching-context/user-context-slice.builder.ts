@@ -120,6 +120,19 @@ export function buildUserContextSliceFromSnapshot(
         weeklyProgress: summarizeWeeklyProgress(snapshot, "medium"),
       });
 
+    // Deep-review numeric aggregates plus a small recent-baseline contrast.
+    // Deliberately NO wellbeingSummary / recoveryContext (sensitive-context
+    // floor stays untouched) and NO documentContext / ragResults — trends reach
+    // the review only as the numbers-only progressHistory packet.
+    case "progress_history_review":
+      return userContextSliceSchema.parse({
+        ...base,
+        progressHistory: snapshot.progressHistory ?? undefined,
+        activeWorkoutPlan: summarizeWorkoutPlan(snapshot),
+        recentWorkoutExecution: extractWorkoutExecution(snapshot),
+        weeklyProgress: summarizeWeeklyProgress(snapshot, "small"),
+      });
+
     case "health_context": {
       // biomarkerContext is structured, user-visible, consent-gated data and is
       // exempt from the allowDocuments budget floor by design — eligibility is

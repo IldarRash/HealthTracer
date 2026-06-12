@@ -412,9 +412,61 @@ export const rawAiProposalSchema = z.discriminatedUnion("intent", [
 
 export type RawAiProposal = z.infer<typeof rawAiProposalSchema>;
 
+/**
+ * Size cap (serialized chars) for the otherwise-opaque revision-original
+ * proposedChanges: user-controlled input that gets serialized into LLM
+ * prompts, so an explicit bound closes the cost/DoS surface left open by the
+ * generous HTTP body limit.
+ */
+export const MAX_REVISION_ORIGINAL_CHANGES_JSON_CHARS = 65_536;
+
+/**
+ * Loose original-proposal snapshot carried on a Modify revision chat send.
+ *
+ * Intentionally NOT rawAiProposalSchema: the user must be able to Modify a
+ * proposal that was persisted as invalid (its proposedChanges never passed the
+ * per-intent payload schema). The server treats proposedChanges as opaque
+ * revision context for the LLM (SystemPlanner already types it `unknown`) and
+ * never applies it — plan changes stay proposal-only behind full validation.
+ * Opaque is still bounded: see MAX_REVISION_ORIGINAL_CHANGES_JSON_CHARS.
+ */
+export const chatProposalRevisionOriginalSchema = z.object({
+  intent: proposalIntentSchema,
+  targetDomain: proposalTargetDomainSchema,
+  title: z.string().min(1).max(160),
+  reason: z.string().min(1).max(1000),
+  evidenceRefs: proposalCorrelationEvidenceRefsSchema.optional(),
+  proposedChanges: z.unknown().superRefine((value, ctx) => {
+    if (value === undefined) {
+      return;
+    }
+
+    let serialized: string | undefined;
+
+    try {
+      serialized = JSON.stringify(value);
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        message: "originalProposal.proposedChanges is not JSON-serializable.",
+      });
+      return;
+    }
+
+    if ((serialized?.length ?? 0) > MAX_REVISION_ORIGINAL_CHANGES_JSON_CHARS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `originalProposal.proposedChanges exceeds ${MAX_REVISION_ORIGINAL_CHANGES_JSON_CHARS} serialized characters.`,
+      });
+    }
+  }),
+});
+
+export type ChatProposalRevisionOriginal = z.infer<typeof chatProposalRevisionOriginalSchema>;
+
 export const chatProposalRevisionSchema = z.object({
   supersededProposalId: z.string().uuid(),
-  originalProposal: rawAiProposalSchema,
+  originalProposal: chatProposalRevisionOriginalSchema,
   modificationFeedback: z.string().min(1).max(2000),
 });
 
@@ -447,10 +499,37 @@ const aiProposalCoreSchema = z.object({
 
 type AiProposalPersistedFields = Omit<
   z.infer<typeof aiProposalCoreSchema>,
-  "intent" | "proposedChanges"
+  "intent" | "proposedChanges" | "validationStatus"
 >;
 
-export type AiProposal = AiProposalPersistedFields & RawAiProposal;
+/**
+ * Proposal whose payload passed per-intent validation — proposedChanges is the
+ * fully typed RawAiProposal payload for its intent.
+ */
+export type ValidatedAiProposal = AiProposalPersistedFields &
+  RawAiProposal & { validationStatus: "valid" };
+
+/**
+ * Proposal the server intentionally persisted with a failed (or not-yet-run)
+ * payload validation. proposedChanges stays the raw, untyped LLM payload so the
+ * client can render an honest invalid card (disabled Apply, working
+ * Reject/Modify) instead of failing the whole response parse.
+ */
+export type UnvalidatedAiProposal = AiProposalPersistedFields & {
+  intent: ProposalIntent;
+  proposedChanges: unknown;
+  validationStatus: Exclude<ProposalValidationStatus, "valid">;
+};
+
+export type AiProposal = ValidatedAiProposal | UnvalidatedAiProposal;
+
+/**
+ * Narrow an AiProposal to its validated variant. Only validated proposals carry
+ * a payload that is safe to treat as typed; everything else must be safeParsed.
+ */
+export function isValidatedProposal(proposal: AiProposal): proposal is ValidatedAiProposal {
+  return proposal.validationStatus === "valid";
+}
 
 export function getProposedChangesSchemaForIntent(intent: ProposalIntent): z.ZodTypeAny {
   switch (intent) {
@@ -512,7 +591,20 @@ function addProposedChangesIssues(
   }
 }
 
+/**
+ * Persisted proposal schema, validation-status aware:
+ * - validationStatus "valid": the per-intent payload check runs — a proposal
+ *   that CLAIMS to be valid but carries a non-conforming payload fails parse
+ *   (honesty floor: the client must never treat a bad payload as applicable).
+ * - "invalid" / "pending_validation": no per-intent check — the server
+ *   deliberately persists these with the raw LLM payload + validationErrors so
+ *   the client can render an honest invalid card.
+ */
 export const aiProposalSchema = aiProposalCoreSchema.superRefine((proposal, ctx) => {
+  if (proposal.validationStatus !== "valid") {
+    return;
+  }
+
   addProposedChangesIssues(proposal.intent, proposal.proposedChanges, ctx);
 }) as z.ZodType<AiProposal>;
 

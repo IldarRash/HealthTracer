@@ -90,6 +90,7 @@ describe("prompt template renderer", () => {
       safetyConstraints: "Stay conservative",
       responseLanguage: "en",
       lowConfidenceRouteSuffix: "",
+      deepReviewSuffix: "",
     });
 
     expect(rendered).toContain("wellness coach");
@@ -112,6 +113,7 @@ describe("prompt template renderer", () => {
       safetyConstraints: "Never diagnose.",
       attachmentContextJson: "none",
       responseLanguage: "en",
+      deepReviewSuffix: "",
     });
 
     expect(rendered).toContain("workout");

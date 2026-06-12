@@ -16,3 +16,8 @@ export {
   type LabExtractionProvider,
   type LabExtractionRequest,
 } from "./lab-extraction-provider.js";
+export {
+  type ProposalRepairProvider,
+  type ProposalRepairRequest,
+  type ProposalRepairResult,
+} from "./proposal-repair-provider.js";

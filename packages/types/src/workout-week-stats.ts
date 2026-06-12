@@ -1,5 +1,15 @@
 import type { WorkoutSession } from "./workouts.js";
 
+/**
+ * Structural input for aggregateWorkoutWeek: only the execution fields are read.
+ * Lets narrow, free-text-free repository projections reuse the aggregation
+ * (e.g. the numeric-only progress-history packet) without carrying full sessions.
+ */
+export type WorkoutWeekStatsSessionInput = Pick<
+  WorkoutSession,
+  "plannedDate" | "status" | "source"
+>;
+
 export type WorkoutDayState = "completed" | "skipped" | "planned" | "none";
 
 export interface WorkoutWeekDaySummary {
@@ -61,7 +71,7 @@ function buildDaysWindow(weekStart: string, weekEnd: string): string[] {
  * but never to plannedCount or the adherence denominator.
  */
 export function aggregateWorkoutWeek(
-  sessions: readonly WorkoutSession[],
+  sessions: readonly WorkoutWeekStatsSessionInput[],
   weekStart: string,
   weekEnd: string,
 ): WorkoutWeekStats {
@@ -88,7 +98,7 @@ export function aggregateWorkoutWeek(
   const activeDays = completedDays.size;
 
   // Build per-day state. Prefer completed > skipped > planned > none.
-  const sessionsByDate = new Map<string, WorkoutSession[]>();
+  const sessionsByDate = new Map<string, WorkoutWeekStatsSessionInput[]>();
   for (const s of weekSessions) {
     const bucket = sessionsByDate.get(s.plannedDate) ?? [];
     bucket.push(s);

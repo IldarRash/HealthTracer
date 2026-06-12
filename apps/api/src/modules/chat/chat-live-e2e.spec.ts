@@ -427,11 +427,11 @@ describe.skipIf(!DB_URL)("Tier 2 — DB integration: free_exercise_db exercise l
     expect(result.unmatchedNames.some((n) => n.includes("Totally Unknown"))).toBe(true);
   });
 
-  it("ProposalValidationService.normalizeWorkoutProposalExercises runs fault-free against real DB with free_exercise_db rows", async () => {
+  it("ProposalNormalizationService.normalizeProposal runs fault-free against real DB with free_exercise_db rows", async () => {
     const { ExercisesRepository } = await import("../exercises/exercises.repository.js");
     const { ExercisesService } = await import("../exercises/exercises.service.js");
-    const { ProposalValidationService } = await import(
-      "../proposals/proposal-validation.service.js"
+    const { ProposalNormalizationService } = await import(
+      "../proposals/proposal-normalization.service.js"
     );
 
     const repo = new (ExercisesRepository as new (db: unknown) => InstanceType<typeof ExercisesRepository>)(db);
@@ -440,24 +440,7 @@ describe.skipIf(!DB_URL)("Tier 2 — DB integration: free_exercise_db exercise l
       { resolveFromAuth: async () => { throw new Error("not used"); } } as never,
     );
 
-    // Build a minimal ProposalValidationService: only exercisesService is exercised
-    // for normalizeWorkoutProposalExercises; all other deps are stubs.
-    const noop = {} as never;
-    const service = new (ProposalValidationService as new (...args: unknown[]) => InstanceType<typeof ProposalValidationService>)(
-      noop, // progressRepository
-      exercisesService,
-      noop, // habitsService
-      noop, // metricsAiContextService
-      noop, // goalsRepository
-      noop, // recoveryContextService
-      noop, // workoutsRepository
-      noop, // usersRepository
-      noop, // habitsRepository
-      noop, // wellbeingCheckInsRepository
-      noop, // nutritionRepository
-      noop, // recipesRepository
-      noop, // chatAttachmentsRepository
-    );
+    const service = new ProposalNormalizationService(exercisesService);
 
     const rawChanges = {
       title: "Test Plan",
@@ -472,10 +455,14 @@ describe.skipIf(!DB_URL)("Tier 2 — DB integration: free_exercise_db exercise l
       notes: [],
     };
 
-    const normalized = await service.normalizeWorkoutProposalExercises(
-      testUserId,
+    const normalized = await service.normalizeProposal(
       "create_workout_plan",
       rawChanges,
+      {
+        userId: testUserId,
+        nowIso: new Date().toISOString(),
+        turnAttachments: [],
+      },
     );
 
     // Must not have thrown — this is the core bugfix assertion.
@@ -775,6 +762,8 @@ describe.skipIf(!liveE2eEnabled)("Tier 3 — live e2e: full ChatService + real O
         // recipesRepository
         { findRecommendationById: async () => null } as never,
         chatAttachmentsRepo,
+        // biomarkersRepository — unused in this scenario.
+        noop,
       );
 
       // Build the AI pipeline.
@@ -1048,6 +1037,12 @@ Day 5 — Lower (Accessory):
         // todayService — stub
         { getOrGenerateDay: async () => ({ items: [] }) } as never,
         usersService,
+        // nutritionService — stub the read-only part
+        {
+          getCurrentActivePlan: async () => ({ plan: null, activeRevision: null }),
+        } as never,
+        // progressService — stub the read-only part
+        { getLatestSummarySnapshot: async () => null } as never,
         // workoutsService — stub the read-only part
         {
           getCurrentActivePlan: async () => ({ plan: null, activeRevision: null }),
@@ -1099,6 +1094,13 @@ Day 5 — Lower (Accessory):
       // Construct the real ChatService.
       // -----------------------------------------------------------------------
       const { ChatService } = await import("./chat.service.js");
+      const { ProposalNormalizationService } = await import(
+        "../proposals/proposal-normalization.service.js"
+      );
+      const proposalNormalizationService = new ProposalNormalizationService(exercisesService);
+      const { ProposalRepairService } = await import("../ai/proposal-repair.service.js");
+      // No repair provider configured — repair degrades to no-op in this e2e.
+      const proposalRepairService = new ProposalRepairService(undefined);
 
       const chatService = new (ChatService as new (
         ...args: unknown[]
@@ -1107,6 +1109,8 @@ Day 5 — Lower (Accessory):
         usersService,
         aiService,
         proposalValidationService,
+        proposalNormalizationService,
+        proposalRepairService,
         progressWeeklyReviewService,
         wellbeingCheckInsService,
         recipesService,

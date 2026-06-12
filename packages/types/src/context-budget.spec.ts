@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildLookbackClampNote,
   clampContextBudgetPolicy,
   clampContextDepth,
   CONTEXT_BUDGET_ABSOLUTE_LIMITS,
+  DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+  DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
   DEFAULT_CONTEXT_BUDGET_POLICY,
   DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
   denyContextExpansionRequest,
@@ -14,6 +17,7 @@ import {
   validateContextBudgetPolicy,
   validateContextCompressionOutputShape,
 } from "./context-budget.js";
+import { PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS } from "./progress-history.js";
 
 describe("context budget policy", () => {
   it("exposes conservative default and deep review profiles", () => {
@@ -34,6 +38,19 @@ describe("context budget policy", () => {
       maxExpansionRounds: 2,
       allowDocuments: false,
     });
+
+    expect(DEEP_HISTORY_CONTEXT_BUDGET_POLICY).toEqual({
+      profile: "deep_history",
+      maxSlices: 6,
+      maxDepth: "large",
+      maxRawItems: 60,
+      maxLookbackDays: PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS,
+      allowDocuments: false,
+      allowSensitiveHealthContext: false,
+      requiresCompression: true,
+      maxExpansionRounds: 2,
+      maxSlicesPerExpansionRound: 3,
+    });
   });
 
   it("resolves profile presets deterministically", () => {
@@ -41,6 +58,21 @@ describe("context budget policy", () => {
     expect(resolveContextBudgetPolicyForProfile("deep_review")).toEqual(
       DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
     );
+    expect(resolveContextBudgetPolicyForProfile("deep_history")).toEqual(
+      DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+    );
+  });
+
+  it("forces safety floors off for deep_history regardless of input", () => {
+    const clamped = clampContextBudgetPolicy({
+      profile: "deep_history",
+      allowDocuments: true,
+      allowSensitiveHealthContext: true,
+    });
+
+    expect(clamped.allowDocuments).toBe(false);
+    expect(clamped.allowSensitiveHealthContext).toBe(false);
+    expect(clamped.maxLookbackDays).toBe(PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS);
   });
 
   it("validates well-formed budget policies", () => {
@@ -268,5 +300,55 @@ describe("context expansion contracts", () => {
     expect(denied.decision).toBe("denied");
     expect(denied.denialReason).toBe("Expansion rounds exhausted.");
     expect(denied.approvedSlices).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — degradation notes (config-sourced clamp copy)
+// ---------------------------------------------------------------------------
+
+describe("buildLookbackClampNote", () => {
+  const notes = DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES;
+
+  it("renders the English template with granted/requested months", () => {
+    // 731 granted of 1825 requested (5 years) → 24 of 60 months.
+    const note = buildLookbackClampNote(notes, 731, 1825, "en");
+
+    expect(note).toBe(
+      "Showing the last 24 months of the requested 60 — older data is summarized monthly.",
+    );
+  });
+
+  it("renders the Russian template for ru language", () => {
+    const note = buildLookbackClampNote(notes, 731, 1825, "ru");
+
+    expect(note).toBe(
+      "Показаны последние 24 мес. из запрошенных 60 — более старые данные сведены в помесячную сводку.",
+    );
+  });
+
+  it("falls back to English for unknown or null languages", () => {
+    expect(buildLookbackClampNote(notes, 90, 180, null)).toContain("Showing the last 3 months");
+    expect(buildLookbackClampNote(notes, 90, 180, "de")).toContain("of the requested 6");
+  });
+
+  it("supports day placeholders from custom config copy", () => {
+    const customNotes = {
+      lookbackClamped: {
+        en: "Granted {{grantedDays}} of {{requestedDays}} days.",
+        ru: "Выдано {{grantedDays}} из {{requestedDays}} дней.",
+      },
+    };
+
+    expect(buildLookbackClampNote(customNotes, 731, 1825, "en")).toBe(
+      "Granted 731 of 1825 days.",
+    );
+    expect(buildLookbackClampNote(customNotes, 731, 1825, "ru")).toBe(
+      "Выдано 731 из 1825 дней.",
+    );
+  });
+
+  it("never renders below one month", () => {
+    expect(buildLookbackClampNote(notes, 7, 14, "en")).toContain("last 1 months");
   });
 });
