@@ -860,6 +860,41 @@ describe("CoachingContextService — progress_history_review slice (Phase 3)", (
     ).toBe(true);
   });
 
+  it("uses the orchestrator-precomputed summary and skips the lazy aggregation (F5)", async () => {
+    const buildReviewSummary = vi.fn(async () => createProgressHistorySummary());
+    const service = createCoachingContextService({
+      progressHistoryAggregateService: { buildReviewSummary },
+    });
+    const precomputedSummary = createProgressHistorySummary();
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "проанализируй последние полгода",
+        intent: "review_progress",
+        purpose: "weekly_review",
+      },
+      createReviewRoute(true),
+      {
+        contextBudget: DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+        progressHistoryLookback: {
+          requestedLookbackDays: 180,
+          grantedLookbackDays: 180,
+          responseLanguage: "ru",
+          precomputedSummary,
+        },
+      },
+    );
+
+    expect(buildReviewSummary).not.toHaveBeenCalled();
+
+    const reviewSlice = [packet.slice, ...packet.supplementarySlices].find(
+      (slice) => slice.purpose === "progress_history_review",
+    );
+
+    expect(reviewSlice?.progressHistory).toEqual(precomputedSummary);
+  });
+
   it("adds the RU config-sourced clamp note when requested lookback exceeds the grant", async () => {
     const service = createCoachingContextService();
 

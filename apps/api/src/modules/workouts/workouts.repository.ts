@@ -178,9 +178,10 @@ export class WorkoutsRepository {
 
   /**
    * Revision creation timestamps only (for plan-change markers) — never the
-   * revision payloads.
+   * revision payloads. Filtered to [createdFrom, createdTo] in SQL so a long
+   * revision history is never fetched wholesale.
    */
-  async listRevisionCreatedAtByUserId(userId: string) {
+  async listRevisionCreatedAtByUserId(userId: string, createdFrom: Date, createdTo: Date) {
     const rows = await this.db
       .select({ createdAt: workoutPlanRevisions.createdAt })
       .from(workoutPlanRevisions)
@@ -188,7 +189,13 @@ export class WorkoutsRepository {
         workoutPlans,
         eq(workoutPlanRevisions.workoutPlanId, workoutPlans.id),
       )
-      .where(eq(workoutPlans.userId, userId))
+      .where(
+        and(
+          eq(workoutPlans.userId, userId),
+          gte(workoutPlanRevisions.createdAt, createdFrom),
+          lte(workoutPlanRevisions.createdAt, createdTo),
+        ),
+      )
       .orderBy(desc(workoutPlanRevisions.createdAt));
 
     return rows.map((row) => row.createdAt);

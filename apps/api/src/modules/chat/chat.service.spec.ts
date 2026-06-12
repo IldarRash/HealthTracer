@@ -200,6 +200,33 @@ function wrapAiServiceWithDefaultMetadata(aiService: unknown) {
   };
 }
 
+/**
+ * Pass-everything ProposalValidationService mock. Every validator returns "no
+ * errors"; pass `overrides` to make specific validators fail (or spy on them).
+ */
+function createProposalValidationServiceMock(overrides: Record<string, unknown> = {}) {
+  return {
+    normalizeWorkoutProposalExercises: async (
+      _userId: string,
+      _intent: unknown,
+      proposedChanges: unknown,
+    ) => proposedChanges,
+    validateRawProposal: () => ({ valid: true, errors: [] }),
+    validateCorrelationEvidenceOwnership: async () => [],
+    validateProvenanceOwnership: async () => [],
+    validateProgressLinkedProvenanceRequired: () => [],
+    validateGoalProposalHierarchy: async () => [],
+    validateTodayChecklistGoalSourceRefs: async () => [],
+    validateRecoveryAwareWorkoutAdaptation: async () => [],
+    validateHabitProposalContext: async () => [],
+    validateWellbeingCheckinProposalContext: async () => [],
+    validateNutritionIncidentImageRefOwnership: async () => [],
+    validateChatAttachmentProposalRefs: async () => [],
+    validateRecipeRecommendationProposalContext: async () => [],
+    ...overrides,
+  };
+}
+
 function createChatService(deps: {
   chatRepository: unknown;
   usersService: unknown;
@@ -293,25 +320,7 @@ describe("ChatService", () => {
           agentMetadata,
         }),
       },
-      proposalValidationService: {
-        normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        validateCorrelationEvidenceOwnership: async () => [],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      proposalValidationService: createProposalValidationServiceMock(),
     });
 
     await service.sendMessage(auth, thread.id, {
@@ -394,25 +403,7 @@ describe("ChatService", () => {
           };
         },
       },
-      proposalValidationService: {
-        normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        validateCorrelationEvidenceOwnership: async () => [],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      proposalValidationService: createProposalValidationServiceMock(),
     });
 
     await service.sendMessage(auth, thread.id, {
@@ -491,25 +482,7 @@ describe("ChatService", () => {
           agentMetadata,
         }),
       },
-      proposalValidationService: {
-        normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        validateCorrelationEvidenceOwnership: async () => [],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      proposalValidationService: createProposalValidationServiceMock(),
     });
 
     await service.sendMessage(auth, thread.id, {
@@ -735,25 +708,9 @@ describe("ChatService", () => {
           replySafetyErrors: [],
         }),
       },
-      proposalValidationService: {
-        normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
+      proposalValidationService: createProposalValidationServiceMock({
         validateCorrelationEvidenceOwnership: async () => [evidenceError],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      }),
     });
 
     const result = await service.sendMessage(auth, thread.id, {
@@ -815,25 +772,7 @@ describe("ChatService", () => {
           };
         },
       },
-      proposalValidationService: {
-        normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        validateCorrelationEvidenceOwnership: async () => [],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      proposalValidationService: createProposalValidationServiceMock(),
     });
 
     const result = await service.sendMessage(auth, thread.id, {
@@ -962,25 +901,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         directChatPathService: createDirectChatPathServiceForChatTests(
           options?.todayService ?? {
             getOrGenerateDay: async () => buildDirectPathTodayDay(),
@@ -1552,25 +1473,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => ({
             summary: { summary: { id: summaryId }, trends: [] },
@@ -1674,25 +1577,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => {
             packingCalled = true;
@@ -1915,25 +1800,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         wellbeingCheckInsService: {
           getCheckInForDate: async () => ({
             checkIn: options.hasTodayCheckIn
@@ -2053,25 +1920,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
 
       const result = await service.sendMessage(auth, thread.id, {
@@ -2202,25 +2051,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () =>
@@ -2327,25 +2158,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
 
       await service.sendMessage(auth, thread.id, {
@@ -2451,25 +2264,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () => {
@@ -2573,14 +2368,7 @@ describe("ChatService", () => {
             },
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () =>
@@ -2620,25 +2408,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => {
             throw new BadRequestException({
@@ -2702,25 +2472,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend,
           runTurnStages,
@@ -2784,25 +2536,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async (input: {
@@ -2895,25 +2629,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () =>
@@ -2972,14 +2688,7 @@ describe("ChatService", () => {
         aiService: {
           generateCoachResponse,
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         proposalExplainerService: {
           resolvePreAiTurn: async () => ({
             kind: "no_proposal",
@@ -3072,14 +2781,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         proposalExplainerService: {
           resolvePreAiTurn: async () => ({
             kind: "with_proposal",
@@ -3220,25 +2922,7 @@ describe("ChatService", () => {
             },
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () =>
@@ -3352,25 +3036,7 @@ describe("ChatService", () => {
             },
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
     }
 
@@ -3518,25 +3184,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () => ({
@@ -3596,25 +3244,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
 
       const result = await service.sendMessage(auth, thread.id, {
@@ -3920,25 +3550,7 @@ describe("ChatService", () => {
             },
           }),
         },
-        proposalValidationService: {
-          normalizeWorkoutProposalExercises: async (
-          _userId: string,
-          _intent: unknown,
-          proposedChanges: unknown,
-        ) => proposedChanges,
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
 
       return { service, getAssistantContent: () => assistantMessageContent, getAssistantMetadata: () => assistantMessageMetadata };

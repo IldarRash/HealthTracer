@@ -422,8 +422,15 @@ describe("detectRequestedLookbackDays", () => {
   });
 
   it("does not extract a period from calendar years like 2026", () => {
-    expect(detectRequestedLookbackDays("моя цель на 2026 год")).toBe(365);
+    expect(detectRequestedLookbackDays("моя цель на 2026 год")).toBeNull();
+    expect(detectRequestedLookbackDays("в 2026 году я хочу набрать форму")).toBeNull();
+    expect(detectRequestedLookbackDays("my goal for 2026")).toBeNull();
     expect(detectRequestedLookbackDays("план на 2026")).toBeNull();
+  });
+
+  it("still detects relative year lookbacks alongside the calendar-year guard", () => {
+    expect(detectRequestedLookbackDays("за последний год")).toBe(365);
+    expect(detectRequestedLookbackDays("review my last year")).toBe(365);
   });
 
   it("never exceeds MAX_REQUESTED_LOOKBACK_DAYS for absurd numeric asks", () => {

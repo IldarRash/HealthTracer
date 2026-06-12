@@ -263,6 +263,9 @@ function makeOrchestrator(opts: {
     new DecisionMakerExecutorService(),
     new ActionVariantCatalogService(),
     attachmentTextExtractionService,
+    // Returns undefined → no precomputed summary; the mocked
+    // coachingContextService already serves the progress-history packet.
+    { buildReviewSummaryForAuth: vi.fn() } as never,
   );
 }
 

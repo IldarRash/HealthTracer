@@ -604,31 +604,10 @@ describe("AgentToolRegistryService", () => {
     expect(progressHistoryService.buildReviewSummaryForAuth).not.toHaveBeenCalled();
   });
 
-  it("getProgressHistory — returns a typed error when the summary fails schema validation", async () => {
-    const progressHistoryService = createStubProgressHistoryService(
-      buildProgressHistorySummary({
-        // Free text smuggled into a typed-enum field must fail the result parse.
-        noteCodes: ["the user trained badly"] as never,
-      }),
-    );
-    const service = createService(
-      {},
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      progressHistoryService,
-    );
-
-    const result = await service.executeTool(auth, {
-      tool: "getProgressHistory",
-      input: { periodDays: 30 },
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.tool).toBe("getProgressHistory");
-    expect(result.errors.length).toBeGreaterThan(0);
-  });
+  // No registry-level result re-validation test (F9): the aggregate service
+  // already returns its summary through progressHistoryReviewSummarySchema.parse,
+  // and free-text rejection is pinned at schema level in packages/types
+  // progress-history.spec.ts.
 
   it("getProgressHistory — allowlisted only on review capabilities (review_progress, longevity_overview)", () => {
     // The per-domain executor rejects any tool not in the active capability

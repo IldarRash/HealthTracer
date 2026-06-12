@@ -233,11 +233,23 @@ function makeOrchestrator(opts: {
   compressionSummary?: { dataQuality?: "sufficient" | "partial" | "insufficient" };
   /** Phase 4: capture every DomainLlmExecutorService.runDomainLoop input. */
   captureDomainLoopInput?: (input: { deepReview?: unknown }) => void;
+  /** F5: spy on the once-per-turn progress-history aggregation. */
+  progressHistoryAggregateSpies?: {
+    buildReviewSummaryForAuth: ReturnType<typeof vi.fn>;
+  };
+  /** F5: capture every CoachingContextService.buildAgentContext options arg. */
+  captureBuildAgentContextOptions?: (options: unknown) => void;
 }): AgentOrchestratorService {
   const contextPacket = makeContextPacket({ withProgressHistory: opts.withProgressHistory });
 
   const coachingContextService = {
-    buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+    buildAgentContext: vi
+      .fn()
+      .mockImplementation((_auth, _request, _route, options: unknown) => {
+        opts.captureBuildAgentContextOptions?.(options);
+
+        return Promise.resolve(contextPacket);
+      }),
     toAgentPromptContext: vi.fn().mockReturnValue({ agentContext: {} }),
   } as unknown as CoachingContextService;
 
@@ -345,6 +357,10 @@ function makeOrchestrator(opts: {
     extractTurnAttachmentTexts: vi.fn().mockResolvedValue(new Map()),
   };
 
+  const progressHistoryAggregateService = (opts.progressHistoryAggregateSpies ?? {
+    buildReviewSummaryForAuth: vi.fn(),
+  }) as never;
+
   return new AgentOrchestratorService(
     coachingContextService,
     contextCompressionService,
@@ -358,6 +374,7 @@ function makeOrchestrator(opts: {
     decisionMakerExecutorService,
     actionVariantCatalogService,
     attachmentTextExtractionService as never,
+    progressHistoryAggregateService,
   );
 }
 
@@ -871,5 +888,68 @@ describe("AgentOrchestratorService — fan-out: deepReview block (Phase 4)", () 
 
     expect(capturedDecisionRequest?.deepReview).toBeUndefined();
     expect(result.agentMetadata.fanOut?.decision?.deepReview).toBeUndefined();
+  });
+
+  it("aggregates progress history exactly ONCE on a 3-domain deep-review turn and threads it to every packet build (F5)", async () => {
+    const reviewSlice = {
+      type: "progress_history_review" as const,
+      depth: "large" as const,
+      timeRange: "1y" as const,
+      includeDocuments: false,
+    };
+    const selectedDomains: DomainFanoutEntry[] = [
+      {
+        ...makeDomainFanoutEntry("workout", ["adapt_workout_plan"]),
+        supplementaryContextSlices: [reviewSlice],
+      },
+      {
+        ...makeDomainFanoutEntry("nutrition", ["log_nutrition_incident"]),
+        supplementaryContextSlices: [reviewSlice],
+      },
+      {
+        ...makeDomainFanoutEntry("nutrition", ["log_nutrition_incident"]),
+        domain: "health",
+        capabilityId: "longevity_overview",
+        supplementaryContextSlices: [reviewSlice],
+      },
+    ];
+    const buildReviewSummaryForAuth = vi.fn(async () => PROGRESS_HISTORY_SUMMARY);
+    const capturedOptions: unknown[] = [];
+
+    const orchestrator = makeOrchestrator({
+      domainResults: [
+        makeReviewDomainResult(),
+        makeReviewDomainResult(),
+        makeReviewDomainResult(),
+      ],
+      selectedDomains,
+      decisionOutput: {
+        reply: "Cross-domain review.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      deepReviewPlan: { requestedLookbackDays: 365, grantedLookbackDays: 180 },
+      withProgressHistory: true,
+      progressHistoryAggregateSpies: { buildReviewSummaryForAuth },
+      captureBuildAgentContextOptions: (options) => capturedOptions.push(options),
+    });
+
+    await orchestrator.orchestrateCoachTurn(
+      makeOrchestratorInput("проанализируй последние полгода"),
+    );
+
+    // The identical 6-query aggregation runs once per turn — not once per packet.
+    expect(buildReviewSummaryForAuth).toHaveBeenCalledTimes(1);
+    expect(buildReviewSummaryForAuth).toHaveBeenCalledWith(expect.anything(), 180);
+
+    // 1 primary + 3 domain packet builds, each handed the same precomputed summary.
+    expect(capturedOptions).toHaveLength(4);
+    for (const options of capturedOptions) {
+      expect(
+        (options as { progressHistoryLookback?: { precomputedSummary?: unknown } })
+          .progressHistoryLookback?.precomputedSummary,
+      ).toBe(PROGRESS_HISTORY_SUMMARY);
+    }
   });
 });

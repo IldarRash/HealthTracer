@@ -330,9 +330,10 @@ const LOOKBACK_PHRASE_RULES: ReadonlyArray<{ pattern: RegExp; days: number }> = 
   // год / year / 12 months → 365
   // Cyrillic has no \b semantics in JS regex — guard with letter lookarounds so
   // "год" does not match inside "полгода"/"погода"/"выгода"; the extra
-  // lookbehind keeps the spaced "пол года" (180) from also counting as a year.
-  { pattern: /(?<![а-яё])(?<!пол\s)год(?:а|у)?(?![а-яё])/i, days: 365 },
-  { pattern: /(?<!half\s)(?<!half\sa\s)\byear\b/i, days: 365 },
+  // lookbehinds keep the spaced "пол года" (180) and calendar-year mentions
+  // ("на 2026 год", "в 2026 году") from also counting as a lookback year.
+  { pattern: /(?<![а-яё])(?<!пол\s)(?<!\d\s?)год(?:а|у)?(?![а-яё])/i, days: 365 },
+  { pattern: /(?<!half\s)(?<!half\sa\s)(?<!\d\s?)\byear\b/i, days: 365 },
   { pattern: /\b12\s*months\b/i, days: 365 },
   { pattern: /12\s*месяцев/i, days: 365 },
   // full history → sentinel (731 = monthly ladder grant)

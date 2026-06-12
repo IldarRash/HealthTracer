@@ -595,8 +595,11 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
       expect(errors.some((e) => e.includes('forbidden field "kind"'))).toBe(true);
     });
 
-    it("rejects selectedDomains > MAX_ROUTER_SELECTED_DOMAINS (3) via schema", () => {
-      const result = routerDecisionOutputSchema.safeParse({
+    it("caps selectedDomains > MAX_ROUTER_SELECTED_DOMAINS (3) by slicing in-schema, never rejecting", () => {
+      // The cap is still enforced — but as graceful degradation (keep the top
+      // 3) instead of a whole-parse failure that would dump the turn onto the
+      // fallback route.
+      const parsed = routerDecisionOutputSchema.parse({
         selectedDomains: [
           { domain: "workout", confidence: 0.9, intentHints: [], toolHints: [], signalHints: [] },
           { domain: "nutrition", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
@@ -605,7 +608,7 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
         ],
         confidence: 0.9,
       });
-      expect(result.success).toBe(false);
+      expect(parsed.selectedDomains).toHaveLength(MAX_ROUTER_SELECTED_DOMAINS);
     });
 
     it("clampRouterDecisionOutput caps selectedDomains to MAX_ROUTER_SELECTED_DOMAINS", () => {

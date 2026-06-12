@@ -17,6 +17,7 @@ import type {
   ContextTimeRange,
   DeepReviewPromptContext,
   ProposalExplainerTurnContext,
+  ProgressHistoryReviewSummary,
   ProgressReporter,
   RawAiProposal,
   ResolvedCapabilityPresentationMetadata,
@@ -35,6 +36,7 @@ import {
 } from "../coaching-context/coaching-context.service.js";
 import { ContextCompressionService } from "../coaching-context/context-compression.service.js";
 import { ContextExpansionPolicyService } from "../coaching-context/context-expansion-policy.service.js";
+import { ProgressHistoryAggregateService } from "../progress/progress-history-aggregate.service.js";
 import { mapContextSourceRefsToAgentCitations } from "../coaching-context/agent-prompt-context.js";
 import { AttachmentTextExtractionService } from "../chat-attachments/attachment-text-extraction.service.js";
 import type { AttachmentTextExtractionResult } from "../chat-attachments/attachment-text-extraction.service.js";
@@ -139,6 +141,7 @@ export class AgentOrchestratorService {
     private readonly decisionMakerExecutorService: DecisionMakerExecutorService,
     private readonly actionVariantCatalogService: ActionVariantCatalogService,
     private readonly attachmentTextExtractionService: AttachmentTextExtractionService,
+    private readonly progressHistoryAggregateService: ProgressHistoryAggregateService,
   ) {
     this.provider = createCoachAiProvider(
       this.aiBehaviorConfigService.getCompiledPromptTemplates(),
@@ -199,12 +202,14 @@ export class AgentOrchestratorService {
     // Build primary context packet for the current route (used as a fallback
     // for fan-out path metadata and for domain context building).
     // Turn-level lookback grant for the planner-injected progress_history_review
-    // slice (Phase 3). Threaded into every packet build; CoachingContextService
-    // runs the aggregation lazily — only when the slice plan contains the purpose.
-    const progressHistoryLookback = {
+    // slice (Phase 3). The SAME options object (including the once-per-turn
+    // precomputed summary on review turns) is threaded into every packet build
+    // — primary + ≤3 domains — so the 6-query aggregation never runs per packet.
+    const progressHistoryLookback: ProgressHistoryLookbackOptions = {
       requestedLookbackDays: plan.requestedLookbackDays,
       grantedLookbackDays: plan.grantedLookbackDays,
       responseLanguage: preprocessorResult.responseLanguage,
+      precomputedSummary: await this.precomputeProgressHistorySummary(input.auth, plan),
     };
 
     const contextStart = Date.now();
@@ -314,6 +319,7 @@ export class AgentOrchestratorService {
       capabilityTurnMetadata,
       routerResult,
       responseLanguage: preprocessorResult.responseLanguage,
+      progressHistoryLookback,
       deepReview,
       onProgress,
       turnStart,
@@ -338,6 +344,8 @@ export class AgentOrchestratorService {
       routerResult: RouterLlmResult | undefined;
       /** Resolved response language (hint ?? detected). Null = fall back to message detection. */
       responseLanguage: string | null;
+      /** Shared per-turn lookback options (incl. the once-per-turn precomputed summary). */
+      progressHistoryLookback: ProgressHistoryLookbackOptions;
       /** Deep-review sufficiency block (Phase 4). Undefined on non-review turns. */
       deepReview: DeepReviewPromptContext | undefined;
       onProgress?: ProgressReporter;
@@ -349,7 +357,7 @@ export class AgentOrchestratorService {
       contextLatencyMs: number;
     },
   ): Promise<OrchestratedCoachTurnResult> {
-    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, deepReview, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
+    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, progressHistoryLookback, deepReview, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
     const selectedDomains = plan.fanout.selectedDomains;
 
     // Emit domains_running stage with the selected domain names (structural info only,
@@ -379,11 +387,7 @@ export class AgentOrchestratorService {
       input,
       selectedDomains,
       contextPacket,
-      {
-        requestedLookbackDays: plan.requestedLookbackDays,
-        grantedLookbackDays: plan.grantedLookbackDays,
-        responseLanguage,
-      },
+      progressHistoryLookback,
     );
 
     // Run selected domain LLMs concurrently.
@@ -685,6 +689,41 @@ export class AgentOrchestratorService {
         },
       },
     };
+  }
+
+  /**
+   * Aggregate the deep-review progress history ONCE per turn.
+   *
+   * On review turns the planner injects the progress_history_review slice into
+   * the primary route and into every fan-out domain entry — without this, each
+   * of up to four buildAgentContext calls would re-run the identical 6-query
+   * aggregation with its own `new Date()`. Non-review turns return undefined
+   * (and CoachingContextService keeps its lazy compute path for other callers).
+   */
+  private async precomputeProgressHistorySummary(
+    auth: ClerkAuthContext,
+    plan: DomainFanoutPlan,
+  ): Promise<ProgressHistoryReviewSummary | undefined> {
+    const wantsProgressHistory =
+      (plan.route.requiredContextSlices ?? []).some(
+        (slice) => slice.type === "progress_history_review",
+      ) ||
+      plan.fanout.selectedDomains.some((entry) =>
+        (entry.supplementaryContextSlices ?? []).some(
+          (slice) => slice.type === "progress_history_review",
+        ),
+      );
+
+    if (!wantsProgressHistory) {
+      return undefined;
+    }
+
+    // Mirrors CoachingContextService's lazy fallback: the planner grant when
+    // present, otherwise the plan budget's horizon.
+    return this.progressHistoryAggregateService.buildReviewSummaryForAuth(
+      auth,
+      plan.grantedLookbackDays ?? plan.contextBudget.maxLookbackDays,
+    );
   }
 
   /**

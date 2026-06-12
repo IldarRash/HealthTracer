@@ -128,6 +128,18 @@ describe("ProgressHistoryAggregateService", () => {
     expect(nextBucket?.workout.completedCount).toBe(1);
   });
 
+  it("clamps the leading weekly bucket to the queried startDate (F6)", async () => {
+    // 30-day window starts 2026-02-14 (a Saturday): the Monday-aligned first
+    // week begins 2026-02-09, but the bucket must not claim the five
+    // never-queried pre-window days as silent zero-data.
+    const { service } = createMocks();
+
+    const summary = await service.buildReviewSummary(USER_ID, 30, NOW);
+
+    expect(summary.buckets[0]?.bucketStart).toBe("2026-02-14");
+    expect(summary.buckets[1]?.bucketStart).toBe("2026-02-16");
+  });
+
   it("clamps a 9999-day request to monthly granularity with the 24-bucket cap", async () => {
     const { service } = createMocks();
 
@@ -255,7 +267,8 @@ describe("ProgressHistoryAggregateService", () => {
   // ---------------------------------------------------------------------------
 
   it("marks sparse domains insufficient and emits the matching note codes", async () => {
-    // 30-day window with two recovery days (2/30 < 20%) and nothing else.
+    // 60-day window → 9 weekly buckets; both recovery days fall into a single
+    // bucket (1/9 ≈ 11% of buckets < 20%) and nothing else has data.
     const { service } = createMocks({
       recoveryRows: [
         { date: "2026-03-10", soreness: 3, fatigue: 3, moodScore: null, perceivedStress: null },
@@ -263,7 +276,7 @@ describe("ProgressHistoryAggregateService", () => {
       ],
     });
 
-    const summary = await service.buildReviewSummary(USER_ID, 30, NOW);
+    const summary = await service.buildReviewSummary(USER_ID, 60, NOW);
 
     expect(summary.dataSufficiency).toEqual({
       workout: "insufficient",
@@ -283,12 +296,12 @@ describe("ProgressHistoryAggregateService", () => {
     );
 
     const { service } = createMocks({
-      sessions, // 5 of 7 days ≈ 71% → sufficient
-      wellbeingRows: [{ date: "2026-03-14", moodScore: 3, stressScore: 3 }], // 1/7 ≈ 14% → insufficient
+      sessions, // 5 planned sessions, all with a final status → 100% → sufficient
+      wellbeingRows: [{ date: "2026-03-14", moodScore: 3, stressScore: 3 }], // 1/7 buckets ≈ 14% → insufficient
       habitRows: [
         { date: "2026-03-13", status: "completed" },
         { date: "2026-03-14", status: "completed" },
-      ], // 2/7 ≈ 29% → partial
+      ], // 2/7 buckets ≈ 29% → partial
     });
 
     const summary = await service.buildReviewSummary(USER_ID, 7, NOW);
@@ -297,6 +310,62 @@ describe("ProgressHistoryAggregateService", () => {
     expect(summary.dataSufficiency.habits).toBe("partial");
     expect(summary.dataSufficiency.wellbeing).toBe("insufficient");
     expect(summary.noteCodes).not.toContain("no_workout_data");
+  });
+
+  it("grades a fully adherent 3x/week user over 8 weeks as workout-sufficient (F4 calibration)", async () => {
+    // 56-day window starting 2026-01-19 (a Monday): 8 full weeks, 3 planned
+    // sessions per week, every one completed. Under a days-with-data/period
+    // denominator this user would be stuck at 24/56 ≈ 43% ("partial") forever;
+    // the planned-session denominator must grade them "sufficient".
+    const weekStarts = Array.from({ length: 8 }, (_, week) => week * 7);
+    const sessions = weekStarts.flatMap((weekOffset) =>
+      [0, 2, 4].map((dayOffset) => {
+        const day = new Date(Date.UTC(2026, 0, 19 + weekOffset + dayOffset));
+
+        return sessionRow({ plannedDate: day.toISOString().slice(0, 10), status: "completed" });
+      }),
+    );
+
+    const { service } = createMocks({ sessions });
+
+    const summary = await service.buildReviewSummary(USER_ID, 56, NOW);
+
+    expect(sessions).toHaveLength(24);
+    expect(summary.dataSufficiency.workout).toBe("sufficient");
+    expect(summary.noteCodes).not.toContain("no_workout_data");
+  });
+
+  it("workout sufficiency is driven by recorded outcomes on PLANNED sessions", async () => {
+    // Planned sessions left in status "planned" (never resolved) count against
+    // sufficiency; ad-hoc sessions are not part of the denominator.
+    const unresolved = Array.from({ length: 4 }, (_, i) =>
+      sessionRow({ plannedDate: `2026-03-${String(9 + i).padStart(2, "0")}`, status: "planned" }),
+    );
+    const resolved = [
+      sessionRow({ plannedDate: "2026-03-13", status: "completed" }),
+      sessionRow({ plannedDate: "2026-03-14", status: "skipped" }),
+    ];
+
+    const { service } = createMocks({ sessions: [...unresolved, ...resolved] });
+
+    // 2 of 6 planned sessions resolved ≈ 33% → partial.
+    const summary = await service.buildReviewSummary(USER_ID, 7, NOW);
+
+    expect(summary.dataSufficiency.workout).toBe("partial");
+  });
+
+  it("marks workout insufficient with the no_workout_data note when only ad-hoc sessions exist", async () => {
+    const { service } = createMocks({
+      sessions: [
+        sessionRow({ plannedDate: "2026-03-10", source: "ad_hoc" }),
+        sessionRow({ plannedDate: "2026-03-12", source: "ad_hoc" }),
+      ],
+    });
+
+    const summary = await service.buildReviewSummary(USER_ID, 7, NOW);
+
+    expect(summary.dataSufficiency.workout).toBe("insufficient");
+    expect(summary.noteCodes).toContain("no_workout_data");
   });
 
   // ---------------------------------------------------------------------------
@@ -319,6 +388,44 @@ describe("ProgressHistoryAggregateService", () => {
       { isoDate: "2026-03-10", domain: "workout" },
       { isoDate: "2026-03-12", domain: "nutrition" },
     ]);
+  });
+
+  it("formats plan-change markers in the user timezone, not UTC (F7)", async () => {
+    // 02:00 UTC on 2026-03-10 is still 2026-03-09 in Los Angeles — the marker
+    // must land on the same local day convention the buckets use.
+    const { service } = createMocks({
+      workoutRevisionDates: [new Date("2026-03-10T02:00:00Z")],
+    });
+
+    const summary = await service.buildReviewSummary(USER_ID, 7, NOW, "America/Los_Angeles");
+
+    expect(summary.planChangeMarkers).toEqual([{ isoDate: "2026-03-09", domain: "workout" }]);
+  });
+
+  it("pushes the revision date range into the repository query (F11)", async () => {
+    const mocks = createMocks();
+
+    await mocks.service.buildReviewSummary(USER_ID, 7, NOW);
+
+    // Window is 2026-03-09..2026-03-15 (UTC); the SQL bounds must bracket it
+    // (padded by one day for timezone skew) for BOTH revision repositories.
+    for (const repository of [mocks.workoutsRepository, mocks.nutritionRepository]) {
+      expect(repository.listRevisionCreatedAtByUserId).toHaveBeenCalledWith(
+        USER_ID,
+        expect.any(Date),
+        expect.any(Date),
+      );
+
+      const [, createdFrom, createdTo] =
+        repository.listRevisionCreatedAtByUserId.mock.calls[0] as unknown as [
+          string,
+          Date,
+          Date,
+        ];
+
+      expect(createdFrom.getTime()).toBeLessThanOrEqual(Date.parse("2026-03-09T00:00:00Z"));
+      expect(createdTo.getTime()).toBeGreaterThanOrEqual(Date.parse("2026-03-15T23:59:59Z"));
+    }
   });
 
   // ---------------------------------------------------------------------------

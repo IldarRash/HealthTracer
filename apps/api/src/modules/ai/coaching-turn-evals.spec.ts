@@ -513,10 +513,11 @@ describe("S9: Router domain clamping", () => {
   });
 
   it("routerDecisionOutputSchema enforces max 3 selected domains at the schema level", () => {
-    // The Zod schema for router output itself enforces max(3) on selectedDomains.
-    // This is the primary clamping mechanism — the schema rejects invalid LLM outputs
-    // before they reach the pipeline.
-    const fourDomainResult = routerDecisionOutputSchema.safeParse({
+    // The Zod schema itself enforces the ≤3 cap on selectedDomains — by slicing
+    // in-schema (F3), so an over-eager-but-valid LLM output degrades to the top
+    // 3 domains instead of failing the parse and dumping the turn onto the
+    // fallback route. The cap still always holds before the pipeline runs.
+    const fourDomainResult = routerDecisionOutputSchema.parse({
       selectedDomains: [
         { domain: "workout", confidence: 0.9, intentHints: [], toolHints: [], signalHints: [] },
         { domain: "nutrition", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
@@ -527,8 +528,13 @@ describe("S9: Router domain clamping", () => {
       confidence: 0.9,
     });
 
-    // INVARIANT: 4 domains must be rejected by the schema.
-    expect(fourDomainResult.success).toBe(false);
+    // INVARIANT: never more than 3 domains after the schema parse.
+    expect(fourDomainResult.selectedDomains).toHaveLength(3);
+    expect(fourDomainResult.selectedDomains.map((entry) => entry.domain)).toEqual([
+      "workout",
+      "nutrition",
+      "health",
+    ]);
   });
 
   it("RouterLlmService returns ≤3 domains from a valid 3-domain response", async () => {
@@ -805,6 +811,7 @@ function buildE2EOrchestratorWithMocks(
     decisionMaker as never,
     actionVariantCatalog as never,
     attachmentTextExtractionService as never,
+    { buildReviewSummaryForAuth: vi.fn() } as never,
   );
 }
 

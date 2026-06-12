@@ -13,6 +13,7 @@ import {
   buildManualCheckInSignals,
   clampProgressHistoryLookback,
   computeRecoveryBand,
+  formatIsoDateInTimezone,
   getTodayIsoDateInTimezone,
   getWeekStartIsoDate,
   MAX_PROGRESS_HISTORY_PLAN_CHANGE_MARKERS,
@@ -29,14 +30,32 @@ import { WellbeingCheckInsRepository } from "../wellbeing-check-ins/wellbeing-ch
 import { WorkoutsRepository } from "../workouts/workouts.repository.js";
 
 /**
- * Per-domain data-sufficiency thresholds, as a ratio of granted lookback days
- * that have at least one structured entry for the domain:
+ * Per-domain data-sufficiency calibration (owner decision, review F4):
+ *
+ * - workout: ratio of planned (non ad-hoc) sessions in range that carry a
+ *   recorded final status (completed/skipped). A fully adherent 3x/week user
+ *   scores 1.0 regardless of window length — sufficiency measures how well the
+ *   PLAN was tracked, not how many calendar days had a workout. No planned
+ *   sessions in range → "insufficient".
+ * - habits / recovery / wellbeing: ratio of BUCKETS containing at least one
+ *   data point — periodic check-ins are judged against the report's own
+ *   granularity, not raw days.
+ *
+ * Shared thresholds on the resulting coverage ratio:
  *   coverage <  0.2 → insufficient
  *   coverage <  0.6 → partial
  *   otherwise       → sufficient
  */
 const INSUFFICIENT_COVERAGE_BELOW_RATIO = 0.2;
 const SUFFICIENT_COVERAGE_FROM_RATIO = 0.6;
+
+/**
+ * Padding applied to the SQL createdAt range for plan-change markers: a UTC
+ * timestamp up to ±14h away from the user-timezone window edge can still
+ * format into the window, so the coarse SQL filter widens by one day on each
+ * side and buildPlanChangeMarkers re-applies the exact per-timezone day filter.
+ */
+const REVISION_RANGE_PADDING_MS = 24 * 60 * 60 * 1000;
 
 interface BucketRange {
   bucketStart: string;
@@ -87,6 +106,14 @@ export class ProgressHistoryAggregateService {
     const endDate = getTodayIsoDateInTimezone(timezone, now);
     const startDate = shiftIsoDate(endDate, -(grant.grantedPeriodDays - 1));
     const bucketRanges = buildBucketRanges(startDate, endDate, grant.granularity, grant.bucketCap);
+    // Coarse SQL bounds for revision timestamps (exact per-timezone day filter
+    // happens in buildPlanChangeMarkers).
+    const revisionCreatedFrom = new Date(
+      Date.parse(`${startDate}T00:00:00.000Z`) - REVISION_RANGE_PADDING_MS,
+    );
+    const revisionCreatedTo = new Date(
+      Date.parse(`${endDate}T23:59:59.999Z`) + REVISION_RANGE_PADDING_MS,
+    );
 
     const [
       sessionRows,
@@ -108,8 +135,16 @@ export class ProgressHistoryAggregateService {
         startDate,
         endDate,
       ),
-      this.workoutsRepository.listRevisionCreatedAtByUserId(userId),
-      this.nutritionRepository.listRevisionCreatedAtByUserId(userId),
+      this.workoutsRepository.listRevisionCreatedAtByUserId(
+        userId,
+        revisionCreatedFrom,
+        revisionCreatedTo,
+      ),
+      this.nutritionRepository.listRevisionCreatedAtByUserId(
+        userId,
+        revisionCreatedFrom,
+        revisionCreatedTo,
+      ),
     ]);
 
     const sessions: SessionExecutionRow[] = sessionRows.map((row) => ({
@@ -150,11 +185,26 @@ export class ProgressHistoryAggregateService {
       ...wellbeingDays,
     ]).size;
 
+    const plannedSessions = sessions.filter((row) => row.source !== "ad_hoc");
     const dataSufficiency = {
-      workout: resolveDomainSufficiency(workoutDays.size, grant.grantedPeriodDays),
-      habits: resolveDomainSufficiency(habitDays.size, grant.grantedPeriodDays),
-      recovery: resolveDomainSufficiency(recoveryDays.size, grant.grantedPeriodDays),
-      wellbeing: resolveDomainSufficiency(wellbeingDays.size, grant.grantedPeriodDays),
+      workout: resolveWorkoutSufficiency(plannedSessions),
+      habits: resolveBucketCoverageSufficiency(
+        buckets,
+        (bucket) => bucket.habits.adherencePercent !== null,
+      ),
+      recovery: resolveBucketCoverageSufficiency(
+        buckets,
+        (bucket) =>
+          bucket.recovery.wellSupportedDays +
+            bucket.recovery.moderateLoadDays +
+            bucket.recovery.prioritizeRecoveryDays +
+            bucket.recovery.insufficientDataDays >
+          0,
+      ),
+      wellbeing: resolveBucketCoverageSufficiency(
+        buckets,
+        (bucket) => bucket.wellbeing.checkInCount > 0,
+      ),
     };
 
     const noteCodes: ProgressHistoryNoteCode[] = [];
@@ -163,7 +213,9 @@ export class ProgressHistoryAggregateService {
       noteCodes.push("lookback_clamped");
     }
 
-    if (sessions.length === 0) {
+    // Mirrors the workout sufficiency denominator: with no PLANNED sessions in
+    // range, plan adherence cannot be evaluated (ad-hoc-only data included).
+    if (plannedSessions.length === 0) {
       noteCodes.push("no_workout_data");
     }
 
@@ -180,6 +232,7 @@ export class ProgressHistoryAggregateService {
       nutritionRevisionDates,
       startDate,
       endDate,
+      timezone,
     );
 
     // Final parse guarantees the numeric-only structural contract; any drift
@@ -282,6 +335,12 @@ function buildBucketRanges(
 ): BucketRange[] {
   const ranges: BucketRange[] = [];
 
+  // The leading weekly/monthly bucket is clamped to the queried startDate so
+  // the first bucket never claims pre-window days that were never queried
+  // (they would otherwise read as silent zero-data).
+  const clampToWindow = (bucketStart: string): string =>
+    bucketStart < startDate ? startDate : bucketStart;
+
   if (granularity === "daily") {
     let current = startDate;
 
@@ -295,7 +354,7 @@ function buildBucketRanges(
     let current = getWeekStartIsoDate(startDate);
 
     while (current <= endDate) {
-      ranges.push({ bucketStart: current, bucketEnd: shiftIsoDate(current, 6) });
+      ranges.push({ bucketStart: clampToWindow(current), bucketEnd: shiftIsoDate(current, 6) });
       current = shiftIsoDate(current, 7);
     }
   } else {
@@ -304,7 +363,7 @@ function buildBucketRanges(
 
     while (current <= endDate) {
       const next = nextMonthStart(current);
-      ranges.push({ bucketStart: current, bucketEnd: shiftIsoDate(next, -1) });
+      ranges.push({ bucketStart: clampToWindow(current), bucketEnd: shiftIsoDate(next, -1) });
       current = next;
     }
   }
@@ -322,12 +381,7 @@ function nextMonthStart(monthStartIsoDate: string): string {
   return `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
 }
 
-function resolveDomainSufficiency(
-  daysWithData: number,
-  grantedPeriodDays: number,
-): ProgressHistoryDomainSufficiency {
-  const coverage = grantedPeriodDays > 0 ? daysWithData / grantedPeriodDays : 0;
-
+function gradeCoverageRatio(coverage: number): ProgressHistoryDomainSufficiency {
   if (coverage < INSUFFICIENT_COVERAGE_BELOW_RATIO) {
     return "insufficient";
   }
@@ -339,17 +393,50 @@ function resolveDomainSufficiency(
   return "sufficient";
 }
 
+/**
+ * Workout sufficiency = recorded final statuses over planned sessions (see the
+ * calibration comment on the threshold constants). `plannedSessions` must
+ * already exclude ad-hoc sessions.
+ */
+function resolveWorkoutSufficiency(
+  plannedSessions: readonly SessionExecutionRow[],
+): ProgressHistoryDomainSufficiency {
+  if (plannedSessions.length === 0) {
+    return "insufficient";
+  }
+
+  const resolvedCount = plannedSessions.filter((row) => row.status !== "planned").length;
+
+  return gradeCoverageRatio(resolvedCount / plannedSessions.length);
+}
+
+/** Check-in domains: sufficiency = fraction of buckets containing any data. */
+function resolveBucketCoverageSufficiency(
+  buckets: readonly ProgressHistoryBucket[],
+  hasData: (bucket: ProgressHistoryBucket) => boolean,
+): ProgressHistoryDomainSufficiency {
+  if (buckets.length === 0) {
+    return "insufficient";
+  }
+
+  return gradeCoverageRatio(buckets.filter(hasData).length / buckets.length);
+}
+
 function buildPlanChangeMarkers(
   workoutRevisionDates: readonly Date[],
   nutritionRevisionDates: readonly Date[],
   startDate: string,
   endDate: string,
+  timezone: string,
 ): ProgressHistoryPlanChangeMarker[] {
   const markers = new Map<string, ProgressHistoryPlanChangeMarker>();
 
   const addMarkers = (dates: readonly Date[], domain: "workout" | "nutrition") => {
     for (const createdAt of dates) {
-      const isoDate = createdAt.toISOString().slice(0, 10);
+      // Same timezone convention as the bucket window (endDate is the user's
+      // local "today") — a near-midnight UTC timestamp must not land the
+      // marker on the wrong local day.
+      const isoDate = formatIsoDateInTimezone(timezone, createdAt);
 
       if (isoDate >= startDate && isoDate <= endDate) {
         markers.set(`${domain}:${isoDate}`, { isoDate, domain });

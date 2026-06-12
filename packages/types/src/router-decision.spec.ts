@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clampRouterDecisionOutput,
   createFallbackRouterDecision,
+  MAX_ROUTER_HINTS_PER_DOMAIN,
   MAX_ROUTER_SELECTED_DOMAINS,
   routerDecisionOutputSchema,
   routerDecisionRequestSchema,
@@ -141,7 +142,7 @@ describe("RouterDecisionOutput schema", () => {
     expect(parsed.safetyFlags).toEqual([]);
   });
 
-  it("rejects selectedDomains exceeding MAX_ROUTER_SELECTED_DOMAINS via schema", () => {
+  it("slices selectedDomains exceeding MAX_ROUTER_SELECTED_DOMAINS instead of rejecting", () => {
     const tooManyDomains = [
       { domain: "workout", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
       { domain: "nutrition", confidence: 0.7, intentHints: [], toolHints: [], signalHints: [] },
@@ -149,12 +150,78 @@ describe("RouterDecisionOutput schema", () => {
       { domain: "workout", confidence: 0.5, intentHints: [], toolHints: [], signalHints: [] },
     ];
 
-    const result = routerDecisionOutputSchema.safeParse({
+    const parsed = routerDecisionOutputSchema.parse({
       selectedDomains: tooManyDomains,
       confidence: 0.5,
     });
 
-    expect(result.success).toBe(false);
+    expect(parsed.selectedDomains).toHaveLength(MAX_ROUTER_SELECTED_DOMAINS);
+    expect(parsed.selectedDomains.map((d) => d.domain)).toEqual([
+      "workout",
+      "nutrition",
+      "health",
+    ]);
+  });
+
+  it("slices over-long hint lists to MAX_ROUTER_HINTS_PER_DOMAIN instead of failing the parse", () => {
+    // 7 valid tool names exist in the catalog — one more than the hint cap. A
+    // router emitting all of them must NOT degrade the route to the fallback.
+    const sevenToolHints = [
+      "getUserContextSlice",
+      "getWeeklyProgressContext",
+      "searchExerciseCatalog",
+      "searchRecipeCatalog",
+      "getActivePlanDetail",
+      "getRecentAdherence",
+      "getProgressHistory",
+    ];
+    const sixStringHints = ["one", "two", "three", "four", "five", "six"];
+
+    const parsed = routerDecisionOutputSchema.parse({
+      selectedDomains: [
+        {
+          domain: "workout",
+          confidence: 0.9,
+          intentHints: sixStringHints,
+          toolHints: sevenToolHints,
+          signalHints: sixStringHints,
+        },
+      ],
+      confidence: 0.9,
+    });
+
+    const entry = parsed.selectedDomains[0];
+
+    expect(entry?.toolHints).toEqual(sevenToolHints.slice(0, MAX_ROUTER_HINTS_PER_DOMAIN));
+    expect(entry?.intentHints).toEqual(sixStringHints.slice(0, MAX_ROUTER_HINTS_PER_DOMAIN));
+    expect(entry?.signalHints).toEqual(sixStringHints.slice(0, MAX_ROUTER_HINTS_PER_DOMAIN));
+  });
+
+  it("clampRouterDecisionOutput keeps a sliced 7-tool hint list within the cap and allowlist", () => {
+    const parsed = routerDecisionOutputSchema.parse({
+      selectedDomains: [
+        {
+          domain: "workout",
+          confidence: 0.9,
+          intentHints: [],
+          toolHints: [
+            "getUserContextSlice",
+            "getWeeklyProgressContext",
+            "searchExerciseCatalog",
+            "searchRecipeCatalog",
+            "getActivePlanDetail",
+            "getRecentAdherence",
+            "getProgressHistory",
+          ],
+          signalHints: [],
+        },
+      ],
+      confidence: 0.9,
+    });
+
+    const clamped = clampRouterDecisionOutput(parsed);
+
+    expect(clamped.selectedDomains[0]?.toolHints).toHaveLength(MAX_ROUTER_HINTS_PER_DOMAIN);
   });
 
   it("rejects unknown extra fields (.strict())", () => {

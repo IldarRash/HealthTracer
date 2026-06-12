@@ -100,6 +100,13 @@ export interface ProgressHistoryLookbackOptions {
   grantedLookbackDays: number | null;
   /** Resolved response language for the config-sourced clamp note (EN fallback). */
   responseLanguage: string | null;
+  /**
+   * Review summary already aggregated ONCE for this turn by the orchestrator.
+   * When present it is used as-is so up to four packet builds (primary + ≤3
+   * domains) do not each re-run the identical 6-query aggregation. Absent for
+   * callers outside the fan-out turn — the lazy compute path below still runs.
+   */
+  precomputedSummary?: ProgressHistoryReviewSummary;
 }
 
 export interface BuildAgentContextOptions {
@@ -383,12 +390,16 @@ export class CoachingContextService {
       const lookbackDays =
         options?.progressHistoryLookback?.grantedLookbackDays ?? budget.maxLookbackDays;
 
-      snapshot.progressHistory = await this.progressHistoryAggregateService.buildReviewSummary(
-        snapshot.user.id,
-        lookbackDays,
-        new Date(),
-        snapshot.user.timezone,
-      );
+      // Prefer the orchestrator's once-per-turn precomputed summary; lazy
+      // compute remains for callers outside the fan-out turn.
+      snapshot.progressHistory =
+        options?.progressHistoryLookback?.precomputedSummary ??
+        (await this.progressHistoryAggregateService.buildReviewSummary(
+          snapshot.user.id,
+          lookbackDays,
+          new Date(),
+          snapshot.user.timezone,
+        ));
     }
 
     const primarySlice = this.contextBudgetPolicyService.applyBudgetToBuiltSlice(

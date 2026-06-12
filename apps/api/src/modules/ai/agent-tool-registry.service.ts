@@ -18,7 +18,6 @@ import {
   getRecentAdherenceInputSchema,
   getUserContextSliceInputSchema,
   MIN_PROGRESS_HISTORY_PERIOD_DAYS,
-  progressHistoryReviewSummarySchema,
   recentAdherenceResultSchema,
   searchExerciseCatalogInputSchema,
   searchExerciseCatalogResultSchema,
@@ -538,26 +537,17 @@ export class AgentToolRegistryService {
     }
 
     const clampedPeriodDays = Math.max(MIN_PROGRESS_HISTORY_PERIOD_DAYS, parsed.data.periodDays);
+    // No result re-validation: the aggregate service already returns its summary
+    // through progressHistoryReviewSummarySchema.parse (fails loudly on drift).
     const summary = await this.progressHistoryAggregateService.buildReviewSummaryForAuth(
       auth,
       clampedPeriodDays,
     );
-    const validated = progressHistoryReviewSummarySchema.safeParse(summary);
-
-    if (!validated.success) {
-      return agentToolCallResultSchema.parse({
-        tool: "getProgressHistory",
-        ok: false,
-        errors: validated.error.issues.map(
-          (issue) => `${issue.path.join(".") || "result"}: ${issue.message}`,
-        ),
-      });
-    }
 
     return agentToolCallResultSchema.parse({
       tool: "getProgressHistory",
       ok: true,
-      result: validated.data,
+      result: summary,
     });
   }
 }
