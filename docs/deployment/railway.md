@@ -59,6 +59,8 @@ Create a new service from the GitHub repo (or empty service + connect repo).
 | Root directory     | `/` (repo root)                |
 | Watch paths        | `apps/api/**`, `packages/**`   |
 
+> Once Config-as-code is enabled (`apps/api/railway.json`, see §3), the file's `build` block (builder, dockerfilePath) is the source of truth and overrides the equivalent dashboard settings — dashboard edits to those fields are ignored. Root Directory and Watch Paths remain dashboard-only.
+
 **Environment variables**
 
 | Variable                 | Source / value                                      | Notes                                      |
@@ -102,40 +104,37 @@ curl -sS https://<api-domain>/health/ready
 # Expected: {"service":"api","status":"ok","checks":[...]}
 ```
 
-### 3. Run database migrations (MVP: manual)
+### 3. Database migrations (automatic via pre-deploy command)
 
-Do **not** run migrations automatically on every API start for MVP. Apply them explicitly after Postgres is available and before or after the first API deploy.
-
-> **Pending migration — `0038_biomarkers_replace_documents`.** This migration replaces the
+> **Destructive migration — `0038_biomarkers_replace_documents`.** This migration replaces the
 > health-documents tables with the biomarkers model: it **drops** `health_documents`,
 > `health_document_summaries`, `document_signals` (and their six `document_*` enums) plus
 > `chat_attachments.linked_document_id`, and creates `lab_reports` + `biomarker_readings`.
-> Like every Drizzle migration under `packages/db/drizzle`, the Railway deploy is **not
-> complete until `0038` is applied manually via the Railway CLI** (Option A below). Because it
-> drops tables, take a backup first.
+> It is applied automatically by the pre-deploy command below on the first deploy that includes
+> it — because it drops tables, **take a backup before that deploy** and confirm it in the
+> pre-deploy logs (`railway logs --service health-api --build`).
 
-**Option A — Railway CLI one-off (recommended)**
+Migrations apply **automatically on every `health-api` deploy** through Railway's [pre-deploy command](https://docs.railway.com/deployments/pre-deploy-command), configured as code in `apps/api/railway.json`:
 
-Link the project and run migrations with the production `DATABASE_URL`:
-
-```bash
-railway link
-railway run --service health-api pnpm --dir packages/db db:migrate
+```json
+{
+  "deploy": {
+    "preDeployCommand": "pnpm --dir packages/db db:migrate"
+  }
+}
 ```
 
-If API runtime `DATABASE_URL` uses Railway private networking, keep it private and run migrations with an explicit one-off command that maps the public migration URL into `DATABASE_URL` only for that process:
+The pre-deploy command runs `drizzle-kit migrate` **inside the built service image** between build and deploy, with the service's environment variables — so the private-networking `DATABASE_URL` works as-is, no public migration URL needed. If the migration exits non-zero, **the deploy is halted and the previous version keeps serving traffic**; the failure is visible in the deployment's pre-deploy logs (`railway logs --service health-api --build`). Drizzle migrations are idempotent per the journal, so deploys without new migration files are a fast no-op.
 
-```bash
-railway.cmd run --service health-api powershell -NoProfile -Command '$env:DATABASE_URL=$env:MIGRATION_DATABASE_URL; pnpm --dir packages/db db:migrate'
-```
+**One-time dashboard step:** Railway only auto-discovers `railway.json`/`railway.toml` at the repo root, and this monorepo has two services. On the `health-api` service: **Settings → Config-as-code → set the config file path to `apps/api/railway.json`**, then redeploy. (`health-web` has no config file and is unaffected.)
 
-If migrations must run without the API service context, set `DATABASE_URL` on a shell service or use `railway variables` and run from a local machine with the remote URL (handle credentials securely).
-
-**Option B — Local against Railway Postgres**
+**Manual fallback — local against Railway Postgres** (only if a migration must be run outside a deploy, e.g. repairing a failed deploy):
 
 ```bash
 DATABASE_URL="postgres://..." pnpm --dir packages/db db:migrate
 ```
+
+Handle the credential securely; keep API runtime `DATABASE_URL` on private networking.
 
 **Seeds (non-production only)**
 
@@ -152,7 +151,6 @@ Only run seeds in staging or with explicit approval. Do not seed production unle
 
 **Later hardening**
 
-- Add a dedicated migration job service or Railway pre-deploy command once migrations are proven idempotent.
 - Keep migration SQL in `packages/db/drizzle/` under version control.
 
 ### 4. Deploy `health-web`
@@ -278,7 +276,7 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 - [ ] `health-api` deployed from `apps/api/Dockerfile`
 - [ ] API env vars set (Clerk JWKS, DB, AI provider)
 - [ ] Billing env vars set on `health-api` (`STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_WEBHOOK_SECRET`, `WEB_APP_BASE_URL`), same Stripe mode; webhook endpoint `…/webhooks/stripe` created
-- [ ] Migrations applied: `pnpm --dir packages/db db:migrate` (includes `0031_billing_subscriptions`)
+- [ ] `health-api` config-as-code path set to `apps/api/railway.json` (Settings → Config-as-code) so migrations run as the pre-deploy command; verify the pre-deploy step succeeded in the deploy logs
 - [ ] `GET /health` returns 200 on API public URL
 - [ ] `GET /health/ready` returns 200 with `status: "ok"`
 - [ ] `health-web` deployed from `apps/web/Dockerfile`
@@ -304,12 +302,13 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 | `http.exception` with `auth_jwks` | Clerk JWKS config or token validation issue |
 | `http.exception` with `database` | Postgres connectivity, migration, or query failure |
 | `api_proxy` 502 in web logs     | `health-web` could not reach `health-api`; check API deploy and `NEXT_PUBLIC_API_BASE_URL` |
-| Migrations fail                 | Wrong `DATABASE_URL`, or migration order conflict |
+| Migrations fail (deploy halted at pre-deploy step) | Wrong `DATABASE_URL`, or migration order conflict; check `railway logs --service health-api --build`. Previous version keeps serving |
 | Uploads disappear after deploy  | Ephemeral filesystem; add volume or object storage  |
 
 ## What stays outside this repo
 
 - Railway dashboard service linking and domain assignment
+- The `health-api` config-as-code file path setting (`apps/api/railway.json`) — one-time dashboard step
 - Clerk production keys and allowed redirect URLs for Railway domains
 - OpenAI billing and rate limits
 - Optional staging environment (`staging` vs `production` Railway environments)
