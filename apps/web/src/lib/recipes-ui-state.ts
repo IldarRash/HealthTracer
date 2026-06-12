@@ -296,3 +296,61 @@ export function isRecommendationVisible(
 ): boolean {
   return recommendation.status === "pending" || recommendation.status === "accepted";
 }
+
+/**
+ * Returns true when the recipe was authored by the current user.
+ * User-authored recipes have `source === "user_created"` in the backend DB row,
+ * which surfaces on the `Recipe` type's `source` field.
+ */
+export function isUserOwnedRecipe(recipe: Pick<Recipe, "source">): boolean {
+  return recipe.source === "user_created";
+}
+
+/** Macro totals for a draft food-log item, scaled from per-serving values. */
+export interface ScalableMacros {
+  estimatedCalories: number;
+  proteinGrams: number;
+  carbsGrams: number;
+  fatGrams: number;
+  fiberGrams?: number | null;
+}
+
+/**
+ * Proportionally rescale macro estimates from `baseServings` to `targetServings`.
+ * This is a pure, deterministic client-side estimate — not a verified nutrition fact.
+ * Returns rounded integer values.
+ */
+export function rescaleMacros(
+  base: ScalableMacros,
+  baseServings: number,
+  targetServings: number,
+): ScalableMacros {
+  if (baseServings <= 0 || targetServings <= 0) {
+    return base;
+  }
+
+  const factor = targetServings / baseServings;
+
+  return {
+    estimatedCalories: Math.max(1, Math.round(base.estimatedCalories * factor)),
+    proteinGrams: Math.round(base.proteinGrams * factor),
+    carbsGrams: Math.round(base.carbsGrams * factor),
+    fatGrams: Math.round(base.fatGrams * factor),
+    fiberGrams:
+      base.fiberGrams != null ? Math.round(base.fiberGrams * factor) : base.fiberGrams,
+  };
+}
+
+/**
+ * Format a confidence band as a user-facing hint for macro estimates in the log draft.
+ */
+export function formatMacroConfidenceHint(confidence: RecipeConfidenceBand): string {
+  switch (confidence) {
+    case "high":
+      return "Macro values are reasonable estimates from USDA data. Edit as needed.";
+    case "medium":
+      return "These are rough estimates. Review and adjust before logging.";
+    case "low":
+      return "Low-confidence estimate — ingredient quantities may be imprecise. Edit before logging.";
+  }
+}

@@ -1,5 +1,7 @@
+"use client";
+
 import type { ExerciseCatalogMetadata } from "@health/types";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { buildExerciseCatalogDetailView } from "../../lib/exercise-catalog-ui-state";
 import { cn } from "../../lib/utils";
 import { PlanFacts } from "./plan-view";
@@ -13,8 +15,10 @@ export function ExerciseCatalogDetails({ catalog, className }: ExerciseCatalogDe
   const view = buildExerciseCatalogDetailView(catalog);
   const instructionsId = useId();
   const safetyId = useId();
+  const mediaId = useId();
 
   if (
+    view.mediaImages.length === 0 &&
     view.sections.length === 0 &&
     view.instructions.length === 0 &&
     view.safetyNotes.length === 0 &&
@@ -41,7 +45,25 @@ export function ExerciseCatalogDetails({ catalog, className }: ExerciseCatalogDe
         </p>
       ) : null}
 
-      {view.mediaFallbackLabel ? (
+      {view.mediaImages.length > 0 ? (
+        <section
+          className="exercise-catalog-media"
+          aria-labelledby={mediaId}
+        >
+          <h4 id={mediaId} className="section-label">
+            Demonstration
+          </h4>
+          <div className="exercise-catalog-media-grid">
+            {view.mediaImages.map((image, index) => (
+              <ExerciseDemoImage
+                key={image.url}
+                url={image.url}
+                alt={image.label ?? `${catalog.name} demonstration ${index + 1}`}
+              />
+            ))}
+          </div>
+        </section>
+      ) : view.mediaFallbackLabel ? (
         <p
           className="exercise-catalog-media-fallback muted-text"
           role="status"
@@ -85,5 +107,33 @@ export function ExerciseCatalogDetails({ catalog, className }: ExerciseCatalogDe
         </aside>
       ) : null}
     </div>
+  );
+}
+
+type ExerciseDemoImageProps = {
+  url: string;
+  alt: string;
+};
+
+/**
+ * Single exercise demonstration image with graceful error fallback.
+ * Images are remote GitHub raw URLs — broken/missing images are hidden rather than
+ * showing a broken icon.
+ */
+function ExerciseDemoImage({ url, alt }: ExerciseDemoImageProps) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return null;
+  }
+
+  return (
+    <img
+      src={url}
+      alt={alt}
+      loading="lazy"
+      className="exercise-catalog-media-img"
+      onError={() => setFailed(true)}
+    />
   );
 }

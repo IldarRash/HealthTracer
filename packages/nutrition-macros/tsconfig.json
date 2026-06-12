@@ -1,0 +1,9 @@
+{
+  "extends": "../config/tsconfig/node.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.mjs"]
+}

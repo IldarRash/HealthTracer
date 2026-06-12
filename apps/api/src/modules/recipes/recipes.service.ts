@@ -1,25 +1,34 @@
 import { validateProposalSafety } from "@health/ai";
 import type {
   AiProposal,
+  ComputeRecipeMacrosInput,
+  ComputeRecipeMacrosResponse,
+  CreateRecipeInput,
   CreateRecipeNutritionIncidentProposalInput,
   GenerateRecipeRecommendationsResponse,
   LogNutritionIncidentProposalPayload,
   NutritionPlanPayload,
   RawAiProposal,
   Recipe,
+  RecipeIngredient,
   RecipeListQuery,
   RecipeListResponse,
+  RecipePerServingMacros,
+  UpdateRecipeInput,
   UpdateRecipeRecommendationStatusInput,
   UserRecipeRecommendation,
   UserRecipeRecommendationListResponse,
 } from "@health/types";
 import {
+  buildRecipeDedupeKeyFromName,
   buildRecipeRecommendationProposal,
+  createRecipeInputSchema,
   createRecipeNutritionIncidentProposalInputSchema,
   getRecipeRecommendationRevisionErrors,
   logNutritionIncidentProposalPayloadSchema,
   nutritionPlanPayloadSchema,
   recipeRecommendationProposalPayloadSchema,
+  updateRecipeInputSchema,
 } from "@health/types";
 import {
   BadRequestException,
@@ -28,6 +37,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { computeRecipeMacros } from "@health/nutrition-macros";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { NutritionRepository } from "../nutrition/nutrition.repository.js";
 import { toAiProposal } from "../proposals/proposal.mapper.js";
@@ -73,7 +83,9 @@ export class RecipesService {
     private readonly recipeCatalogProvider: RecipeCatalogProvider,
   ) {}
 
-  async listRecipes(filters: RecipeListQuery): Promise<RecipeListResponse> {
+  async listRecipes(filters: RecipeListQuery, auth?: ClerkAuthContext): Promise<RecipeListResponse> {
+    const userId = auth ? (await this.usersService.resolveFromAuth(auth)).id : null;
+
     // Hydrate provider catalog on browse when the catalog appears empty (zero
     // active provider recipes). This keeps the browse path consistent with the
     // recommendations path. Lazy + idempotent: the in-flight latch prevents
@@ -84,7 +96,7 @@ export class RecipesService {
       await this.ensureProviderCatalogLoaded();
     }
 
-    const rows = await this.recipesRepository.listActiveRecipes(filters);
+    const rows = await this.recipesRepository.listActiveRecipes(filters, userId);
     let recipes = dedupeRecipesByCanonicalName(rows.map(toRecipe));
 
     if (filters.compatibleWithRestrictions?.length) {
@@ -95,6 +107,104 @@ export class RecipesService {
     }
 
     return { recipes };
+  }
+
+  async createRecipe(auth: ClerkAuthContext, input: CreateRecipeInput): Promise<Recipe> {
+    const parsed = createRecipeInputSchema.parse(input);
+    const user = await this.usersService.resolveFromAuth(auth);
+    const dedupeKey = buildRecipeDedupeKeyFromName({ name: parsed.name });
+
+    const existing = await this.recipesRepository.findUserRecipeByDedupeKey(user.id, dedupeKey);
+
+    if (existing) {
+      return toRecipe(existing);
+    }
+
+    const macroEstimates = parsed.macroEstimates
+      ? { ...parsed.macroEstimates, confidence: "high" as const }
+      : computeRecipeMacros(parsed.ingredients, parsed.servings);
+
+    const row = await this.recipesRepository.createUserRecipe({
+      userId: user.id,
+      name: parsed.name,
+      description: parsed.description,
+      ingredients: parsed.ingredients,
+      preparationSteps: parsed.preparationSteps,
+      servings: parsed.servings,
+      mealTypes: parsed.mealTypes,
+      tags: parsed.tags,
+      restrictionTags: parsed.restrictionTags,
+      allergenTags: parsed.allergenTags,
+      prepMinutes: parsed.prepMinutes ?? null,
+      cookMinutes: parsed.cookMinutes ?? null,
+      macroEstimates,
+      confidence: macroEstimates.confidence,
+      dedupeKey,
+    });
+
+    if (!row) {
+      throw new BadRequestException("Failed to create recipe.");
+    }
+
+    return toRecipe(row);
+  }
+
+  async updateRecipe(auth: ClerkAuthContext, recipeId: string, input: UpdateRecipeInput): Promise<Recipe> {
+    const parsed = updateRecipeInputSchema.parse(input);
+    const user = await this.usersService.resolveFromAuth(auth);
+    const existing = await this.recipesRepository.findOwnedRecipeById(recipeId, user.id);
+
+    if (!existing) {
+      throw new NotFoundException("Recipe not found.");
+    }
+
+    const needsMacroRecompute =
+      !parsed.macroEstimates && (parsed.ingredients !== undefined || parsed.servings !== undefined);
+
+    let resolvedMacros:
+      | (RecipePerServingMacros & { confidence: "high" | "medium" | "low" })
+      | undefined;
+
+    if (parsed.macroEstimates) {
+      resolvedMacros = { ...parsed.macroEstimates, confidence: "high" as const };
+    } else if (needsMacroRecompute) {
+      const ingredients = parsed.ingredients ?? (existing.ingredients as unknown as RecipeIngredient[]);
+      const servings = parsed.servings ?? existing.servings;
+      resolvedMacros = computeRecipeMacros(ingredients, servings);
+    }
+
+    let dedupeKey: string | undefined;
+
+    if (parsed.name !== undefined) {
+      dedupeKey = buildRecipeDedupeKeyFromName({ name: parsed.name });
+    }
+
+    const updated = await this.recipesRepository.updateUserRecipe(recipeId, user.id, {
+      ...parsed,
+      ...(resolvedMacros ? { macroEstimates: resolvedMacros, confidence: resolvedMacros.confidence } : {}),
+      ...(dedupeKey ? { dedupeKey } : {}),
+    });
+
+    if (!updated) {
+      throw new NotFoundException("Recipe not found.");
+    }
+
+    return toRecipe(updated);
+  }
+
+  async deleteRecipe(auth: ClerkAuthContext, recipeId: string): Promise<void> {
+    const user = await this.usersService.resolveFromAuth(auth);
+    const existing = await this.recipesRepository.findOwnedRecipeById(recipeId, user.id);
+
+    if (!existing) {
+      throw new NotFoundException("Recipe not found.");
+    }
+
+    await this.recipesRepository.softDeleteUserRecipe(recipeId, user.id);
+  }
+
+  computeMacros(input: ComputeRecipeMacrosInput): ComputeRecipeMacrosResponse {
+    return computeRecipeMacros(input.ingredients, input.servings);
   }
 
   async getRecipe(recipeId: string): Promise<Recipe> {
@@ -136,7 +246,7 @@ export class RecipesService {
 
     const hardFilters = await this.resolveHardFilters(user.id, activeContext.payload);
     await this.ensureProviderCatalogLoaded();
-    const catalog = await this.recipesRepository.listActiveRecipes({});
+    const catalog = await this.recipesRepository.listActiveRecipes({}, user.id);
     const ranked = catalog
       .map((row) => ({ row, recipe: toRecipe(row) }))
       .filter(({ recipe }) => isRecipeCompatibleWithHardFilters(recipe, hardFilters))

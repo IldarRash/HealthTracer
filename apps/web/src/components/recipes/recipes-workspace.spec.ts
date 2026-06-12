@@ -42,8 +42,8 @@ describe("RecipesWorkspace", () => {
     expect(workspaceSource).toContain("apiQueryKeys");
   });
 
-  it("does not contain mutations — mutations are owned by RecipeRecommendationsPanel", () => {
-    expect(workspaceSource).not.toContain("useMutation");
+  it("owns only the user-recipe delete mutation — recommendation mutations live in RecipeRecommendationsPanel", () => {
+    expect(workspaceSource).toContain("deleteRecipe");
     expect(workspaceSource).not.toContain("updateRecipeRecommendationStatus");
     expect(workspaceSource).not.toContain("generateRecipeRecommendations");
   });

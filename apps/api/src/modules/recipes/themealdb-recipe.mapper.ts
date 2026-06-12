@@ -1,4 +1,5 @@
-import type { RecipeIngredient, RecipePerServingMacros, RecipeMealType } from "@health/types";
+import type { RecipeIngredient, RecipeMealType } from "@health/types";
+import { computeRecipeMacros } from "@health/nutrition-macros";
 import {
   inferAllergenTagsFromIngredients,
   inferRestrictionTagsFromIngredients,
@@ -8,16 +9,10 @@ import {
   type ProviderRecipeDraft,
 } from "./recipe-catalog-provider.js";
 
-export const APPROXIMATE_PROVIDER_MACRO_ESTIMATES: RecipePerServingMacros = {
-  caloriesPerServing: 550,
-  proteinGramsPerServing: 25,
-  carbsGramsPerServing: 45,
-  fatGramsPerServing: 20,
-  fiberGramsPerServing: 8,
-};
-
-export const APPROXIMATE_MACRO_SOURCE =
-  "TheMealDB catalog (approximate macros, not verified nutrition facts)";
+// TheMealDB does not expose a serving count, and its ingredient amounts are for
+// the whole dish (typically a family-sized main). Assume 4 servings so the
+// USDA-computed macros are realistic per-serving values, not whole-dish totals.
+export const THEMEALDB_ASSUMED_SERVINGS = 4;
 
 const CATEGORY_MEAL_TYPE: Record<string, RecipeMealType> = {
   breakfast: "breakfast",
@@ -114,27 +109,32 @@ export function mapTheMealDbMealToProviderDraft(meal: TheMealDbMeal): ProviderRe
   const allergenTags = inferAllergenTagsFromIngredients(ingredients);
   const restrictionTags = inferRestrictionTagsFromIngredients(ingredients);
 
+  const servings = THEMEALDB_ASSUMED_SERVINGS;
+  const computed = computeRecipeMacros(ingredients, servings);
+  const { confidence, ...macroEstimates } = computed;
+
   return {
     provider: THEMEALDB_PROVIDER,
     externalId: meal.idMeal,
     name: meal.strMeal.slice(0, 160),
     description:
-      `${meal.strMeal} from TheMealDB (${category}). Macro values are approximate estimates, not verified nutrition facts.`.slice(
+      `${meal.strMeal} from TheMealDB (${category}). Macro values computed from USDA FoodData Central (estimates, not verified nutrition facts).`.slice(
         0,
         2000,
       ),
     ingredients,
     preparationSteps: parseTheMealDbPreparationSteps(meal.strInstructions),
-    servings: 1,
-    macroEstimates: { ...APPROXIMATE_PROVIDER_MACRO_ESTIMATES },
+    servings,
+    macroEstimates,
     mealTypes: mapTheMealDbCategoryToMealTypes(meal.strCategory),
     tags,
     restrictionTags,
     allergenTags,
     prepMinutes: null,
     cookMinutes: null,
-    source: APPROXIMATE_MACRO_SOURCE,
-    confidence: "low",
+    source:
+      "TheMealDB catalog — macros computed from USDA FoodData Central (estimates, not verified nutrition facts)",
+    confidence,
     provenance: {
       source: "external_provider",
       providerId: THEMEALDB_PROVIDER,

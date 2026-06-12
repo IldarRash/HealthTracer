@@ -1,10 +1,62 @@
 import { recipes, userRecipeRecommendations } from "@health/db";
-import type { RecipeListQuery } from "@health/types";
+import type {
+  RecipeIngredient,
+  RecipeListQuery,
+  RecipeMealType,
+  RecipePerServingMacros,
+} from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, count, desc, eq, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
 import type { ProviderRecipeDraft } from "./recipe-catalog-provider.js";
+
+export interface CreateUserRecipeInput {
+  userId: string;
+  name: string;
+  description: string;
+  ingredients: RecipeIngredient[];
+  preparationSteps: string[];
+  servings: number;
+  mealTypes: RecipeMealType[];
+  tags: string[];
+  restrictionTags: string[];
+  allergenTags: string[];
+  prepMinutes?: number | null;
+  cookMinutes?: number | null;
+  macroEstimates: RecipePerServingMacros;
+  confidence: "high" | "medium" | "low";
+  dedupeKey: string;
+}
+
+export interface UpdateUserRecipeInput {
+  name?: string;
+  description?: string;
+  ingredients?: RecipeIngredient[];
+  preparationSteps?: string[];
+  servings?: number;
+  mealTypes?: RecipeMealType[];
+  tags?: string[];
+  restrictionTags?: string[];
+  allergenTags?: string[];
+  prepMinutes?: number | null;
+  cookMinutes?: number | null;
+  macroEstimates?: RecipePerServingMacros;
+  confidence?: "high" | "medium" | "low";
+  dedupeKey?: string;
+}
 
 export interface CreateRecommendationInput {
   userId: string;
@@ -35,8 +87,14 @@ export class RecipesRepository {
     return row?.value ?? 0;
   }
 
-  async listActiveRecipes(filters: RecipeListQuery) {
+  async listActiveRecipes(filters: RecipeListQuery, userId?: string | null) {
     const conditions = [eq(recipes.status, "active")];
+
+    if (userId) {
+      conditions.push(or(isNull(recipes.userId), eq(recipes.userId, userId))!);
+    } else {
+      conditions.push(isNull(recipes.userId));
+    }
 
     if (filters.mealType) {
       conditions.push(
@@ -168,6 +226,149 @@ export class RecipesRepository {
     }
 
     return upserted;
+  }
+
+  async findUserRecipeByDedupeKey(userId: string, dedupeKey: string) {
+    const [row] = await this.db
+      .select()
+      .from(recipes)
+      .where(
+        and(
+          eq(recipes.userId, userId),
+          eq(recipes.dedupeKey, dedupeKey),
+          eq(recipes.status, "active"),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async findOwnedRecipeById(recipeId: string, userId: string) {
+    const [row] = await this.db
+      .select()
+      .from(recipes)
+      .where(and(eq(recipes.id, recipeId), eq(recipes.userId, userId)))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async createUserRecipe(input: CreateUserRecipeInput) {
+    const now = new Date();
+
+    const [row] = await this.db
+      .insert(recipes)
+      .values({
+        name: input.name.trim(),
+        description: input.description.trim(),
+        ingredients: input.ingredients as Record<string, unknown>[],
+        preparationSteps: input.preparationSteps,
+        servings: input.servings,
+        caloriesPerServing: input.macroEstimates.caloriesPerServing,
+        proteinGramsPerServing: input.macroEstimates.proteinGramsPerServing,
+        carbsGramsPerServing: input.macroEstimates.carbsGramsPerServing,
+        fatGramsPerServing: input.macroEstimates.fatGramsPerServing,
+        fiberGramsPerServing: input.macroEstimates.fiberGramsPerServing ?? null,
+        mealTypes: input.mealTypes,
+        tags: input.tags,
+        restrictionTags: input.restrictionTags,
+        allergenTags: input.allergenTags,
+        prepMinutes: input.prepMinutes ?? null,
+        cookMinutes: input.cookMinutes ?? null,
+        source: "user_created",
+        confidence: input.confidence,
+        status: "active",
+        userId: input.userId,
+        dedupeKey: input.dedupeKey,
+        updatedAt: now,
+      })
+      .returning();
+
+    return row ?? null;
+  }
+
+  async updateUserRecipe(recipeId: string, userId: string, input: UpdateUserRecipeInput) {
+    const now = new Date();
+    const patch: Record<string, unknown> = { updatedAt: now };
+
+    if (input.name !== undefined) {
+      patch.name = input.name.trim();
+    }
+
+    if (input.description !== undefined) {
+      patch.description = input.description.trim();
+    }
+
+    if (input.ingredients !== undefined) {
+      patch.ingredients = input.ingredients as Record<string, unknown>[];
+    }
+
+    if (input.preparationSteps !== undefined) {
+      patch.preparationSteps = input.preparationSteps;
+    }
+
+    if (input.servings !== undefined) {
+      patch.servings = input.servings;
+    }
+
+    if (input.mealTypes !== undefined) {
+      patch.mealTypes = input.mealTypes;
+    }
+
+    if (input.tags !== undefined) {
+      patch.tags = input.tags;
+    }
+
+    if (input.restrictionTags !== undefined) {
+      patch.restrictionTags = input.restrictionTags;
+    }
+
+    if (input.allergenTags !== undefined) {
+      patch.allergenTags = input.allergenTags;
+    }
+
+    if (input.prepMinutes !== undefined) {
+      patch.prepMinutes = input.prepMinutes;
+    }
+
+    if (input.cookMinutes !== undefined) {
+      patch.cookMinutes = input.cookMinutes;
+    }
+
+    if (input.macroEstimates !== undefined) {
+      patch.caloriesPerServing = input.macroEstimates.caloriesPerServing;
+      patch.proteinGramsPerServing = input.macroEstimates.proteinGramsPerServing;
+      patch.carbsGramsPerServing = input.macroEstimates.carbsGramsPerServing;
+      patch.fatGramsPerServing = input.macroEstimates.fatGramsPerServing;
+      patch.fiberGramsPerServing = input.macroEstimates.fiberGramsPerServing ?? null;
+    }
+
+    if (input.confidence !== undefined) {
+      patch.confidence = input.confidence;
+    }
+
+    if (input.dedupeKey !== undefined) {
+      patch.dedupeKey = input.dedupeKey;
+    }
+
+    const [updated] = await this.db
+      .update(recipes)
+      .set(patch as Partial<typeof recipes.$inferInsert>)
+      .where(and(eq(recipes.id, recipeId), eq(recipes.userId, userId)))
+      .returning();
+
+    return updated ?? null;
+  }
+
+  async softDeleteUserRecipe(recipeId: string, userId: string) {
+    const [updated] = await this.db
+      .update(recipes)
+      .set({ status: "archived", updatedAt: new Date() })
+      .where(and(eq(recipes.id, recipeId), eq(recipes.userId, userId)))
+      .returning();
+
+    return updated ?? null;
   }
 
   async listRecommendationsByUserId(userId: string) {

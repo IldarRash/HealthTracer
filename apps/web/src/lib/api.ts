@@ -34,6 +34,10 @@ import {
   proposalDecisionSchema,
   proposalModifyResponseSchema,
   upsertNutritionAdherenceSchema,
+  computeRecipeMacrosInputSchema,
+  computeRecipeMacrosResponseSchema,
+  createRecipeInputSchema,
+  updateRecipeInputSchema,
   recipeListQuerySchema,
   recipeListResponseSchema,
   recipeSchema,
@@ -69,6 +73,10 @@ import {
   type DeviceConnection,
   type DeviceConsent,
   type CompleteWorkoutSessionInput,
+  type ComputeRecipeMacrosInput,
+  type ComputeRecipeMacrosResponse,
+  type CreateRecipeInput,
+  type UpdateRecipeInput,
   type GenerateRecipeRecommendationsResponse,
   type GrantDeviceConsentInput,
   type Goal,
@@ -962,6 +970,46 @@ export async function getRecipe(
   recipeId: string,
 ): Promise<ApiResult<Recipe>> {
   return apiFetch(`/recipes/${recipeId}`, token, recipeSchema);
+}
+
+export async function createRecipe(
+  token: string,
+  input: CreateRecipeInput,
+): Promise<ApiResult<Recipe>> {
+  const body = createRecipeInputSchema.parse(input);
+  return apiFetch("/recipes", token, recipeSchema, { method: "POST", body });
+}
+
+export async function updateRecipe(
+  token: string,
+  recipeId: string,
+  input: UpdateRecipeInput,
+): Promise<ApiResult<Recipe>> {
+  const body = updateRecipeInputSchema.parse(input);
+  return apiFetch(`/recipes/${encodeURIComponent(recipeId)}`, token, recipeSchema, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export async function deleteRecipe(
+  token: string,
+  recipeId: string,
+): Promise<ApiResult<void>> {
+  return apiFetch(`/recipes/${encodeURIComponent(recipeId)}`, token, z.void(), {
+    method: "DELETE",
+  });
+}
+
+export async function computeRecipeMacros(
+  token: string,
+  input: ComputeRecipeMacrosInput,
+): Promise<ApiResult<ComputeRecipeMacrosResponse>> {
+  const body = computeRecipeMacrosInputSchema.parse(input);
+  return apiFetch("/recipes/compute-macros", token, computeRecipeMacrosResponseSchema, {
+    method: "POST",
+    body,
+  });
 }
 
 export async function listRecipeRecommendations(

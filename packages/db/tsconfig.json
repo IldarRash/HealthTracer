@@ -4,5 +4,5 @@
     "allowJs": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "drizzle.config.ts", "scripts/**/*.mjs"]
+  "include": ["src/**/*.ts", "drizzle.config.ts", "scripts/**/*.mjs", "scripts/**/*.ts"]
 }

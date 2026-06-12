@@ -105,4 +105,23 @@ describe("dedupeRecipesByCanonicalName", () => {
   it("handles an empty list", () => {
     expect(dedupeRecipesByCanonicalName([])).toEqual([]);
   });
+
+  it("never dedupes away user-authored recipes, even on a canonical-name collision", () => {
+    const catalog = makeRecipe("Lentil Power Bowl");
+    const userOwned = { ...makeRecipe("Lentil power bowl"), source: "user_created" };
+    const result = dedupeRecipesByCanonicalName([catalog, userOwned]);
+    expect(result).toHaveLength(2);
+    expect(result).toContain(catalog);
+    expect(result).toContain(userOwned);
+  });
+
+  it("still dedupes catalog rows when a user recipe with the same name is present", () => {
+    const userOwned = { ...makeRecipe("Chicken Curry"), source: "user_created" };
+    const provider = { ...makeRecipe("Chicken Curry", "themealdb"), source: "provider_catalog" };
+    const curated = { ...makeRecipe("Chicken Curry"), source: "Curated catalog" };
+    const result = dedupeRecipesByCanonicalName([userOwned, provider, curated]);
+    expect(result).toHaveLength(2);
+    expect(result).toContain(userOwned);
+    expect(result).toContain(curated);
+  });
 });

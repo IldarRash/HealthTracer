@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -38,15 +39,21 @@ export const recipes = pgTable(
     confidence: text("confidence"),
     provenance: jsonb("provenance").$type<Record<string, unknown>>(),
     status: text("status").notNull().default("active"),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    dedupeKey: text("dedupe_key"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     statusIdx: index("recipes_status_idx").on(table.status),
+    userIdIdx: index("recipes_user_id_idx").on(table.userId),
     providerExternalIdx: uniqueIndex("recipes_provider_external_id_idx").on(
       table.provider,
       table.externalId,
     ),
+    userDedupeIdx: uniqueIndex("recipes_user_dedupe_key_idx")
+      .on(table.userId, table.dedupeKey)
+      .where(sql`${table.userId} IS NOT NULL`),
   }),
 );
 

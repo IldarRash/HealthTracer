@@ -172,6 +172,8 @@ web IA, and the trigger for revisiting.
 | Feature | Brief | Depends on |
 |---------|-------|------------|
 | Editable proposals + performed log | [editable-proposals-performed-log.md](features/editable-proposals-performed-log.md) | Proposals, workouts, nutrition, Today, progress |
+| Real catalog data (exercises/recipes + user authoring) | [real-catalog-data.md](features/real-catalog-data.md) | Exercises, recipes, nutrition plan/revisions, proposals |
+| Body analysis + deeper nutrition (gap analysis) — archived | [archive/body-and-nutrition/00-overview.md](features/archive/body-and-nutrition/00-overview.md) | Chat attachments, profiles, nutrition plan/revisions, proposals, design system |
 | LLM live-contract hardening (strict wire schemas + catalog-aware workout) | [llm-live-contract-hardening.md](features/llm-live-contract-hardening.md) | AI fan-out pipeline, exercise catalog, types |
 | Pipeline observability (stdout token/cost + per-turn diagnostics) | [pipeline-observability.md](features/pipeline-observability.md) | AI orchestrator, chat module |
 | No-stubs program — conformance follow-ups | [no-stubs-followups.md](features/no-stubs-followups.md) | Chat, types, web chat UI, ai-behavior config |

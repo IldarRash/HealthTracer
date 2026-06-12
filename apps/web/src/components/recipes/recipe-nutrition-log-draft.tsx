@@ -17,13 +17,22 @@ import {
   sumNutritionItemCalories,
   sumNutritionItemMacros,
 } from "../../lib/action-proposal-ui-state";
-import { apiQueryKeys, buildRecipeNutritionIncidentProposal } from "../../lib/api";
+import {
+  apiQueryKeys,
+  buildRecipeNutritionIncidentProposal,
+} from "../../lib/api";
+import { formatMacroConfidenceHint, rescaleMacros } from "../../lib/recipes-ui-state";
 import { useInlineProposalActions } from "../../lib/use-inline-proposal-actions";
 import { Button, LoadingState } from "../ui";
 
 type RecipeNutritionLogDraftProps = {
   recommendationId: string;
   recipeName: string;
+  /** Per-serving baseline macros — calories/protein/carbs/fat are each one serving. */
+  recipeCalories?: number;
+  recipeProtein?: number;
+  recipeCarbs?: number;
+  recipeFat?: number;
   onClose: () => void;
   onAccepted?: () => void;
 };
@@ -36,6 +45,10 @@ type RecipeNutritionLogDraftContentProps = {
   proposal: AiProposal;
   recommendationId: string;
   recipeName: string;
+  recipeCalories?: number;
+  recipeProtein?: number;
+  recipeCarbs?: number;
+  recipeFat?: number;
   onClose: () => void;
   onAccepted?: () => void;
 };
@@ -44,6 +57,10 @@ function RecipeNutritionLogDraftContent({
   proposal,
   recommendationId,
   recipeName,
+  recipeCalories,
+  recipeProtein,
+  recipeCarbs,
+  recipeFat,
   onClose,
   onAccepted,
 }: RecipeNutritionLogDraftContentProps) {
@@ -55,6 +72,7 @@ function RecipeNutritionLogDraftContent({
   const [form, setForm] = useState(() =>
     parsedPayload ? createNutritionIncidentFormState(parsedPayload) : null,
   );
+  const [portionServings, setPortionServings] = useState<string>("1");
 
   useEffect(() => {
     if (parsedPayload) {
@@ -90,6 +108,7 @@ function RecipeNutritionLogDraftContent({
   const previewCalories = sumNutritionItemCalories(form.items);
   const previewMacros = sumNutritionItemMacros(form.items);
   const confidenceNotice = nutritionConfidenceNotice(form.confidence, form.lowConfidenceNotice);
+  const macroConfidenceHint = formatMacroConfidenceHint(form.confidence);
   const isInvalidPending =
     proposal.status === "pending" && proposal.validationStatus === "invalid";
   const chatThreadHref = proposal.threadId
@@ -111,6 +130,47 @@ function RecipeNutritionLogDraftContent({
         items,
         hasUserEdited: true,
       };
+    });
+  };
+
+  /**
+   * When the user changes portion size, proportionally rescale macros from the
+   * per-recipe baseline. Falls back to the current item values if no baseline is available.
+   * This is a client-side estimate — the user can still hand-edit all fields.
+   */
+  const applyPortionRescale = (targetServingsStr: string) => {
+    setPortionServings(targetServingsStr);
+    const target = Number.parseFloat(targetServingsStr);
+    if (!isFinite(target) || target <= 0) return;
+    if (!recipeCalories) return;
+
+    // Baseline is always 1 serving — the per-serving values passed in from the recipe.
+    const baseMacros = {
+      estimatedCalories: recipeCalories,
+      proteinGrams: recipeProtein ?? 0,
+      carbsGrams: recipeCarbs ?? 0,
+      fatGrams: recipeFat ?? 0,
+    };
+
+    const scaled = rescaleMacros(baseMacros, 1, target);
+
+    setForm((current) => {
+      if (!current || current.items.length === 0) return current;
+      // Update the first item (recipe item) with rescaled values;
+      // additional user-added items are left as-is.
+      const items = current.items.map((item, idx) =>
+        idx === 0
+          ? {
+              ...item,
+              quantity: `${target} serving${target === 1 ? "" : "s"}`,
+              calories: scaled.estimatedCalories,
+              proteinGrams: scaled.proteinGrams,
+              carbsGrams: scaled.carbsGrams,
+              fatGrams: scaled.fatGrams,
+            }
+          : item,
+      );
+      return { ...current, items, hasUserEdited: true };
     });
   };
 
@@ -151,6 +211,27 @@ function RecipeNutritionLogDraftContent({
         </div>
       ) : null}
 
+      {recipeCalories != null ? (
+        <div className="recipe-portion-control">
+          <div className="form-field">
+            <label className="proposal-meta" htmlFor={`${draftId}-portion`}>
+              Portion (servings)
+            </label>
+            <input
+              id={`${draftId}-portion`}
+              className="form-input"
+              inputMode="decimal"
+              value={portionServings}
+              disabled={isActionPending}
+              onChange={(e) => applyPortionRescale(e.target.value)}
+            />
+          </div>
+          <p className="proposal-meta recipe-portion-hint">
+            {macroConfidenceHint}
+          </p>
+        </div>
+      ) : null}
+
       <div className="nutrition-incident-items">
         {form.items.map((item, index) => (
           <div key={`${recommendationId}-item-${index}`} className="nutrition-incident-item-row">
@@ -180,7 +261,7 @@ function RecipeNutritionLogDraftContent({
             </div>
             <div className="form-field">
               <label className="proposal-meta" htmlFor={`recipe-item-cal-${recommendationId}-${index}`}>
-                Calories
+                Calories (kcal)
               </label>
               <input
                 id={`recipe-item-cal-${recommendationId}-${index}`}
@@ -192,6 +273,60 @@ function RecipeNutritionLogDraftContent({
                   const value = event.target.value.trim();
                   updateItem(index, {
                     calories: value.length > 0 ? Number.parseInt(value, 10) : undefined,
+                  });
+                }}
+              />
+            </div>
+            <div className="form-field">
+              <label className="proposal-meta" htmlFor={`recipe-item-prot-${recommendationId}-${index}`}>
+                Protein (g)
+              </label>
+              <input
+                id={`recipe-item-prot-${recommendationId}-${index}`}
+                className="form-input"
+                inputMode="numeric"
+                value={item.proteinGrams ?? ""}
+                disabled={isActionPending}
+                onChange={(event) => {
+                  const value = event.target.value.trim();
+                  updateItem(index, {
+                    proteinGrams: value.length > 0 ? Number.parseInt(value, 10) : undefined,
+                  });
+                }}
+              />
+            </div>
+            <div className="form-field">
+              <label className="proposal-meta" htmlFor={`recipe-item-carbs-${recommendationId}-${index}`}>
+                Carbs (g)
+              </label>
+              <input
+                id={`recipe-item-carbs-${recommendationId}-${index}`}
+                className="form-input"
+                inputMode="numeric"
+                value={item.carbsGrams ?? ""}
+                disabled={isActionPending}
+                onChange={(event) => {
+                  const value = event.target.value.trim();
+                  updateItem(index, {
+                    carbsGrams: value.length > 0 ? Number.parseInt(value, 10) : undefined,
+                  });
+                }}
+              />
+            </div>
+            <div className="form-field">
+              <label className="proposal-meta" htmlFor={`recipe-item-fat-${recommendationId}-${index}`}>
+                Fat (g)
+              </label>
+              <input
+                id={`recipe-item-fat-${recommendationId}-${index}`}
+                className="form-input"
+                inputMode="numeric"
+                value={item.fatGrams ?? ""}
+                disabled={isActionPending}
+                onChange={(event) => {
+                  const value = event.target.value.trim();
+                  updateItem(index, {
+                    fatGrams: value.length > 0 ? Number.parseInt(value, 10) : undefined,
                   });
                 }}
               />
@@ -252,6 +387,7 @@ function RecipeNutritionLogDraftContent({
             : "Food log could not be saved."}
         </p>
       ) : null}
+
     </div>
   );
 }
@@ -259,6 +395,10 @@ function RecipeNutritionLogDraftContent({
 export function RecipeNutritionLogDraft({
   recommendationId,
   recipeName,
+  recipeCalories,
+  recipeProtein,
+  recipeCarbs,
+  recipeFat,
   onClose,
   onAccepted,
 }: RecipeNutritionLogDraftProps) {
@@ -317,6 +457,10 @@ export function RecipeNutritionLogDraft({
       proposal={proposalQuery.data}
       recommendationId={recommendationId}
       recipeName={recipeName}
+      recipeCalories={recipeCalories}
+      recipeProtein={recipeProtein}
+      recipeCarbs={recipeCarbs}
+      recipeFat={recipeFat}
       onClose={onClose}
       onAccepted={onAccepted}
     />

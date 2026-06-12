@@ -1072,6 +1072,71 @@ export type {
   RecipeRecommendationProposalPayload,
 } from "./ai-proposal.js";
 
+// ---------------------------------------------------------------------------
+// User-authored recipe creation / update
+// ---------------------------------------------------------------------------
+
+export const createRecipeInputSchema = z.object({
+  name: z.string().min(1).max(160),
+  description: z.string().min(1).max(2000),
+  ingredients: z.array(recipeIngredientSchema).min(1).max(50),
+  preparationSteps: z.array(z.string().min(1).max(1000)).min(1).max(30),
+  servings: z.number().int().positive().max(20),
+  mealTypes: z.array(recipeMealTypeSchema).min(1).max(4),
+  tags: z.array(z.string().min(1).max(80)).max(20).default([]),
+  restrictionTags: z.array(z.string().min(1).max(80)).max(20).default([]),
+  allergenTags: z.array(z.string().min(1).max(80)).max(20).default([]),
+  prepMinutes: z.number().int().nonnegative().max(600).nullable().optional(),
+  cookMinutes: z.number().int().nonnegative().max(600).nullable().optional(),
+  macroEstimates: recipePerServingMacrosSchema.optional(),
+});
+
+export type CreateRecipeInput = z.infer<typeof createRecipeInputSchema>;
+
+export const updateRecipeInputSchema = z.object({
+  name: z.string().min(1).max(160).optional(),
+  description: z.string().min(1).max(2000).optional(),
+  ingredients: z.array(recipeIngredientSchema).min(1).max(50).optional(),
+  preparationSteps: z.array(z.string().min(1).max(1000)).min(1).max(30).optional(),
+  servings: z.number().int().positive().max(20).optional(),
+  mealTypes: z.array(recipeMealTypeSchema).min(1).max(4).optional(),
+  tags: z.array(z.string().min(1).max(80)).max(20).optional(),
+  restrictionTags: z.array(z.string().min(1).max(80)).max(20).optional(),
+  allergenTags: z.array(z.string().min(1).max(80)).max(20).optional(),
+  prepMinutes: z.number().int().nonnegative().max(600).nullable().optional(),
+  cookMinutes: z.number().int().nonnegative().max(600).nullable().optional(),
+  macroEstimates: recipePerServingMacrosSchema.optional(),
+});
+
+export type UpdateRecipeInput = z.infer<typeof updateRecipeInputSchema>;
+
+export const computeRecipeMacrosInputSchema = z.object({
+  ingredients: z.array(recipeIngredientSchema).min(1).max(50),
+  servings: z.number().int().positive().max(20),
+});
+
+export type ComputeRecipeMacrosInput = z.infer<typeof computeRecipeMacrosInputSchema>;
+
+export const computeRecipeMacrosResponseSchema = recipePerServingMacrosSchema.extend({
+  confidence: z.enum(["high", "medium", "low"]),
+});
+
+export type ComputeRecipeMacrosResponse = z.infer<typeof computeRecipeMacrosResponseSchema>;
+
+export function normalizeRecipeName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/[-_]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function buildRecipeDedupeKeyFromName(input: { name: string }): string {
+  return normalizeRecipeName(input.name);
+}
+
 export {
   calculateTodayAdherence,
   filterChecklistItemsConflictingWithHabitItems,
