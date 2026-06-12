@@ -41,8 +41,16 @@ const ATTACHMENT_SUMMARY_LINE_PATTERN =
 
 const DEFAULT_ATTACHMENT_ONLY_MESSAGE = "Shared attachment(s) for coaching review.";
 
+/**
+ * Web-origin path for an attachment image used directly as an <img src>.
+ *
+ * A plain <img> cannot attach the Clerk bearer token, so this points at the
+ * dedicated server-side proxy route (app/api-proxy/chat/attachments/[attachmentId]/content)
+ * which mints the token from the session cookie and forwards to the API's
+ * GET /chat/attachments/:id/content. Ownership stays enforced by the API.
+ */
 export function buildChatAttachmentContentPath(attachmentId: string): string {
-  return `/chat/attachments/${encodeURIComponent(attachmentId)}/content`;
+  return `/api-proxy/chat/attachments/${encodeURIComponent(attachmentId)}/content`;
 }
 
 export function resolveChatMessageAttachmentPreviews(

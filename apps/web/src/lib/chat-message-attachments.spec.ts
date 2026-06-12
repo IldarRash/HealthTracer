@@ -77,14 +77,19 @@ const EXPIRED_IMAGE_ATT: ChatMessage["attachments"][number] = {
 // ---------------------------------------------------------------------------
 
 describe("buildChatAttachmentContentPath", () => {
-  it("returns the /content path for the given id", () => {
+  it("returns the authenticated web-origin proxy path for the given id", () => {
+    // Must hit the dedicated /api-proxy route (which mints the Clerk token
+    // server-side), NOT the bare API path — a plain <img> cannot send a bearer
+    // token, and the bare path on the web origin returns SPA HTML.
     expect(buildChatAttachmentContentPath("abc-123")).toBe(
-      "/chat/attachments/abc-123/content",
+      "/api-proxy/chat/attachments/abc-123/content",
     );
   });
 
   it("percent-encodes special characters in the id", () => {
-    expect(buildChatAttachmentContentPath("a/b")).toBe("/chat/attachments/a%2Fb/content");
+    expect(buildChatAttachmentContentPath("a/b")).toBe(
+      "/api-proxy/chat/attachments/a%2Fb/content",
+    );
   });
 });
 
