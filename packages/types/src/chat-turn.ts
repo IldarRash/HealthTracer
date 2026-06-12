@@ -129,7 +129,9 @@ export const chatTurnResponseSchema = z.object({
    * Suggested quick-action chips for LLM-backed turns only.
    * Derived deterministically from the selected domains in the fan-out plan.
    * Absent on pre-AI gate turns (crisis, quota, direct-path, explainer-no-proposal)
-   * and on turnError turns.
+   * and on turnError turns. Also persisted in assistant message
+   * metadata.suggestedQuickActions so chips survive a thread reload
+   * (see parseChatMessageSuggestedQuickActions).
    */
   suggestedQuickActions: z.array(suggestedQuickActionSchema).optional(),
 });
@@ -140,32 +142,57 @@ export type ChatTurnResponse = z.infer<typeof chatTurnResponseSchema>;
 // a second import from ai-proposal.ts.
 export type { AiProposal };
 
+/**
+ * Parse persisted quick-action chips from an assistant message's metadata field
+ * (metadata.suggestedQuickActions). Returns the non-empty parsed array if
+ * present and valid, null otherwise. Tolerant of unknown or missing keys —
+ * never throws. Mirrors parseChatMessageTurnError below.
+ */
+export function parseChatMessageSuggestedQuickActions(
+  metadata: Record<string, unknown> | null | undefined,
+): SuggestedQuickAction[] | null {
+  if (!metadata || !Array.isArray(metadata.suggestedQuickActions)) {
+    return null;
+  }
+
+  const parsed = z.array(suggestedQuickActionSchema).safeParse(metadata.suggestedQuickActions);
+  return parsed.success && parsed.data.length > 0 ? parsed.data : null;
+}
+
 // ---------------------------------------------------------------------------
 // Degraded-turn metadata — stored in assistant message metadata.turnDegraded
 //
-// Semantic split (mutually exclusive — ChatService enforces this):
-//   turnError    = no usable reply produced. Content is persisted as " " (space)
-//                  and the frontend renders an error card instead of coach prose.
-//                  Reasons: decision_failed, reply_blocked.
-//   turnDegraded = a usable reply was persisted, but some pipeline stage degraded
-//                  (quality marker). No error card — the reply is shown as-is.
+// PERMANENT SPLIT (intentional, not a refactor leftover). The two contracts
+// encode different turn outcomes and are mutually exclusive — ChatService
+// enforces this when persisting the assistant message:
 //
-// When turnError is set, turnDegraded is NOT written. When only a stage degrades
-// (but a reply is still available), only turnDegraded is written.
+//   turnError    = reply ABSENT. The pipeline could not produce an honest reply;
+//                  content is persisted as " " (space placeholder) and the
+//                  frontend renders an error card with Retry instead of coach
+//                  prose. Reasons: decision_failed, reply_blocked.
+//   turnDegraded = reply PRESENT. A usable reply was persisted but some pipeline
+//                  stage degraded (quality/telemetry marker only). No error card
+//                  — the reply is shown as-is. Reasons: parse_failed,
+//                  provider_error.
+//
+// The boundary is exactly reply-present vs reply-absent, and the reason enums
+// are disjoint by contract. When turnError is set, turnDegraded is never
+// written; when only a stage degrades (reply still available), only
+// turnDegraded is written.
 // ---------------------------------------------------------------------------
 
 /**
- * Reason codes for a degraded AI turn.
- * - reply_blocked: reply safety validation blocked the reply (proposals dropped)
- * - parse_failed: all domain LLMs degraded (parse/output failure)
- * - provider_error: upstream LLM provider error
- * - decision_failed: decision-maker failed after retry (no honest reply available)
+ * Reason codes for a degraded-but-replied AI turn (reply present).
+ * - parse_failed: all domain LLMs degraded (parse/output failure) but the
+ *   decision-maker still synthesized a usable reply
+ * - provider_error: upstream LLM provider error on a non-fatal stage
+ *
+ * Reply-absent failures (decision_failed, reply_blocked) are NOT degraded
+ * reasons — they are turnError reasons (chatTurnErrorSchema above).
  */
 export const chatTurnDegradedReasonSchema = z.enum([
-  "reply_blocked",
   "parse_failed",
   "provider_error",
-  "decision_failed",
 ]);
 
 export type ChatTurnDegradedReason = z.infer<typeof chatTurnDegradedReasonSchema>;

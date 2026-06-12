@@ -14,6 +14,11 @@ describe("Attachment preview primitive contracts", () => {
     expect(attachmentPreviewSource).toContain("aria-label={`${fileName} file`}");
   });
 
+  it("renders the design-system doc Icon as the no-preview fallback (no emoji)", () => {
+    expect(attachmentPreviewSource).toContain('<Icon name="doc"');
+    expect(attachmentPreviewSource).not.toContain("📄");
+  });
+
   it("exposes status badge aria-label with optional context", () => {
     expect(attachmentPreviewSource).toContain("AttachmentStatusBadge");
     expect(attachmentPreviewSource).toContain("aria-label={ariaLabel}");

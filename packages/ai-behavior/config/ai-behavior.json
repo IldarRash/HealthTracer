@@ -2,7 +2,11 @@
   "version": 1,
   "capabilities": [],
   "chat": {
-    "emptyAttachmentMessage": "Shared attachment(s) for coaching review."
+    "emptyAttachmentMessage": "Shared attachment(s) for coaching review.",
+    "quotaLimitReply": {
+      "en": "You've reached today's free AI message limit — upgrade to Pro for unlimited coaching.",
+      "ru": "Вы достигли дневного лимита бесплатных сообщений ИИ-коуча — перейдите на Pro для безлимитного коучинга."
+    }
   },
   "directPaths": {
     "enabled": true,

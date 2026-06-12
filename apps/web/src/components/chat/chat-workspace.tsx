@@ -2,7 +2,7 @@
 
 import { useTranslations, useLocale } from "next-intl";
 import { useAuth } from "@clerk/nextjs";
-import type { AiProposal, ChatTurnResponse, ProposalModifyResponse, SuggestedQuickAction } from "@health/types";
+import type { AiProposal, ChatTurnResponse, ProposalModifyResponse } from "@health/types";
 import { MAX_CHAT_USER_MESSAGE_CHARS } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -31,7 +31,6 @@ import {
 } from "../../lib/chat-direct-path-ui-state";
 import {
   findPrecedingUserMessage,
-  resolveChatMessageDegradedTurn,
   resolveChatMessageTurnError,
 } from "../../lib/chat-degraded-ui-state";
 import { useChatAutoScroll } from "../../lib/use-chat-auto-scroll";
@@ -44,6 +43,7 @@ import {
   createOptimisticUserMessage,
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
+  resolveChatMessageSuggestedQuickActions,
   resolveChatMessageWeeklyReview,
   resolvePrimaryThreadId,
   SUGGESTED_CHAT_PROMPT_DEFINITIONS,
@@ -125,9 +125,6 @@ export function ChatWorkspace() {
   const [pendingRevisionSend, setPendingRevisionSend] =
     useState<ProposalRevisionChatSend | null>(null);
   const [composerAttachments, setComposerAttachments] = useState<ChatComposerAttachmentDraft[]>(
-    [],
-  );
-  const [liveSuggestedQuickActions, setLiveSuggestedQuickActions] = useState<SuggestedQuickAction[]>(
     [],
   );
   /**
@@ -256,7 +253,6 @@ export function ChatWorkspace() {
     setLocalProposals([]);
     setOptimisticMessage(null);
     setPendingRevisionSend(null);
-    setLiveSuggestedQuickActions([]);
     setChatBodyFlowStep(null);
     setComposerAttachments((current) => {
       for (const attachment of current) {
@@ -361,12 +357,9 @@ export function ChatWorkspace() {
       }
 
       setLocalProposals(turn.proposals);
-      // Capture quick actions from this turn (only on non-error turns).
-      setLiveSuggestedQuickActions(
-        !turn.turnError && turn.suggestedQuickActions?.length
-          ? turn.suggestedQuickActions
-          : [],
-      );
+      // Quick-action chips are NOT captured here: they render from the persisted
+      // assistant message metadata (resolveChatMessageSuggestedQuickActions) once
+      // the thread query refetch below delivers the message, so they survive reload.
       void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
       void queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
       void queryClient.invalidateQueries({ queryKey: ["proposals", turn.thread.id] });
@@ -903,9 +896,6 @@ export function ChatWorkspace() {
               const directPathFeedback = isUser
                 ? null
                 : resolveChatMessageDirectPathFeedback(message);
-              const degradedTurn = isUser
-                ? null
-                : resolveChatMessageDegradedTurn(message);
               const messageTurnError = isUser
                 ? null
                 : resolveChatMessageTurnError(message);
@@ -914,6 +904,11 @@ export function ChatWorkspace() {
                 !isUser &&
                 !isSendPending &&
                 messageIndex === messages.length - 1;
+              // Chips come from persisted assistant metadata so they survive reload;
+              // absent by backend contract when none were produced or on turnError turns.
+              const suggestedQuickActions = isLatestAssistantMessage
+                ? resolveChatMessageSuggestedQuickActions(message)
+                : null;
 
               // Body-flow: show PhotoStripMsg instead of generic previews for user
               // messages that carry body-analysis photos (3 images in body flow context).
@@ -974,21 +969,6 @@ export function ChatWorkspace() {
                               }
                             }}
                           />
-                        ) : !isUser && degradedTurn && !messageText.trim() ? (
-                          <ChatTurnErrorCard
-                            onRetry={() => {
-                              const precedingText = findPrecedingUserMessage(messages, messageIndex);
-                              if (precedingText) {
-                                void sendMessageStreaming(precedingText);
-                              }
-                            }}
-                            onEditRequest={() => {
-                              const precedingText = findPrecedingUserMessage(messages, messageIndex);
-                              if (precedingText) {
-                                setDraft(precedingText);
-                              }
-                            }}
-                          />
                         ) : (!isUser && messageText ? <ChatMessageMarkdown>{messageText}</ChatMessageMarkdown> : null)}
                         {directPathFeedback ? (
                           <p className="notice notice-inline" role="status">
@@ -1026,10 +1006,10 @@ export function ChatWorkspace() {
                     />
                   ) : null}
 
-                  {/* Quick-action chips — latest assistant message only, no turnError */}
-                  {isLatestAssistantMessage && !messageTurnError && liveSuggestedQuickActions.length > 0 ? (
+                  {/* Quick-action chips — latest assistant message only, from persisted metadata */}
+                  {suggestedQuickActions ? (
                     <ChatQuickActionChips
-                      actions={liveSuggestedQuickActions}
+                      actions={suggestedQuickActions}
                       disabled={isSendPending}
                       onActionSelect={(messageText) => {
                         void sendMessageStreaming(messageText);

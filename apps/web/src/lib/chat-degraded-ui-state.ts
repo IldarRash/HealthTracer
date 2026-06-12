@@ -1,32 +1,15 @@
-import { parseChatMessageDegradedTurn, parseChatMessageTurnError } from "@health/types";
-import type { ChatMessageDegradedTurn, ChatTurnError } from "@health/types";
+import { parseChatMessageTurnError } from "@health/types";
+import type { ChatTurnError } from "@health/types";
 import type { DisplayChatMessage } from "./chat-ui-state.js";
-
-/**
- * Resolve whether an assistant message represents a degraded turn.
- * Returns the parsed degraded-turn object if the message is an assistant message
- * with a valid turnDegraded metadata entry; null otherwise.
- */
-export function resolveChatMessageDegradedTurn(
-  message: Pick<DisplayChatMessage, "role" | "metadata">,
-): ChatMessageDegradedTurn | null {
-  if (message.role !== "assistant") {
-    return null;
-  }
-
-  const meta = message.metadata;
-  if (!meta || typeof meta !== "object") {
-    return null;
-  }
-
-  return parseChatMessageDegradedTurn(meta as Record<string, unknown>);
-}
 
 /**
  * Resolve whether an assistant message has a turnError (decision_failed / reply_blocked).
  * Returns the parsed ChatTurnError if present and valid, null otherwise.
- * Distinct from the older turnDegraded path — turnError is the new honest-failure contract
- * stored in metadata.turnError.
+ *
+ * turnError is the reply-ABSENT honest-failure contract (metadata.turnError) and the
+ * single error-card path. Its counterpart, metadata.turnDegraded (reply PRESENT,
+ * telemetry-only), is deliberately not consumed by the web UI — the persisted reply
+ * is shown as-is.
  */
 export function resolveChatMessageTurnError(
   message: Pick<DisplayChatMessage, "role" | "metadata">,

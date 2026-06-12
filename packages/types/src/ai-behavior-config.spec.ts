@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDefaultAiBehaviorConfig,
+  DEFAULT_QUOTA_LIMIT_REPLY,
   mergeCapabilityConfigOverrides,
   normalizeAiBehaviorConfig,
   resolveLoadedAiBehaviorConfig,
   resolveProposalRevisionCapabilityId,
+  resolveQuotaLimitReply,
   safeParseAiBehaviorConfig,
   validateAiBehaviorConfig,
   type AiBehaviorConfig,
@@ -306,5 +308,48 @@ describe("ai behavior config", () => {
       shouldTriggerWellbeingCheckinProposal("custom low mood phrase today", false, config),
     ).toBe(true);
     expect(shouldTriggerWellbeingCheckinProposal("I feel bad today", false, config)).toBe(false);
+  });
+});
+
+describe("chat.quotaLimitReply (deterministic quota gate copy)", () => {
+  it("defaults include the bilingual quota reply", () => {
+    const defaults = buildDefaultAiBehaviorConfig();
+
+    expect(defaults.chat.quotaLimitReply).toEqual(DEFAULT_QUOTA_LIMIT_REPLY);
+    expect(defaults.chat.quotaLimitReply.en.length).toBeGreaterThan(0);
+    expect(defaults.chat.quotaLimitReply.ru.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the default reply when the file config omits the key (fail-closed)", () => {
+    const parsed = safeParseAiBehaviorConfig({
+      ...buildDefaultAiBehaviorConfig(),
+      chat: { emptyAttachmentMessage: "Attachment." },
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.chat.quotaLimitReply).toEqual(DEFAULT_QUOTA_LIMIT_REPLY);
+    }
+  });
+
+  it("honors file-config overrides for both languages", () => {
+    const normalized = normalizeAiBehaviorConfig({
+      chat: {
+        emptyAttachmentMessage: "Attachment.",
+        quotaLimitReply: { en: "Custom EN quota copy.", ru: "Кастомный лимит." },
+      },
+    });
+
+    expect(resolveQuotaLimitReply(normalized.chat, "en")).toBe("Custom EN quota copy.");
+    expect(resolveQuotaLimitReply(normalized.chat, "ru")).toBe("Кастомный лимит.");
+  });
+
+  it("resolveQuotaLimitReply falls back to English for unknown/null languages", () => {
+    const chat = buildDefaultAiBehaviorConfig().chat;
+
+    expect(resolveQuotaLimitReply(chat, null)).toBe(DEFAULT_QUOTA_LIMIT_REPLY.en);
+    expect(resolveQuotaLimitReply(chat, undefined)).toBe(DEFAULT_QUOTA_LIMIT_REPLY.en);
+    expect(resolveQuotaLimitReply(chat, "de")).toBe(DEFAULT_QUOTA_LIMIT_REPLY.en);
+    expect(resolveQuotaLimitReply(chat, "ru")).toBe(DEFAULT_QUOTA_LIMIT_REPLY.ru);
   });
 });
