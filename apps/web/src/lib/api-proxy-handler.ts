@@ -92,6 +92,13 @@ export async function proxyApiRequest(
       responseHeaders.set("content-type", contentType);
     }
 
+    // Respect upstream cache semantics (e.g. `private, no-store` on attachment
+    // content). The proxy never adds caching of its own.
+    const cacheControl = upstreamResponse.headers.get("cache-control");
+    if (cacheControl) {
+      responseHeaders.set("cache-control", cacheControl);
+    }
+
     const responseBody: ReadableStream<Uint8Array> | ArrayBuffer =
       upstreamStatus === 502 && upstreamResponse.status === 0
         ? new TextEncoder().encode(

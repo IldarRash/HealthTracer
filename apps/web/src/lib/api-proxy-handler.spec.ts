@@ -343,6 +343,53 @@ describe("api proxy handler", () => {
     expect(end.done).toBe(true);
   });
 
+  it("passes the upstream cache-control header through and never invents one", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () => {
+      return new Response(new Uint8Array([0xff, 0xd8]), {
+        status: 200,
+        headers: {
+          "content-type": "image/jpeg",
+          "cache-control": "private, no-store",
+          [REQUEST_ID_HEADER]: requestId,
+        },
+      });
+    });
+
+    const result = await proxyApiRequest({
+      method: "GET",
+      pathSegments: ["chat", "attachments", "abc", "content"],
+      search: "",
+      headers: new Headers({ [REQUEST_ID_HEADER]: requestId }),
+      body: null,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("private, no-store");
+
+    // No upstream cache-control → none on the proxied response either.
+    const fetchMockNoCache = vi.fn(async () => {
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json", [REQUEST_ID_HEADER]: requestId },
+      });
+    });
+
+    const resultNoCache = await proxyApiRequest({
+      method: "GET",
+      pathSegments: ["users", "me"],
+      search: "",
+      headers: new Headers({ [REQUEST_ID_HEADER]: requestId }),
+      body: null,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMockNoCache as typeof fetch,
+    });
+
+    expect(resultNoCache.headers.get("cache-control")).toBeNull();
+  });
+
   it("passes a non-streaming JSON response through as a ReadableStream byte-identical", async () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const upstreamBody = JSON.stringify({ id: "abc", status: "ok" });
