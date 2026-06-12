@@ -447,7 +447,6 @@ describe.skipIf(!DB_URL)("Tier 2 — DB integration: free_exercise_db exercise l
       noop, // progressRepository
       exercisesService,
       noop, // habitsService
-      noop, // documentSignalsRepository
       noop, // metricsAiContextService
       noop, // goalsRepository
       noop, // recoveryContextService
@@ -744,8 +743,6 @@ describe.skipIf(!liveE2eEnabled)("Tier 3 — live e2e: full ChatService + real O
         {
           getHabitTemplateReferenceErrors: async () => [],
         } as never,
-        // documentSignalsRepository
-        { findCorrelationEligibleSignalById: async () => null } as never,
         // metricsAiContextService
         { buildSummaryForUser: async () => ({ items: [] }) } as never,
         // goalsRepository

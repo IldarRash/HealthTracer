@@ -74,6 +74,42 @@ describe("buildAgentPromptContextFromPacket", () => {
     }
   });
 
+  it("emits the slice's biomarker context to the provider prompt", () => {
+    const biomarkerContext = {
+      items: [
+        {
+          biomarkerKey: "vitamin_d" as const,
+          displayLabel: "Vitamin D (25-OH)",
+          value: 38,
+          valueText: null,
+          unit: "ng/mL",
+          observedAt: "2026-05-20",
+          source: "manual" as const,
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const packet = createPacket({
+      purpose: "health_context",
+      intent: "ask_health_context",
+      slice: {
+        purpose: "health_context",
+        depth: "large",
+        timeRange: "30d",
+        generatedAt: new Date().toISOString(),
+        relevantMemories: [],
+        snapshots: [],
+        recommendationConstraints: [],
+        sourceRefs: [],
+        biomarkerContext,
+      },
+    });
+
+    const context = buildAgentPromptContextFromPacket(packet);
+
+    expect(context.biomarkerContext).toEqual(biomarkerContext);
+  });
+
   it("omits document fields when the slice excludes them", () => {
     const packet = createPacket({
       purpose: "nutrition_adaptation",
@@ -99,7 +135,9 @@ describe("buildAgentPromptContextFromPacket", () => {
 });
 
 describe("mapContextSourceRefsToAgentCitations", () => {
-  it("maps document and rag domains to document_summary citations", () => {
+  it("maps legacy document and rag domains to plain structured_state citations", () => {
+    // The document_summary citation source type was deleted with the documents
+    // module — stray document/rag domains degrade to structured_state.
     const citations = mapContextSourceRefsToAgentCitations([
       {
         domain: "profile",
@@ -118,12 +156,23 @@ describe("mapContextSourceRefsToAgentCitations", () => {
     ]);
 
     expect(citations[0]?.sourceType).toBe("structured_state");
-    expect(citations[1]?.sourceType).toBe("document_summary");
-    expect(citations[2]?.sourceType).toBe("document_summary");
+    expect(citations[1]?.sourceType).toBe("structured_state");
+    expect(citations[2]?.sourceType).toBe("structured_state");
   });
 
   it("maps memory and snapshot domains distinctly", () => {
     expect(mapDomainToCitationSourceType("memory")).toBe("memory");
     expect(mapDomainToCitationSourceType("snapshot")).toBe("snapshot");
+  });
+
+  it("maps biomarker domains to biomarker_reading citations", () => {
+    expect(mapDomainToCitationSourceType("biomarker")).toBe("biomarker_reading");
+    expect(mapDomainToCitationSourceType("biomarker_reading")).toBe("biomarker_reading");
+
+    const citations = mapContextSourceRefsToAgentCitations([
+      { domain: "biomarker", label: "Vitamin D (25-OH)" },
+    ]);
+
+    expect(citations[0]?.sourceType).toBe("biomarker_reading");
   });
 });

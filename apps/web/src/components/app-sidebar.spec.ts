@@ -11,20 +11,21 @@ const sidebarSource = readFileSync(
 );
 
 describe("AppSidebar information architecture", () => {
-  it("renders all four primary nav tabs and both secondary plan links", () => {
+  it("renders all four primary nav tabs and the three secondary plan links", () => {
     expect(sidebarSource).toContain("PRIMARY_NAV_LINKS");
     expect(sidebarSource).toContain("SECONDARY_ROUTE_LINKS");
     expect(PRIMARY_NAV_LINKS).toHaveLength(4);
-    expect(SECONDARY_ROUTE_LINKS).toHaveLength(2);
+    expect(SECONDARY_ROUTE_LINKS).toHaveLength(3);
   });
 
-  it("includes chat, today, longevity, profile, dumbbell, and fork icon mappings", () => {
+  it("includes chat, today, longevity, profile, dumbbell, fork, and drop icon mappings", () => {
     expect(sidebarSource).toContain('"/chat": "chat"');
     expect(sidebarSource).toContain('"/today": "today"');
     expect(sidebarSource).toContain('"/longevity": "longevity"');
     expect(sidebarSource).toContain('"/profile": "profile"');
     expect(sidebarSource).toContain('"/training": "dumbbell"');
     expect(sidebarSource).toContain('"/nutrition": "fork"');
+    expect(sidebarSource).toContain('"/biomarkers": "drop"');
   });
 
   it("shows the app brand name — not the mockup rename", () => {

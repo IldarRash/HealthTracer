@@ -1,14 +1,12 @@
 import type {
   AgentContextPacket,
-  AiDocumentContextSummary,
-  AiDocumentSignalContextSummary,
+  AiBiomarkerContextSummary,
   AiMetricsContextSummary,
   AiRecoveryContextSummary,
   AiWellbeingContextSummary,
   BuildAgentContextRequest,
   CoachingHierarchySummary,
   ContextBudgetPolicy,
-  CorrelationInsightPreviewResponse,
   GetUserContextSliceInput,
   Goal,
   HabitAdherenceCoachingSummary,
@@ -46,9 +44,7 @@ import { ContextBudgetPolicyService } from "./context-budget-policy.service.js";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { buildAgentPromptContextFromPacket } from "./agent-prompt-context.js";
 import { buildUserContextSliceFromSnapshot, resolveSliceOptions } from "./user-context-slice.builder.js";
-import { DocumentsService } from "../documents/documents.service.js";
-import { DocumentSignalsService } from "../documents/document-signals.service.js";
-import { CorrelationsService } from "../documents/correlations.service.js";
+import { BiomarkersService } from "../biomarkers/biomarkers.service.js";
 import { GoalsService } from "../goals/goals.service.js";
 import { HabitsRepository } from "../habits/habits.repository.js";
 import { HabitsService } from "../habits/habits.service.js";
@@ -75,9 +71,8 @@ export interface CoachingContextSnapshot {
   activeHabitPlanSummary: HabitPlanCoachingSummary | null;
   recentHabitAdherenceSummary: HabitAdherenceCoachingSummary | null;
   weeklyProgressSummary: WeeklyProgressSummaryResponse | null;
-  documentContext: AiDocumentContextSummary;
-  documentSignalContext: AiDocumentSignalContextSummary;
-  correlationInsights: CorrelationInsightPreviewResponse;
+  /** Structured, catalog-labeled, consent-gated biomarker readings (max 30). */
+  biomarkerContext: AiBiomarkerContextSummary;
   metricsSummary: AiMetricsContextSummary;
   wellbeingSummary: AiWellbeingContextSummary;
   recoveryContext: AiRecoveryContextSummary;
@@ -99,9 +94,7 @@ export class CoachingContextService {
     private readonly habitsRepository: HabitsRepository,
     private readonly habitsService: HabitsService,
     private readonly progressService: ProgressService,
-    private readonly documentsService: DocumentsService,
-    private readonly documentSignalsService: DocumentSignalsService,
-    private readonly correlationsService: CorrelationsService,
+    private readonly biomarkersService: BiomarkersService,
     private readonly metricsAiContextService: MetricsAiContextService,
     private readonly wellbeingAiContextService: WellbeingAiContextService,
     private readonly recoveryAiContextService: RecoveryAiContextService,
@@ -116,9 +109,7 @@ export class CoachingContextService {
       nutritionPlan,
       habitPlan,
       weeklyProgressSummary,
-      documentContext,
-      documentSignalContext,
-      correlationInsights,
+      biomarkerContext,
       metricsSummary,
       wellbeingSummary,
       recoveryContext,
@@ -129,9 +120,7 @@ export class CoachingContextService {
       this.nutritionRepository.findActivePlanByUserId(user.id),
       this.habitsRepository.findActivePlanByUserId(user.id),
       this.progressService.getLatestSummarySnapshot(user.id),
-      this.documentsService.buildDocumentContextSummary(user.id),
-      this.documentSignalsService.buildSignalContextSummary(user.id),
-      this.correlationsService.previewInsights(auth),
+      this.biomarkersService.buildBiomarkerContextSummary(user.id),
       this.metricsAiContextService.buildSummaryForUser(user.id),
       this.wellbeingAiContextService.buildSummaryForUser(user.id, user.timezone),
       this.recoveryAiContextService.buildSummaryForUser(user.id, user.timezone),
@@ -188,9 +177,7 @@ export class CoachingContextService {
       activeHabitPlanSummary,
       recentHabitAdherenceSummary,
       weeklyProgressSummary,
-      documentContext,
-      documentSignalContext,
-      correlationInsights,
+      biomarkerContext,
       metricsSummary,
       wellbeingSummary,
       recoveryContext,
@@ -259,13 +246,7 @@ export class CoachingContextService {
             })),
           }
         : null,
-      documentContext: snapshot.documentContext,
-      documentSignalContext: snapshot.documentSignalContext,
-      correlationInsights: {
-        insights: snapshot.correlationInsights.insights.slice(0, 3),
-        generatedAt: snapshot.correlationInsights.generatedAt,
-        dataStatus: snapshot.correlationInsights.dataStatus,
-      },
+      biomarkerContext: snapshot.biomarkerContext,
       metricsSummary: snapshot.metricsSummary,
       wellbeingSummary: snapshot.wellbeingSummary,
       recoveryContext: snapshot.recoveryContext,
@@ -322,7 +303,6 @@ export class CoachingContextService {
           type: request.purpose ?? INTENT_TO_SLICE_PURPOSE[intent],
           depth: request.depth,
           timeRange: request.timeRange,
-          includeDocuments: request.includeDocuments,
         },
       ],
     );
@@ -404,11 +384,9 @@ export class CoachingContextService {
         purpose: sliceRequest.type,
         depth: sliceRequest.depth,
         timeRange: sliceRequest.timeRange,
-        includeDocuments: sliceRequest.includeDocuments,
       }),
     );
     const depth = clampContextDepth(resolved.depth, budget.maxDepth);
-    const includeDocuments = budget.allowDocuments && resolved.includeDocuments;
 
     return buildUserContextSliceFromSnapshot(
       snapshot,
@@ -416,7 +394,6 @@ export class CoachingContextService {
         purpose: sliceRequest.type,
         depth,
         timeRange: resolved.timeRange,
-        includeDocuments,
         includeRawData: false,
       },
       {
@@ -459,10 +436,9 @@ function collectMissingContextNotes(
 
     if (
       request.type === "health_context" &&
-      request.includeDocuments &&
-      (slice.documentContext?.items.length ?? 0) === 0
+      (slice.biomarkerContext?.items.length ?? 0) === 0
     ) {
-      notes.push("No approved health documents are available.");
+      notes.push("No consented biomarker readings are available.");
     }
   }
 

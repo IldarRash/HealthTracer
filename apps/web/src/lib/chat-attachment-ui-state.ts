@@ -2,7 +2,6 @@ import type {
   ChatAttachmentCategory,
   ChatAttachmentRecord,
   ChatAttachmentStatus,
-  DocumentConsentScope,
 } from "@health/types";
 import type { ChatMessageAttachmentPreview } from "./chat-message-attachments.js";
 import {
@@ -12,13 +11,7 @@ import {
   isChatAttachmentPendingMessageFirstSend,
   isChatAttachmentSendEligibleStatus,
 } from "@health/types";
-import {
-  DOCUMENT_CONSENT_SCOPE_OPTIONS,
-  DOCUMENT_CONSENT_VERSION,
-  DOCUMENT_TYPE_OPTIONS,
-  documentTypeLabel,
-} from "./documents-ui-state";
-import { formatDocumentFileSize } from "./document-upload";
+import { formatFileSize } from "./file-upload";
 
 export const MAX_CHAT_COMPOSER_ATTACHMENTS = 5;
 
@@ -69,38 +62,8 @@ export function chatAttachmentCategoryLabel(category: ChatAttachmentCategory): s
   return LABELS[category] ?? category;
 }
 
-export function buildChatAttachmentConsentScopeItems(
-  selectedScopes: readonly DocumentConsentScope[],
-) {
-  return DOCUMENT_CONSENT_SCOPE_OPTIONS.map((option) => ({
-    id: option.scope,
-    label: option.required ? `${option.label} (required)` : option.label,
-    description: option.description,
-    enabled: selectedScopes.includes(option.scope),
-  }));
-}
-
-export function toggleChatAttachmentConsentScope(
-  scopes: readonly DocumentConsentScope[],
-  scope: DocumentConsentScope,
-): DocumentConsentScope[] {
-  if (scope === "upload_storage") {
-    return scopes.includes(scope)
-      ? scopes.filter((item) => item !== scope)
-      : [...scopes, scope];
-  }
-
-  if (scopes.includes(scope)) {
-    return scopes.filter((item) => item !== scope);
-  }
-
-  return [...scopes, scope];
-}
-
-export { DOCUMENT_CONSENT_VERSION, DOCUMENT_TYPE_OPTIONS, documentTypeLabel };
-
 export function formatChatAttachmentFileSize(bytes: number): string {
-  return formatDocumentFileSize(bytes);
+  return formatFileSize(bytes);
 }
 
 export function normalizeAttachmentMimeType(file: Pick<File, "name" | "type">): string {

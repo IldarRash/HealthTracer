@@ -47,8 +47,9 @@ describe("ProfileWorkspace layout", () => {
     expect(workspaceSource).toContain("<PersonalContextCard");
   });
 
-  it("renders right column with documents, devices, and subscription cards", () => {
-    expect(workspaceSource).toContain("<DocumentsCard");
+  it("renders right column with devices and subscription cards — documents moved to /biomarkers", () => {
+    expect(workspaceSource).not.toContain("<DocumentsCard");
+    expect(workspaceSource).not.toContain("DocumentsWorkspace");
     expect(workspaceSource).toContain("<DevicesCard");
     expect(workspaceSource).toContain("<SubscriptionSummaryCard");
   });
@@ -168,31 +169,13 @@ describe("PersonalContextCard", () => {
   });
 });
 
-// ── Documents card ─────────────────────────────────────────────────
+// ── Documents removal ──────────────────────────────────────────────
 
-describe("DocumentsCard", () => {
-  it("wraps DocumentsWorkspace embedded without modifying its logic", () => {
-    expect(workspaceSource).toContain("<DocumentsWorkspace embedded />");
-  });
-
-  it("has the amber accent (Documents card chrome)", () => {
-    expect(workspaceSource).toContain("accent={M.amber}");
-    expect(workspaceSource).toContain('"title"');
-    expect(getNestedValue(enMessages, "Profile.documents.title")).toBe("Health documents");
-    // CardHead passes icon="doc"
-    expect(workspaceSource).toContain('icon="doc"');
-  });
-
-  it("shows the wellness/privacy framing copy", () => {
-    expect(workspaceSource).toContain('"privacyNotice"');
-    const notice = getNestedValue(enMessages, "Profile.documents.privacyNotice") as string;
-    expect(notice).toContain("Visible only to you");
-    expect(notice).toContain("explicit consent");
-    expect(notice).toContain("not for");
-  });
-
-  it("has the shield icon in the disclaimer", () => {
-    expect(workspaceSource).toContain('name="shield"');
+describe("documents removal", () => {
+  it("hosts no document upload/consent UI — lab reports live on /biomarkers", () => {
+    expect(workspaceSource).not.toContain("DocumentsWorkspace");
+    expect(workspaceSource).not.toContain("Profile.documents");
+    expect(getNestedValue(enMessages, "Profile.documents")).toBeUndefined();
   });
 });
 
@@ -266,8 +249,8 @@ describe("hash anchor ids for redirect routes", () => {
     expect(workspaceSource).toContain('id="goals"');
   });
 
-  it("has #documents anchor for /documents→/profile#documents redirect", () => {
-    expect(workspaceSource).toContain('id="documents"');
+  it("has no #documents anchor — the documents card is gone", () => {
+    expect(workspaceSource).not.toContain('id="documents"');
   });
 
   it("has #data-consent anchor for /metrics→/profile#data-consent redirect", () => {

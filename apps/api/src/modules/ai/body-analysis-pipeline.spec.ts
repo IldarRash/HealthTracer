@@ -83,7 +83,6 @@ const validationService = new ProposalValidationService(
   {} as never, // progressRepository
   {} as never, // exercisesService
   {} as never, // habitsService
-  {} as never, // documentSignalsRepository
   {} as never, // metricsAiContextService
   {} as never, // goalsRepository
   {} as never, // recoveryContextService
@@ -94,6 +93,7 @@ const validationService = new ProposalValidationService(
   {} as never, // nutritionRepository
   {} as never, // recipesRepository
   {} as never, // chatAttachmentsRepository
+  {} as never, // biomarkersRepository
 );
 
 // ---------------------------------------------------------------------------

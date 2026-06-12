@@ -131,7 +131,6 @@ describe("AgentToolRegistryService", () => {
     expect(getUserContextSlice).toHaveBeenCalledWith(auth, {
       purpose: "weekly_review",
       includeRawData: false,
-      includeDocuments: false,
     });
     expect(result.ok).toBe(true);
     expect(result.result).toMatchObject({

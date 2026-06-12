@@ -14,7 +14,7 @@ export const apiEnvSchema = z.object({
     .url()
     .default("postgres://postgres:postgres@localhost:5432/health_tracer"),
   CLERK_JWKS_URL: z.string().url().optional(),
-  DOCUMENT_STORAGE_PATH: z.string().min(1).default(".data/documents"),
+  LAB_REPORT_STORAGE_PATH: z.string().min(1).default(".data/lab-reports"),
   CHAT_ATTACHMENT_STORAGE_PATH: z.string().min(1).default(".data/chat-attachments"),
   AI_COACH_PROVIDER: z.literal("openai").default("openai"),
   OPENAI_API_KEY: z.string().min(1).optional(),
@@ -25,6 +25,8 @@ export const apiEnvSchema = z.object({
   OPENAI_MODEL_DOMAIN: z.string().min(1).optional(),
   /** Override model for the decision-maker (final synthesis) stage. Falls back to OPENAI_MODEL. */
   OPENAI_MODEL_DECISION: z.string().min(1).optional(),
+  /** Override model for the out-of-band lab-extraction stage. Falls back to OPENAI_MODEL. */
+  OPENAI_MODEL_LAB_EXTRACTION: z.string().min(1).optional(),
   CORS_ORIGINS: z.string().min(1).optional(),
   STORAGE_ALLOW_LOCAL_IN_PRODUCTION: z
     .enum(["true", "false"])

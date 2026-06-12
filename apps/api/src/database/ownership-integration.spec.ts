@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Schemas we assert against
 import {
-  healthDocuments,
+  labReports,
   nutritionPlanRevisions,
   nutritionPlans,
   users,
@@ -238,61 +238,59 @@ describe.skipIf(!shouldRun)("ownership-scoped repository behaviors (integration)
   });
 
   // -------------------------------------------------------------------------
-  // 3. Document row ownership filter — user A cannot see user B's document
+  // 3. Lab report row ownership filter — user A cannot see user B's report
   // -------------------------------------------------------------------------
-  describe("health document ownership filter", () => {
-    it("findActiveById scoped by userId returns only the owning user's document", async () => {
-      // Insert a document owned by user B
-      const [docB] = await db
-        .insert(healthDocuments)
+  describe("lab report ownership filter", () => {
+    it("queries scoped by userId return only the owning user's lab report", async () => {
+      // Insert a lab report owned by user B
+      const [reportB] = await db
+        .insert(labReports)
         .values({
           userId: userBId,
-          documentType: "lab_report",
           title: "User B Lab",
           storageReference: "b/lab.txt",
           mimeType: "text/plain",
           fileSizeBytes: 100,
-          consentScopes: ["upload_storage"],
-          consentVersion: "v1",
-          consentGrantedAt: new Date(),
+          consentVersion: "v2",
+          storeParseConsentAt: new Date(),
           uploadedAt: new Date(),
         })
-        .returning({ id: healthDocuments.id, userId: healthDocuments.userId });
+        .returning({ id: labReports.id, userId: labReports.userId });
 
-      expect(docB?.id).toBeDefined();
+      expect(reportB?.id).toBeDefined();
 
-      // Query the document using user A's ID — must return nothing
+      // Query the report using user A's ID — must return nothing
       const visibleToA = await db
-        .select({ id: healthDocuments.id })
-        .from(healthDocuments)
+        .select({ id: labReports.id })
+        .from(labReports)
         .where(
           and(
-            eq(healthDocuments.userId, userAId),
-            eq(healthDocuments.id, docB!.id),
+            eq(labReports.userId, userAId),
+            eq(labReports.id, reportB!.id),
           ),
         );
 
       expect(visibleToA).toHaveLength(0);
 
-      // Query using user B's ID — must return the document
+      // Query using user B's ID — must return the report
       const visibleToB = await db
-        .select({ id: healthDocuments.id })
-        .from(healthDocuments)
+        .select({ id: labReports.id })
+        .from(labReports)
         .where(
           and(
-            eq(healthDocuments.userId, userBId),
-            eq(healthDocuments.id, docB!.id),
+            eq(labReports.userId, userBId),
+            eq(labReports.id, reportB!.id),
           ),
         );
 
       expect(visibleToB).toHaveLength(1);
-      expect(visibleToB[0]!.id).toBe(docB!.id);
+      expect(visibleToB[0]!.id).toBe(reportB!.id);
 
       // Cleanup
-      if (docB?.id) {
+      if (reportB?.id) {
         await db
-          .delete(healthDocuments)
-          .where(eq(healthDocuments.id, docB.id));
+          .delete(labReports)
+          .where(eq(labReports.id, reportB.id));
       }
     });
   });

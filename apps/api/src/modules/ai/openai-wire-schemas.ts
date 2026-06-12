@@ -116,7 +116,7 @@ const agentSafetyFlagSchema: JsonSchema = {
 
 const agentToolNameSchema: JsonSchema = {
   type: "string",
-  enum: ["getUserContextSlice", "getDocumentContext", "getWeeklyProgressContext"],
+  enum: ["getUserContextSlice", "getWeeklyProgressContext"],
 };
 
 const routerDomainSchema: JsonSchema = {

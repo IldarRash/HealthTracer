@@ -46,7 +46,7 @@ import {
 import { containsUnsafeWellnessInsightLanguage } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
-import { DocumentSignalsRepository } from "../documents/document-signals.repository.js";
+import { BiomarkersRepository } from "../biomarkers/biomarkers.repository.js";
 import { ExercisesService } from "../exercises/exercises.service.js";
 import { GoalsRepository } from "../goals/goals.repository.js";
 import { toGoal } from "../goals/goal.mapper.js";
@@ -92,7 +92,6 @@ export class ProposalValidationService {
     private readonly progressRepository: ProgressRepository,
     private readonly exercisesService: ExercisesService,
     private readonly habitsService: HabitsService,
-    private readonly documentSignalsRepository: DocumentSignalsRepository,
     private readonly metricsAiContextService: MetricsAiContextService,
     private readonly goalsRepository: GoalsRepository,
     private readonly recoveryContextService: RecoveryContextService,
@@ -103,6 +102,7 @@ export class ProposalValidationService {
     private readonly nutritionRepository: NutritionRepository,
     private readonly recipesRepository: RecipesRepository,
     private readonly chatAttachmentsRepository: ChatAttachmentsRepository,
+    private readonly biomarkersRepository: BiomarkersRepository,
   ) {}
 
   validateRawProposal(proposal: RawAiProposal): ProposalValidationResult {
@@ -472,21 +472,6 @@ export class ProposalValidationService {
     );
 
     for (const [index, ref] of evidenceRefs.entries()) {
-      if (ref.type === "document_signal") {
-        const owned = await this.documentSignalsRepository.findCorrelationEligibleSignalById(
-          userId,
-          ref.id,
-        );
-
-        if (!owned) {
-          errors.push(
-            `evidenceRefs[${index}].id: Approved document signal was not found for this user.`,
-          );
-        }
-
-        continue;
-      }
-
       if (ref.type === "weekly_progress_summary") {
         const exists = await this.progressRepository.summaryExistsForUser(userId, ref.id);
 
@@ -515,6 +500,22 @@ export class ProposalValidationService {
         errors.push(
           `evidenceRefs[${index}].type: Habit adherence evidence refs cannot be verified yet.`,
         );
+        continue;
+      }
+
+      if (ref.type === "biomarker_reading") {
+        // Guard before the DB lookup: a non-UUID id can never match a reading
+        // and would otherwise error at the Postgres layer.
+        const owned = z.string().uuid().safeParse(ref.id).success
+          ? await this.biomarkersRepository.findContextEligibleReadingById(userId, ref.id)
+          : null;
+
+        if (!owned) {
+          errors.push(
+            `evidenceRefs[${index}].id: Consented biomarker reading was not found for this user.`,
+          );
+        }
+
         continue;
       }
 

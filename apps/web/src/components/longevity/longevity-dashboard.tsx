@@ -11,16 +11,16 @@ import {
   getHabitAdherence,
   getTodayDay,
   getTodayHistory,
+  getBiomarkersDashboard,
   getTodayNutritionAdherence,
   getWellbeingAggregates,
   listDeviceConnections,
-  listDocuments,
   listGoals,
   listHealthMetricAggregates,
   listHealthMetricSnapshots,
 } from "../../lib/api";
 import {
-  buildDocumentsContextView,
+  buildBiomarkersLabsCardView,
   buildGoalsSectionView,
   buildLongevityCoachPrompts,
   buildLongevityTrendsView,
@@ -42,7 +42,6 @@ import {
 import { WEEKLY_REVIEW_READ_ONLY_NOTICE } from "../../lib/weekly-review-ui-state";
 import type { WeeklyProgressSummaryResponse } from "@health/types";
 import {
-  Badge,
   DashboardCard,
   DashboardGrid,
   ErrorState,
@@ -284,7 +283,7 @@ export function LongevityDashboard() {
         deviceConnectionsResult,
         metricAggregatesResult,
         metricSnapshotsResult,
-        documentsResult,
+        biomarkersDashboardResult,
         wellbeingAggregatesResult,
       ] = await Promise.all([
         listGoals(token),
@@ -298,7 +297,7 @@ export function LongevityDashboard() {
         listDeviceConnections(token),
         listHealthMetricAggregates(token, { limit: 20 }),
         listHealthMetricSnapshots(token, { limit: 20 }),
-        listDocuments(token),
+        getBiomarkersDashboard(token),
         getWellbeingAggregates(token, 7),
       ]);
 
@@ -314,7 +313,7 @@ export function LongevityDashboard() {
         deviceConnectionsResult.error,
         metricAggregatesResult.error,
         metricSnapshotsResult.error,
-        documentsResult.error,
+        biomarkersDashboardResult.error,
         wellbeingAggregatesResult.error,
       ].filter((error): error is string => Boolean(error));
 
@@ -330,7 +329,7 @@ export function LongevityDashboard() {
         deviceConnections: deviceConnectionsResult.data ?? [],
         metricAggregates: metricAggregatesResult.data ?? [],
         metricSnapshots: metricSnapshotsResult.data ?? [],
-        documents: documentsResult.data ?? [],
+        biomarkersDashboard: biomarkersDashboardResult.data ?? null,
         wellbeingAggregates: wellbeingAggregatesResult.data ?? null,
         wellbeingAggregatesError: wellbeingAggregatesResult.error,
         goalsFetchFailed: Boolean(goalsResult.error && !goalsResult.data),
@@ -392,7 +391,7 @@ export function LongevityDashboard() {
     snapshots: data.metricSnapshots,
     todayDay: data.todayDay,
   });
-  const documentsView = buildDocumentsContextView(data.documents);
+  const labsCard = buildBiomarkersLabsCardView(data.biomarkersDashboard);
   const trendsView = buildLongevityTrendsView(data.progress);
   const habitHint = summarizeHabitConsistencyHint(data.habitAdherence);
   const coachPrompts = buildLongevityCoachPrompts({
@@ -785,41 +784,34 @@ export function LongevityDashboard() {
           )}
         </DashboardCard>
 
-        {/* ── Documents card ── */}
+        {/* ── Labs card ── */}
         <DashboardCard
           className="dashboard-card--span-6"
-          label="Documents"
-          title="Document context"
-          hint="Metadata only — no clinical interpretation on this screen."
+          label="Labs"
+          title="Biomarkers"
+          value={labsCard.status === "ready" ? labsCard.trackedValue : undefined}
+          hint={
+            labsCard.status === "ready"
+              ? labsCard.outsideRangeDetail
+              : undefined
+          }
           footer={
-            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.profileDocuments}>
-              Open documents →
+            <OverviewCardLink href={LONGEVITY_CTA_ROUTES.biomarkers}>
+              Open Biomarkers →
             </OverviewCardLink>
           }
         >
-          {documentsView.status === "ready" ? (
-            <>
-              <OverviewSignalList>
-                {documentsView.items.map((document) => (
-                  <OverviewSignalItem
-                    key={document.id}
-                    title={document.title}
-                    meta={`${document.uploadedLabel} · ${document.parseStatusLabel}`}
-                    badge={<Badge tone="neutral">{document.consentLabel}</Badge>}
-                  />
-                ))}
-              </OverviewSignalList>
-              <MedicalNote>
-                Metadata only — contents are not analyzed on this screen.
-              </MedicalNote>
-            </>
+          {labsCard.status === "ready" ? (
+            <MedicalNote>
+              Wellness context only — values and typical ranges, no interpretation.
+            </MedicalNote>
           ) : (
             <OverviewInlineEmptyState
-              title="No documents yet"
-              description={documentsView.message}
+              title="No lab results yet"
+              description={labsCard.message}
               action={
-                <OverviewCardLink href={LONGEVITY_CTA_ROUTES.profileDocuments}>
-                  Upload from Profile →
+                <OverviewCardLink href={LONGEVITY_CTA_ROUTES.biomarkers}>
+                  Upload a lab report →
                 </OverviewCardLink>
               }
             />

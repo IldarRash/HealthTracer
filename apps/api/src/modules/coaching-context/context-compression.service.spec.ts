@@ -212,6 +212,9 @@ describe("OpenAiContextCompressionProvider — S5 context-leak regression", () =
         },
         { domain: "profile", label: "User profile summary" },
       ],
+      // The documentContext/ragResults slice fields were deleted from the
+      // contract with the documents module. Inject them adversarially (cast)
+      // to prove the provider still never echoes unknown document-text fields.
       slice: {
         ...createPacket().slice,
         documentContext: {
@@ -237,7 +240,7 @@ describe("OpenAiContextCompressionProvider — S5 context-leak regression", () =
             consentScope: "medical_review",
           },
         ],
-      },
+      } as unknown as ReturnType<typeof createPacket>["slice"],
     });
 
     const budget = { ...DEEP_REVIEW_CONTEXT_BUDGET_POLICY, allowDocuments: false };

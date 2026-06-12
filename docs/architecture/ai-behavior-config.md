@@ -96,40 +96,44 @@ classification/recognition stages.
 
 Config cannot relax these — they are enforced in code and regression-tested:
 
-- **Context budgets deny documents and sensitive health context by default**
-  (`allowDocuments=false`), re-applied to every per-domain packet. Config cannot
-  relax this floor.
+- **Context budgets deny raw document-derived text and sensitive health context by
+  default** (`allowDocuments=false`, now meaning raw document-derived text slices, not the
+  uploaded attachment; the consent-gated `biomarkerContext` slice is exempt by design),
+  re-applied to every per-domain packet. Config cannot relax this floor.
 - **The router is read-only and clamped** — it selects ≤3 domains and emits
   hints only, never replies or proposals.
 - **The decision-maker emits typed proposals only** and never writes domain
   state; only the workout domain LLM may set a workout calorie estimate.
 - **Crisis support and the other pre-AI gates** bypass the LLM entirely.
 - **Attachments are images + document files (PDF/TXT/Markdown), context-only** —
-  no attachment path may create or parse `health_documents`. Document text is
-  extracted per-turn and never persisted or logged.
+  no attachment path may create or parse `lab_reports` / `biomarker_readings`. Document
+  text is extracted per-turn and never persisted or logged.
 
 See [`llm-pipeline.md`](./llm-pipeline.md) for the full pipeline and the
 "Removed Legacy Paths" list.
 
 ## Recent truth-cleanup
 
-- **`getDocumentContext` is no longer advertised to domain LLMs.** Under the
-  `allowDocuments=false` context-budget floor it always returns empty, so
-  exposing it would promise a capability that cannot fire. It is intentionally
-  excluded from `AgentToolRegistry.listAvailableTools`
-  ([`apps/api/src/modules/ai/agent-tool-registry.service.ts`](../../apps/api/src/modules/ai/agent-tool-registry.service.ts))
-  and commented out of `health.yml`. Document context for health questions is not
-  available via any domain config.
+- **`getDocumentContext` was removed entirely.** Under the `allowDocuments=false`
+  context-budget floor a raw-document tool could never fire, so it is gone — not
+  advertised to any domain LLM and not present in `AgentToolRegistry.listAvailableTools`
+  ([`apps/api/src/modules/ai/agent-tool-registry.service.ts`](../../apps/api/src/modules/ai/agent-tool-registry.service.ts)).
+  Structured biomarker context reaches chat **only** through the separate consent-gated
+  `biomarkerContext` slice (≤30 items, no reference ranges), which is exempt from the
+  `allowDocuments` floor by design.
 - **`medical.yml` was deleted — `health.yml` owns the domain.** There is no
   separate `medical` domain; the health domain config carries the health/wellness
   intents (general context, longevity, body-photo analysis) and its own
   non-diagnostic safety notes.
 
 > `document_file` chat attachments are **context-only**: their text is extracted
-> per-turn and never persisted. **Durable** document upload/parse/storage is a
-> separate, explicit **Profile** feature
-> ([`apps/api/src/modules/documents`](../../apps/api/src/modules/documents)) under
-> a five-scope per-operation consent model — it is not an attachment behavior and
-> is not driven by this config, and no attachment path may create or parse a
-> `health_document`. See [`domain-model.md`](./domain-model.md) and
-> [`database.md`](./database.md).
+> per-turn and never persisted. **Durable** lab-report upload/parse/storage is a
+> separate, explicit **Biomarkers** feature
+> ([`apps/api/src/modules/biomarkers`](../../apps/api/src/modules/biomarkers)) under
+> a **two-level** consent model (`storeAndParse` literal-`true` + per-report
+> `coachContextConsentAt`), with a dedicated **out-of-band** extraction LLM pipeline
+> (`LabExtractionProvider`) — it is not an attachment behavior and is not driven by this
+> config, and no attachment path may create or parse a `lab_report` / `biomarker_reading`.
+> (This replaces the deleted five-scope health-documents feature.) See
+> [`domain-model.md`](./domain-model.md), [`database.md`](./database.md), and
+> [`llm-pipeline.md`](./llm-pipeline.md).

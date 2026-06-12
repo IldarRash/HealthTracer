@@ -30,7 +30,6 @@ import {
 import { setLocaleCookie } from "../../i18n/set-locale-action";
 import { isLocale } from "../../i18n/config";
 import { LanguageSwitcher } from "../settings/language-switcher";
-import { DocumentsWorkspace } from "../documents/documents-workspace";
 import { Toggle } from "../ui/toggle";
 import { Icon } from "../ui/icon";
 import type { IconName } from "../ui/icon";
@@ -560,41 +559,6 @@ function PersonalContextCard({ profile }: { profile: UserProfile | null }) {
   );
 }
 
-// ── Documents card (amber accent, wraps existing DocumentsWorkspace) ─
-
-function DocumentsCard() {
-  const t = useTranslations("Profile.documents");
-  return (
-    <LightCard accent={M.amber}>
-      <CardHead
-        icon="doc"
-        color={M.amber}
-        title={t("title")}
-      />
-      {/* Wellness / "visible only to you" framing */}
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          padding: "12px 14px",
-          borderRadius: 12,
-          background: M.amberDim,
-          marginBottom: 16,
-        }}
-      >
-        <span style={{ flexShrink: 0, marginTop: 1 }}>
-          <Icon name="shield" size={17} stroke={M.amber} />
-        </span>
-        <div style={{ fontSize: 12.5, lineHeight: 1.5, color: L.ink2 }}>
-          {t("privacyNotice")}
-        </div>
-      </div>
-      {/* All upload / consent / list / parse logic stays in DocumentsWorkspace */}
-      <DocumentsWorkspace embedded />
-    </LightCard>
-  );
-}
-
 // ── Devices card (disabled placeholder, not in MVP) ───────────────
 
 function DevicesCard() {
@@ -814,7 +778,7 @@ export function ProfileWorkspace() {
   }, [profileQuery.data?.user.locale, locale, router]);
 
   // Hash-anchor deep links: once data is available, scroll the matching element
-  // into view so /profile#goals, /profile#documents, /profile#data-consent land correctly.
+  // into view so /profile#goals and /profile#data-consent land correctly.
   useEffect(() => {
     if (!profileQuery.isSuccess) return;
     const hash = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
@@ -930,10 +894,6 @@ export function ProfileWorkspace() {
             gap: 16,
           }}
         >
-          {/* documents anchor — /documents redirects to /profile#documents */}
-          <div id="documents">
-            <DocumentsCard />
-          </div>
           {/* data-consent anchor — /metrics redirects to /profile#data-consent */}
           <div id="data-consent">
             <DevicesCard />

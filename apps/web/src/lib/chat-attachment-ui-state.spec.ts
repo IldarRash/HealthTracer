@@ -41,7 +41,6 @@ function createReadyRecord(
     mimeType: "image/jpeg",
     fileSizeBytes: 1024,
     storageKey: "local://attachments/meal.jpg",
-    linkedDocumentId: null,
     linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
     consent: null,
     // recognition field removed (B3 removal, C4 cluster)

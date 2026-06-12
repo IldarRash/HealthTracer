@@ -2,7 +2,7 @@
 
 ## Product Idea
 
-AI Health Coach is a stateful wellness and fitness coaching product. The user talks to an AI coach through chat, but chat is only the interaction layer. The source of truth is structured state: profile, goals, workout plans, nutrition plans, recipes, device metrics, documents, adherence, and progress.
+AI Health Coach is a stateful wellness and fitness coaching product. The user talks to an AI coach through chat, but chat is only the interaction layer. The source of truth is structured state: profile, goals, workout plans, nutrition plans, recipes, device metrics, biomarkers / lab reports, adherence, and progress.
 
 The AI can explain, summarize, and propose changes. It does not silently rewrite the user's plans. When the AI recommends a new workout, nutrition adjustment, recipe set, or daily checklist change, it creates a typed proposal. The user approves or rejects that proposal. Approved proposals are validated by backend services and applied as auditable revisions.
 
@@ -54,18 +54,19 @@ The user-facing web IA is intentionally small. The primary navigation has four s
 - Chat: the dominant coaching conversation for planning, feedback, explanations, image attachment context, typed (now editable) proposals, and approval decisions.
 - Today: the daily execution loop for the current workout, today's nutrition plan and eaten/performed totals, stress/recovery check-in, mental wellbeing checkpoints, habits, adherence, and quick feedback.
 - Longevity: the weekly overview for consistency, cross-domain trends (incl. nutrition performed and ad-hoc activity), goals, recovery/wellbeing context, and safe coach prompts.
-- Profile: account identity, onboarding, personal context, goal hierarchy, documents, consent, device/data settings, and preferences.
+- Profile: account identity, onboarding, personal context, goal hierarchy, consent, device/data settings, and preferences.
 
 Secondary read-only plan views remain routeable but are not primary tabs:
 
 - Training: active weekly workout plan, scheduled sessions, execution history, and revision context.
 - Nutrition: active weekly nutrition plan, meal structure, hydration, restrictions, adherence, and revision context.
+- Biomarkers (`/biomarkers`, wayfinding parent Nutrition): lab-report upload, biomarker dashboard-by-area, per-marker history, and manual reading entry.
 
 Backend or nested surfaces should not become primary navigation:
 
 - Recipes support nutrition planning and recommendations behind the scenes.
 - Metrics feed Today, Longevity, and AI context; raw metric management belongs under Profile/settings.
-- Documents live under Profile with explicit consent and wellness-only copy.
+- Biomarkers (lab reports) live as a secondary route under Nutrition with explicit two-level consent and wellness-only copy.
 - Goals are structured state shown through Profile, Today linkage, Longevity, and Chat proposals.
 
 ## Roadmap Phases
@@ -102,9 +103,14 @@ Add recipes as a structured knowledge base with ingredients, macro estimates, ta
 
 Add Apple HealthKit, Android Health Connect, and wearable sync after explicit consent. Store normalized metric snapshots and aggregates rather than exposing raw private logs to the AI by default.
 
-### Phase 9: Documents
+### Phase 9: Biomarkers (lab reports)
 
-Add health document upload, parsing/OCR, summaries, semantic search, and document-aware coaching context. Keep diagnosis and treatment guidance out of scope.
+**Supersedes the earlier "Documents" phase.** Add explicit lab-report (PDF/text) upload with a
+dedicated out-of-band extraction LLM, a code-owned biomarker catalog, manual reading entry, a
+dashboard-by-area, and a bounded consent-gated biomarker chat-context slice. Keep diagnosis and
+treatment guidance out of scope. The general-purpose health-document feature (OCR/summaries/semantic
+search/correlations/five-scope consent) was **removed** in favor of this labs-focused model
+(migration `0038_biomarkers_replace_documents`).
 
 ### Phase 10: Progress and Adaptation
 
@@ -118,9 +124,9 @@ As of the completed longevity foundation pass, the core coaching loop is impleme
 |---------|--------|-------|
 | Chat / Proposals | Implemented foundation | Multi-domain fan-out LLM pipeline, typed **editable** proposals (universal display contract with accept-time backend recompute), evidence refs, wellbeing/recovery context, image attachment context, nutrition incident cards, recipe proposals, and safety gates |
 | Today / Workouts / Nutrition | Implemented web MVP | Current workout with catalog metadata and bounded feedback, ad-hoc activity sessions on the checklist (non-required), nutrition `eaten` totals, checklist, wellbeing, recovery, adherence, reflection, and secondary Training/Nutrition links |
-| Profile / Onboarding / Goals | Implemented web MVP | First-run onboarding, structured personal context, goal hierarchy, document consent, and profile hierarchy summary |
+| Profile / Onboarding / Goals | Implemented web MVP | First-run onboarding, structured personal context, goal hierarchy, data/device consent, and profile hierarchy summary |
 | Metrics / Device Sync | Partial | API, consent, and aggregate support exist; native HealthKit/Health Connect ingestion is not live |
-| Documents / Labs | Implemented MVP | Text/PDF upload, structured signal extraction, signal approval/revocation, document-backed correlation preview, proposal evidence refs, and Chat attachment consent/review routing |
+| Biomarkers / Labs | Implemented MVP | Text/PDF lab-report upload, dedicated out-of-band extraction LLM (strict json_schema, closed 47-key catalog enum, typed failure codes), code-owned catalog (8 areas), manual reading add/edit/delete, dashboard-by-area + per-marker history, two-level consent, and a bounded consent-gated `biomarkerContext` chat slice + `biomarker_reading` proposal evidence. **Replaced** the removed health-documents feature (migration `0038`). |
 | Recipes / Nutrition incidents | Implemented MVP | Recipe intake/recommendations, recommendation lifecycle, recipe-backed nutrition incident proposals, and food/photo nutrition incident proposal flow |
 | Progress / Adaptation | Partial | Weekly progress includes workout (incl. ad-hoc activity), recovery, and nutrition `performed` (eaten) aggregates; broader cross-domain review is still expanding |
 
@@ -138,7 +144,7 @@ These capabilities extend the product toward AI-first coaching for a longer and 
 | Mental wellbeing check-ins | Implemented MVP | Today mood/stress check-in, Longevity 7-day history, coaching `wellbeingSummary` without raw notes, static crisis support, and Chat crisis boundary |
 | Recovery and readiness | Implemented MVP | Manual recovery check-in, qualitative recovery band, Today recovery focus card, consent-filtered recovery context, weekly recovery aggregate, and recovery-aware workout proposal guards |
 | Today daily execution | Implemented MVP | Selected-date Today nutrition card, date-scoped adherence writes, no plan editing, and clear read-only links to Training, Nutrition, and Chat |
-| Medical/lab correlations | Implemented MVP | Consent-gated text/PDF document upload, structured signal extraction/review/revocation, document-backed correlation preview, and proposal evidence validation |
+| Biomarkers (lab reports) | Implemented MVP | Consent-gated text/PDF lab-report upload, dedicated out-of-band biomarker extraction LLM, code-owned catalog + manual entry, dashboard-by-area, two-level consent, and `biomarker_reading` proposal evidence validation. **Replaced** the deleted document-correlations feature (signal extraction/review/revocation, correlation preview). |
 | Adaptive workout execution | Implemented MVP | Exercise catalog taxonomy, catalog-enriched Training/Today views, execution feedback, and revision-safe workout proposal validation |
 | Recipe recommendations | Implemented MVP | Provider-backed recipe normalization, confidence/provenance, Nutrition recipe panel, chat recipe proposals, and recipe-to-nutrition-incident proposal flow |
 | Chat action proposals | Implemented MVP | Wellbeing check-in, nutrition incident, and `log_workout_activity` (ad-hoc) proposals with edit-before-apply, the universal editable display contract + accept-time backend recompute, crisis-safe behavior, and no-write-before-confirm guards |
@@ -176,21 +182,22 @@ web IA, and the trigger for revisiting.
 - AI creates typed proposals; backend services validate and apply them.
 - User approval is required before an AI proposal changes a plan or user-facing tab state.
 - Workout and nutrition changes create revisions instead of overwriting active plans.
-- Device sync and document features require explicit consent and least-privilege data access.
+- Device sync and biomarker (lab-report) features require explicit consent and least-privilege data access.
 - The product is for wellness, fitness, tracking, and coaching, not medical diagnosis or treatment.
 
 ## Medical and Lab Data Policy
 
 The product does **not** provide diagnosis, treatment, medication guidance, medical certainty, or clinical triage. That boundary is fixed across every product phase.
 
-Users **may** upload medical documents, laboratory studies, and other health data when they choose to. That data is allowed only as **user-consented coaching context**, not as a clinical decision engine.
+Users **may** upload laboratory reports and other health data when they choose to. That data is allowed only as **user-consented coaching context**, not as a clinical decision engine.
 
 With consent, the coach may:
 
-- extract wellness-relevant structured signals from uploaded documents (for example biomarker name, value, unit, date, source section),
-- look for **wellness-safe correlations** between physical, mental, behavioral, and plan signals,
-- explain observed patterns in coaching language,
+- extract catalog-mapped biomarker readings from uploaded lab reports (biomarker key, value, unit, date) via the dedicated out-of-band extraction LLM,
+- explain observed patterns in wellness-neutral coaching language (ranges are "typical", never "normal/abnormal/deficient"),
 - propose changes to workout load, recovery focus, nutrition structure, habits, or Today checklist items.
+
+Values are stored **as-reported** (no unit conversion — a deliberate safety decision), and biomarker readings reach the coach only through the bounded consent-gated `biomarkerContext` slice or `biomarker_reading` proposal evidence.
 
 All such changes must flow through typed proposals, user approval, backend validation, and revision-safe state updates. Chat remains the interaction layer; structured state remains authoritative.
 

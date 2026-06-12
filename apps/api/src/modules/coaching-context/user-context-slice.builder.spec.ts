@@ -36,18 +36,9 @@ function createSnapshot(overrides: Partial<CoachingContextSnapshot> = {}): Coach
     activeHabitPlanSummary: null,
     recentHabitAdherenceSummary: null,
     weeklyProgressSummary: null,
-    documentContext: {
+    biomarkerContext: {
       items: [],
       generatedAt: new Date().toISOString(),
-    },
-    documentSignalContext: {
-      signals: [],
-      generatedAt: new Date().toISOString(),
-    },
-    correlationInsights: {
-      insights: [],
-      generatedAt: new Date().toISOString(),
-      dataStatus: "insufficient",
     },
     metricsSummary: {
       items: [],
@@ -80,104 +71,75 @@ function createSnapshot(overrides: Partial<CoachingContextSnapshot> = {}): Coach
   };
 }
 
+const populatedBiomarkerContext = {
+  generatedAt: new Date().toISOString(),
+  items: [
+    {
+      biomarkerKey: "ferritin" as const,
+      displayLabel: "Ferritin",
+      value: 45,
+      valueText: null,
+      unit: "ng/mL",
+      observedAt: "2026-05-20",
+      source: "extraction" as const,
+    },
+  ],
+};
+
 describe("buildUserContextSliceFromSnapshot", () => {
-  it("excludes document context from general chat slices", () => {
+  it("excludes biomarker context from general chat slices", () => {
     const slice = buildUserContextSliceFromSnapshot(
-      createSnapshot({
-        documentContext: {
-          generatedAt: new Date().toISOString(),
-          items: [
-            {
-              documentId: "d1000001-0000-4000-8000-000000000001",
-              summaryId: "a1000001-0000-4000-8000-000000000001",
-              documentType: "lab_report",
-              title: "Blood panel",
-              summarySnippet: "Approved summary only.",
-              extractedConstraints: ["Low iron"],
-            },
-          ],
-        },
-      }),
+      createSnapshot({ biomarkerContext: populatedBiomarkerContext }),
       { purpose: "general_chat" },
     );
 
-    expect(slice.documentContext).toBeUndefined();
-    expect(slice.ragResults).toBeUndefined();
+    expect(slice.biomarkerContext).toBeUndefined();
   });
 
-  it("excludes document context from nutrition adaptation slices", () => {
+  it("excludes biomarker context from nutrition adaptation slices", () => {
     const slice = buildUserContextSliceFromSnapshot(
-      createSnapshot({
-        documentContext: {
-          generatedAt: new Date().toISOString(),
-          items: [
-            {
-              documentId: "d1000001-0000-4000-8000-000000000001",
-              summaryId: "a1000001-0000-4000-8000-000000000001",
-              documentType: "lab_report",
-              title: "Blood panel",
-              summarySnippet: "Approved summary only.",
-              extractedConstraints: ["Low iron"],
-            },
-          ],
-        },
-      }),
+      createSnapshot({ biomarkerContext: populatedBiomarkerContext }),
       { purpose: "nutrition_adaptation" },
     );
 
-    expect(slice.documentContext).toBeUndefined();
-    expect(slice.ragResults).toBeUndefined();
+    expect(slice.biomarkerContext).toBeUndefined();
   });
 
-  it("excludes document context from health context when includeDocuments is false", () => {
+  it("includes the consent-gated biomarker context for health context slices", () => {
     const slice = buildUserContextSliceFromSnapshot(
-      createSnapshot({
-        documentContext: {
-          generatedAt: new Date().toISOString(),
-          items: [
-            {
-              documentId: "d1000001-0000-4000-8000-000000000001",
-              summaryId: "a1000001-0000-4000-8000-000000000001",
-              documentType: "lab_report",
-              title: "Blood panel",
-              summarySnippet: "Approved summary only.",
-              extractedConstraints: ["Low iron"],
-            },
-          ],
-        },
-      }),
-      { purpose: "health_context", includeDocuments: false },
+      createSnapshot({ biomarkerContext: populatedBiomarkerContext }),
+      { purpose: "health_context" },
     );
 
-    expect(slice.documentContext).toBeUndefined();
-    expect(slice.ragResults).toBeUndefined();
+    expect(slice.biomarkerContext?.items).toHaveLength(1);
+    expect(slice.biomarkerContext?.items[0]).toMatchObject({
+      biomarkerKey: "ferritin",
+      displayLabel: "Ferritin",
+      source: "extraction",
+    });
   });
 
-  it("records document and rag provenance in source refs for health context", () => {
+  it("records biomarker provenance in source refs for health context", () => {
     const slice = buildUserContextSliceFromSnapshot(
-      createSnapshot({
-        documentContext: {
-          generatedAt: new Date().toISOString(),
-          items: [
-            {
-              documentId: "d1000001-0000-4000-8000-000000000001",
-              summaryId: "a1000001-0000-4000-8000-000000000001",
-              documentType: "lab_report",
-              title: "Blood panel",
-              summarySnippet: "Approved summary only.",
-              extractedConstraints: ["Low iron"],
-            },
-          ],
-        },
-      }),
-      { purpose: "health_context", includeDocuments: true },
+      createSnapshot({ biomarkerContext: populatedBiomarkerContext }),
+      { purpose: "health_context" },
     );
 
     expect(slice.sourceRefs).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ domain: "document", label: "Blood panel" }),
-        expect.objectContaining({ domain: "rag", label: "Blood panel" }),
+        expect.objectContaining({ domain: "biomarker", label: "Ferritin" }),
       ]),
+    );
+  });
+
+  it("keeps the biomarker context free of reference ranges and document text", () => {
+    const slice = buildUserContextSliceFromSnapshot(
+      createSnapshot({ biomarkerContext: populatedBiomarkerContext }),
+      { purpose: "health_context" },
+    );
+
+    expect(JSON.stringify(slice.biomarkerContext)).not.toMatch(
+      /referenceRange|typicalRange|snippet|summary/i,
     );
   });
 
@@ -188,30 +150,6 @@ describe("buildUserContextSliceFromSnapshot", () => {
 
     expect(slice.snapshots).toEqual([]);
     expect(slice.relevantMemories).toEqual([]);
-  });
-
-  it("includes consent-gated document context for health context slices", () => {
-    const slice = buildUserContextSliceFromSnapshot(
-      createSnapshot({
-        documentContext: {
-          generatedAt: new Date().toISOString(),
-          items: [
-            {
-              documentId: "d1000001-0000-4000-8000-000000000001",
-              summaryId: "a1000001-0000-4000-8000-000000000001",
-              documentType: "lab_report",
-              title: "Blood panel",
-              summarySnippet: "Approved summary only.",
-              extractedConstraints: ["Low iron"],
-            },
-          ],
-        },
-      }),
-      { purpose: "health_context", includeDocuments: true },
-    );
-
-    expect(slice.documentContext?.items).toHaveLength(1);
-    expect(slice.ragResults?.[0]?.snippet).toBe("Approved summary only.");
   });
 
   it("keeps daily check-in wellbeing summaries free of private notes", () => {

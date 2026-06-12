@@ -170,7 +170,6 @@ export class AgentToolRegistryService {
     const slice = await this.coachingContextService.getUserContextSlice(auth, {
       purpose: "weekly_review",
       includeRawData: false,
-      includeDocuments: false,
     });
 
     const result = slice.weeklyProgress ?? null;
@@ -455,7 +454,6 @@ export class AgentToolRegistryService {
     const slice = await this.coachingContextService.getUserContextSlice(auth, {
       purpose: "weekly_review",
       includeRawData: false,
-      includeDocuments: false,
     });
 
     const workoutExecution = slice.recentWorkoutExecution ?? null;

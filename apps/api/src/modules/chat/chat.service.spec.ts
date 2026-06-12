@@ -603,10 +603,6 @@ describe("ChatService", () => {
           getHabitTemplateReferenceErrors: async () => [],
         } as never,
         {
-          findApprovedSignalById: async () => null,
-          findCorrelationEligibleSignalById: async () => null,
-        } as never,
-        {
           buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }),
         } as never,
         {
@@ -633,6 +629,7 @@ describe("ChatService", () => {
         {} as never,
         {} as never,
         { listByIdsForUser: async () => [] } as never,
+        { findContextEligibleReadingById: async () => null } as never,
       ),
     });
 
@@ -1255,10 +1252,6 @@ describe("ChatService", () => {
           ...habitsService,
         } as never,
         {
-          findApprovedSignalById: async () => null,
-          findCorrelationEligibleSignalById: async () => null,
-        } as never,
-        {
           buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }),
         } as never,
         {
@@ -1286,6 +1279,7 @@ describe("ChatService", () => {
         {} as never,
         {} as never,
         { listByIdsForUser: async () => [] } as never,
+        { findContextEligibleReadingById: async () => null } as never,
       );
     }
 
@@ -1763,10 +1757,6 @@ describe("ChatService", () => {
           { findInaccessibleExerciseIds: async () => [] } as never,
           { getHabitTemplateReferenceErrors: async () => [] } as never,
           {
-            findApprovedSignalById: async () => null,
-            findCorrelationEligibleSignalById: async () => null,
-          } as never,
-          {
             buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }),
           } as never,
           { listByUserId: async () => [] } as never,
@@ -1786,6 +1776,7 @@ describe("ChatService", () => {
           {} as never,
           {} as never,
           { listByIdsForUser: async () => [] } as never,
+          { findContextEligibleReadingById: async () => null } as never,
         ),
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => ({
@@ -3048,21 +3039,21 @@ describe("ChatService", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Gap 4 — document_file attachment turn + workout proposal + no health_documents
+  // Gap 4 — document_file attachment turn + workout proposal + no persisted health data
   // ---------------------------------------------------------------------------
   //
   // An attachment turn whose mocked AI output selects a create_workout_plan
   // candidate must:
   //   (a) produce a validated + persisted proposal in the result
-  //   (b) NEVER call any health_documents repository or service method
-  //       (no auto-persist path exists for document attachments)
+  //   (b) NEVER call any lab-report / biomarker-reading repository or service
+  //       method (no auto-persist path exists for document attachments)
   //
   // The chat-attachments path is images + document files, context-only; document text goes
   // directly to the LLM as ephemeral context and must never be saved.
   // ---------------------------------------------------------------------------
 
   describe("document_file attachment turn with workout proposal (Gap 4)", () => {
-    it("document_file attachment turn → create_workout_plan proposal persisted, zero health_documents calls", async () => {
+    it("document_file attachment turn → create_workout_plan proposal persisted, zero lab_reports/biomarker_readings calls", async () => {
       const attachmentId = "d9000001-0000-4000-8000-000000000001";
       const proposalRecord = {
         intent: "create_workout_plan" as const,
@@ -3101,8 +3092,9 @@ describe("ChatService", () => {
         updatedAt: new Date("2026-06-10T00:00:00.000Z"),
       }));
 
-      // Health documents repository mock — all methods should be untouched.
-      const documentsRepositoryMock = {
+      // Structured-health (lab reports / biomarker readings) repository mock —
+      // all methods should be untouched by the attachment turn.
+      const biomarkersRepositoryMock = {
         create: vi.fn(),
         findById: vi.fn(),
         findByUserId: vi.fn(),
@@ -3201,16 +3193,17 @@ describe("ChatService", () => {
       expect(result.proposals[0]?.intent).toBe("create_workout_plan");
       expect(result.proposals[0]?.targetDomain).toBe("workout");
 
-      // (b) Health documents repository must never have been called.
-      // The document file is ephemeral context only — no auto-save to health_documents.
-      for (const [methodName, mock] of Object.entries(documentsRepositoryMock)) {
-        expect(mock, `documentsRepositoryMock.${methodName} should not be called`).not.toHaveBeenCalled();
+      // (b) The structured-health repository must never have been called.
+      // The document file is ephemeral context only — no auto-save to
+      // lab_reports or biomarker_readings.
+      for (const [methodName, mock] of Object.entries(biomarkersRepositoryMock)) {
+        expect(mock, `biomarkersRepositoryMock.${methodName} should not be called`).not.toHaveBeenCalled();
       }
     });
   });
 
   // ---------------------------------------------------------------------------
-  // Phase 7: consentRequired surfacing + no health_documents auto-persist
+  // Phase 7: consentRequired surfacing + no structured-health auto-persist
   // ---------------------------------------------------------------------------
 
   describe("consentRequired surfacing (Phase 7)", () => {
@@ -3311,9 +3304,9 @@ describe("ChatService", () => {
 
       // consentRequired must be surfaced to the caller so the UI can prompt for consent.
       expect(result.consentRequired).toBe(true);
-      // No health_documents are auto-persisted — proposals flow through the normal
-      // proposal validation + accept path. The proposals array may be empty or contain
-      // a consent-gated proposal record; no auto-applied health_documents row exists.
+      // No lab_reports / biomarker_readings are auto-persisted — proposals flow through
+      // the normal proposal validation + accept path. The proposals array may be empty or
+      // contain a consent-gated proposal record; no auto-applied structured health row exists.
       // (The intent type union does not include an auto-persist variant by design.)
       expect(Array.isArray(result.proposals)).toBe(true);
     });

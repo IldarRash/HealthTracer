@@ -3,8 +3,8 @@
 ## Domains
 
 The model stays focused on structured wellness/coaching state without becoming a
-medical-records architecture. Later domains — recipes, device sync, health
-documents, habits, recovery, wellbeing, body composition, progress, and billing —
+medical-records architecture. Later domains — recipes, device sync, biomarkers /
+lab reports, habits, recovery, wellbeing, body composition, progress, and billing —
 attach to the same structured-state model instead of turning chat into the source
 of truth. Each domain maps to a NestJS module under
 [`apps/api/src/modules/*`](../../apps/api/src/modules) and a Drizzle schema file
@@ -84,8 +84,8 @@ Represents an image attached to a chat message.
 
 Attachments are not authoritative workout, nutrition, or medical state. They can supply
 context and evidence to selected multimodal LLM stages, but they do not create proposal
-candidates outside the unified proposal validation path and must not auto-create health
-document records.
+candidates outside the unified proposal validation path and must not auto-create
+`lab_report` / `biomarker_reading` records.
 
 ### WorkoutPlan
 
@@ -297,40 +297,47 @@ Represents an explicit user-approved connection to a device or health data provi
 - connectedAt
 - revokedAt
 
-### HealthDocument
+### LabReport
 
-Represents a user-uploaded health document. Documents are sensitive context, not a diagnosis engine.
+Represents an explicitly user-uploaded laboratory report (PDF/plain text). Lab reports are
+sensitive context, not a diagnosis engine. Schema:
+`packages/db/src/schema/biomarkers.ts`.
 
 - user id
-- document type
-- storage reference
-- parse status
-- consent scope
-- uploadedAt
+- title
+- storage reference, MIME type, file size
+- status: uploaded, processing, extracted, failed
+- failure code (typed extraction-failure enum) when failed
+- observed date and `unmappedMarkerCount`
+- **two-level consent**: `storeParseConsentAt` (required at upload) and the optional,
+  revoke-able `coachContextConsentAt` (per-report coach-chat consent)
+- extractedAt, uploadedAt, soft-delete `deletedAt`
 
-### HealthDocumentSummary
+Extraction runs through a **dedicated out-of-band LLM pipeline** (separate from the chat
+fan-out); extracted document text is never persisted or logged. See
+[`llm-pipeline.md`](./llm-pipeline.md) "Lab extraction pipeline (out-of-band)".
 
-Structured summary extracted from a health document for safe contextual retrieval.
+### BiomarkerReading
 
-- health document id
-- summary payload
-- extracted constraints
-- generatedAt
-- review status
+A single structured biomarker measurement, either extracted from a lab report or entered
+manually.
 
-### HealthDocumentSignal
-
-Structured, allowlisted wellness signal extracted from a consented document.
-
-- health document id
-- signal type
-- value and unit when applicable
+- user id
+- nullable lab report id (NULL for manual readings)
+- `biomarkerKey` — a key from the **code-owned catalog** (`packages/types/src/biomarkers.ts`,
+  ~50 markers across 8 areas; no DB catalog table, no pg enum)
+- `value` (numeric) **or** `valueText`, plus `unit` (stored **as-reported** — there is no
+  unit conversion anywhere, a deliberate safety decision)
+- optional reference range text
 - observed date
-- source section or provenance label
-- confidence
-- review status
+- `source`: `extraction` or `manual`
+- confidence and `userEdited`
+- soft-delete `deletedAt`
 
-Only approved, consent-eligible, sufficiently confident signals can enter coaching context or document-backed correlation previews.
+A reading reaches the coach (the bounded `biomarkerContext` chat slice or a
+`biomarker_reading` proposal evidence ref) **only** when the user deliberately put it there:
+manual readings are always eligible; extracted readings require their lab report's
+`coachContextConsentAt`. The chat slice carries **no reference ranges** by design.
 
 ### AIProposal
 
@@ -379,9 +386,9 @@ erDiagram
   User ||--o{ DeviceConnection : authorizes
   User ||--o{ UserRecipeRecommendation : receives
   Recipe ||--o{ UserRecipeRecommendation : suggested
-  User ||--o{ HealthDocument : uploads
-  HealthDocument ||--o{ HealthDocumentSummary : summarizes
-  HealthDocument ||--o{ HealthDocumentSignal : extracts
+  User ||--o{ LabReport : uploads
+  LabReport ||--o{ BiomarkerReading : extracts
+  User ||--o{ BiomarkerReading : records
   User ||--o{ WellbeingCheckIn : records
   User ||--o{ RecoveryCheckIn : records
   User ||--o{ RecoveryContextSnapshot : has
@@ -406,12 +413,13 @@ The domain model is intentionally broader than the primary navigation. User-faci
 
 - Chat reads structured context and renders typed proposals.
 - Today reads `DailyChecklist`, current workout execution, nutrition-today data, wellbeing/recovery check-ins, and habit items.
-- Longevity reads weekly aggregates, trends, goals, adherence, recovery/wellbeing summaries, consented metrics, and document-context status.
-- Profile reads `User`, `UserProfile`, goal hierarchy, documents, device/data consent, and settings.
+- Longevity reads weekly aggregates, trends, goals, adherence, recovery/wellbeing summaries, and consented metrics.
+- Profile reads `User`, `UserProfile`, goal hierarchy, device/data consent, and settings.
 - Training reads `WorkoutPlan`, `WorkoutPlanRevision`, and `WorkoutSession` as a secondary read-only weekly plan view.
 - Nutrition reads `NutritionPlan`, `NutritionPlanRevision`, adherence, and recipe-supported recommendations as a secondary read-only weekly plan view.
+- Biomarkers (`/biomarkers`) reads `LabReport` and `BiomarkerReading` as a secondary route whose wayfinding parent is Nutrition — a dashboard-by-area with range bars, per-marker history, an upload panel, and manual reading entry.
 
-Metrics, documents, recipes, proposal audit data, and developer diagnostics can exist as domain or support models without becoming primary product tabs.
+Metrics, recipes, proposal audit data, and developer diagnostics can exist as domain or support models without becoming primary product tabs.
 
 ## Modeling Rules
 
@@ -422,24 +430,29 @@ Metrics, documents, recipes, proposal audit data, and developer diagnostics can 
 - Keep workout and nutrition plan screens read-only for active plan structure; user-requested changes should create proposals and revisions.
 - Keep Today focused on daily execution, not full weekly planning.
 - Keep Longevity read-only and trend-oriented; it can link to Chat for proposed changes.
-- Treat medical documents as sensitive, consent-gated coaching context only.
+- Treat uploaded lab reports as sensitive, consent-gated coaching context only.
 - Treat diagnosis and treatment guidance as out of scope for every product phase.
-- Require explicit consent before syncing device data or using health documents as AI context.
+- Require explicit consent before syncing device data or using biomarker readings as AI context.
 
 ## Medical and Lab Data Boundaries
 
-Users may upload medical documents and laboratory studies. These records are sensitive context, not a diagnosis engine.
+Users may upload laboratory reports (the **Biomarkers** feature) and laboratory studies.
+These records are sensitive context, not a diagnosis engine.
 
 Allowed uses with explicit consent:
 
-- structured extraction of wellness-relevant signals,
-- correlation analysis across physical, mental, behavioral, and plan data,
-- coaching explanations and typed proposals for workout, nutrition, recovery, and habit changes.
+- structured extraction of catalog-mapped biomarker readings (out-of-band LLM pipeline),
+- coaching explanations and typed proposals for workout, nutrition, recovery, and habit changes,
+- a bounded, consent-gated `biomarkerContext` chat slice (≤30 items, no reference ranges).
 
 Not allowed:
 
 - diagnosis, treatment plans, medication guidance, or medical certainty,
-- silent plan mutation from document or lab data,
-- using chat history as the authoritative store for extracted medical context.
+- silent plan mutation from lab data,
+- using chat history as the authoritative store for extracted lab context,
+- unit conversion of reported values (stored as-reported; conversion is a deliberate
+  non-goal), or "normal/abnormal/deficient" framing (ranges are wellness-neutral "typical").
 
-Extracted document signals, correlation insights, and proposal evidence should be stored as validated structured state with provenance and auditability.
+Extracted biomarker readings and proposal evidence (`biomarker_reading`) are stored as
+validated structured state with provenance (`source`, `confidence`, `userEdited`) and
+soft-delete auditability.

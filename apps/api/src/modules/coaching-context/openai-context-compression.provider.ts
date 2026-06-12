@@ -173,8 +173,9 @@ function buildCompressionUserContent(
 }
 
 /**
- * Reads only the non-document, already-bounded fields from a slice.
- * Deliberately does NOT read documentContext or ragResults (S5).
+ * Reads only the already-bounded, non-sensitive fields from a slice.
+ * Document-derived slice fields no longer exist in the contract (documents
+ * module deleted); the sourceRef-domain strip above stays as a defensive floor.
  */
 function appendBoundedSliceFindings(
   slice: UserContextSlice,
@@ -233,9 +234,8 @@ function appendBoundedSliceFindings(
     risks.push(slice.recommendationConstraints[0]!.slice(0, 240));
   }
 
-  // S5: documentContext and ragResults are intentionally NOT read here.
-  // We never echo raw document text; document sourceRefs are stripped upstream
-  // when budget.allowDocuments is false.
+  // We never echo raw document text; document-domain sourceRefs are stripped
+  // upstream when budget.allowDocuments is false (defensive floor).
 }
 
 function mapPurposeToFocusArea(purpose: ContextSlicePurpose): string {

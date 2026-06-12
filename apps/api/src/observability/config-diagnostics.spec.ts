@@ -10,7 +10,6 @@ const mockEnv = vi.hoisted(() => ({
   OPENAI_MODEL_DECISION: undefined as string | undefined,
   CORS_ORIGINS: undefined as string | undefined,
   DATABASE_URL: "postgres://postgres:postgres@localhost:5432/health_tracer",
-  DOCUMENT_STORAGE_PATH: ".data/documents",
 }));
 
 vi.mock("../env.js", () => ({

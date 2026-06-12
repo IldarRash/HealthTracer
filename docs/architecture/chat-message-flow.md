@@ -67,7 +67,8 @@ When `input.attachmentRefIds.length > 0`, `ChatService.sendMessage`:
 
 Document files are **not** text-extracted here. Extraction is lazy and happens **inside the
 AI stage**, once per turn, just before the domain fan-out (see §4). This boundary is the
-context-only invariant: **no attachment path creates or parses a `health_documents` row.**
+context-only invariant: **no attachment path creates or parses a `lab_reports` /
+`biomarker_readings` row.**
 
 ---
 

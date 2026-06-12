@@ -1,6 +1,6 @@
 import { z } from "zod";
+import { aiBiomarkerContextSummarySchema } from "./biomarker-context.js";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
-import { aiDocumentContextSummarySchema } from "./documents.js";
 import { aiMetricsContextSummarySchema } from "./device-metrics.js";
 import { personalContextSummarySchema } from "./goal-hierarchy.js";
 import { habitAdherencePlanSummarySchema } from "./habits.js";
@@ -89,7 +89,6 @@ export const contextSliceRequestSchema = z.object({
   type: contextSlicePurposeSchema,
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
-  includeDocuments: z.boolean().optional(),
 });
 
 export type ContextSliceRequest = z.infer<typeof contextSliceRequestSchema>;
@@ -124,7 +123,6 @@ export const getUserContextSliceInputSchema = z.object({
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
   includeRawData: z.boolean().default(false),
-  includeDocuments: z.boolean().default(false),
 });
 
 export type GetUserContextSliceInput = z.input<typeof getUserContextSliceInputSchema>;
@@ -256,17 +254,6 @@ export const contextSourceRefSchema = z.object({
 
 export type ContextSourceRef = z.infer<typeof contextSourceRefSchema>;
 
-export const ragContextResultSchema = z.object({
-  documentId: z.string().uuid(),
-  summaryId: z.string().uuid(),
-  title: z.string().min(1).max(160),
-  snippet: z.string().min(1).max(500),
-  provenance: z.string().min(1).max(240),
-  consentScope: z.string().min(1).max(80),
-});
-
-export type RagContextResult = z.infer<typeof ragContextResultSchema>;
-
 export const userContextSliceSchema = z.object({
   purpose: contextSlicePurposeSchema,
   depth: contextDepthSchema,
@@ -296,8 +283,12 @@ export const userContextSliceSchema = z.object({
   metricsSummary: aiMetricsContextSummarySchema.optional(),
   wellbeingSummary: aiWellbeingContextSummarySchema.optional(),
   recoveryContext: aiRecoveryContextSummarySchema.optional(),
-  documentContext: aiDocumentContextSummarySchema.optional(),
-  ragResults: z.array(ragContextResultSchema).max(5).optional(),
+  /**
+   * Structured, catalog-labeled, consent-gated biomarker readings.
+   * Exempt from the `allowDocuments` context-budget floor by design: this is
+   * user-visible, user-editable structured state — never document-derived text.
+   */
+  biomarkerContext: aiBiomarkerContextSummarySchema.optional(),
   relevantMemories: z.array(userMemoryItemSchema).max(20).default([]),
   snapshots: z.array(contextSnapshotItemSchema).max(5).default([]),
   recommendationConstraints: z.array(z.string().min(1).max(240)).max(10).default([]),
@@ -312,7 +303,6 @@ export const buildAgentContextRequestSchema = z.object({
   purpose: contextSlicePurposeSchema.optional(),
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
-  includeDocuments: z.boolean().optional(),
 });
 
 export type BuildAgentContextRequest = z.infer<typeof buildAgentContextRequestSchema>;
@@ -351,7 +341,6 @@ export const intentRouteResultSchema = z.object({
   purpose: contextSlicePurposeSchema,
   depth: contextDepthSchema,
   timeRange: contextTimeRangeSchema,
-  includeDocuments: z.boolean(),
   routingMethod: agentRoutingMethodSchema,
   requiredContextSlices: z.array(contextSliceRequestSchema).min(1).max(MAX_CONTEXT_SLICES),
   safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
@@ -613,7 +602,12 @@ export function validateAgentLoopOutputShape(value: unknown): string[] {
 }
 
 export const agentCitationSchema = z.object({
-  sourceType: z.enum(["structured_state", "document_summary", "memory", "snapshot"]),
+  sourceType: z.enum([
+    "structured_state",
+    "biomarker_reading",
+    "memory",
+    "snapshot",
+  ]),
   label: z.string().min(1).max(160),
   referenceId: z.string().uuid().optional(),
 });
@@ -866,7 +860,7 @@ export const DEFAULT_AGENT_SAFETY_CONSTRAINTS = [
   "Do not prescribe medication or claim to treat diseases.",
   "Prefer wellness coaching, habits, and structured plan suggestions.",
   "Plan changes must be proposals requiring user approval.",
-  "Do not expose raw health documents or private wellbeing notes.",
+  "Do not expose raw lab reports or private wellbeing notes.",
 ] as const;
 
 export const INTENT_TO_SLICE_PURPOSE: Record<AgentIntent, ContextSlicePurpose> = {
@@ -914,10 +908,6 @@ export function resolveDefaultTimeRangeForPurpose(
   }
 }
 
-export function shouldIncludeDocumentsForPurpose(purpose: ContextSlicePurpose): boolean {
-  return purpose === "health_context";
-}
-
 export function resolveDefaultExpectedResponseMode(
   intent: AgentIntent,
 ): ExpectedResponseMode {
@@ -948,8 +938,6 @@ export function normalizeContextSlicePlan(
       type: request.type,
       depth: request.depth ?? resolveDefaultDepthForPurpose(request.type),
       timeRange: request.timeRange ?? resolveDefaultTimeRangeForPurpose(request.type),
-      includeDocuments:
-        request.includeDocuments ?? shouldIncludeDocumentsForPurpose(request.type),
     });
 
     if (normalized.length >= MAX_CONTEXT_SLICES) {
@@ -962,7 +950,6 @@ export function normalizeContextSlicePlan(
       type: "general_chat",
       depth: resolveDefaultDepthForPurpose("general_chat"),
       timeRange: resolveDefaultTimeRangeForPurpose("general_chat"),
-      includeDocuments: false,
     });
   }
 
@@ -974,7 +961,6 @@ export function buildContextSliceRequestForIntent(
   options?: {
     depth?: ContextDepth;
     timeRange?: ContextTimeRange;
-    includeDocuments?: boolean;
   },
 ): ContextSliceRequest {
   const purpose = INTENT_TO_SLICE_PURPOSE[intent];
@@ -983,7 +969,6 @@ export function buildContextSliceRequestForIntent(
     type: purpose,
     depth: options?.depth ?? resolveDefaultDepthForPurpose(purpose),
     timeRange: options?.timeRange ?? resolveDefaultTimeRangeForPurpose(purpose),
-    includeDocuments: options?.includeDocuments ?? shouldIncludeDocumentsForPurpose(purpose),
   };
 }
 
@@ -1009,7 +994,6 @@ export function buildRouteFromCatalogIntent(input: {
     purpose: primary.type,
     depth: primary.depth ?? resolveDefaultDepthForPurpose(primary.type),
     timeRange: primary.timeRange ?? resolveDefaultTimeRangeForPurpose(primary.type),
-    includeDocuments: primary.includeDocuments ?? shouldIncludeDocumentsForPurpose(primary.type),
     routingMethod: input.routingMethod,
     requiredContextSlices: slicePlan,
     safetyFlags: input.safetyFlags ?? [],
