@@ -310,6 +310,43 @@ describe("OpenAiCoachProvider", () => {
       expect(result.output.confidence).toBe(0.85);
     });
 
+    it("preserves the domain selection when directCommand.kind is the literal string \"null\" (live regression 2026-06)", async () => {
+      // Exact payload captured from a live golden-eval failure (R-EN-01
+      // "Create a 3-day strength training plan for me"): the model emitted the
+      // string "null" for directCommand.kind (learned from the old prompt shape
+      // line) and the failed enum parse silently degraded a 0.95-confidence
+      // workout selection to the empty fallback — 13/41 golden cases failed.
+      const capturedLiveContent = JSON.stringify({
+        selectedDomains: [
+          {
+            domain: "workout",
+            confidence: 0.95,
+            intentHints: ["create_workout_plan"],
+            toolHints: [],
+            signalHints: ["explicit_plan_request"],
+          },
+        ],
+        directCommand: { detected: true, kind: "null", confidence: 0.0 },
+        safetyFlags: [],
+        confidence: 0.95,
+      });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(makeSuccessfulFetchResponse(capturedLiveContent)),
+      );
+
+      const provider = makeProvider();
+      const result = await provider.generateRouterDecision(makeRouterRequest());
+
+      expect(result.output.selectedDomains ?? []).toHaveLength(1);
+      expect((result.output.selectedDomains ?? [])[0]?.domain).toBe("workout");
+      expect(result.output.confidence).toBe(0.95);
+      // The junk kind degrades to null — telemetry only, never a routing failure.
+      expect(result.output.directCommand?.kind ?? null).toBeNull();
+      expect(result.output.directCommand?.detected).toBe(true);
+    });
+
     it("throws when the API returns malformed JSON (truncated) — non-JSON content is not silently absorbed", async () => {
       // requestJsonCompletion throws on JSON.parse failure; the caller (executor/orchestrator)
       // handles the error by degrading. The provider itself does not absorb this class of error.
