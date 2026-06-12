@@ -250,8 +250,36 @@
     {
       "idx": 35,
       "version": "7",
-      "when": 1781028345627,
-      "tag": "0035_silent_lucky_pierre",
+      "when": 1780970000000,
+      "tag": "0035_nutrition_plan_invariants",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781110200962,
+      "tag": "0036_careless_pandemic",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1781110300000,
+      "tag": "0037_recipe_per_serving_macros",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1781200000000,
+      "tag": "0038_biomarkers_replace_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1781287452117,
+      "tag": "0039_user_recipes",
       "breakpoints": true
     }
   ]

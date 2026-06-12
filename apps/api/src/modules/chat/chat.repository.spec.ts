@@ -5,7 +5,7 @@ describe("ChatRepository.createProposal", () => {
   it("persists optional evidenceRefs on inserted proposals", async () => {
     const evidenceRefs = [
       {
-        type: "document_signal" as const,
+        type: "biomarker_reading" as const,
         id: "3f98f3dd-806d-4386-8c5f-43499626c5d6",
         label: "Vitamin D from recent lab review",
       },

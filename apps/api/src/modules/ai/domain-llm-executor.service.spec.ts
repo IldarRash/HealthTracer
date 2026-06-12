@@ -1,12 +1,12 @@
 import { createFallbackDomainAnswer, DEFAULT_CONTEXT_BUDGET_POLICY } from "@health/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentContextPacket } from "@health/types";
-import type { CoachAiProvider } from "@health/ai";
-import { createCoachAiProviderMock } from "@health/ai/testing";
+import type { CoachAiProvider, ProviderUsage } from "@health/ai";
+import { createCoachAiProviderMock, wrapDomainOutput } from "@health/ai/testing";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import type { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { AgentToolRegistryService } from "./agent-tool-registry.service.js";
-import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
+import { buildCandidateMap, DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import type { DomainFanoutEntry } from "./system-planner.service.js";
 import type { OrchestrateCoachTurnInput } from "./agent-orchestrator.service.js";
 
@@ -96,7 +96,9 @@ function makeOrchestratorInput(
 
 function makeProvider(domainStepOutput: unknown): CoachAiProvider {
   return createCoachAiProviderMock({
-    generateDomainStep: vi.fn().mockResolvedValue(domainStepOutput),
+    generateDomainStep: vi.fn().mockResolvedValue(
+      domainStepOutput !== null ? { output: domainStepOutput } : domainStepOutput,
+    ),
   });
 }
 
@@ -112,7 +114,6 @@ function makeToolRegistry(): AgentToolRegistryService {
     listAvailableTools: vi.fn().mockReturnValue([
       "getUserContextSlice",
       "getWeeklyProgressContext",
-      "getDocumentContext",
     ]),
   } as unknown as AgentToolRegistryService;
 }
@@ -190,16 +191,20 @@ describe("DomainLlmExecutorService", () => {
     const generateDomainStep = vi
       .fn()
       .mockResolvedValueOnce({
-        kind: "tool_request",
-        tool: "getUserContextSlice",
-        input: { purpose: "workout_adaptation" },
+        output: {
+          kind: "tool_request",
+          tool: "getUserContextSlice",
+          input: { purpose: "workout_adaptation" },
+        },
       })
       .mockResolvedValueOnce({
-        kind: "domain_answer",
-        domain: "workout",
-        summary: "Context loaded and reviewed.",
-        candidateProposals: [],
-        domainSignals: [],
+        output: {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: "Context loaded and reviewed.",
+          candidateProposals: [],
+          domainSignals: [],
+        },
       });
 
     const provider = { ...makeProvider(null), generateDomainStep } as unknown as CoachAiProvider;
@@ -222,10 +227,11 @@ describe("DomainLlmExecutorService", () => {
   // -------------------------------------------------------------------------
 
   it("degrades when the domain LLM requests a tool not in the domain allowlist", async () => {
-    // Workout domain only allows getUserContextSlice; provider requests getDocumentContext.
+    // Workout domain only allows getUserContextSlice; provider requests getWeeklyProgressContext
+    // which is not in the clamped allowlist for this test's domain entry.
     const provider = makeProvider({
       kind: "tool_request",
-      tool: "getDocumentContext",
+      tool: "getWeeklyProgressContext",
       input: {},
     });
 
@@ -238,9 +244,9 @@ describe("DomainLlmExecutorService", () => {
     });
 
     expect(result.degraded).toBe(true);
-    expect(result.degradedReasons.join(" ")).toContain("getDocumentContext");
+    expect(result.degradedReasons.join(" ")).toContain("getWeeklyProgressContext");
     expect(result.degradedReasons.join(" ")).toContain("per-domain allowlist");
-    // Tool registry must NOT have been called for the blocked tool.
+    // Tool registry must NOT have been called for the blocked tool (enforcement is pre-dispatch).
     expect(toolRegistry.executeTool).not.toHaveBeenCalled();
   });
 
@@ -262,6 +268,67 @@ describe("DomainLlmExecutorService", () => {
 
     expect(result.degraded).toBe(true);
     expect(result.degradedReasons.join(" ")).toContain("per-domain allowlist");
+  });
+
+  it("rejects getProgressHistory for a non-review capability allowlist", async () => {
+    // adjust_workout-style entry: getProgressHistory is allowlisted only on
+    // review_progress / longevity_overview, never on plain workout adjustment.
+    const provider = makeProvider({
+      kind: "tool_request",
+      tool: "getProgressHistory",
+      input: { periodDays: 180 },
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout", ["getUserContextSlice", "getWeeklyProgressContext"]),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(true);
+    expect(result.degradedReasons.join(" ")).toContain("getProgressHistory");
+    expect(result.degradedReasons.join(" ")).toContain("per-domain allowlist");
+    expect(toolRegistry.executeTool).not.toHaveBeenCalled();
+  });
+
+  it("executes getProgressHistory when the domain entry carries a review allowlist", async () => {
+    const generateDomainStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        output: {
+          kind: "tool_request",
+          tool: "getProgressHistory",
+          input: { periodDays: 180 },
+        },
+      })
+      .mockResolvedValueOnce({
+        output: {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: "Long-range progress reviewed.",
+          candidateProposals: [],
+          domainSignals: [],
+        },
+      });
+
+    const provider = { ...makeProvider(null), generateDomainStep } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout", ["getUserContextSlice", "getProgressHistory"]),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({ userMessage: "Review my last six months" }),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.toolsInvoked).toContain("getProgressHistory");
+    expect(toolRegistry.executeTool).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tool: "getProgressHistory", input: { periodDays: 180 } }),
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -512,13 +579,13 @@ describe("DomainLlmExecutorService", () => {
   // -------------------------------------------------------------------------
 
   it("threads responseLanguage='ru' into the domain step request", async () => {
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "workout",
       summary: "Reviewed workout.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -541,13 +608,13 @@ describe("DomainLlmExecutorService", () => {
   });
 
   it("omits responseLanguage from the domain step request when it is null", async () => {
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "workout",
       summary: "Reviewed workout.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -645,6 +712,67 @@ describe("DomainLlmExecutorService", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Long-message (Slice 2) — 20 000-char userMessage reaches provider without
+// fallback or degradation (regression guard: previously capped at 4000).
+// ---------------------------------------------------------------------------
+
+describe("DomainLlmExecutorService — long-message (Slice 2)", () => {
+  let service: DomainLlmExecutorService;
+  let toolRegistry: AgentToolRegistryService;
+
+  beforeEach(() => {
+    toolRegistry = makeToolRegistry();
+    service = new DomainLlmExecutorService(toolRegistry, makeAttachmentsService());
+  });
+
+  it(`a long (>4000-char) userMessage reaches generateDomainStep without fallback or degradation`, async () => {
+    // Build a message well above the old 4000-char cap and well within the new 20 000-char cap.
+    const longMessage = "Сохрани мне эту программу тренировок: " + "x".repeat(12_000);
+
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Reviewed long workout program.",
+      candidateProposals: [
+        {
+          intent: "create_workout_plan",
+          targetDomain: "workout",
+          title: "Custom Program",
+          reason: "User pasted a detailed workout program.",
+          proposedChanges: { title: "Custom Program", days: [], notes: [] },
+        },
+      ],
+      domainSignals: ["explicit_plan_request"],
+    }));
+
+    const provider: CoachAiProvider = {
+      generateDomainStep: capturedRequest,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket("workout_adaptation", "adjust_workout"),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({ userMessage: longMessage }),
+      provider,
+    });
+
+    // Must not degrade — long message must not cause a schema parse failure
+    expect(result.degraded).toBe(false);
+    expect(result.domainAnswer.candidateProposals).toHaveLength(1);
+    expect(result.loopIterations).toBe(1);
+
+    // The full long message must reach the provider un-truncated (not cut to 4000)
+    expect(capturedRequest).toHaveBeenCalled();
+    const stepRequest = capturedRequest.mock.calls[0]?.[0] as { userMessage: string };
+    expect(stepRequest.userMessage.length).toBeGreaterThan(4_000);
+    expect(stepRequest.userMessage.startsWith("Сохрани мне эту программу тренировок:")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Step 7b — attachment context threading tests
 // ---------------------------------------------------------------------------
 
@@ -658,13 +786,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
   });
 
   it("threads food_photo attachment context into the nutrition domain step request", async () => {
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "nutrition",
       summary: "Analyzed the food photo.",
       candidateProposals: [],
       domainSignals: ["food_photo_present"],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -686,6 +814,7 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
               mimeType: "image/jpeg",
               consentState: "none",
               storageRef: "local://attachments/meal.jpg",
+              filename: "meal.jpg",
             },
           ],
         },
@@ -708,13 +837,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
   it("includes food_photo in the workout domain step request (no domain-to-category filter)", async () => {
     // Attachments are context-only: all attachments flow to every selected domain.
     // The domain LLM decides relevance based on its own prompt and allowlists.
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "workout",
       summary: "Workout reviewed.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -736,6 +865,7 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
               mimeType: "image/jpeg",
               consentState: "none",
               storageRef: "local://attachments/meal.jpg",
+              filename: "meal.jpg",
             },
           ],
         },
@@ -758,13 +888,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     // Images flow to every selected domain; the domain LLM reads content directly.
     // The allowDocuments=false context-budget floor (for DB health_documents slices)
     // is still enforced upstream by CoachingContextService.
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "health",
       summary: "Context only.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -786,6 +916,7 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
               mimeType: "image/jpeg",
               consentState: "needs_consent",  // No consent — still included in context-only mode.
               storageRef: "local://attachments/scan.jpg",
+              filename: "scan.jpg",
             },
           ],
         },
@@ -806,13 +937,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
   it("includes image attachment regardless of category or consentState in all domain steps", async () => {
     // All categories (including formerly-consent-gated medical_document) flow to all domains.
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "health",
       summary: "Reviewed the health document.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -834,6 +965,7 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
               mimeType: "image/jpeg",
               consentState: "granted",
               storageRef: "local://attachments/lab-scan.jpg",
+              filename: "lab-scan.jpg",
             },
           ],
         },
@@ -862,13 +994,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     );
     const serviceWithImages = new DomainLlmExecutorService(toolRegistry, attachmentsService);
 
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "nutrition",
       summary: "Analyzed the food photo.",
       candidateProposals: [],
       domainSignals: ["food_photo_present"],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -890,6 +1022,7 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
               mimeType: "image/jpeg",
               consentState: "none",
               storageRef: "local://attachments/meal.jpg",
+              filename: "meal.jpg",
             },
           ],
         },
@@ -922,14 +1055,14 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     );
     const serviceWithImages = new DomainLlmExecutorService(toolRegistry, attachmentsService);
 
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "workout",
       summary: "Workout reviewed.",
       candidateProposals: [],
       domainSignals: [],
       workoutCalorieEstimate: 280,
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -951,6 +1084,7 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
               mimeType: "image/jpeg",
               consentState: "none",
               storageRef: "local://attachments/workout.jpg",
+              filename: "workout.jpg",
             },
           ],
         },
@@ -982,13 +1116,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
     );
     const serviceWithFailingStorage = new DomainLlmExecutorService(toolRegistry, attachmentsService);
 
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "nutrition",
       summary: "Nutrition reviewed (no photo).",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -1010,6 +1144,7 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
               mimeType: "image/jpeg",
               consentState: "none",
               storageRef: "local://attachments/meal.jpg",
+              filename: "meal.jpg",
             },
           ],
         },
@@ -1030,13 +1165,13 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
   });
 
   it("returns an empty attachment context (absent field) when no attachments are present", async () => {
-    const capturedRequest = vi.fn().mockResolvedValue({
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
       kind: "domain_answer",
       domain: "nutrition",
       summary: "Nutrition reviewed.",
       candidateProposals: [],
       domainSignals: [],
-    });
+    }));
 
     const provider: CoachAiProvider = {
       generateDomainStep: capturedRequest,
@@ -1074,18 +1209,19 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
       mimeType: "image/jpeg",
       consentState: "none" as const,
       storageRef: "local://attachments/img.jpg",
+      filename: "img.jpg",
     };
 
     const attachmentTurn = { attachments: [sharedAttachment] };
 
     const makeCapturingProvider = (domain: "workout" | "nutrition" | "health") => {
-      const fn = vi.fn().mockResolvedValue({
+      const fn = vi.fn().mockResolvedValue(wrapDomainOutput({
         kind: "domain_answer",
         domain,
         summary: `${domain} reviewed.`,
         candidateProposals: [],
         domainSignals: [],
-      });
+      }));
 
       return {
         fn,
@@ -1146,5 +1282,692 @@ describe("DomainLlmExecutorService — attachment context (Step 7b)", () => {
 
     expect(healthReq.attachmentContext?.items).toHaveLength(1);
     expect(healthReq.attachmentContext?.items[0]?.attachmentRefId).toBe(sharedAttachment.attachmentRefId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Usage accumulation across multiple iterations
+// ---------------------------------------------------------------------------
+
+describe("DomainLlmExecutorService — multi-iteration usage accumulation", () => {
+  let service: DomainLlmExecutorService;
+  let toolRegistry: AgentToolRegistryService;
+
+  beforeEach(() => {
+    toolRegistry = makeToolRegistry();
+    service = new DomainLlmExecutorService(toolRegistry, makeAttachmentsService());
+  });
+
+  it("accumulates token usage and retries across tool_request iter1 + domain_answer iter2", async () => {
+    const iter1Usage: ProviderUsage = {
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+      latencyMs: 200,
+      retries: 1,
+    };
+    const iter2Usage: ProviderUsage = {
+      promptTokens: 120,
+      completionTokens: 60,
+      totalTokens: 180,
+      latencyMs: 250,
+      retries: 0,
+    };
+
+    const generateDomainStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        output: {
+          kind: "tool_request",
+          tool: "getUserContextSlice",
+          input: { purpose: "workout_adaptation" },
+        },
+        usage: iter1Usage,
+      })
+      .mockResolvedValueOnce({
+        output: {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: "Context loaded and reviewed.",
+          candidateProposals: [],
+          domainSignals: [],
+        },
+        usage: iter2Usage,
+      });
+
+    const provider: CoachAiProvider = {
+      generateDomainStep,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.loopIterations).toBe(2);
+    // Usage should be summed across both iterations
+    expect(result.usage).toBeDefined();
+    expect(result.usage?.promptTokens).toBe(220);      // 100 + 120
+    expect(result.usage?.completionTokens).toBe(110);  // 50 + 60
+    expect(result.usage?.totalTokens).toBe(330);       // 150 + 180
+    expect(result.usage?.latencyMs).toBe(450);         // 200 + 250
+    expect(result.usage?.retries).toBe(1);             // 1 + 0
+  });
+
+  it("preserves usage.model stamp across tool_request iter1 + domain_answer iter2 (Fix 1 regression guard)", async () => {
+    const iter1Usage: ProviderUsage = {
+      promptTokens: 50,
+      completionTokens: 20,
+      totalTokens: 70,
+      latencyMs: 100,
+      retries: 0,
+      model: "gpt-4o",
+    };
+    const iter2Usage: ProviderUsage = {
+      promptTokens: 60,
+      completionTokens: 25,
+      totalTokens: 85,
+      latencyMs: 120,
+      retries: 0,
+      // No model field on iter2 — iter1 stamp should survive.
+    };
+
+    const generateDomainStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        output: {
+          kind: "tool_request",
+          tool: "getUserContextSlice",
+          input: { purpose: "workout_adaptation" },
+        },
+        usage: iter1Usage,
+      })
+      .mockResolvedValueOnce({
+        output: {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: "Reviewed after tool.",
+          candidateProposals: [],
+          domainSignals: [],
+        },
+        usage: iter2Usage,
+      });
+
+    const provider: CoachAiProvider = {
+      generateDomainStep,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.loopIterations).toBe(2);
+    // model stamp from iter1 must survive the accumulation into iter2.
+    expect(result.usage?.model).toBe("gpt-4o");
+    // Numeric fields are still summed correctly.
+    expect(result.usage?.promptTokens).toBe(110);  // 50 + 60
+    expect(result.usage?.totalTokens).toBe(155);   // 70 + 85
+  });
+
+  it("threads accumulated usage into fallback result when domain degrades mid-loop", async () => {
+    const iter1Usage: ProviderUsage = {
+      promptTokens: 80,
+      completionTokens: 40,
+      totalTokens: 120,
+      latencyMs: 180,
+      retries: 0,
+    };
+
+    // iter1 returns a tool_request (usage accumulated), iter2 returns invalid kind (degrade)
+    const generateDomainStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        output: {
+          kind: "tool_request",
+          tool: "getUserContextSlice",
+          input: { purpose: "workout_adaptation" },
+        },
+        usage: iter1Usage,
+      })
+      .mockResolvedValueOnce({
+        output: {
+          kind: "unknown_kind",
+          domain: "workout",
+        },
+        usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40, latencyMs: 90, retries: 0 },
+      });
+
+    const provider: CoachAiProvider = {
+      generateDomainStep,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(true);
+    // Usage from iter1 (tool_request) should be preserved in fallback;
+    // iter2 usage is also accumulated before we detect the unknown kind.
+    expect(result.usage).toBeDefined();
+    expect(result.usage?.promptTokens).toBe(110); // 80 + 30
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Abort signal — timeout fires and cancels in-flight fetch
+// ---------------------------------------------------------------------------
+
+describe("DomainLlmExecutorService — abort signal wiring", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("passes an AbortSignal to generateDomainStep and aborts it when the timeout fires", async () => {
+    vi.useFakeTimers();
+
+    const toolRegistry = makeToolRegistry();
+    const service = new DomainLlmExecutorService(toolRegistry, makeAttachmentsService());
+
+    let capturedSignal: AbortSignal | undefined;
+
+    // Provider that captures the signal but never resolves.
+    const hangingProvider: CoachAiProvider = {
+      generateDomainStep: vi.fn().mockImplementation(
+        (_req: unknown, opts?: { signal?: AbortSignal }) => {
+          capturedSignal = opts?.signal;
+          return new Promise<never>(() => undefined); // never resolves
+        },
+      ),
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const resultPromise = service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider: hangingProvider,
+    });
+
+    // Signal must be present after the first generateDomainStep call starts.
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    // Result degrades to fallback.
+    expect(result.degraded).toBe(true);
+    expect(result.degradedReasons.join(" ")).toContain("timed out");
+
+    // The signal captured by the provider must be aborted after the timeout.
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Item 3b — candidateMap key scheme and values
+// ---------------------------------------------------------------------------
+
+describe("DomainLlmExecutorService — candidateMap key scheme (Item 3b)", () => {
+  let service: DomainLlmExecutorService;
+
+  beforeEach(() => {
+    service = new DomainLlmExecutorService(makeToolRegistry(), makeAttachmentsService());
+  });
+
+  it("assigns deterministic cand_<domain>_<index> keys matching candidateProposals order", async () => {
+    const candidate0 = {
+      intent: "adapt_workout_plan",
+      targetDomain: "workout",
+      title: "Reduce load",
+      reason: "User is fatigued.",
+      proposedChanges: {},
+    };
+    const candidate1 = {
+      intent: "create_workout_plan",
+      targetDomain: "workout",
+      title: "New plan",
+      reason: "Fresh start requested.",
+      proposedChanges: { title: "New plan", days: [], notes: [] },
+    };
+
+    const provider = makeProvider({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Two workout candidates.",
+      candidateProposals: [candidate0, candidate1],
+      domainSignals: [],
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.domainAnswer.candidateProposals).toHaveLength(2);
+
+    // Key scheme: cand_workout_0 and cand_workout_1 in order.
+    expect(result.candidateMap.size).toBe(2);
+    expect(result.candidateMap.has("cand_workout_0")).toBe(true);
+    expect(result.candidateMap.has("cand_workout_1")).toBe(true);
+
+    // Values must match the original candidate objects from the domain answer.
+    expect(result.candidateMap.get("cand_workout_0")).toMatchObject({
+      intent: "adapt_workout_plan",
+      title: "Reduce load",
+    });
+    expect(result.candidateMap.get("cand_workout_1")).toMatchObject({
+      intent: "create_workout_plan",
+      title: "New plan",
+    });
+  });
+
+  it("uses domain as the key prefix — nutrition domain uses cand_nutrition_<index>", async () => {
+    const provider = makeProvider({
+      kind: "domain_answer",
+      domain: "nutrition",
+      summary: "Nutrition candidate.",
+      candidateProposals: [
+        {
+          intent: "create_nutrition_plan",
+          targetDomain: "nutrition",
+          title: "Balanced diet",
+          reason: "Calorie deficit goal.",
+          proposedChanges: {},
+        },
+      ],
+      domainSignals: [],
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("nutrition"),
+      contextPacket: makeContextPacket("nutrition_adaptation", "adjust_nutrition"),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({ userMessage: "Adjust my nutrition." }),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.candidateMap.size).toBe(1);
+    expect(result.candidateMap.has("cand_nutrition_0")).toBe(true);
+    expect(result.candidateMap.has("cand_workout_0")).toBe(false);
+  });
+
+  it("returns an empty candidateMap when the domain answer has no candidateProposals", async () => {
+    const provider = makeProvider({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "No proposals needed.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.candidateMap.size).toBe(0);
+  });
+
+  it("returns an empty candidateMap for a degraded (fallback) result", async () => {
+    // Provider throws → degraded result → candidateMap must be empty.
+    const provider: CoachAiProvider = {
+      generateDomainStep: vi.fn().mockRejectedValue(new Error("network error")),
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(true);
+    expect(result.candidateMap.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCandidateMap pure-function tests
+// ---------------------------------------------------------------------------
+
+describe("buildCandidateMap", () => {
+  it("assigns cand_<domain>_<index> keys in candidateProposals array order", () => {
+    const proposals = [
+      { intent: "adapt_workout_plan", title: "Reduce load", reason: "Fatigue." },
+      { intent: "create_workout_plan", title: "New plan", reason: "Fresh start." },
+    ];
+
+    const map = buildCandidateMap("workout", proposals);
+
+    expect(map.size).toBe(2);
+    expect(map.get("cand_workout_0")).toBe(proposals[0]);
+    expect(map.get("cand_workout_1")).toBe(proposals[1]);
+  });
+
+  it("uses domain name as key prefix for nutrition domain", () => {
+    const proposals = [{ intent: "create_nutrition_plan", title: "Diet", reason: "Goals." }];
+
+    const map = buildCandidateMap("nutrition", proposals);
+
+    expect(map.size).toBe(1);
+    expect(map.has("cand_nutrition_0")).toBe(true);
+    expect(map.has("cand_workout_0")).toBe(false);
+  });
+
+  it("returns an empty map for an empty candidateProposals array", () => {
+    const map = buildCandidateMap("workout", []);
+    expect(map.size).toBe(0);
+  });
+
+  it("preserves the original candidate object reference as the map value", () => {
+    const candidate = { intent: "adapt_workout_plan", title: "Test", reason: "Reason." };
+    const map = buildCandidateMap("workout", [candidate]);
+    expect(map.get("cand_workout_0")).toBe(candidate);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gap 1 — document_file text extraction threading (workout domain)
+// ---------------------------------------------------------------------------
+//
+// Verifies that:
+//   (a) When attachmentTextMap has a successful extraction, the WORKOUT domain
+//       step request carries textContent + filename on the item.
+//   (b) When the extraction status is "failed" or "empty", items are
+//       metadata-only (no textContent) and the turn proceeds without degradation.
+//
+// Note: the workout domain skips imageDataUri (proven in the existing
+// "skips imageDataUri for workout domain" test above) but DOES receive
+// textContent for document_file MIMEs via the attachmentTextMap.
+// ---------------------------------------------------------------------------
+
+describe("DomainLlmExecutorService — document_file text threading (Gap 1)", () => {
+  let service: DomainLlmExecutorService;
+  let toolRegistry: AgentToolRegistryService;
+
+  beforeEach(() => {
+    toolRegistry = makeToolRegistry();
+    // Attachments service should not be called for text extraction path
+    service = new DomainLlmExecutorService(toolRegistry, makeAttachmentsService());
+  });
+
+  it("workout domain step request carries textContent + filename when attachmentTextMap has status=ok", async () => {
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Reviewed the uploaded training plan.",
+      candidateProposals: [],
+      domainSignals: [],
+    }));
+
+    const provider: CoachAiProvider = {
+      generateDomainStep: capturedRequest,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const attachmentRefId = "d1000001-0000-4000-8000-000000000001";
+    const attachmentTextMap = new Map([
+      [
+        attachmentRefId,
+        {
+          text: "Day 1: Squat 4x8. Day 2: Bench Press 4x8.",
+          truncated: false,
+          status: "ok" as const,
+        },
+      ],
+    ]);
+
+    await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket("workout_adaptation", "adjust_workout"),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({
+        userMessage: "Adapt this plan for me.",
+        attachmentTurn: {
+          attachments: [
+            {
+              attachmentRefId,
+              category: "document_file",
+              mimeType: "application/pdf",
+              consentState: "none",
+              storageRef: "local://attachments/training-plan.pdf",
+              filename: "training-plan.pdf",
+            },
+          ],
+        },
+      }),
+      provider,
+      attachmentTextMap,
+    });
+
+    expect(capturedRequest).toHaveBeenCalled();
+    const stepRequest = capturedRequest.mock.calls[0]?.[0] as {
+      attachmentContext?: {
+        items: Array<{ attachmentRefId: string; mimeType: string; textContent?: string; filename?: string; imageDataUri?: string }>;
+      };
+    };
+
+    expect(stepRequest.attachmentContext).toBeDefined();
+    const item = stepRequest.attachmentContext?.items[0];
+
+    // textContent and filename must be populated for all domains (including workout).
+    expect(item?.textContent).toBe("Day 1: Squat 4x8. Day 2: Bench Press 4x8.");
+    expect(item?.filename).toBe("training-plan.pdf");
+    // imageDataUri must NOT be set on the workout domain (workout skips vision content).
+    expect(item?.imageDataUri).toBeUndefined();
+  });
+
+  it("workout domain step request has metadata-only item (no textContent) when extraction status is 'failed'", async () => {
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Reviewed workout context.",
+      candidateProposals: [],
+      domainSignals: [],
+    }));
+
+    const provider: CoachAiProvider = {
+      generateDomainStep: capturedRequest,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const attachmentRefId = "d2000001-0000-4000-8000-000000000001";
+    const attachmentTextMap = new Map([
+      [attachmentRefId, { truncated: false, status: "failed" as const }],
+    ]);
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket("workout_adaptation", "adjust_workout"),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({
+        userMessage: "Review this plan.",
+        attachmentTurn: {
+          attachments: [
+            {
+              attachmentRefId,
+              category: "document_file",
+              mimeType: "text/plain",
+              consentState: "none",
+              storageRef: "local://attachments/plan.txt",
+              filename: "plan.txt",
+            },
+          ],
+        },
+      }),
+      provider,
+      attachmentTextMap,
+    });
+
+    // Turn must NOT be blocked by a failed extraction.
+    expect(result.degraded).toBe(false);
+    expect(capturedRequest).toHaveBeenCalled();
+
+    const stepRequest = capturedRequest.mock.calls[0]?.[0] as {
+      attachmentContext?: {
+        items: Array<{ attachmentRefId: string; textContent?: string; filename?: string }>;
+      };
+    };
+
+    const item = stepRequest.attachmentContext?.items[0];
+    // textContent must be absent (no extracted text).
+    expect(item?.textContent).toBeUndefined();
+    // filename may still be present as metadata.
+    expect(item?.filename).toBe("plan.txt");
+  });
+
+  it("workout domain step request has metadata-only item (no textContent) when extraction status is 'empty'", async () => {
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Reviewed workout context.",
+      candidateProposals: [],
+      domainSignals: [],
+    }));
+
+    const provider: CoachAiProvider = {
+      generateDomainStep: capturedRequest,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const attachmentRefId = "d3000001-0000-4000-8000-000000000001";
+    const attachmentTextMap = new Map([
+      [attachmentRefId, { truncated: false, status: "empty" as const }],
+    ]);
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout"),
+      contextPacket: makeContextPacket("workout_adaptation", "adjust_workout"),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({
+        userMessage: "Review this plan.",
+        attachmentTurn: {
+          attachments: [
+            {
+              attachmentRefId,
+              category: "document_file",
+              mimeType: "text/plain",
+              consentState: "none",
+              storageRef: "local://attachments/empty.txt",
+              filename: "empty.txt",
+            },
+          ],
+        },
+      }),
+      provider,
+      attachmentTextMap,
+    });
+
+    // Turn must NOT be blocked by an empty extraction.
+    expect(result.degraded).toBe(false);
+    expect(capturedRequest).toHaveBeenCalled();
+
+    const stepRequest = capturedRequest.mock.calls[0]?.[0] as {
+      attachmentContext?: {
+        items: Array<{ textContent?: string; filename?: string }>;
+      };
+    };
+
+    const item = stepRequest.attachmentContext?.items[0];
+    expect(item?.textContent).toBeUndefined();
+    expect(item?.filename).toBe("empty.txt");
+  });
+
+  it("nutrition domain also receives textContent + filename from attachmentTextMap for document_file attachments", async () => {
+    const capturedRequest = vi.fn().mockResolvedValue(wrapDomainOutput({
+      kind: "domain_answer",
+      domain: "nutrition",
+      summary: "Reviewed the nutrition document.",
+      candidateProposals: [],
+      domainSignals: [],
+    }));
+
+    const provider: CoachAiProvider = {
+      generateDomainStep: capturedRequest,
+      generateRouterDecision: vi.fn(),
+      generateFinalDecision: vi.fn(),
+    } as unknown as CoachAiProvider;
+
+    const attachmentRefId = "d4000001-0000-4000-8000-000000000001";
+    const attachmentTextMap = new Map([
+      [
+        attachmentRefId,
+        {
+          text: "Calories: 2000. Protein: 150g.",
+          truncated: false,
+          status: "ok" as const,
+        },
+      ],
+    ]);
+
+    await service.runDomainLoop({
+      domainEntry: makeDomainEntry("nutrition"),
+      contextPacket: makeContextPacket("nutrition_adaptation", "adjust_nutrition"),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({
+        userMessage: "Analyze this nutrition document.",
+        attachmentTurn: {
+          attachments: [
+            {
+              attachmentRefId,
+              category: "document_file",
+              mimeType: "text/plain",
+              consentState: "none",
+              storageRef: "local://attachments/macros.txt",
+              filename: "macros.txt",
+            },
+          ],
+        },
+      }),
+      provider,
+      attachmentTextMap,
+    });
+
+    expect(capturedRequest).toHaveBeenCalled();
+    const stepRequest = capturedRequest.mock.calls[0]?.[0] as {
+      attachmentContext?: {
+        items: Array<{ textContent?: string; filename?: string }>;
+      };
+    };
+
+    const item = stepRequest.attachmentContext?.items[0];
+    expect(item?.textContent).toBe("Calories: 2000. Protein: 150g.");
+    expect(item?.filename).toBe("macros.txt");
   });
 });

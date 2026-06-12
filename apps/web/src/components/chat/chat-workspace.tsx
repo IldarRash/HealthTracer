@@ -1,9 +1,11 @@
 "use client";
 
+import { useTranslations, useLocale } from "next-intl";
 import { useAuth } from "@clerk/nextjs";
-import type { AiProposal, ProposalModifyResponse } from "@health/types";
+import type { AiProposal, ChatTurnResponse, ProposalModifyResponse } from "@health/types";
+import { MAX_CHAT_USER_MESSAGE_CHARS } from "@health/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   apiQueryKeys,
   createChatThread,
@@ -20,7 +22,6 @@ import {
   createChatComposerAttachmentDraft,
   isChatAttachmentSendEligible,
   revokeChatAttachmentPreviewUrl,
-  type ChatAttachmentOutcomeDisplay,
   type ChatComposerAttachmentDraft,
 } from "../../lib/chat-attachment-ui-state";
 import { buildChatAttachmentUploadPayload } from "../../lib/chat-attachment-upload";
@@ -29,28 +30,49 @@ import {
   resolveChatMessageDirectPathFeedback,
 } from "../../lib/chat-direct-path-ui-state";
 import {
+  findPrecedingUserMessage,
+  resolveChatMessageTurnError,
+} from "../../lib/chat-degraded-ui-state";
+import { useChatAutoScroll } from "../../lib/use-chat-auto-scroll";
+import {
+  formatChatDateSeparator,
+  shouldShowDateSeparator,
+} from "../../lib/chat-transcript-grouping";
+import { shouldSendOnEnter } from "../../lib/chat-composer-ui-state";
+import {
   createOptimisticUserMessage,
-  formatChatTimestamp,
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
+  resolveChatMessageSuggestedQuickActions,
   resolveChatMessageWeeklyReview,
-  CHAT_EMPTY_STATE_DESCRIPTION,
-  CHAT_EMPTY_STATE_TITLE,
   resolvePrimaryThreadId,
-  SUGGESTED_CHAT_PROMPTS,
+  SUGGESTED_CHAT_PROMPT_DEFINITIONS,
   type OptimisticChatMessage,
 } from "../../lib/chat-ui-state";
 import {
   resolveChatMessageAttachmentPreviews,
   resolveChatMessageTextContent,
 } from "../../lib/chat-message-attachments";
+import {
+  buildStreamChatMessageBody,
+  resolveStageCopy,
+  shouldFallbackToSync,
+  streamChatMessage,
+  StreamError,
+  type ChatTurnStreamEvent,
+  type StreamFailureReason,
+} from "../../lib/chat-stream";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
-import { ChatAttachmentOutcomePanel } from "./chat-attachment-outcome-panel";
+import { ChatQuickActionChips } from "./chat-quick-action-chips";
 import { ChatComposerAttachmentInput } from "./chat-composer-attachment-input";
 import { ChatComposerAttachments } from "./chat-composer-attachments";
 import { ChatMessageAttachmentPreviews } from "./chat-message-attachment-previews";
 import { PhotoGuide } from "./photo-guide";
 import { PhotoStripMsg } from "./photo-strip-msg";
+import { ChatDateSeparator } from "./chat-date-separator";
+import { ChatJumpToLatest } from "./chat-jump-to-latest";
+import { ChatMessageMarkdown } from "./chat-message-markdown";
+import { ChatTurnErrorCard } from "./chat-turn-error-card";
 import { WeeklyReviewChatSummary } from "./weekly-review-chat-summary";
 import {
   BODY_ANALYSIS_THINKING_LABEL,
@@ -91,6 +113,8 @@ type ChatSendMutationInput =
     };
 
 export function ChatWorkspace() {
+  const t = useTranslations("Chat");
+  const locale = useLocale();
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
@@ -103,9 +127,6 @@ export function ChatWorkspace() {
   const [composerAttachments, setComposerAttachments] = useState<ChatComposerAttachmentDraft[]>(
     [],
   );
-  const [attachmentOutcomesByMessageId, setAttachmentOutcomesByMessageId] = useState<
-    Record<string, ChatAttachmentOutcomeDisplay[]>
-  >({});
   /**
    * chatBodyFlow — tracks whether we are in the body-analysis photo intake flow.
    * - "ask": coach has requested photos; PhotoGuide is mounted after the request message.
@@ -115,6 +136,25 @@ export function ChatWorkspace() {
    */
   const [chatBodyFlowStep, setChatBodyFlowStep] =
     useState<ChatBodyFlowStep | null>(null);
+
+  /**
+   * Streaming-specific state.
+   * - streamingCopy: the current coaching-toned stage label shown in the
+   *   ThinkingIndicator while a stream is in flight (null = not streaming).
+   * - streamingInFlight: true while the SSE stream or its sync fallback is
+   *   actively running. Controls send-button disabled state to match the
+   *   sync mutation's isPending behavior.
+   */
+  const [streamingCopy, setStreamingCopy] = useState<string | null>(null);
+  const [streamingInFlight, setStreamingInFlight] = useState(false);
+  /**
+   * True after a `final_unparseable` stream failure: the backend turn succeeded
+   * and was persisted, but the final frame failed client-side validation. The
+   * thread is refetched (tolerant contract) and a system notice tells the user
+   * not to resend — resending would run a duplicate paid LLM turn.
+   */
+  const [streamRecoveryNotice, setStreamRecoveryNotice] = useState(false);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   const threadsQuery = useQuery({
     queryKey: ["chat-threads"],
@@ -213,7 +253,6 @@ export function ChatWorkspace() {
     setLocalProposals([]);
     setOptimisticMessage(null);
     setPendingRevisionSend(null);
-    setAttachmentOutcomesByMessageId({});
     setChatBodyFlowStep(null);
     setComposerAttachments((current) => {
       for (const attachment of current) {
@@ -294,6 +333,48 @@ export function ChatWorkspace() {
     [getToken, primaryThreadId, updateComposerAttachment],
   );
 
+  // ---------------------------------------------------------------------------
+  // Shared cache-update handler — called identically by the streaming and sync
+  // paths so there is no duplication of the TanStack Query invalidation logic.
+  // ---------------------------------------------------------------------------
+  const applyTurnResponse = useCallback(
+    (turn: ChatTurnResponse) => {
+      setDraft("");
+      setOptimisticMessage(null);
+      setPendingRevisionSend(null);
+      setStreamRecoveryNotice(false);
+
+      setComposerAttachments((current) => {
+        for (const attachment of current) {
+          revokeChatAttachmentPreviewUrl(attachment);
+        }
+        return [];
+      });
+
+      // Advance body flow step: if the response contains a body analysis proposal, mark "result".
+      if (hasBodyAnalysisProposal(turn.proposals)) {
+        setChatBodyFlowStep("result");
+      }
+
+      setLocalProposals(turn.proposals);
+      // Quick-action chips are NOT captured here: they render from the persisted
+      // assistant message metadata (resolveChatMessageSuggestedQuickActions) once
+      // the thread query refetch below delivers the message, so they survive reload.
+      void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
+      void queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
+      void queryClient.invalidateQueries({ queryKey: ["proposals", turn.thread.id] });
+      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
+
+      const directPathRefreshHints = getDirectChatPathRefreshHints(turn.assistantMessage.metadata);
+      if (directPathRefreshHints.length > 0) {
+        for (const queryKey of getDirectChatPathRefreshQueryKeys(directPathRefreshHints)) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
+      }
+    },
+    [queryClient],
+  );
+
   const sendMessageMutation = useMutation({
     mutationFn: async (input: ChatSendMutationInput) => {
       const token = await getToken();
@@ -347,50 +428,182 @@ export function ChatWorkspace() {
       setOptimisticMessage(createOptimisticUserMessage(primaryThreadId, content));
     },
     onSuccess: (turn) => {
-      setDraft("");
-      setOptimisticMessage(null);
-      setPendingRevisionSend(null);
-
-      setComposerAttachments((current) => {
-        for (const attachment of current) {
-          revokeChatAttachmentPreviewUrl(attachment);
-        }
-        return [];
-      });
-
-      // Advance body flow step: if the response contains a body analysis proposal, mark "result".
-      if (hasBodyAnalysisProposal(turn.proposals)) {
-        setChatBodyFlowStep("result");
-      }
-
-      setLocalProposals(turn.proposals);
-      if (turn.attachmentOutcomes?.length) {
-        setAttachmentOutcomesByMessageId((current) => ({
-          ...current,
-          [turn.assistantMessage.id]: turn.attachmentOutcomes ?? [],
-        }));
-      }
-      void queryClient.invalidateQueries({ queryKey: ["chat-thread", turn.thread.id] });
-      void queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
-      void queryClient.invalidateQueries({ queryKey: ["proposals", turn.thread.id] });
-      void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
-
-      const directPathRefreshHints = getDirectChatPathRefreshHints(turn.assistantMessage.metadata);
-      if (directPathRefreshHints.length > 0) {
-        for (const queryKey of getDirectChatPathRefreshQueryKeys(directPathRefreshHints)) {
-          void queryClient.invalidateQueries({ queryKey });
-        }
-      }
+      applyTurnResponse(turn);
     },
     onError: () => {
       setOptimisticMessage(null);
+      // A failed-looking send may still have persisted messages server-side
+      // (e.g. the response parse failed after the turn ran). Refetch the thread
+      // through the tolerant contract so persisted messages are revealed.
+      if (primaryThreadId) {
+        void queryClient.invalidateQueries({ queryKey: ["chat-thread", primaryThreadId] });
+      }
     },
   });
+
+  // ---------------------------------------------------------------------------
+  // Streaming send — attempts the SSE endpoint and falls back to sync on failure.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * sendMessageStreaming — attempt to stream a chat turn via the SSE endpoint.
+   * On any stream failure, automatically retries via sendMessageMutation (sync path).
+   *
+   * While the stream is in flight, streamingInFlight=true mirrors the
+   * sendMessageMutation.isPending behavior so the UI stays consistent.
+   */
+  const sendMessageStreaming = useCallback(
+    async (
+      content: string,
+      options?: { proposalRevision?: unknown; attachmentRefIds?: string[] },
+    ) => {
+      if (!primaryThreadId) {
+        return;
+      }
+
+      const token = await getToken();
+      if (!token) {
+        // No token — fall directly to sync.
+        const syncInput = options?.attachmentRefIds?.length
+          ? { content, attachmentRefIds: options.attachmentRefIds }
+          : content;
+        sendMessageMutation.mutate(syncInput as ChatSendMutationInput);
+        return;
+      }
+
+      // Abort any previous in-flight stream.
+      streamAbortRef.current?.abort();
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
+
+      setStreamingInFlight(true);
+      setStreamingCopy(null);
+      setStreamRecoveryNotice(false);
+
+      // Set optimistic user message so the thread renders immediately.
+      const messageContent = content;
+      setOptimisticMessage(
+        options?.attachmentRefIds?.length
+          ? createOptimisticUserMessage(
+              primaryThreadId,
+              messageContent,
+              buildOptimisticAttachmentDisplays(composerAttachments),
+            )
+          : createOptimisticUserMessage(primaryThreadId, messageContent),
+      );
+
+      let finalTurn: ChatTurnResponse | null = null;
+
+      const body = buildStreamChatMessageBody(content, options);
+
+      const onEvent = (event: ChatTurnStreamEvent) => {
+        if (event.kind === "stage") {
+          setStreamingCopy(resolveStageCopy(event));
+        }
+        if (event.kind === "final") {
+          finalTurn = event.response as ChatTurnResponse;
+        }
+      };
+
+      try {
+        await streamChatMessage({
+          token,
+          threadId: primaryThreadId,
+          body,
+          onEvent,
+          signal: abortController.signal,
+        });
+      } catch (err) {
+        // AbortError means we deliberately cancelled the stream — don't fall back.
+        if (err instanceof Error && err.name === "AbortError") {
+          setStreamingInFlight(false);
+          setStreamingCopy(null);
+          setOptimisticMessage(null);
+          return;
+        }
+
+        // Fix 2 (duplicate-message guard): if we already received the final event,
+        // the turn was fully delivered — treat as success regardless of any late
+        // read error that fires after the final frame. A late read_error after
+        // final is a stream-close race and must NOT trigger the sync fallback,
+        // which would re-send the message and produce duplicate user+assistant
+        // messages in the thread.
+        if (finalTurn !== null) {
+          setStreamingInFlight(false);
+          setStreamingCopy(null);
+          applyTurnResponse(finalTurn);
+          return;
+        }
+
+        // finalTurn is null — the stream failed before a usable final event.
+        // shouldFallbackToSync governs whether we retry via the sync endpoint.
+        const reason: StreamFailureReason =
+          err instanceof StreamError ? err.reason : "read_error";
+
+        if (!shouldFallbackToSync(reason)) {
+          // final_unparseable: the final frame ARRIVED — the backend turn
+          // succeeded and is persisted. Re-sending would run a duplicate paid
+          // LLM turn, so refetch instead: the tolerant contract reveals the
+          // persisted turn, and a system notice tells the user not to resend.
+          setStreamingInFlight(false);
+          setStreamingCopy(null);
+          setOptimisticMessage(null);
+          setStreamRecoveryNotice(true);
+          void queryClient.invalidateQueries({ queryKey: ["chat-thread", primaryThreadId] });
+          void queryClient.invalidateQueries({ queryKey: ["proposals", primaryThreadId] });
+          void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
+          return;
+        }
+        // fall through to sync fallback
+      }
+
+      if (finalTurn !== null) {
+        // Stream completed cleanly with a final event — apply the turn response.
+        setStreamingInFlight(false);
+        setStreamingCopy(null);
+        applyTurnResponse(finalTurn);
+        return;
+      }
+
+      // Fallback: stream failed — retry via sync mutation.
+      // Keep streamingInFlight=true so the UI stays in the loading state
+      // seamlessly until the sync mutation resolves.
+      setStreamingCopy(null);
+
+      const syncInput: ChatSendMutationInput = options?.attachmentRefIds?.length
+        ? { content, attachmentRefIds: options.attachmentRefIds }
+        : content;
+
+      // Clear optimistic message so the sync mutation's onMutate re-sets it.
+      setOptimisticMessage(null);
+      sendMessageMutation.mutate(syncInput, {
+        onSettled: () => {
+          setStreamingInFlight(false);
+        },
+      });
+    },
+    [
+      applyTurnResponse,
+      composerAttachments,
+      getToken,
+      primaryThreadId,
+      queryClient,
+      sendMessageMutation,
+    ],
+  );
+
+  // Whether a turn is currently in flight (streaming or sync mutation).
+  const isSendPending = streamingInFlight || sendMessageMutation.isPending;
 
   const messages = mergeDisplayMessages(
     threadDetailQuery.data?.messages ?? [],
     optimisticMessage,
   );
+
+  const { transcriptRef, isAtBottom, scrollToLatest } = useChatAutoScroll({
+    messages,
+    isSendPending,
+  });
 
   const proposalsByMessageId = useMemo(() => {
     const merged = mergeProposalsById(threadProposalsQuery.data ?? [], localProposals);
@@ -434,13 +647,13 @@ export function ChatWorkspace() {
   const resolvedBodyFlowStep: ChatBodyFlowStep | null = useMemo(() => {
     if (bodyAnalysisSaved) return "saved";
     if (chatBodyFlowStep === "result" || chatBodyFlowStep === "saved") return chatBodyFlowStep;
-    if (chatBodyFlowStep === "analyzing" || sendMessageMutation.isPending) {
+    if (chatBodyFlowStep === "analyzing" || isSendPending) {
       return chatBodyFlowStep ?? null;
     }
     if (chatBodyFlowStep === "uploading") return "uploading";
     if (bodyPhotoRequestMessage) return "ask";
     return null;
-  }, [bodyAnalysisSaved, bodyPhotoRequestMessage, chatBodyFlowStep, sendMessageMutation.isPending]);
+  }, [bodyAnalysisSaved, bodyPhotoRequestMessage, chatBodyFlowStep, isSendPending]);
 
   /**
    * Whether to show the PhotoGuide card after the body-photo-request coach message.
@@ -449,13 +662,12 @@ export function ChatWorkspace() {
   const showPhotoGuide =
     resolvedBodyFlowStep === "ask" &&
     bodyPhotoRequestMessage !== null &&
-    !sendMessageMutation.isPending;
+    !isSendPending;
 
   /**
    * Whether to show the body analysis ThinkingBlock label during the analyzing step.
    */
-  const showBodyAnalysisThinking =
-    sendMessageMutation.isPending && chatBodyFlowStep === "analyzing";
+  const showBodyAnalysisThinking = isSendPending && chatBodyFlowStep === "analyzing";
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -469,7 +681,7 @@ export function ChatWorkspace() {
       !canSendChatComposer({
         draftText: draft,
         attachments: composerAttachments,
-        isSendPending: sendMessageMutation.isPending,
+        isSendPending,
       }) ||
       !primaryThreadId
     ) {
@@ -481,7 +693,7 @@ export function ChatWorkspace() {
       if (chatBodyFlowStep === "uploading" || resolvedBodyFlowStep === "ask") {
         setChatBodyFlowStep("analyzing");
       }
-      sendMessageMutation.mutate({ content, attachmentRefIds });
+      void sendMessageStreaming(content, { attachmentRefIds });
       return;
     }
 
@@ -489,21 +701,21 @@ export function ChatWorkspace() {
       return;
     }
 
-    sendMessageMutation.mutate(content);
+    void sendMessageStreaming(content);
   };
 
   const sendDisabled = !canSendChatComposer({
     draftText: draft,
     attachments: composerAttachments,
-    isSendPending: sendMessageMutation.isPending,
+    isSendPending,
   });
 
   const handlePromptSelect = (prompt: string) => {
-    if (sendMessageMutation.isPending || !primaryThreadId) {
+    if (isSendPending || !primaryThreadId) {
       return;
     }
 
-    sendMessageMutation.mutate(prompt);
+    void sendMessageStreaming(prompt);
   };
 
   const handleProposalDecision = (updated: AiProposal) => {
@@ -547,22 +759,48 @@ export function ChatWorkspace() {
     );
 
     const revisionSend = buildProposalRevisionChatSend(response);
-    if (revisionSend.message.trim() && primaryThreadId && !sendMessageMutation.isPending) {
+    if (revisionSend.message.trim() && primaryThreadId && !isSendPending) {
       setPendingRevisionSend(revisionSend);
-      sendMessageMutation.mutate(revisionSend);
+      void sendMessageStreaming(revisionSend.message, {
+        proposalRevision: revisionSend.proposalRevision,
+      });
     }
   };
 
   const showRevisionSendRetry = shouldShowProposalRevisionSendRetry({
     pendingRevisionSend,
     isSendError: sendMessageMutation.isError,
-    isSendPending: sendMessageMutation.isPending,
+    isSendPending,
   });
 
   const isBootstrapping =
     threadsQuery.isLoading ||
     ensureThreadMutation.isPending ||
     (Boolean(primaryThreadId) && threadDetailQuery.isLoading);
+
+  // Determine the thinking indicator content.
+  // Streaming stage copy takes precedence over the generic body-analysis label.
+  const thinkingContent = (() => {
+    if (showBodyAnalysisThinking) {
+      return (
+        <p className="chat-thinking-indicator__body-label">
+          {BODY_ANALYSIS_THINKING_LABEL}
+        </p>
+      );
+    }
+    if (streamingCopy) {
+      return (
+        <p
+          className="chat-thinking-indicator__stage"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {streamingCopy}
+        </p>
+      );
+    }
+    return <ChatThinkingIndicator />;
+  })();
 
   return (
     <div className="chat-single">
@@ -613,28 +851,34 @@ export function ChatWorkspace() {
               <span className="chat-header__status">· online</span>
             </div>
           </div>
-          <ChatTranscript>
-            {messages.length === 0 && !sendMessageMutation.isPending ? (
+          <ChatTranscript ref={transcriptRef}>
+            {messages.length === 0 && !isSendPending ? (
               <li className="chat-empty-state">
                 <EmptyState
-                  title={CHAT_EMPTY_STATE_TITLE}
-                  description={CHAT_EMPTY_STATE_DESCRIPTION}
+                  title={t("emptyStateTitle")}
+                  description={t("emptyStateDescription")}
                 />
                 <PromptChipList>
-                  {SUGGESTED_CHAT_PROMPTS.map((prompt) => (
+                  {SUGGESTED_CHAT_PROMPT_DEFINITIONS.map((prompt) => (
                     <PromptChip
                       key={prompt.message}
-                      disabled={sendMessageMutation.isPending}
+                      disabled={isSendPending}
                       onClick={() => handlePromptSelect(prompt.message)}
                     >
-                      {prompt.label}
+                      {t(`suggestedPrompts.${prompt.labelKey}`)}
                     </PromptChip>
                   ))}
                 </PromptChipList>
               </li>
             ) : null}
 
-            {messages.map((message) => {
+            {messages.map((message, messageIndex) => {
+              const prevMessage = messageIndex > 0 ? messages[messageIndex - 1] : null;
+              const showSeparator = shouldShowDateSeparator(prevMessage ?? null, message);
+              const separatorLabel = showSeparator
+                ? formatChatDateSeparator(message.createdAt, locale, t("dateToday"), t("dateYesterday"))
+                : null;
+
               const linkedProposals = proposalsByMessageId.get(message.id) ?? [];
               const isUser = message.role === "user";
               const attachmentPreviews = isUser
@@ -652,6 +896,19 @@ export function ChatWorkspace() {
               const directPathFeedback = isUser
                 ? null
                 : resolveChatMessageDirectPathFeedback(message);
+              const messageTurnError = isUser
+                ? null
+                : resolveChatMessageTurnError(message);
+              // The latest assistant message is the last non-user, non-optimistic message.
+              const isLatestAssistantMessage =
+                !isUser &&
+                !isSendPending &&
+                messageIndex === messages.length - 1;
+              // Chips come from persisted assistant metadata so they survive reload;
+              // absent by backend contract when none were produced or on turnError turns.
+              const suggestedQuickActions = isLatestAssistantMessage
+                ? resolveChatMessageSuggestedQuickActions(message)
+                : null;
 
               // Body-flow: show PhotoStripMsg instead of generic previews for user
               // messages that carry body-analysis photos (3 images in body flow context).
@@ -670,16 +927,18 @@ export function ChatWorkspace() {
                 bodyPhotoRequestMessage?.id === message.id;
 
               return (
-                <li key={message.id}>
+                <React.Fragment key={message.id}>
+                  {showSeparator && separatorLabel ? (
+                    <ChatDateSeparator
+                      label={separatorLabel}
+                      dateTime={message.createdAt}
+                    />
+                  ) : null}
+                <li>
                   <ChatBubble
                     role={isUser ? "user" : "assistant"}
                     variant={
                       isUser ? "default" : crisisSupportCopy ? "crisis" : "coach"
-                    }
-                    meta={
-                      <time dateTime={message.createdAt}>
-                        {formatChatTimestamp(message.createdAt)}
-                      </time>
                     }
                   >
                     {crisisSupportCopy ? (
@@ -693,12 +952,24 @@ export function ChatWorkspace() {
                         {isBodyPhotoMessage ? (
                           <PhotoStripMsg
                             previews={attachmentPreviews}
-                            caption="Вот, со всех сторон"
+                            caption={t("bodyPhotoCaption")}
                           />
                         ) : attachmentPreviews.length > 0 ? (
                           <ChatMessageAttachmentPreviews previews={attachmentPreviews} />
                         ) : null}
-                        {messageText ? <p className="chat-bubble__text">{messageText}</p> : null}
+                        {isUser && messageText ? <p className="chat-bubble__text">{messageText}</p> : null}
+                        {!isUser && messageTurnError ? (
+                          <ChatTurnErrorCard
+                            reason={messageTurnError.reason}
+                            disabled={isSendPending}
+                            onRetry={() => {
+                              const precedingText = findPrecedingUserMessage(messages, messageIndex);
+                              if (precedingText) {
+                                void sendMessageStreaming(precedingText);
+                              }
+                            }}
+                          />
+                        ) : (!isUser && messageText ? <ChatMessageMarkdown>{messageText}</ChatMessageMarkdown> : null)}
                         {directPathFeedback ? (
                           <p className="notice notice-inline" role="status">
                             {directPathFeedback.message}
@@ -730,39 +1001,44 @@ export function ChatWorkspace() {
                   {/* Body-flow: PhotoGuide card after the coach's photo-request message */}
                   {isBodyPhotoRequestMsg ? (
                     <PhotoGuide
-                      disabled={sendMessageMutation.isPending}
+                      disabled={isSendPending}
                       onFilesSelected={handlePhotoGuideFilesSelected}
                     />
                   ) : null}
 
-                  {attachmentOutcomesByMessageId[message.id]?.length ? (
-                    <ChatAttachmentOutcomePanel
-                      outcomes={attachmentOutcomesByMessageId[message.id] ?? []}
-                      titleId={`chat-attachment-outcomes-${message.id}`}
+                  {/* Quick-action chips — latest assistant message only, from persisted metadata */}
+                  {suggestedQuickActions ? (
+                    <ChatQuickActionChips
+                      actions={suggestedQuickActions}
+                      disabled={isSendPending}
+                      onActionSelect={(messageText) => {
+                        void sendMessageStreaming(messageText);
+                      }}
                     />
                   ) : null}
                 </li>
+                </React.Fragment>
               );
             })}
 
-            {sendMessageMutation.isPending ? (
+            {isSendPending ? (
               <li>
                 <ChatBubble role="assistant">
-                  {/* Body-flow: show specialized thinking label during body analysis */}
-                  {showBodyAnalysisThinking ? (
-                    <p className="chat-thinking-indicator__body-label">
-                      {BODY_ANALYSIS_THINKING_LABEL}
-                    </p>
-                  ) : (
-                    <ChatThinkingIndicator />
-                  )}
+                  {thinkingContent}
                 </ChatBubble>
               </li>
             ) : null}
           </ChatTranscript>
 
+          <ChatJumpToLatest visible={!isAtBottom} onClick={scrollToLatest} />
+
           <ChatComposer onSubmit={handleSubmit}>
             <div className="chat-composer-inner">
+              {streamRecoveryNotice ? (
+                <p className="notice notice-inline" role="status">
+                  {t("streamRecoveredNotice")}
+                </p>
+              ) : null}
               {showRevisionSendRetry ? (
                 <div className="notice notice-inline" role="alert">
                   <p className="proposal-meta">
@@ -772,27 +1048,29 @@ export function ChatWorkspace() {
                     <Button
                       type="button"
                       variant="secondary"
-                      disabled={sendMessageMutation.isPending}
+                      disabled={isSendPending}
                       onClick={() => {
                         if (pendingRevisionSend) {
-                          sendMessageMutation.mutate(pendingRevisionSend);
+                          void sendMessageStreaming(pendingRevisionSend.message, {
+                            proposalRevision: pendingRevisionSend.proposalRevision,
+                          });
                         }
                       }}
                     >
-                      {sendMessageMutation.isPending ? "Retrying…" : "Retry revision message"}
+                      {isSendPending ? "Retrying…" : "Retry revision message"}
                     </Button>
                   </div>
                 </div>
               ) : null}
               <ChatComposerAttachments
                 attachments={composerAttachments}
-                disabled={sendMessageMutation.isPending}
+                disabled={isSendPending}
                 onAttachmentsChange={setComposerAttachments}
               />
               <div className="chat-composer-controls">
                 <ChatComposerAttachmentInput
                   attachments={composerAttachments}
-                  disabled={sendMessageMutation.isPending}
+                  disabled={isSendPending}
                   onAttachmentsChange={setComposerAttachments}
                   onProcessDraft={(draft) => {
                     void processAttachmentDraft(draft);
@@ -804,11 +1082,27 @@ export function ChatWorkspace() {
                 <textarea
                   id="chat-message"
                   className="chat-composer-controls__input"
-                  rows={2}
+                  rows={1}
                   value={draft}
-                  placeholder="Message your coach…"
-                  disabled={sendMessageMutation.isPending}
+                  placeholder={t("composerPlaceholder")}
+                  disabled={isSendPending}
+                  maxLength={MAX_CHAT_USER_MESSAGE_CHARS}
                   onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (
+                      shouldSendOnEnter({
+                        key: event.key,
+                        shiftKey: event.shiftKey,
+                        isComposing: event.nativeEvent.isComposing,
+                      })
+                    ) {
+                      event.preventDefault();
+                      const form = event.currentTarget.form;
+                      if (form) {
+                        form.requestSubmit();
+                      }
+                    }
+                  }}
                 />
                 <Button
                   type="submit"
@@ -816,7 +1110,7 @@ export function ChatWorkspace() {
                   disabled={sendDisabled || !primaryThreadId}
                   aria-label="Send message"
                 >
-                  {sendMessageMutation.isPending ? (
+                  {isSendPending ? (
                     <span className="chat-composer-controls__send-pending" aria-hidden>…</span>
                   ) : (
                     <Icon name="send" size={16} stroke="currentColor" aria-hidden />
@@ -831,9 +1125,14 @@ export function ChatWorkspace() {
                 </p>
               ) : null}
             </div>
-            <p className="chat-composer-disclaimer">
-              Your coach suggests — the decision is always yours. This is lifestyle support, not medical advice.
-            </p>
+            <div className="chat-composer-footer">
+              <p className="chat-composer-disclaimer">
+                {t("disclaimer")}
+              </p>
+              <p className="chat-composer-enter-hint" aria-hidden="true">
+                {t("enterHint")}
+              </p>
+            </div>
           </ChatComposer>
         </>
       ) : null}

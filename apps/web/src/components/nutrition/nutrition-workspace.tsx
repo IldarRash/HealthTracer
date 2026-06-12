@@ -25,6 +25,7 @@ import {
 import {
   formatPlanRevisionSource,
   formatPlanRevisionTimestamp,
+  formatRevisionReason,
 } from "../../lib/plan-view-ui-state";
 import {
   ChangeBanner,
@@ -44,6 +45,7 @@ import {
 } from "../ui";
 import { ErrorState } from "../ui";
 import { NutritionWeekPlan } from "./nutrition-week-plan";
+import { RecipeRecommendationsPanel } from "../recipes/recipe-recommendations-panel";
 
 // ── ActiveNutritionHeader ────────────────────────────────────────
 
@@ -972,11 +974,16 @@ function RecipeIdeas({ onOpenRecipe }: RecipeIdeasProps): ReactElement {
         }}
       >
         <IconBadge icon="spark" color="var(--color-metric-green)" size={26} />
-        <span
-          style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text-primary)", flex: 1 }}
-        >
-          Meal ideas for your plan
-        </span>
+        <div style={{ flex: 1 }}>
+          <span
+            style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text-primary)", display: "block" }}
+          >
+            Meal ideas
+          </span>
+          <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            Generic catalog — not filtered to your plan
+          </span>
+        </div>
         <span style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
           approx. nutrient estimate
         </span>
@@ -1017,7 +1024,7 @@ function RecipeIdeas({ onOpenRecipe }: RecipeIdeasProps): ReactElement {
                 icon="fork"
                 color="var(--color-metric-green)"
                 title={r.name}
-                meta={`≈ ${r.macroEstimates.estimatedCalories} kcal · ${r.macroEstimates.proteinGrams} g protein`}
+                meta={`≈ ${r.perServingMacros.caloriesPerServing} kcal · ${r.perServingMacros.proteinGramsPerServing} g protein`}
                 duration={duration}
                 tags={r.mealTypes}
                 poster={i}
@@ -1310,9 +1317,9 @@ function RecipeDetail({ recipe, onBack }: RecipeDetailProps): ReactElement {
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               {(
                 [
-                  [String(recipe.macroEstimates.estimatedCalories), "kcal", "var(--color-metric-amber)"],
-                  [`${recipe.macroEstimates.proteinGrams} g`, "protein", "var(--color-metric-green)"],
-                  [`${recipe.macroEstimates.fatGrams} g`, "fat", "var(--color-metric-indigo)"],
+                  [String(recipe.perServingMacros.caloriesPerServing), "kcal", "var(--color-metric-amber)"],
+                  [`${recipe.perServingMacros.proteinGramsPerServing} g`, "protein", "var(--color-metric-green)"],
+                  [`${recipe.perServingMacros.fatGramsPerServing} g`, "fat", "var(--color-metric-indigo)"],
                 ] as const
               ).map(([val, label, color]) => (
                 <div
@@ -1495,14 +1502,18 @@ function buildNutritionRevisionRows(
   revisions: readonly NutritionPlanRevision[],
   activeRevisionId: string,
 ): RevisionHistoryRow[] {
-  return [...revisions]
-    .sort((a, b) => b.revisionNumber - a.revisionNumber)
-    .map((r) => ({
+  const sorted = [...revisions].sort((a, b) => b.revisionNumber - a.revisionNumber);
+  return sorted.map((r, index) => {
+    const previousRevision = sorted[index + 1];
+    const reason = formatRevisionReason(r.reason, previousRevision?.reason, r.revisionNumber);
+    const note = reason.length > 90 ? `${reason.slice(0, 90)}…` : reason;
+    return {
       rev: `v${r.revisionNumber}`,
       when: formatPlanRevisionTimestamp(r.createdAt),
-      note: r.reason.length > 90 ? `${r.reason.slice(0, 90)}…` : r.reason,
+      note,
       active: r.id === activeRevisionId,
-    }));
+    };
+  });
 }
 
 // ── Main export: NutritionWorkspace ──────────────────────────────
@@ -1812,10 +1823,43 @@ export function NutritionWorkspace() {
         <AdherencePanel state="empty" />
       )}
 
-      {/* 12. RecipeIdeas */}
+      {/* 12. RecipeIdeas — generic catalog browse, not plan-filtered */}
       <RecipeIdeas onOpenRecipe={(id) => setSelectedRecipeId(id)} />
 
-      {/* 13. RevisionHistoryDark */}
+      {/* 13. RecipeRecommendationsPanel — plan-fit suggestions keyed to active revision */}
+      <div
+        style={{
+          background: "var(--color-surface-card)",
+          border: "1px solid var(--color-border-default)",
+          borderRadius: 16,
+          padding: 20,
+        }}
+        aria-label="Plan-fit recipe recommendations"
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            marginBottom: 16,
+          }}
+        >
+          <IconBadge icon="star" color="var(--color-metric-green)" size={26} />
+          <div style={{ flex: 1 }}>
+            <span
+              style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text-primary)", display: "block" }}
+            >
+              Recommended for you
+            </span>
+            <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+              Plan-fit suggestions matched to your active nutrition revision
+            </span>
+          </div>
+        </div>
+        <RecipeRecommendationsPanel activeRevision={activeRevision} embedded />
+      </div>
+
+      {/* 14. RevisionHistoryDark */}
       <RevisionHistoryDark
         rows={historyRows}
         defaultOpen={true}

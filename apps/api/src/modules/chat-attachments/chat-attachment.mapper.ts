@@ -6,9 +6,9 @@ import {
 import type { ChatAttachmentRow } from "./chat-attachments.repository.js";
 
 export function toChatAttachmentRecord(row: ChatAttachmentRow): ChatAttachmentRecord {
-  // S7: mapper does NOT persist or parse health_documents — linkedDocumentId is a passive
-  // nullable read-through. The recognition DB column is readable but excluded from the
-  // domain record type (B3 removal, C4 cluster).
+  // The recognition DB column is readable but excluded from the domain record
+  // type (B3 removal, C4 cluster). Attachments never link to persisted health
+  // data — the legacy linked_document_id column was dropped with the documents module.
   const consent = row.consent
     ? chatAttachmentConsentSchema.parse(row.consent)
     : null;
@@ -25,7 +25,6 @@ export function toChatAttachmentRecord(row: ChatAttachmentRow): ChatAttachmentRe
     mimeType: row.mimeType,
     fileSizeBytes: row.fileSizeBytes,
     storageKey: row.storageKey,
-    linkedDocumentId: row.linkedDocumentId,
     linkedImageRefId: row.linkedImageRefId,
     consent,
     failureReason: row.failureReason,
@@ -42,7 +41,6 @@ export function toOwnedChatAttachmentRef(row: ChatAttachmentRow) {
     userId: row.userId,
     category: row.category,
     status: row.status,
-    linkedDocumentId: row.linkedDocumentId,
     linkedImageRefId: row.linkedImageRefId,
     retentionPolicy: row.retentionPolicy,
     expiresAt: row.expiresAt?.toISOString() ?? null,

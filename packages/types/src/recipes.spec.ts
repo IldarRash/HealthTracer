@@ -155,15 +155,15 @@ describe("createRecipeInputSchema", () => {
     const result = createRecipeInputSchema.safeParse({
       ...validInput,
       macroEstimates: {
-        estimatedCalories: 500,
-        proteinGrams: 30,
-        carbsGrams: 60,
-        fatGrams: 10,
-        fiberGrams: 8,
+        caloriesPerServing: 500,
+        proteinGramsPerServing: 30,
+        carbsGramsPerServing: 60,
+        fatGramsPerServing: 10,
+        fiberGramsPerServing: 8,
       },
     });
     expect(result.success).toBe(true);
-    expect(result.data?.macroEstimates?.estimatedCalories).toBe(500);
+    expect(result.data?.macroEstimates?.caloriesPerServing).toBe(500);
   });
 
   it("rejects empty name", () => {
@@ -210,14 +210,14 @@ describe("updateRecipeInputSchema", () => {
   it("accepts partial macroEstimates override", () => {
     const result = updateRecipeInputSchema.safeParse({
       macroEstimates: {
-        estimatedCalories: 600,
-        proteinGrams: 40,
-        carbsGrams: 70,
-        fatGrams: 12,
+        caloriesPerServing: 600,
+        proteinGramsPerServing: 40,
+        carbsGramsPerServing: 70,
+        fatGramsPerServing: 12,
       },
     });
     expect(result.success).toBe(true);
-    expect(result.data?.macroEstimates?.estimatedCalories).toBe(600);
+    expect(result.data?.macroEstimates?.caloriesPerServing).toBe(600);
   });
 
   it("rejects servings of 0 when provided", () => {

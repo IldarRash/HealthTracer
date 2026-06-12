@@ -1,5 +1,6 @@
 import { vi } from "vitest";
-import type { CoachAiProvider } from "../coach-ai-provider.js";
+import type { CoachAiProvider, ProviderCallResult } from "../coach-ai-provider.js";
+import type { DomainLlmStepOutputInput } from "@health/types";
 
 /**
  * Creates a fully-typed mock of CoachAiProvider for use in tests.
@@ -10,7 +11,7 @@ import type { CoachAiProvider } from "../coach-ai-provider.js";
  *
  * Usage:
  *   const mock = createCoachAiProviderMock({
- *     generateRouterDecision: vi.fn().mockResolvedValue(myRouterOutput),
+ *     generateRouterDecision: vi.fn().mockResolvedValue({ output: myRouterOutput }),
  *   });
  */
 export function createCoachAiProviderMock(
@@ -31,4 +32,14 @@ export function createCoachAiProviderMock(
     generateFinalDecision:
       overrides.generateFinalDecision ?? notConfigured("generateFinalDecision"),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Convenience wrapper — wraps a domain step output value in a ProviderCallResult
+// ---------------------------------------------------------------------------
+
+export function wrapDomainOutput(
+  output: DomainLlmStepOutputInput,
+): ProviderCallResult<DomainLlmStepOutputInput> {
+  return { output };
 }

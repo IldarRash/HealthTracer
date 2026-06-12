@@ -1,15 +1,7 @@
-import { auth } from "@clerk/nextjs/server";
-import { redirectToAppSignIn } from "../../src/lib/auth-redirect";
 import { AppLayout } from "../../src/components/app-layout";
 import { BillingDashboard } from "../../src/components/billing/billing-dashboard";
 
-export default async function BillingPage() {
-  const { isAuthenticated } = await auth();
-
-  if (!isAuthenticated) {
-    redirectToAppSignIn("/billing");
-  }
-
+export default function BillingPage() {
   return (
     <AppLayout variant="dashboard">
       <BillingDashboard />

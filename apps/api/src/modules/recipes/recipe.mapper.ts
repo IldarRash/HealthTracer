@@ -2,7 +2,7 @@ import { recipes, userRecipeRecommendations } from "@health/db";
 import {
   recipeConfidenceBandSchema,
   recipeIngredientSchema,
-  recipeMacroEstimatesSchema,
+  recipePerServingMacrosSchema,
   recipeMealTypeSchema,
   recipeProvenanceSchema,
   type Recipe,
@@ -45,15 +45,27 @@ function resolveRecipeProvenance(row: RecipeRow): RecipeProvenance {
   };
 }
 
+function normalizeTagArray(tags: string[]): string[] {
+  const normalized = tags.map((tag) =>
+    tag
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .trim()
+      .replace(/\s+/g, "_"),
+  );
+  return [...new Set(normalized)];
+}
+
 export function toRecipe(row: RecipeRow): Recipe {
   const ingredients = row.ingredients.map((item) => recipeIngredientSchema.parse(item));
   const mealTypes = row.mealTypes.map((mealType) => recipeMealTypeSchema.parse(mealType));
-  const macroEstimates = recipeMacroEstimatesSchema.parse({
-    estimatedCalories: row.estimatedCalories,
-    proteinGrams: row.proteinGrams,
-    carbsGrams: row.carbsGrams,
-    fatGrams: row.fatGrams,
-    fiberGrams: row.fiberGrams,
+  const perServingMacros = recipePerServingMacrosSchema.parse({
+    caloriesPerServing: row.caloriesPerServing,
+    proteinGramsPerServing: row.proteinGramsPerServing,
+    carbsGramsPerServing: row.carbsGramsPerServing,
+    fatGramsPerServing: row.fatGramsPerServing,
+    fiberGramsPerServing: row.fiberGramsPerServing,
   });
 
   return {
@@ -63,11 +75,11 @@ export function toRecipe(row: RecipeRow): Recipe {
     ingredients,
     preparationSteps: row.preparationSteps,
     servings: row.servings,
-    macroEstimates,
+    perServingMacros,
     mealTypes,
-    tags: row.tags,
-    restrictionTags: row.restrictionTags,
-    allergenTags: row.allergenTags,
+    tags: normalizeTagArray(row.tags),
+    restrictionTags: normalizeTagArray(row.restrictionTags),
+    allergenTags: normalizeTagArray(row.allergenTags),
     prepMinutes: row.prepMinutes,
     cookMinutes: row.cookMinutes,
     source: row.source,

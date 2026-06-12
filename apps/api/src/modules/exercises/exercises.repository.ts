@@ -120,6 +120,48 @@ export class ExercisesRepository {
       );
   }
 
+  /**
+   * Find active exercises by normalized name, preferring system-catalog rows
+   * (userId IS NULL) over user-created ones, same precedence as findActiveByDedupeKey.
+   * Used by the legacy-exercise normalizer to bridge name-only LLM output to catalog ids.
+   */
+  async findByNormalizedName(normalizedName: string, userId?: string | null) {
+    // Prefer system catalog (userId IS NULL) first.
+    const [systemMatch] = await this.db
+      .select()
+      .from(exercises)
+      .where(
+        and(
+          eq(exercises.normalizedName, normalizedName),
+          eq(exercises.status, "active"),
+          isNull(exercises.userId),
+        ),
+      )
+      .limit(1);
+
+    if (systemMatch) {
+      return systemMatch;
+    }
+
+    if (!userId) {
+      return null;
+    }
+
+    const [userMatch] = await this.db
+      .select()
+      .from(exercises)
+      .where(
+        and(
+          eq(exercises.normalizedName, normalizedName),
+          eq(exercises.status, "active"),
+          eq(exercises.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    return userMatch ?? null;
+  }
+
   async findActiveByDedupeKey(dedupeKey: string, userId?: string | null) {
     if (userId) {
       const [systemMatch] = await this.db

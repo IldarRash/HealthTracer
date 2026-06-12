@@ -59,6 +59,8 @@ Create a new service from the GitHub repo (or empty service + connect repo).
 | Root directory     | `/` (repo root)                |
 | Watch paths        | `apps/api/**`, `packages/**`   |
 
+> Once Config-as-code is enabled (`apps/api/railway.json`, see §3), the file's `build` block (builder, dockerfilePath) is the source of truth and overrides the equivalent dashboard settings — dashboard edits to those fields are ignored. Root Directory and Watch Paths remain dashboard-only.
+
 **Environment variables**
 
 | Variable                 | Source / value                                      | Notes                                      |
@@ -69,8 +71,11 @@ Create a new service from the GitHub repo (or empty service + connect repo).
 | `AI_COACH_PROVIDER`      | `openai` or `stub`                                  | Use `stub` for non-AI smoke tests          |
 | `OPENAI_API_KEY`         | Railway secret                                      | Required when `AI_COACH_PROVIDER=openai`   |
 | `OPENAI_MODEL`           | `gpt-4o-mini` (or chosen model)                     | Optional; defaults in code                 |
-| `DOCUMENT_STORAGE_PATH`  | `/app/.data/documents`                              | Local container path; see storage note     |
-| `CORS_ORIGINS`           | `https://<web-service-public-domain>`               | Optional; Safari needs explicit origins for Bearer auth |
+| `OPENAI_MODEL_LAB_EXTRACTION` | `gpt-4o-mini` (or chosen model)                | Optional; overrides the model for the out-of-band lab-report biomarker extraction stage. Falls back to `OPENAI_MODEL` |
+| `LAB_REPORT_STORAGE_PATH` | `/app/.data/lab-reports`                           | Local container path for uploaded lab-report bytes; see storage note |
+| `CHAT_ATTACHMENT_STORAGE_PATH` | `/app/.data/chat-attachments`                 | Local container path for chat attachment bytes; see storage note |
+| `CORS_ORIGINS`           | `https://<web-service-public-domain>`               | **Required in production.** API startup fails closed (no CORS) when unset. Safari also requires explicit origins for Bearer auth. |
+| `STORAGE_ALLOW_LOCAL_IN_PRODUCTION` | `true`                               | **Required** when using local-volume lab-report/attachment storage on Railway. Omit or set to `false` when object storage is used instead. |
 | `STRIPE_SECRET_KEY`      | Stripe → Developers → API keys → **Secret key**     | Billing. `sk_live_...` (prod) / `sk_test_...` (test). Without it checkout/portal fail closed |
 | `STRIPE_PRICE_PRO`       | Stripe → Products → Pro price → **Price ID**        | Billing. `price_...` (the recurring price, **not** the `prod_...` id) |
 | `STRIPE_WEBHOOK_SECRET`  | Stripe → Developers → Webhooks → endpoint signing secret | Billing. `whsec_...`; see "Stripe billing setup" below |
@@ -99,45 +104,53 @@ curl -sS https://<api-domain>/health/ready
 # Expected: {"service":"api","status":"ok","checks":[...]}
 ```
 
-### 3. Run database migrations (MVP: manual)
+### 3. Database migrations (automatic via pre-deploy command)
 
-Do **not** run migrations automatically on every API start for MVP. Apply them explicitly after Postgres is available and before or after the first API deploy.
+> **Destructive migration — `0038_biomarkers_replace_documents`.** This migration replaces the
+> health-documents tables with the biomarkers model: it **drops** `health_documents`,
+> `health_document_summaries`, `document_signals` (and their six `document_*` enums) plus
+> `chat_attachments.linked_document_id`, and creates `lab_reports` + `biomarker_readings`.
+> It is applied automatically by the pre-deploy command below on the first deploy that includes
+> it — because it drops tables, **take a backup before that deploy** and confirm it in the
+> pre-deploy logs (`railway logs --service health-api --build`).
 
-**Option A — Railway CLI one-off (recommended)**
+Migrations apply **automatically on every `health-api` deploy** through Railway's [pre-deploy command](https://docs.railway.com/deployments/pre-deploy-command), configured as code in `apps/api/railway.json`:
 
-Link the project and run migrations with the production `DATABASE_URL`:
-
-```bash
-railway link
-railway run --service health-api pnpm --dir packages/db db:migrate
+```json
+{
+  "deploy": {
+    "preDeployCommand": "pnpm --dir packages/db db:migrate"
+  }
+}
 ```
 
-If API runtime `DATABASE_URL` uses Railway private networking, keep it private and run migrations with an explicit one-off command that maps the public migration URL into `DATABASE_URL` only for that process:
+The pre-deploy command runs `drizzle-kit migrate` **inside the built service image** between build and deploy, with the service's environment variables — so the private-networking `DATABASE_URL` works as-is, no public migration URL needed. If the migration exits non-zero, **the deploy is halted and the previous version keeps serving traffic**; the failure is visible in the deployment's pre-deploy logs (`railway logs --service health-api --build`). Drizzle migrations are idempotent per the journal, so deploys without new migration files are a fast no-op.
 
-```bash
-railway.cmd run --service health-api powershell -NoProfile -Command '$env:DATABASE_URL=$env:MIGRATION_DATABASE_URL; pnpm --dir packages/db db:migrate'
-```
+**One-time dashboard step:** Railway only auto-discovers `railway.json`/`railway.toml` at the repo root, and this monorepo has two services. On the `health-api` service: **Settings → Config-as-code → set the config file path to `apps/api/railway.json`**, then redeploy. (`health-web` has no config file and is unaffected.)
 
-If migrations must run without the API service context, set `DATABASE_URL` on a shell service or use `railway variables` and run from a local machine with the remote URL (handle credentials securely).
-
-**Option B — Local against Railway Postgres**
+**Manual fallback — local against Railway Postgres** (only if a migration must be run outside a deploy, e.g. repairing a failed deploy):
 
 ```bash
 DATABASE_URL="postgres://..." pnpm --dir packages/db db:migrate
 ```
 
+Handle the credential securely; keep API runtime `DATABASE_URL` on private networking.
+
 **Seeds (non-production only)**
 
 ```bash
-railway run --service health-api pnpm --dir packages/db db:seed:recipes
+# All reference data at once (exercises + recipes + habit templates):
+railway run --service health-api pnpm db:seed
+# Or individually:
 railway run --service health-api pnpm --dir packages/db db:seed:exercises
+railway run --service health-api pnpm --dir packages/db db:seed:recipes
+railway run --service health-api pnpm --dir packages/db db:seed:habit-templates
 ```
 
 Only run seeds in staging or with explicit approval. Do not seed production unless intended.
 
 **Later hardening**
 
-- Add a dedicated migration job service or Railway pre-deploy command once migrations are proven idempotent.
 - Keep migration SQL in `packages/db/drizzle/` under version control.
 
 ### 4. Deploy `health-web`
@@ -171,20 +184,20 @@ The Web Dockerfile uses Next.js `output: "standalone"`. The container runs `node
 
 - Assign Railway public domains (or custom domains) to both services.
 - Set `NEXT_PUBLIC_API_BASE_URL` on `health-web` to the API public URL (no trailing slash), then **rebuild** the web service. The web app calls the API through a same-origin `/api-proxy` route handler proxy, which avoids Safari cross-origin `Authorization` issues.
-- Set `CORS_ORIGINS` on `health-api` to the web public URL (comma-separated if you have staging + production).
-- The API reflects the request `Origin` by default instead of returning `Access-Control-Allow-Origin: *`. This is required for Safari on iOS, which blocks cross-origin `fetch()` calls that send `Authorization: Bearer ...` when the API responds with a wildcard origin.
+- Set `CORS_ORIGINS` on `health-api` to the web public URL (comma-separated if you have staging + production). This variable is **required in production** — the API fails closed (no CORS at all) when it is unset.
+- The API allows only the origins listed in `CORS_ORIGINS`. This is required for Safari on iOS, which blocks cross-origin `fetch()` calls that send `Authorization: Bearer ...` when the API responds with a wildcard origin.
 - If mobile shows `... could not be loaded` while `GET /health` works in the phone browser, check both `NEXT_PUBLIC_API_BASE_URL` (web rebuild) and `CORS_ORIGINS` (api redeploy).
 
-## Document storage caveat
+## Lab-report / attachment storage caveat
 
-The API stores uploaded documents on the local filesystem at `DOCUMENT_STORAGE_PATH` (default under `/app/.data/documents` in the container).
+The API stores uploaded lab-report bytes on the local filesystem at `LAB_REPORT_STORAGE_PATH` (default `/app/.data/lab-reports`) and chat attachment bytes at `CHAT_ATTACHMENT_STORAGE_PATH` (default `/app/.data/chat-attachments`).
 
 Railway container filesystem is **ephemeral** unless a volume is attached. Uploads are lost on redeploy or restart unless you:
 
-- Attach a Railway volume mounted at `/app/.data/documents`, or
-- Move document storage to object storage (S3/R2) in a future slice.
+- Attach a Railway volume mounted at `/app/.data` (covering both paths), or
+- Move storage to an access-controlled, encrypted object store (S3/R2) in a future slice.
 
-For MVP, treat document persistence as a known limitation unless a volume is configured.
+For MVP, treat upload persistence as a known limitation unless a volume is configured. (Extracted lab-report text is never persisted — only the structured biomarker readings and the raw file bytes are stored.)
 
 ## Logs and incident runbook
 
@@ -263,14 +276,17 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 - [ ] `health-api` deployed from `apps/api/Dockerfile`
 - [ ] API env vars set (Clerk JWKS, DB, AI provider)
 - [ ] Billing env vars set on `health-api` (`STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_WEBHOOK_SECRET`, `WEB_APP_BASE_URL`), same Stripe mode; webhook endpoint `…/webhooks/stripe` created
-- [ ] Migrations applied: `pnpm --dir packages/db db:migrate` (includes `0031_billing_subscriptions`)
+- [ ] `health-api` config-as-code path set to `apps/api/railway.json` (Settings → Config-as-code) so migrations run as the pre-deploy command; verify the pre-deploy step succeeded in the deploy logs
 - [ ] `GET /health` returns 200 on API public URL
 - [ ] `GET /health/ready` returns 200 with `status: "ok"`
 - [ ] `health-web` deployed from `apps/web/Dockerfile`
 - [ ] Web env vars set (`NEXT_PUBLIC_API_BASE_URL`, Clerk keys)
 - [ ] Web app loads on public URL
 - [ ] Authenticated flows reach API; request ids appear in both `health-web` and `health-api` logs
-- [ ] Document upload expectations documented (ephemeral storage unless volume added)
+- [ ] `CORS_ORIGINS` set on `health-api` to the web public URL (required — API fails closed without it)
+- [ ] `STORAGE_ALLOW_LOCAL_IN_PRODUCTION=true` set on `health-api` when using Railway local-volume storage
+- [ ] Lab-report / attachment upload expectations documented (ephemeral storage unless volume added)
+- [ ] Migration `0038_biomarkers_replace_documents` applied via Railway CLI (drops document tables, creates lab_reports + biomarker_readings)
 
 ## Troubleshooting
 
@@ -278,7 +294,7 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 |---------------------------------|---------------------------------------------------|
 | API crash on start              | Missing `DATABASE_URL` or invalid Clerk JWKS URL  |
 | Web shows wrong API             | Stale build; `NEXT_PUBLIC_API_BASE_URL` needs rebuild |
-| Mobile Safari: content unavailable, desktop OK | API CORS wildcard or stale web build; set `CORS_ORIGINS`, rebuild web |
+| Mobile Safari: content unavailable, desktop OK | `CORS_ORIGINS` unset or missing the web origin; set `CORS_ORIGINS` on `health-api` and rebuild web |
 | 502 / connection refused        | Service not listening on `PORT` or health check mismatch |
 | `/health` OK, `/health/ready` fails | API process is live, but DB or required config is not ready |
 | UI shows `Request ID: ...`      | Search web and API logs for the id to trace the failing request |
@@ -286,15 +302,16 @@ railway logs --service health-web --json --lines 500 | rg '"event":"api_proxy"|"
 | `http.exception` with `auth_jwks` | Clerk JWKS config or token validation issue |
 | `http.exception` with `database` | Postgres connectivity, migration, or query failure |
 | `api_proxy` 502 in web logs     | `health-web` could not reach `health-api`; check API deploy and `NEXT_PUBLIC_API_BASE_URL` |
-| Migrations fail                 | Wrong `DATABASE_URL`, or migration order conflict |
+| Migrations fail (deploy halted at pre-deploy step) | Wrong `DATABASE_URL`, or migration order conflict; check `railway logs --service health-api --build`. Previous version keeps serving |
 | Uploads disappear after deploy  | Ephemeral filesystem; add volume or object storage  |
 
 ## What stays outside this repo
 
 - Railway dashboard service linking and domain assignment
+- The `health-api` config-as-code file path setting (`apps/api/railway.json`) — one-time dashboard step
 - Clerk production keys and allowed redirect URLs for Railway domains
 - OpenAI billing and rate limits
 - Optional staging environment (`staging` vs `production` Railway environments)
-- Volume or object storage for durable document uploads
+- Volume or object storage for durable lab-report / attachment uploads
 
 See also: root `package.json` scripts (`db:migrate`), `apps/api/.env.example`, and `apps/web/.env.example`.

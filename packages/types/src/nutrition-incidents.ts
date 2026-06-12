@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
+import { llmInt } from "./llm-coerce.js";
 
 export const nutritionConfidenceBandSchema = z.enum(["high", "medium", "low"]);
 
@@ -35,10 +36,11 @@ export const nutritionIncidentItemSchema = z
   .object({
     name: z.string().min(1).max(120),
     quantity: z.string().min(1).max(80).optional(),
-    calories: z.number().int().nonnegative().max(5000).optional(),
-    proteinGrams: z.number().int().nonnegative().max(500).optional(),
-    carbsGrams: z.number().int().nonnegative().max(500).optional(),
-    fatGrams: z.number().int().nonnegative().max(500).optional(),
+    // LLMs emit decimals (e.g. 66.7 g); round to int instead of failing.
+    calories: llmInt(z.number().nonnegative().max(5000)).optional(),
+    proteinGrams: llmInt(z.number().nonnegative().max(500)).optional(),
+    carbsGrams: llmInt(z.number().nonnegative().max(500)).optional(),
+    fatGrams: llmInt(z.number().nonnegative().max(500)).optional(),
   })
   .strict();
 
@@ -46,9 +48,10 @@ export type NutritionIncidentItem = z.infer<typeof nutritionIncidentItemSchema>;
 
 export const nutritionIncidentMacrosSchema = z
   .object({
-    proteinGrams: z.number().int().nonnegative().max(2000),
-    carbsGrams: z.number().int().nonnegative().max(2000),
-    fatGrams: z.number().int().nonnegative().max(2000),
+    // LLMs emit decimals (e.g. 66.7 g); round to int instead of failing.
+    proteinGrams: llmInt(z.number().nonnegative().max(2000)),
+    carbsGrams: llmInt(z.number().nonnegative().max(2000)),
+    fatGrams: llmInt(z.number().nonnegative().max(2000)),
   })
   .strict();
 
@@ -78,7 +81,8 @@ export const logNutritionIncidentProposalPayloadSchema = z
   .object({
     incidentDateTime: isoDateTimeSchema,
     items: z.array(nutritionIncidentItemSchema).min(1).max(20),
-    estimatedCalories: z.number().int().nonnegative().max(20000),
+    // LLMs emit decimals; round to int instead of failing.
+    estimatedCalories: llmInt(z.number().nonnegative().max(20000)),
     estimatedMacros: nutritionIncidentMacrosSchema,
     confidence: nutritionConfidenceBandSchema,
     provenance: nutritionProvenanceSchema,

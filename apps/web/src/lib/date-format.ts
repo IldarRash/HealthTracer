@@ -44,3 +44,11 @@ export function formatMonthShort(value: Date | string): string {
   );
 }
 
+/** "Jun 5" (abbreviated month + day, no year) */
+export function formatMonthDayShort(value: Date | string): string {
+  return new Intl.DateTimeFormat(EN_LOCALE, {
+    month: "short",
+    day: "numeric",
+  }).format(typeof value === "string" ? new Date(value) : value);
+}
+

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  containsUnsafeDocumentSummaryLanguage,
   containsUnsafeMedicalLanguage,
   parseAiStructuredOutput,
   validateProposalSafety,
@@ -34,27 +33,6 @@ describe("ai safety helpers", () => {
     ).toBe(true);
   });
 
-  it("allows supported document type labels in document summary checks", () => {
-    expect(
-      containsUnsafeDocumentSummaryLanguage(
-        "Governed summary for a user-provided provider note titled \"Follow-up\".",
-      ),
-    ).toBe(false);
-    expect(
-      containsUnsafeDocumentSummaryLanguage(
-        "Governed summary for a user-provided med list titled \"Home list\".",
-      ),
-    ).toBe(false);
-  });
-
-  it("still blocks unsafe document summary wording", () => {
-    expect(
-      containsUnsafeDocumentSummaryLanguage(
-        "This summary confirms a diagnosis and emergency dosing guidance.",
-      ),
-    ).toBe(true);
-  });
-
   it("flags unsafe proposals and replies", () => {
     expect(
       validateProposalSafety({
@@ -69,6 +47,46 @@ describe("ai safety helpers", () => {
     expect(
       validateReplySafety("I can prescribe a treatment for your symptoms."),
     ).toHaveLength(1);
+  });
+
+  // Phase 4 adversarial regression — deep-review prompts must never let a
+  // diagnostic/treatment reply or proposal through, in EN or RU.
+  it("rejects a reply answering «какая болезнь это вызвала» with a disease attribution", () => {
+    expect(
+      validateReplySafety(
+        "Болезнь, которая это вызвала — скорее всего гипотиреоз. Мой диагноз: гипотиреоз.",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects a reply answering 'what treatment should I start' with treatment guidance", () => {
+    expect(
+      validateReplySafety(
+        "Based on your six-month trends, you should start treatment with anti-inflammatory medication.",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects a progress-review proposal whose reason carries treatment wording", () => {
+    expect(
+      validateProposalSafety({
+        intent: "adapt_workout_plan_from_progress",
+        targetDomain: "workout",
+        title: "Recovery block",
+        reason: "Adherence fell to 40% in May, so begin a treatment course for your condition.",
+        proposedChanges: {},
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("allows an honest non-diagnostic deep-review reply over the same trends", () => {
+    expect(
+      validateReplySafety(
+        "Over the last 180 days your workout adherence dropped from 85% to 40% while average " +
+          "fatigue rose — the data does not show why you feel unwell. Would you like to focus " +
+          "on the last 6 weeks of recovery?",
+      ),
+    ).toEqual([]);
   });
 
   it("flags therapy and therapist wording", () => {
@@ -208,6 +226,128 @@ describe("ai safety helpers", () => {
       },
     });
     expect(errors.length).toBeGreaterThan(0);
+  });
+
+  // ── Russian unsafe medical language patterns ──────────────────────────────
+
+  describe("Russian-language unsafe medical language detection", () => {
+    it("flags диагноз (direct diagnosis)", () => {
+      expect(containsUnsafeMedicalLanguage("поставлю вам диагноз: ожирение")).toBe(true);
+    });
+
+    it("flags диагностирую", () => {
+      expect(containsUnsafeMedicalLanguage("диагностирую у вас нарушение")).toBe(true);
+    });
+
+    it("flags назначаю + pharmaceutical co-occurrence (prescribing)", () => {
+      // Requires a pharmaceutical co-occurrence noun within 60 chars after назначаю.
+      expect(containsUnsafeMedicalLanguage("назначаю вам препарат")).toBe(true);
+      expect(containsUnsafeMedicalLanguage("назначаю дозу антибиотиков")).toBe(true);
+      expect(containsUnsafeMedicalLanguage("назначаю курс лекарств")).toBe(true);
+      expect(containsUnsafeMedicalLanguage("назначаю таблетки от давления")).toBe(true);
+    });
+
+    it("does NOT flag назначаю for coaching scheduling language (false-positive regression)", () => {
+      // "назначаю вам встречу в зале" is scheduling / coaching language, not prescribing.
+      // The narrowed pattern requires a pharmaceutical noun within 60 chars after назначаю.
+      expect(containsUnsafeMedicalLanguage("назначаю вам встречу в зале")).toBe(false);
+      expect(containsUnsafeMedicalLanguage("назначаю тренировку на понедельник")).toBe(false);
+    });
+
+    it("flags рецепт на + pharmaceutical word (prescription for a drug)", () => {
+      expect(containsUnsafeMedicalLanguage("выпишу рецепт на антибиотики")).toBe(true);
+      expect(containsUnsafeMedicalLanguage("дам рецепт на препарат")).toBe(true);
+    });
+
+    it("flags принимайте по … таблетки (dosing instruction)", () => {
+      expect(
+        containsUnsafeMedicalLanguage("принимайте по 2 таблетки в день"),
+      ).toBe(true);
+    });
+
+    it("flags дозировка препарата (pharmaceutical dosing)", () => {
+      expect(containsUnsafeMedicalLanguage("дозировка препарата — 500 мг")).toBe(true);
+      expect(containsUnsafeMedicalLanguage("уточните дозировка лекарства у врача")).toBe(true);
+    });
+
+    it("flags лечение заболевания in prescriptive context", () => {
+      expect(containsUnsafeMedicalLanguage("курс лечения заболевания почек")).toBe(true);
+      expect(containsUnsafeMedicalLanguage("лечу это заболевание витаминами")).toBe(true);
+    });
+
+    it("flags психотерапия / психотерапевт", () => {
+      expect(containsUnsafeMedicalLanguage("рекомендую курс психотерапии")).toBe(true);
+      expect(containsUnsafeMedicalLanguage("психотерапевт поможет вам")).toBe(true);
+    });
+
+    it("is case-insensitive for Cyrillic (match via toLower normalization)", () => {
+      expect(containsUnsafeMedicalLanguage("НАЗНАЧАЮ ВАМ ПРЕПАРАТ")).toBe(true);
+      expect(containsUnsafeMedicalLanguage("Диагноз: диабет второго типа")).toBe(true);
+    });
+
+    it("does NOT flag general wellness coaching text in Russian", () => {
+      // Metaphorical use of терапия in wellness context
+      expect(
+        containsUnsafeMedicalLanguage("план тренировок — лучшая терапия от стресса"),
+      ).toBe(false);
+      // Physical rehabilitation phrasing (лечение without заболевание co-present)
+      expect(containsUnsafeMedicalLanguage("лечение растяжкой помогает восстановиться")).toBe(
+        false,
+      );
+      // Protein dosing — nutrition, not pharmaceutical
+      expect(
+        containsUnsafeMedicalLanguage("дозировка белка: 2 г на кг тела"),
+      ).toBe(false);
+      // принимайте without tablet dosing
+      expect(
+        containsUnsafeMedicalLanguage("принимайте участие в марафоне каждую неделю"),
+      ).toBe(false);
+      // рецепт in culinary context
+      expect(containsUnsafeMedicalLanguage("рецепт на ужин — куриная грудка")).toBe(false);
+      // General wellness discussion with лечение but not заболевание
+      expect(
+        containsUnsafeMedicalLanguage(
+          "лечение спортивных травм включает покой и растяжку",
+        ),
+      ).toBe(false);
+      // Fitness plan without medical language
+      expect(
+        containsUnsafeMedicalLanguage(
+          "составляю тренировочный план для набора мышечной массы",
+        ),
+      ).toBe(false);
+      // Negated disclaimer — "не диагноз" must not trigger (lookbehind for "не ")
+      expect(
+        containsUnsafeMedicalLanguage(
+          "примерная визуальная оценка по фото, не замер состава тела и не диагноз.",
+        ),
+      ).toBe(false);
+      expect(containsUnsafeMedicalLanguage("это не диагноз и не медицинское заключение")).toBe(
+        false,
+      );
+    });
+
+    it("validateReplySafety catches Russian unsafe medical language", () => {
+      expect(
+        validateReplySafety("я ставлю вам диагноз: метаболический синдром"),
+      ).toHaveLength(1);
+      expect(
+        validateReplySafety("назначаю вам курс лечения заболевания"),
+      ).toHaveLength(1);
+    });
+
+    it("validateReplySafety passes normal Russian coaching replies", () => {
+      expect(
+        validateReplySafety(
+          "хорошо, вот план тренировок на три дня, подобранный под твои цели",
+        ),
+      ).toEqual([]);
+      expect(
+        validateReplySafety(
+          "план питания — лучшая терапия от хронического стресса",
+        ),
+      ).toEqual([]);
+    });
   });
 
   it("accepts create_nutrition_plan proposal with weeklyPlan and wellness-only copy", () => {

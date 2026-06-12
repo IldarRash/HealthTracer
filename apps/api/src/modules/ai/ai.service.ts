@@ -1,4 +1,4 @@
-import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, UserLocale } from "@health/types";
+import type { AiStructuredOutput, AgentTurnMetadata, ProposalExplainerTurnContext, ProgressReporter, UserLocale, ChatTurnDegradedReason, ChatTurnError } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import {
@@ -22,6 +22,11 @@ export interface GenerateCoachResponseInput {
   proposalRevision?: ProposalRevisionContext;
   proposalExplainer?: ProposalExplainerTurnContext;
   attachmentTurn?: AttachmentTurnContext;
+  /**
+   * Optional progress reporter for SSE streaming. Threaded through to the
+   * orchestrator. Failures are swallowed — never breaks the turn.
+   */
+  onProgress?: ProgressReporter;
 }
 
 export interface GeneratedCoachResponse {
@@ -30,12 +35,27 @@ export interface GeneratedCoachResponse {
   replySafetyErrors: string[];
   agentMetadata: AgentTurnMetadata;
   /**
-   * Whether the AI pipeline resolved a consent-gated outcome (e.g. a medical
-   * document save proposal). When true, ChatService surfaces a distinct consent
-   * prompt flag in the turn response. Nothing is auto-persisted.
-   * Only set on fan-out turns; undefined otherwise.
+   * COMPATIBILITY CODE (kept intentionally, per refactor-cleanup.md): plumbing
+   * held for the deferred medical special-save flow. When true, the pipeline
+   * resolved a consent-gated outcome; no client consumes the flag yet and
+   * nothing is auto-persisted. Removal condition: remove end-to-end if the
+   * special-save flow is descoped, or wire the client consent prompt when it
+   * ships. Only set on fan-out turns; undefined otherwise.
    */
   consentRequired?: boolean;
+  /**
+   * Present when the AI pipeline produced a degraded/fallback reply.
+   * Maps from agentMetadata.safety.status to a presentation-safe reason code.
+   * Absent when the pipeline completed cleanly (safety.status === "passed").
+   */
+  degraded?: { reason: ChatTurnDegradedReason };
+  /**
+   * Present when the AI pipeline could not produce an honest reply.
+   * reason=decision_failed: decision-maker failed after retry.
+   * reason=reply_blocked: reply safety validation blocked the synthesized reply.
+   * ChatService should persist an error marker instead of fake coach text.
+   */
+  turnError?: ChatTurnError;
 }
 
 @Injectable()
@@ -48,7 +68,21 @@ export class AiService {
     const orchestrated = await this.agentOrchestratorService.orchestrateCoachTurn({
       ...input,
       responseLocale: input.responseLocale,
+      onProgress: input.onProgress,
     });
+
+    const safetyStatus = orchestrated.agentMetadata.safety?.status;
+    // turnError (reply absent) and degraded (reply present) are disjoint by
+    // contract: when turnError is set there is no usable reply and ChatService
+    // persists the error marker, so no quality marker is derived. Only the
+    // reply-present degradations (parse_failed, provider_error) map to degraded.
+    const degradedReason: ChatTurnDegradedReason | undefined = orchestrated.turnError
+      ? undefined
+      : safetyStatus === "parse_failed"
+        ? "parse_failed"
+        : safetyStatus === "provider_error"
+          ? "provider_error"
+          : undefined;
 
     return {
       output: orchestrated.output,
@@ -58,6 +92,8 @@ export class AiService {
       ...(orchestrated.consentRequired !== undefined
         ? { consentRequired: orchestrated.consentRequired }
         : {}),
+      ...(degradedReason !== undefined ? { degraded: { reason: degradedReason } } : {}),
+      ...(orchestrated.turnError !== undefined ? { turnError: orchestrated.turnError } : {}),
     };
   }
 

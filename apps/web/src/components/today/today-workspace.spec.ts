@@ -31,10 +31,11 @@ describe("TodayWorkspace two-column WHOOP dashboard", () => {
     expect(componentSource).toContain("Loading your day");
   });
 
-  it("has an empty state (EmptyHero) that links to goals and chat", () => {
+  it("has an empty state (EmptyHero) that links to profile goals anchor and chat", () => {
     expect(componentSource).toContain("function EmptyHero");
     expect(componentSource).toContain("Your day will appear here");
-    expect(componentSource).toContain('href="/goals"');
+    // /goals alias route deleted — CTA now deep-links directly to /profile#goals.
+    expect(componentSource).toContain('href="/profile#goals"');
     expect(componentSource).toContain("Create your first goal");
     expect(componentSource).toContain("Ask the coach");
   });
@@ -142,6 +143,157 @@ describe("TodayWorkspace two-column WHOOP dashboard", () => {
     // No numeric % adherence score in the top bar
     expect(workspaceSource).not.toContain("formatAdherenceScore");
     expect(workspaceSource).not.toContain("HabitAdherenceSummary");
+  });
+
+  // ── Per-exercise drill-down (Slice 3) ───────────────────────────────────────
+
+  it("renders ExerciseDrillDown inside MoveCard for started sessions", () => {
+    expect(componentSource).toContain("function ExerciseDrillDown");
+    expect(componentSource).toContain("shouldShowExerciseDrillDown");
+    expect(componentSource).toContain("buildExerciseDrillDownRows");
+    expect(componentSource).toContain("buildQuickActionPayload");
+  });
+
+  it("MoveCard per-exercise actions use complete and skip — no plan mutations", () => {
+    const moveCardEnd = componentSource.indexOf("// ── Nutrition + water card");
+    const moveCardRegion = componentSource.slice(
+      componentSource.indexOf("function MoveCard"),
+      moveCardEnd,
+    );
+    expect(moveCardRegion).toContain("onComplete");
+    expect(moveCardRegion).toContain("onSkip");
+    expect(moveCardRegion).toContain("updateWorkoutSessionExercise");
+    // No plan mutations
+    expect(moveCardRegion).not.toContain("acceptProposal");
+    expect(moveCardRegion).not.toContain("applyProposal");
+  });
+
+  it("per-exercise updates invalidate Today, Training active, and progress query keys", () => {
+    expect(componentSource).toContain("getWorkoutExecutionRefreshQueryKeys");
+    expect(componentSource).toContain("invalidateQueries");
+  });
+
+  it("session-level Mark done button is preserved alongside the drill-down", () => {
+    expect(componentSource).toContain("Mark done");
+    expect(componentSource).toContain("workoutItemDone");
+  });
+
+  // ── Per-exercise Adjust form (Slice 4) ──────────────────────────────────────
+
+  it("ExerciseDrillDown accepts an onAdjust prop alongside complete/skip", () => {
+    const drillDownEnd = componentSource.indexOf("// ── Movement card");
+    const drillDownRegion = componentSource.slice(
+      componentSource.indexOf("function ExerciseDrillDown"),
+      drillDownEnd,
+    );
+    expect(drillDownRegion).toContain("onAdjust");
+    expect(drillDownRegion).toContain("ExerciseFeedbackFormState");
+  });
+
+  it("Adjust button renders per non-terminal exercise row and toggles the form", () => {
+    const drillDownEnd = componentSource.indexOf("// ── Movement card");
+    const drillDownRegion = componentSource.slice(
+      componentSource.indexOf("function ExerciseDrillDown"),
+      drillDownEnd,
+    );
+    expect(drillDownRegion).toContain("Adjust");
+    expect(drillDownRegion).toContain("adjustOpen");
+    expect(drillDownRegion).toContain("handleToggleAdjust");
+    expect(drillDownRegion).toContain("aria-expanded");
+  });
+
+  it("Adjust form contains all updateWorkoutSessionExerciseSchema fields", () => {
+    const drillDownEnd = componentSource.indexOf("// ── Movement card");
+    const drillDownRegion = componentSource.slice(
+      componentSource.indexOf("function ExerciseDrillDown"),
+      drillDownEnd,
+    );
+    // Status is set implicitly to "adjusted" — not a form field
+    expect(drillDownRegion).toContain("actualReps");
+    expect(drillDownRegion).toContain("actualWeightKg");
+    expect(drillDownRegion).toContain("perceivedEffort");
+    expect(drillDownRegion).toContain("perceivedDifficulty");
+    expect(drillDownRegion).toContain("notes");
+    expect(drillDownRegion).toContain("loadAdjustmentNotes");
+    expect(drillDownRegion).toContain("discomfortFlag");
+  });
+
+  it("Adjust form is pre-filled via exerciseFeedbackToFormState", () => {
+    const drillDownEnd = componentSource.indexOf("// ── Movement card");
+    const drillDownRegion = componentSource.slice(
+      componentSource.indexOf("function ExerciseDrillDown"),
+      drillDownEnd,
+    );
+    expect(drillDownRegion).toContain("exerciseFeedbackToFormState");
+  });
+
+  it("Adjust form Save button is gated by canSubmitExerciseExecutionUpdate", () => {
+    const drillDownEnd = componentSource.indexOf("// ── Movement card");
+    const drillDownRegion = componentSource.slice(
+      componentSource.indexOf("function ExerciseDrillDown"),
+      drillDownEnd,
+    );
+    expect(drillDownRegion).toContain("canSubmitExerciseExecutionUpdate");
+    expect(drillDownRegion).toContain("canSaveAdjust");
+  });
+
+  it("Adjust form payload uses buildExerciseExecutionUpdatePayload with status=adjusted", () => {
+    const moveCardEnd = componentSource.indexOf("// ── Nutrition + water card");
+    const moveCardRegion = componentSource.slice(
+      componentSource.indexOf("function MoveCard"),
+      moveCardEnd,
+    );
+    expect(moveCardRegion).toContain("buildExerciseExecutionUpdatePayload");
+    expect(moveCardRegion).toContain("adjusted");
+    expect(moveCardRegion).toContain("handleExerciseAdjust");
+  });
+
+  it("Adjust form has accessible labels for all inputs", () => {
+    const drillDownEnd = componentSource.indexOf("// ── Movement card");
+    const drillDownRegion = componentSource.slice(
+      componentSource.indexOf("function ExerciseDrillDown"),
+      drillDownEnd,
+    );
+    // Each input should have an htmlFor label referencing its id
+    expect(drillDownRegion).toContain("adjust-reps-");
+    expect(drillDownRegion).toContain("adjust-weight-");
+    expect(drillDownRegion).toContain("adjust-rpe-");
+    expect(drillDownRegion).toContain("adjust-notes-");
+    expect(drillDownRegion).toContain("adjust-load-notes-");
+    expect(drillDownRegion).toContain("htmlFor");
+  });
+
+  it("Adjust form shows error state when submit is attempted with empty form", () => {
+    const drillDownEnd = componentSource.indexOf("// ── Movement card");
+    const drillDownRegion = componentSource.slice(
+      componentSource.indexOf("function ExerciseDrillDown"),
+      drillDownEnd,
+    );
+    expect(drillDownRegion).toContain("adjustError");
+    expect(drillDownRegion).toContain('role="alert"');
+    expect(drillDownRegion).toContain("Enter at least one value");
+  });
+
+  it("Adjust form collapses after successful submit", () => {
+    const drillDownEnd = componentSource.indexOf("// ── Movement card");
+    const drillDownRegion = componentSource.slice(
+      componentSource.indexOf("function ExerciseDrillDown"),
+      drillDownEnd,
+    );
+    // On submit, the form closes by removing the id from adjustOpenIds
+    expect(drillDownRegion).toContain("handleAdjustSubmit");
+    expect(drillDownRegion).toContain("next.delete(rowId)");
+  });
+
+  it("Adjust form same-row query invalidation path (onAdjust triggers invalidation)", () => {
+    const moveCardEnd = componentSource.indexOf("// ── Nutrition + water card");
+    const moveCardRegion = componentSource.slice(
+      componentSource.indexOf("function MoveCard"),
+      moveCardEnd,
+    );
+    // handleExerciseAdjust calls invalidateQueries same as complete/skip
+    expect(moveCardRegion).toContain("handleExerciseAdjust");
+    expect(moveCardRegion).toContain("getWorkoutExecutionRefreshQueryKeys");
   });
 
   // ── Wellness language guard ──────────────────────────────────────

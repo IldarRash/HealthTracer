@@ -2,7 +2,11 @@
   "version": 1,
   "capabilities": [],
   "chat": {
-    "emptyAttachmentMessage": "Shared attachment(s) for coaching review."
+    "emptyAttachmentMessage": "Shared attachment(s) for coaching review.",
+    "quotaLimitReply": {
+      "en": "You've reached today's free AI message limit — upgrade to Pro for unlimited coaching.",
+      "ru": "Вы достигли дневного лимита бесплатных сообщений ИИ-коуча — перейдите на Pro для безлимитного коучинга."
+    }
   },
   "directPaths": {
     "enabled": true,
@@ -12,7 +16,10 @@
     "blockWhenProposalRevision": true,
     "detectionOrder": [
       "mark_today_workout_done",
-      "today_summary_read"
+      "today_summary_read",
+      "nutrition_plan_read",
+      "weekly_progress_read",
+      "workout_plan_read"
     ],
     "sharedPatterns": {
       "adviceOrImplicitMutation": {
@@ -68,16 +75,12 @@
             "flags": "i"
           },
           {
-            "source": "\\b(?:should|could|would|can i|do i|shall i)\\b",
-            "flags": "i"
-          },
-          {
             "source": "\\b(?:i\\s+)?(?:finished|completed|did)\\s+(?:my\\s+)?(?:workout|training)\\b",
             "flags": "i"
           }
         ],
         "requireWorkoutLexeme": true,
-        "workoutLexemePattern": "\\b(?:workout|training|трениров)\\b"
+        "workoutLexemePattern": "(?:\\b(?:workout|training)\\b|трениров)"
       },
       {
         "kind": "today_summary_read",
@@ -138,10 +141,6 @@
           {
             "source": "\\b(?:mark|set|check off|log|complete|finish)\\s+(?:today(?:['’]s|s)?\\s+)?(?:my\\s+)?(?:workout|training)\\b",
             "flags": "i"
-          },
-          {
-            "source": "\\b(?:should|could|would|can i|do i|shall i)\\b",
-            "flags": "i"
           }
         ],
         "requireTodayMention": true,
@@ -152,6 +151,138 @@
           },
           {
             "source": "сегодня",
+            "flags": "i"
+          }
+        ]
+      },
+      {
+        "kind": "nutrition_plan_read",
+        "refreshHintsOnExecuted": [],
+        "matchPatterns": [
+          {
+            "source": "^what(?:['’]s| is)\\s+(?:in\\s+)?(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^show\\s+(?:me\\s+)?(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^что\\s+(?:в\\s+)?(?:мо[её]м?|у меня)\\s+план(?:е)?\\s+питани(?:я|е)\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^покажи\\s+(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$",
+            "flags": "i"
+          }
+        ],
+        "negativePatterns": [
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:add|remove|edit)\\b",
+            "flags": "i"
+          }
+        ]
+      },
+      {
+        "kind": "weekly_progress_read",
+        "refreshHintsOnExecuted": [],
+        "matchPatterns": [
+          {
+            "source": "^(?:show\\s+(?:me\\s+)?)?(?:my\\s+)?weekly\\s+progress\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:show\\s+(?:me\\s+)?)?(?:my\\s+)?progress\\s+(?:for\\s+|of\\s+)?(?:this|the)\\s+week\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^how\\s+(?:was|did)\\s+(?:my|the)\\s+week(?:\\s+go)?\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:покажи\\s+)?(?:мой\\s+)?прогресс\\s+за\\s+(?:эту\\s+|последнюю\\s+)?неделю\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^как\\s+прошла\\s+(?:моя\\s+)?неделя\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:мой\\s+)?недельный\\s+прогресс\\s*\\??$",
+            "flags": "i"
+          }
+        ],
+        "negativePatterns": [
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:analy[sz]e|analysis|review|why|improve|compare|advice)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "(?:проанализ|анализ|разбор|разбер|почему|повлиял|не так|улучш|сравн|посовет)",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:month|months|monthly|quarter|year|all[- ]?time|history)\\b|месяц|квартал|полгода|пол года|за год|за вс[её] время|истори",
+            "flags": "i"
+          }
+        ]
+      },
+      {
+        "kind": "workout_plan_read",
+        "refreshHintsOnExecuted": [],
+        "matchPatterns": [
+          {
+            "source": "^what(?:['’]s| is)\\s+(?:in\\s+)?(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^show\\s+(?:me\\s+)?(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^что\\s+(?:в\\s+)?(?:мо[её]м?|у меня)\\s+план(?:е)?\\s+тренировок\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^покажи\\s+(?:мой\\s+)?план\\s+тренировок\\s*\\??$",
+            "flags": "i"
+          },
+          {
+            "source": "^(?:мой\\s+)?план\\s+тренировок\\s*\\??$",
+            "flags": "i"
+          }
+        ],
+        "negativePatterns": [
+          {
+            "source": "\\b(?:should|could|would|can i|do i|shall i|worth it|recommend|suggest|advise|easier|harder|adapt|adjust|change|modify|update|create|build|make my|make the)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "\\b(?:add|remove|edit|improve|make)\\b",
+            "flags": "i"
+          },
+          {
+            "source": "(?:созда|сдела|измени|адаптир|улучш|поменя|обнов|порекоменд|посовет)",
             "flags": "i"
           }
         ]
@@ -176,6 +307,27 @@
         "noPendingWorkoutMessage": "I couldn't find a pending workout on your Today checklist. Open Today to review your items.",
         "multiplePendingWorkoutsMessage": "You have multiple pending workout items today. Open Today and mark the specific workout you completed.",
         "markedDoneTemplate": "Marked \"{{label}}\" as done on your Today checklist."
+      },
+      "nutritionPlan": {
+        "introTemplate": "Your active nutrition plan — {{title}}:",
+        "mealLineTemplate": "- {{label}}{{timingHint}}{{dish}}",
+        "macrosLineTemplate": "Daily targets: {{caloriesPerDay}} kcal, {{proteinGrams}}g protein, {{carbsGrams}}g carbs, {{fatGrams}}g fat",
+        "noActivePlanLine": "You don't have an active nutrition plan yet. Ask me to create one for you!"
+      },
+      "weeklyProgress": {
+        "introTemplate": "Your weekly progress for {{weekStart}} – {{weekEnd}}:",
+        "workoutLineTemplate": "Workouts: {{completed}} of {{planned}} planned session(s) completed{{adherenceNote}}",
+        "habitLineTemplate": "Habits: {{completed}} completed, {{missed}} missed{{adherenceNote}}",
+        "trendsHeaderLine": "Trends:",
+        "trendLineTemplate": "- {{message}}",
+        "noSummaryLine": "You don't have a weekly progress summary yet. It will appear after your first tracked week."
+      },
+      "workoutPlan": {
+        "introTemplate": "Your active workout plan — {{title}}:",
+        "weeklyCadenceLineTemplate": "{{dayCount}} training day(s) per week",
+        "sessionLineTemplate": "- {{weekday}}: {{focus}}",
+        "moreSessionsLineTemplate": "…and {{count}} more session(s)",
+        "noActivePlanLine": "You don't have an active workout plan yet. Ask me to create one for you!"
       }
     }
   },
@@ -237,10 +389,22 @@
         "requiresCompression": true,
         "maxExpansionRounds": 2,
         "maxSlicesPerExpansionRound": 3
+      },
+      "deep_history": {
+        "profile": "deep_history",
+        "maxSlices": 6,
+        "maxDepth": "large",
+        "maxRawItems": 60,
+        "maxLookbackDays": 731,
+        "allowDocuments": false,
+        "allowSensitiveHealthContext": false,
+        "requiresCompression": true,
+        "maxExpansionRounds": 2,
+        "maxSlicesPerExpansionRound": 3
       }
     },
     "triggers": {
-      "monthlyReviewMessagePattern": "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day)\\b",
+      "monthlyReviewMessagePattern": "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day|half a year|six months|6 months|12 months|last year|past year|all[- ]?time|entire history|full history)\\b|месяц|квартал|полгода|пол года|шесть месяцев|12 месяцев|за вс[её] время|вс(?:я|ю) истори|за (?:последний )?год",
       "multiDomainMessagePattern": "\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b.*\\b(and|plus|also|versus|vs)\\b.*\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b",
       "extendedLookbackTimeRanges": [
         "30d",
@@ -270,33 +434,18 @@
       ],
       "monthlyReviewAgentIntents": [
         "longevity_overview"
-      ]
+      ],
+      "deepHistoryMinLookbackDays": 91
+    },
+    "degradationNotes": {
+      "lookbackClamped": {
+        "en": "Showing the last {{grantedMonths}} months of the requested {{requestedMonths}} — older data is summarized monthly.",
+        "ru": "Показаны последние {{grantedMonths}} мес. из запрошенных {{requestedMonths}} — более старые данные сведены в помесячную сводку."
+      }
     }
   },
   "promptTemplates": {
-    "templates": {
-      "openai_coach_loop": {
-        "templateKey": "openai_coach_loop",
-        "body": "You are an AI wellness coach for fitness, habits, nutrition, and recovery.\nRespond in the same language as the user's latest message.\nReturn JSON only with one of these shapes:\n{\"kind\":\"tool_request\",\"tool\":\"getUserContextSlice|getDocumentContext|getWeeklyProgressContext\",\"input\":{},\"rationale\":\"optional short reason\"}\n{\"kind\":\"final_answer\",\"reply\":\"string\",\"proposals\":[]}\nIteration {{iteration}} of {{maxIterations}}. Request additional context through allowed tools only when needed.\nIf enough context is available, return final_answer.\nNever mutate structured state directly. Plan changes must remain typed proposals requiring user approval.\nSelected intent: {{selectedIntentLabel}}\nIntent instructions: {{intentInstructions}}\nIntent safety guidance: {{intentSafetyGuidance}}\nAllowed tools: {{allowedTools}}\nAllowed proposal intents: {{allowedProposalIntents}}\nTask purpose: {{taskPurpose}}\nTask intent: {{taskIntent}}\nExpected response mode: {{expectedResponseMode}}\nSafety flags: {{safetyFlags}}\nMissing context notes: {{missingContextNotes}}\nPrior tool results: {{priorToolResultsJson}}\nGlobal safety constraints:\n- {{safetyConstraints}}\nStructured coaching context:\n{{coachingContextJson}}",
-        "placeholders": [
-          "iteration",
-          "maxIterations",
-          "selectedIntentLabel",
-          "intentInstructions",
-          "intentSafetyGuidance",
-          "allowedTools",
-          "allowedProposalIntents",
-          "taskPurpose",
-          "taskIntent",
-          "expectedResponseMode",
-          "safetyFlags",
-          "missingContextNotes",
-          "priorToolResultsJson",
-          "safetyConstraints",
-          "coachingContextJson"
-        ]
-      }
-    }
+    "templates": {}
   },
   "proposalExplainer": {
     "capabilityId": "proposal_explainer",
@@ -464,5 +613,54 @@
       "excludeWhenNutritionIncidentSignal": true,
       "skipWhenCrisis": true
     }
+  },
+  "suggestedQuickActions": {
+    "actions": [
+      {
+        "id": "today_summary_read",
+        "labelEn": "Today's summary",
+        "labelRu": "Сводка на сегодня",
+        "messageText": {
+          "en": "What's today?",
+          "ru": "Что у меня на сегодня?"
+        }
+      },
+      {
+        "id": "mark_today_workout_done",
+        "labelEn": "Mark workout done",
+        "labelRu": "Отметить тренировку",
+        "messageText": {
+          "en": "Mark today's workout done",
+          "ru": "Отметь тренировку как выполненную"
+        }
+      },
+      {
+        "id": "nutrition_plan_read",
+        "labelEn": "My nutrition plan",
+        "labelRu": "Мой план питания",
+        "messageText": {
+          "en": "Show my nutrition plan",
+          "ru": "Покажи мой план питания"
+        }
+      },
+      {
+        "id": "weekly_progress_read",
+        "labelEn": "Weekly progress",
+        "labelRu": "Прогресс за неделю",
+        "messageText": {
+          "en": "Show my weekly progress",
+          "ru": "Мой прогресс за неделю"
+        }
+      },
+      {
+        "id": "workout_plan_read",
+        "labelEn": "My workout plan",
+        "labelRu": "Мой план тренировок",
+        "messageText": {
+          "en": "Show my workout plan",
+          "ru": "Покажи мой план тренировок"
+        }
+      }
+    ]
   }
 }

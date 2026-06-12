@@ -1,5 +1,10 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, extname, join } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
+import { CHAT_PROVISIONAL_UPLOAD_MIME_TYPES } from "@health/types";
+import {
+  assertNotProductionWithoutOptIn,
+  resolveSafePath,
+} from "../../common/local-storage.js";
 
 export interface ChatAttachmentStorageAdapter {
   store(
@@ -12,19 +17,29 @@ export interface ChatAttachmentStorageAdapter {
   delete(storageKey: string): Promise<void>;
 }
 
-const MIME_EXTENSION: Record<string, string> = {
+/**
+ * MIME → extension map for all supported chat attachment MIMEs.
+ * Covers both image types (jpeg/png/webp) and document file types (pdf/txt/md).
+ */
+const MIME_EXTENSION: Record<(typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number], string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
   "application/pdf": "pdf",
   "text/plain": "txt",
+  "text/markdown": "md",
+  "text/x-markdown": "md",
 };
 
 export class LocalChatAttachmentStorageAdapter implements ChatAttachmentStorageAdapter {
-  constructor(private readonly rootDirectory: string) {}
+  private readonly resolvedRoot: string;
 
-  private resolvePath(storageKey: string): string {
-    return join(this.rootDirectory, storageKey);
+  constructor(
+    rootDirectory: string,
+    options: { allowInProduction?: boolean; nodeEnv?: string } = {},
+  ) {
+    assertNotProductionWithoutOptIn("LocalChatAttachmentStorageAdapter", options);
+    this.resolvedRoot = resolve(rootDirectory);
   }
 
   async store(
@@ -33,9 +48,11 @@ export class LocalChatAttachmentStorageAdapter implements ChatAttachmentStorageA
     content: Buffer,
     mimeType: string,
   ): Promise<string> {
-    const extension = MIME_EXTENSION[mimeType] ?? "bin";
+    const extension =
+      MIME_EXTENSION[mimeType as (typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number]] ??
+      "bin";
     const storageKey = join(userId, `${attachmentId}.${extension}`).replace(/\\/g, "/");
-    const absolutePath = this.resolvePath(storageKey);
+    const absolutePath = resolveSafePath(this.resolvedRoot, storageKey);
 
     await mkdir(dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, content);
@@ -44,12 +61,12 @@ export class LocalChatAttachmentStorageAdapter implements ChatAttachmentStorageA
   }
 
   async read(storageKey: string): Promise<Buffer> {
-    return readFile(this.resolvePath(storageKey));
+    return readFile(resolveSafePath(this.resolvedRoot, storageKey));
   }
 
   async delete(storageKey: string): Promise<void> {
     try {
-      await unlink(this.resolvePath(storageKey));
+      await unlink(resolveSafePath(this.resolvedRoot, storageKey));
     } catch {
       // Best-effort cleanup for local development storage.
     }
@@ -67,5 +84,7 @@ export function inferAttachmentExtension(filename: string, mimeType: string): st
     return fromName;
   }
 
-  return MIME_EXTENSION[mimeType] ?? "bin";
+  return (
+    MIME_EXTENSION[mimeType as (typeof CHAT_PROVISIONAL_UPLOAD_MIME_TYPES)[number]] ?? "bin"
+  );
 }

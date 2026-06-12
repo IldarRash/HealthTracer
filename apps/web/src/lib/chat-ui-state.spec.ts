@@ -2,39 +2,32 @@ import { describe, expect, it } from "vitest";
 import { WELLBEING_CRISIS_SUPPORT_COPY } from "@health/types";
 import {
   createOptimisticUserMessage,
-  CHAT_EMPTY_STATE_DESCRIPTION,
-  CHAT_EMPTY_STATE_TITLE,
   isOptimisticMessage,
   mergeDisplayMessages,
   resolveChatMessageCrisisSupport,
+  resolveChatMessageSuggestedQuickActions,
   resolveChatMessageWeeklyReview,
   resolvePrimaryThreadId,
-  SUGGESTED_CHAT_PROMPTS,
+  SUGGESTED_CHAT_PROMPT_DEFINITIONS,
 } from "./chat-ui-state.js";
 import { WEEKLY_REVIEW_CHAT_ACTION_NOTICE, WEEKLY_REVIEW_CHAT_PROMPT } from "./weekly-review-ui-state.js";
 
 const summaryId = "14a08176-64a7-4a2d-8a44-581807368394";
 
 describe("chat UI state", () => {
-  it("exposes coach-forward suggested prompt labels with stable weekly review message", () => {
-    expect(SUGGESTED_CHAT_PROMPTS).toHaveLength(4);
-    expect(SUGGESTED_CHAT_PROMPTS[0]).toEqual({
-      label: "Review my weekly progress",
+  it("exposes coach-forward suggested prompt definitions with stable weekly review message", () => {
+    expect(SUGGESTED_CHAT_PROMPT_DEFINITIONS).toHaveLength(4);
+    // The first prompt targets the weekly review — its message is the stable weekly review prompt.
+    expect(SUGGESTED_CHAT_PROMPT_DEFINITIONS[0]).toEqual({
+      labelKey: "reviewWeekly",
       message: WEEKLY_REVIEW_CHAT_PROMPT,
     });
 
-    for (const prompt of SUGGESTED_CHAT_PROMPTS) {
-      expect(prompt.label.length).toBeLessThanOrEqual(40);
+    // All definitions must have a non-empty labelKey and a non-empty message.
+    for (const prompt of SUGGESTED_CHAT_PROMPT_DEFINITIONS) {
+      expect(prompt.labelKey.length).toBeGreaterThan(0);
+      expect(prompt.message.length).toBeGreaterThan(0);
     }
-
-    expect(SUGGESTED_CHAT_PROMPTS[0]?.label.length).toBeLessThan(
-      SUGGESTED_CHAT_PROMPTS[0]?.message.length ?? 0,
-    );
-  });
-
-  it("uses concise empty state copy", () => {
-    expect(CHAT_EMPTY_STATE_TITLE).toContain("coach");
-    expect(CHAT_EMPTY_STATE_DESCRIPTION).not.toContain("typed");
   });
 
   it("selects the most recently updated thread as primary", () => {
@@ -218,5 +211,50 @@ describe("chat UI state", () => {
     expect(pack?.droppedLanes[0]?.reason).toContain("conflict");
     expect(WEEKLY_REVIEW_CHAT_ACTION_NOTICE).toContain("proposal cards");
     expect(WEEKLY_REVIEW_CHAT_ACTION_NOTICE.toLowerCase()).not.toContain("automatically");
+  });
+
+  it("resolves quick-action chips from persisted assistant message metadata (survives reload)", () => {
+    // Fixture mirrors a persisted assistant message as returned by the thread
+    // query after reload — the chips source of truth is metadata, not live state.
+    const quickAction = {
+      id: "today_summary_read",
+      labelEn: "Today's summary",
+      labelRu: "Сводка дня",
+      messageText: {
+        en: "Show me today's summary",
+        ru: "Покажи сводку за сегодня",
+      },
+    };
+
+    expect(
+      resolveChatMessageSuggestedQuickActions({
+        role: "assistant",
+        metadata: { suggestedQuickActions: [quickAction] },
+      }),
+    ).toEqual([quickAction]);
+
+    // User messages never produce chips, even with metadata present.
+    expect(
+      resolveChatMessageSuggestedQuickActions({
+        role: "user",
+        metadata: { suggestedQuickActions: [quickAction] },
+      }),
+    ).toBeNull();
+
+    // Absent key (e.g. turnError turns or no chips produced) resolves to null.
+    expect(
+      resolveChatMessageSuggestedQuickActions({
+        role: "assistant",
+        metadata: { turnError: { reason: "decision_failed" } },
+      }),
+    ).toBeNull();
+
+    // Invalid persisted shape is tolerated, never thrown.
+    expect(
+      resolveChatMessageSuggestedQuickActions({
+        role: "assistant",
+        metadata: { suggestedQuickActions: [{ id: "not_a_kind" }] },
+      }),
+    ).toBeNull();
   });
 });

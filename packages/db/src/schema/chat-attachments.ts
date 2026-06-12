@@ -9,7 +9,6 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { chatMessages, chatThreads } from "./chat.js";
-import { healthDocuments } from "./documents.js";
 import { users } from "./users.js";
 
 export const chatAttachmentCategoryEnum = pgEnum("chat_attachment_category", [
@@ -17,6 +16,7 @@ export const chatAttachmentCategoryEnum = pgEnum("chat_attachment_category", [
   "food_photo",
   "medical_document",
   "workout_attachment",
+  "document_file",
 ]);
 
 export const chatAttachmentStatusEnum = pgEnum("chat_attachment_status", [
@@ -62,9 +62,6 @@ export const chatAttachments = pgTable(
     mimeType: text("mime_type").notNull(),
     fileSizeBytes: integer("file_size_bytes").notNull(),
     storageKey: text("storage_key"),
-    linkedDocumentId: uuid("linked_document_id").references(() => healthDocuments.id, {
-      onDelete: "set null",
-    }),
     linkedImageRefId: uuid("linked_image_ref_id"),
     consent: jsonb("consent").$type<Record<string, unknown> | null>(),
     recognition: jsonb("recognition").$type<Record<string, unknown> | null>(),

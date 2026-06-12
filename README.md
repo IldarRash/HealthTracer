@@ -39,11 +39,14 @@ User message (+ optional attachments)
        → Domain LLMs (parallel)      workout / nutrition / health; a failed domain → safe empty output
        → DecisionMaker    (LLM N+2)  synthesizes domain outputs into typed proposals only
        → ActionResolver              resolves a typed proposal, filtered to the active allowlist
-  → ProposalValidation + persist     reviewable proposals (NOT applied)
+  → ProposalNormalization            per-intent bridge + trusted server-side stamping
+  → ProposalValidation + persist     full validation stack (schema failures: one bounded
+                                     payload-only LLM self-repair, then full re-validation);
+                                     reviewable proposals (NOT applied)
   → user accepts a valid proposal → workout/nutrition NEW REVISION
 ```
 
-**Safety floors live in code, not config:** crisis support bypasses all LLMs; per-domain context budgets deny documents + sensitive health context by default; the router is read-only and cannot reply or propose; the decision-maker emits typed proposals only and never writes domain state. YAML/JSON config can only *narrow* capability allowlists, never widen them, and loading is fail-closed. A deterministic **stub provider** mirrors every LLM method, so the whole pipeline is testable in CI without external API access.
+**Safety floors live in code, not config:** crisis support bypasses all LLMs; per-domain context budgets deny documents + sensitive health context by default; the router is read-only and cannot reply or propose; the decision-maker emits typed proposals only and never writes domain state. YAML/JSON config can only *narrow* capability allowlists, never widen them, and loading is fail-closed. Tests use the shared provider mocks from `@health/ai/testing`, so the whole pipeline is testable in CI without external API access.
 
 ## Tech stack
 
@@ -66,9 +69,13 @@ cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 cp packages/db/.env.example packages/db/.env
 
+# MCP config — .cursor/mcp.json is gitignored; copy the template and set your env keys
+cp .cursor/mcp.json.example .cursor/mcp.json  # then export CONTEXT7_API_KEY, DATABASE_URL, GITHUB_PERSONAL_ACCESS_TOKEN
+
 pnpm db:up        # start local Postgres (docker compose)
-pnpm db:migrate   # apply Drizzle migrations
-pnpm dev          # run the dev stack — API on :3000, Web on :3001
+pnpm db:migrate   # apply Drizzle migrations (needed before seeding; pnpm dev also applies them)
+pnpm db:seed      # seed reference data: exercises, recipes, and habit templates
+pnpm dev          # apply migrations + run the dev stack — API on :3000, Web on :3001 (fails fast if Postgres is down)
 
 pnpm db:down      # stop Postgres when finished
 ```
@@ -96,6 +103,8 @@ docs/         product + architecture docs (ADRs, LLM pipeline, auth, MCP)
 
 ## Documentation
 
-- `docs/architecture/` — ADRs, the LLM-pipeline spec, auth, and MCP notes.
-- `docs/product/` — phased roadmap and the current phase audit.
+Start at [`docs/README.md`](docs/README.md) for the full index.
+
+- `docs/architecture/` — the LLM-pipeline spec, AI-behavior config, domain model, database, auth, MCP, and ADRs.
+- `docs/product/` — the phased feature roadmap, open feature briefs, and the mobile-parity deferral note.
 - `CLAUDE.md` / `AGENTS.md` — engineering invariants and contributor guidance.

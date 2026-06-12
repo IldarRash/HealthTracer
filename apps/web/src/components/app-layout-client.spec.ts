@@ -32,6 +32,31 @@ describe("AppLayoutClient shell wiring", () => {
   it("uses sidebar instead of top header nav", () => {
     expect(layoutClientSource).toContain("AppSidebar");
     expect(layoutClientSource).not.toContain("AppShellHeader");
-    expect(layoutClientSource).not.toContain("AppNav");
+    // AppNav without further suffix (i.e., no <AppNav /> top-nav component — AppNavDrawer is mobile)
+    expect(layoutClientSource).not.toMatch(/<AppNav\s*\//);
+    expect(layoutClientSource).not.toMatch(/<AppNav\s*>/);
+  });
+
+  it("manages drawer open state with useState", () => {
+    expect(layoutClientSource).toContain("useState");
+    expect(layoutClientSource).toContain("navOpen");
+    expect(layoutClientSource).toContain("setNavOpen");
+  });
+
+  it("closes drawer on pathname change via useEffect", () => {
+    expect(layoutClientSource).toContain("useEffect");
+    expect(layoutClientSource).toContain("setNavOpen(false)");
+    expect(layoutClientSource).toContain("[pathname]");
+  });
+
+  it("renders AppMobileBar and conditional AppNavDrawer", () => {
+    expect(layoutClientSource).toContain("AppMobileBar");
+    expect(layoutClientSource).toContain("AppNavDrawer");
+    expect(layoutClientSource).toContain("{navOpen && (");
+  });
+
+  it("renders AppSidebar in both the static sidebar and the drawer", () => {
+    const sidebarMatches = (layoutClientSource.match(/<AppSidebar/g) ?? []).length;
+    expect(sidebarMatches).toBeGreaterThanOrEqual(2);
   });
 });

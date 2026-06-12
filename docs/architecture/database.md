@@ -26,34 +26,46 @@ packages/db/
   drizzle.config.ts
 ```
 
-## Initial Tables
+## Table Inventory
 
-MVP 1 tables:
+Source of truth is [`packages/db/src/schema/*`](../../packages/db/src/schema)
+(every table is a `pgTable` there). Grouped by domain:
 
-- `users`
-- `user_profiles`
-- `goals`
-- `chat_threads`
-- `chat_messages`
-- `workout_plans`
-- `workout_plan_revisions`
-- `workout_sessions`
-- `nutrition_plans`
-- `nutrition_plan_revisions`
-- `nutrition_incidents`
-- `daily_checklists`
-- `health_metrics`
-- `ai_proposals`
-- `chat_attachments`
-- `exercises`
+**Identity & profile** — `users`, `user_profiles`, `goals`.
 
-Implemented support tables:
+**Chat & AI** — `chat_threads`, `chat_messages`, `chat_attachments`,
+`ai_proposals`.
 
-- `recipes`
-- `user_recipe_recommendations`
-- `device_connections`
-- `health_documents`
-- `health_document_summaries`
+**Workouts** — `workout_plans`, `workout_plan_revisions`, `workout_sessions`
+(planned + `ad_hoc`), `exercises` (catalog).
+
+**Nutrition** — `nutrition_plans`, `nutrition_plan_revisions`,
+`nutrition_adherence`, `nutrition_incidents`, `food_photo_analyses`, `recipes`,
+`user_recipe_recommendations`.
+
+**Today & habits** — `daily_checklists`, `habit_plans`, `habit_plan_revisions`,
+`habit_templates`, `habit_completions`.
+
+**Wellbeing & recovery** — `wellbeing_check_ins`, `recovery_check_ins`,
+`recovery_context_snapshots`.
+
+**Body composition** — `body_composition_analyses`.
+
+**Progress** — `weekly_progress_summaries`, `trend_observations`.
+
+**Metrics & devices** — `health_metric_snapshots`, `health_metric_aggregates`,
+`device_connections`, `device_consents`.
+
+**Biomarkers / lab reports** — `lab_reports`, `biomarker_readings`.
+
+**Billing & usage** — `subscriptions`, `stripe_webhook_events`,
+`chat_ai_usage_daily`.
+
+**Infra** — `migration_checks`.
+
+Each domain maps to a NestJS module under
+[`apps/api/src/modules/*`](../../apps/api/src/modules) (registered in
+[`apps/api/src/app.module.ts`](../../apps/api/src/app.module.ts)).
 
 ## Revision Pattern
 
@@ -76,7 +88,19 @@ workout_plan_revisions
   created_at
 ```
 
-The same pattern should be used for any future user-facing plan that AI can change. AI proposals reference the revision they create after user approval.
+The same pattern is used for any user-facing plan that AI can change
+(`workout_plans` / `nutrition_plans` / `habit_plans` and their `*_revisions`).
+Most accepted workout/nutrition proposals reference the revision they create
+after user approval.
+
+**Performed vs planned.** `workout_sessions` is the performed side and never
+mutates a revision. Its `source` is `planned` (materialized from a revision) or
+`ad_hoc` (a logged one-off with **nullable** `workout_plan_id` /
+`workout_plan_revision_id`, an `activity_type`, and `estimated_calories`). NULLs
+are distinct in the `(user_id, workout_plan_id, workout_plan_revision_id,
+planned_date)` unique index, so multiple ad-hoc rows insert cleanly on one day.
+`nutrition_incidents` is the eaten/performed side and likewise never changes
+plan targets.
 
 ## Proposal Status Pattern
 
@@ -96,7 +120,13 @@ ai_proposals
   created_at
 ```
 
-Pending proposals must not change active plan state. Rejected proposals must remain auditable without applying changes.
+Pending proposals must not change active plan state. Rejected proposals must remain auditable without applying changes. `applied_revision_id` (the `applied`
+reference) points to the created revision for plan intents, or to the created row
+for LOG (revision-free) intents (e.g. `workout_session:<id>` /
+`nutrition_incident:<id>`). A proposal payload may carry an optional,
+non-authoritative `displayContract` render hint; it is recomputed/clamped on
+accept and stripped before any revision is written, so it never persists on a
+revision (see [`../product/features/editable-proposals-performed-log.md`](../product/features/editable-proposals-performed-log.md)).
 
 ## Attachment And Incident Pattern
 
@@ -130,9 +160,46 @@ nutrition_incidents
 
 Chat attachments are ownership scoped and may expire. They do not run a separate
 food/workout/medical recognition pipeline and do not create proposal candidates outside
-the unified LLM proposal path. Medical document save from an image is deferred; no
-attachment path may auto-create `health_documents`. Nutrition incidents are written only
-after an accepted `log_nutrition_incident` proposal.
+the unified LLM proposal path. Special save from an image is deferred; **no
+attachment path may auto-create `lab_reports` / `biomarker_readings`**. Nutrition incidents
+are written only after an accepted `log_nutrition_incident` proposal.
+
+## Biomarker / Lab Report Tables (explicit, consent-gated upload)
+
+`lab_reports` and `biomarker_readings`
+([`packages/db/src/schema/biomarkers.ts`](../../packages/db/src/schema/biomarkers.ts))
+back the **Biomarkers** feature
+([`apps/api/src/modules/biomarkers`](../../apps/api/src/modules/biomarkers)) — an explicit
+user upload of a PDF/text lab report (or manual reading entry), never an attachment
+behavior. **There is no DB catalog table:** the ~50-marker, 8-area biomarker catalog lives
+**as code** in
+[`packages/types/src/biomarkers.ts`](../../packages/types/src/biomarkers.ts)
+(`BIOMARKER_KEYS` / `BIOMARKER_CATALOG`; `biomarker_readings.biomarker_key` is plain text
+validated against that catalog, with no pg enum so adding a marker needs no migration).
+
+- `lab_reports` — the uploaded file record: `storage_reference`, `mime_type`,
+  `file_size_bytes`, `status` (`uploaded`/`processing`/`extracted`/`failed`),
+  `failure_code` (the typed extraction-failure enum), `observed_at`,
+  `unmapped_marker_count`, and the **two-level consent** columns —
+  `store_parse_consent_at` (NOT NULL; set at upload) and the optional, revoke-able
+  `coach_context_consent_at` (per-report coach-chat consent). Soft-deleted via `deleted_at`.
+- `biomarker_readings` — one structured reading: `biomarker_key`, `value` (numeric) **or**
+  `value_text`, `unit`, optional `reference_range_text`, `observed_at`, `source`
+  (`extraction`/`manual`), `confidence`, `user_edited`, nullable `lab_report_id` (NULL for
+  manual readings). Soft-deleted via `deleted_at`.
+
+Consent model is **two-level** (replacing the deleted five-scope health-documents model):
+a structurally-required upload-time `storeAndParse` (`z.literal(true)`) plus an optional
+per-report `coachChat` toggle. Raw bytes live on the storage adapter (encrypted store
+required in production), **extracted document text is never persisted or logged**, and a
+reading reaches the coach (chat context or `biomarker_reading` proposal evidence) **only**
+when the user deliberately put it there — manual readings are always eligible; extracted
+readings require their report's `coach_context_consent_at`.
+
+Migration [`0038_biomarkers_replace_documents.sql`](../../packages/db/drizzle/0038_biomarkers_replace_documents.sql)
+creates these tables and **drops** the prior `health_documents`,
+`health_document_summaries`, `document_signals` tables (and their six `document_*` enums)
+plus the `chat_attachments.linked_document_id` column.
 
 ## Migration Rules
 

@@ -1,4 +1,4 @@
-import { type HTMLAttributes, type ReactNode } from "react";
+import { type HTMLAttributes, type ReactNode, type RefObject } from "react";
 import { cn } from "../../lib/utils";
 
 type ChatBubbleRole = "user" | "assistant";
@@ -72,16 +72,19 @@ export function ChatBubble({
 type ChatTranscriptProps = HTMLAttributes<HTMLUListElement> & {
   live?: "off" | "polite" | "assertive";
   label?: string;
+  ref?: RefObject<HTMLUListElement | null>;
 };
 
 export function ChatTranscript({
   className,
   live = "polite",
   label = "Coaching conversation",
+  ref,
   ...props
 }: ChatTranscriptProps) {
   return (
     <ul
+      ref={ref}
       className={cn("chat-transcript", className)}
       aria-live={live}
       aria-label={label}

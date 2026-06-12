@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { WEEKLY_REVIEW_CHAT_PROMPT } from "@health/types";
 import type {
+  BiomarkersDashboardResponse,
   DeviceConnection,
   Goal,
   HabitAdherenceResponse,
-  HealthDocument,
   HealthMetricAggregate,
   NutritionAdherenceRecord,
   TodayDayResponse,
@@ -16,7 +16,7 @@ import {
   FORBIDDEN_LONGEVITY_TERMS,
   SAFE_BACKEND_MESSAGE_FALLBACK,
   UNSAFE_RECOVERY_INPUT_TYPES,
-  buildDocumentsContextView,
+  buildBiomarkersLabsCardView,
   buildGoalsSectionView,
   buildLongevityCoachPrompts,
   buildLongevityHeroTrendStripView,
@@ -148,29 +148,44 @@ function recoveryAggregate(
   };
 }
 
-function sampleDocument(
-  overrides: Partial<HealthDocument> & Pick<HealthDocument, "id" | "title">,
-): HealthDocument {
+function sampleBiomarkersDashboard(input: {
+  vitaminDValue: number | null;
+}): BiomarkersDashboardResponse {
   return {
-    userId,
-    documentType: "lab_report",
-    storageReference: "documents/sample.txt",
-    mimeType: "text/plain",
-    fileSizeBytes: 1200,
-    parseStatus: "uploaded",
-    signalExtractionStatus: "not_started",
-    signalExtractionFailureReason: null,
-    signalExtractedAt: null,
-    consentScopes: ["upload_storage"],
-    consentVersion: "v1",
-    consentGrantedAt: "2026-05-20T12:00:00.000Z",
-    parseFailureReason: null,
-    revokedAt: null,
-    deletedAt: null,
-    uploadedAt: "2026-05-20T12:00:00.000Z",
-    createdAt: "2026-05-20T12:00:00.000Z",
-    updatedAt: "2026-05-20T12:00:00.000Z",
-    ...overrides,
+    generatedAt: "2026-05-22T12:00:00.000Z",
+    areas: [
+      {
+        area: "nutrients",
+        markers: [
+          {
+            key: "vitamin_d",
+            displayLabel: "Vitamin D (25-OH)",
+            canonicalUnit: "ng/mL",
+            typicalRange: { low: 30, high: 100, unit: "ng/mL" },
+            latestReading:
+              input.vitaminDValue === null
+                ? null
+                : {
+                    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    userId,
+                    labReportId: null,
+                    biomarkerKey: "vitamin_d",
+                    value: input.vitaminDValue,
+                    valueText: null,
+                    unit: "ng/mL",
+                    referenceRangeText: null,
+                    observedAt: "2026-05-20",
+                    source: "extraction",
+                    confidence: 0.9,
+                    userEdited: false,
+                    createdAt: "2026-05-20T12:00:00.000Z",
+                    updatedAt: "2026-05-20T12:00:00.000Z",
+                  },
+            readingCount: input.vitaminDValue === null ? 0 : 1,
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -586,7 +601,7 @@ describe("longevity UI state", () => {
 
       expect(ready.status).toBe("ready");
       if (ready.status === "ready") {
-        expect(ready.value).toBe("1 of 1 sessions completed");
+        expect(ready.value).toBe("1 of 1 planned session completed");
       }
       assertNoForbiddenTerms(ready);
     });
@@ -760,70 +775,42 @@ describe("longevity UI state", () => {
     });
   });
 
-  describe("documents metadata-only context", () => {
-    it("returns empty state when no active documents exist", () => {
-      const view = buildDocumentsContextView([]);
-
-      expect(view.status).toBe("empty");
-      if (view.status === "empty") {
-        expect(view.message).toContain("No documents uploaded yet");
+  describe("biomarkers labs card", () => {
+    it("returns empty state when the dashboard is unavailable or has no tracked markers", () => {
+      const unavailable = buildBiomarkersLabsCardView(null);
+      expect(unavailable.status).toBe("empty");
+      if (unavailable.status === "empty") {
+        expect(unavailable.message).toContain("No lab results yet");
       }
-      assertNoForbiddenTerms(view);
+      assertNoForbiddenTerms(unavailable);
+
+      const untracked = buildBiomarkersLabsCardView(
+        sampleBiomarkersDashboard({ vitaminDValue: null }),
+      );
+      expect(untracked.status).toBe("empty");
+      assertNoForbiddenTerms(untracked);
     });
 
-    it("maps metadata labels only and excludes deleted or revoked documents", () => {
-      const view = buildDocumentsContextView([
-        sampleDocument({
-          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          title: "Annual labs",
-          uploadedAt: "2026-05-21T12:00:00.000Z",
-          consentScopes: ["upload_storage", "coach_chat_context"],
-        }),
-        sampleDocument({
-          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-          title: "Deleted note",
-          deletedAt: "2026-05-22T12:00:00.000Z",
-        }),
-        sampleDocument({
-          id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-          title: "Revoked note",
-          revokedAt: "2026-05-22T12:00:00.000Z",
-        }),
-      ]);
-
-      expect(view.status).toBe("ready");
-      if (view.status !== "ready") {
-        return;
-      }
-
-      expect(view.items).toHaveLength(1);
-      expect(view.items[0]).toMatchObject({
-        title: "Annual labs",
-        consentLabel: "Coach context consented",
+    it("summarizes tracked markers and outside-typical-range counts", () => {
+      const outside = buildBiomarkersLabsCardView(
+        sampleBiomarkersDashboard({ vitaminDValue: 20 }),
+      );
+      expect(outside).toEqual({
+        status: "ready",
+        trackedValue: "1 tracked",
+        outsideRangeDetail: "1 outside typical range",
       });
-      expect(view.items[0]?.parseStatusLabel).toBeTruthy();
-      expect(view.items[0]?.uploadedLabel).toBeTruthy();
+      assertNoForbiddenTerms(outside);
 
-      const serialized = JSON.stringify(view.items);
-      expect(serialized).not.toContain("summaryText");
-      expect(serialized).not.toContain("extractedConstraints");
-      assertNoForbiddenTerms(view);
-    });
-
-    it("labels documents without coach context consent", () => {
-      const view = buildDocumentsContextView([
-        sampleDocument({
-          id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-          title: "Private note",
-          consentScopes: ["upload_storage"],
-        }),
-      ]);
-
-      expect(view.status).toBe("ready");
-      if (view.status === "ready") {
-        expect(view.items[0]?.consentLabel).toBe("Coach context not shared");
-      }
-      assertNoForbiddenTerms(view);
+      const inRange = buildBiomarkersLabsCardView(
+        sampleBiomarkersDashboard({ vitaminDValue: 60 }),
+      );
+      expect(inRange).toEqual({
+        status: "ready",
+        trackedValue: "1 tracked",
+        outsideRangeDetail: "All within typical range",
+      });
+      assertNoForbiddenTerms(inRange);
     });
   });
 
@@ -1070,7 +1057,7 @@ describe("longevity UI state", () => {
         nutrition: "/nutrition",
         profile: "/profile",
         profileGoals: "/profile#goals",
-        profileDocuments: "/profile#documents",
+        biomarkers: "/biomarkers",
         profileConsent: "/profile#data-consent",
       });
     });

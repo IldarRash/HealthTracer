@@ -22,6 +22,7 @@ import {
   updateTodayFeedback,
   updateTodayItemStatus,
   startTodayWorkout,
+  updateWorkoutSessionExercise,
 } from "../../lib/api";
 import type { TodayWorkoutDetail } from "@health/types";
 import {
@@ -30,6 +31,18 @@ import {
   canUpdateTodayItem,
   formatTaskCountChip,
 } from "../../lib/today-ui-state";
+import {
+  buildExerciseDrillDownRows,
+  shouldShowExerciseDrillDown,
+  buildQuickActionPayload,
+  getWorkoutExecutionRefreshQueryKeys,
+  toggleAdjustForm,
+  isAdjustFormOpen,
+  exerciseFeedbackToFormState,
+  buildExerciseExecutionUpdatePayload,
+  canSubmitExerciseExecutionUpdate,
+  type ExerciseFeedbackFormState,
+} from "../../lib/today-exercise-execution-ui-state";
 import {
   buildTodayNutritionAdherenceView,
   resolveTodayNutritionCardPhase,
@@ -54,6 +67,9 @@ import { canStartTodayWorkout } from "../../lib/today-ui-state";
 import { formatWeekdayLong, formatMonthShort } from "../../lib/date-format";
 import { Icon } from "../ui/icon";
 import { CheckCircle } from "../ui/check-circle";
+import { Eyebrow } from "../ui/eyebrow";
+import { Badge } from "../ui/badge";
+import { CardHead } from "../ui/card-head";
 import { SegmentRow } from "../ui/segment-row";
 import { MoodDotScale } from "./mood-dot-scale";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
@@ -111,119 +127,9 @@ function DarkCard({
   );
 }
 
-function CardHead({
-  icon,
-  color,
-  title,
-  right,
-}: {
-  icon?: React.ComponentProps<typeof Icon>["name"];
-  color: string;
-  title: string;
-  right?: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 9,
-        marginBottom: 14,
-      }}
-    >
-      {icon ? (
-        <div
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: `${color}22`,
-          }}
-        >
-          <Icon name={icon} size={15} stroke={color} />
-        </div>
-      ) : null}
-      <span
-        style={{
-          fontSize: 13.5,
-          fontWeight: 700,
-          letterSpacing: 0.2,
-          color: D.ink,
-          flex: 1,
-        }}
-      >
-        {title}
-      </span>
-      {right}
-    </div>
-  );
-}
 
-function Eyebrow({ color, children }: { color: string; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: 1.2,
-        textTransform: "uppercase",
-        color,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
 
-function Chip({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "green" | "amber" }) {
-  const tones = {
-    neutral: { bg: "rgba(255,255,255,0.06)", fg: D.ink2, bd: D.line },
-    green: { bg: M.greenDim, fg: M.green, bd: "transparent" },
-    amber: { bg: M.amberDim, fg: M.amber, bd: "transparent" },
-  };
-  const c = tones[tone];
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        padding: "4px 10px",
-        borderRadius: 999,
-        background: c.bg,
-        color: c.fg,
-        border: `1px solid ${c.bd}`,
-        fontSize: 12.5,
-        fontWeight: 600,
-        lineHeight: 1,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
 
-function ExerciseChip({ label }: { label: string }) {
-  return (
-    <span
-      style={{
-        padding: "5px 10px",
-        borderRadius: 8,
-        background: M.blueDim,
-        color: M.blue,
-        fontSize: 12.5,
-        fontWeight: 600,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </span>
-  );
-}
 
 function QuickLinkRow({
   icon,
@@ -350,6 +256,592 @@ function DayStrip({
   );
 }
 
+// ── Per-exercise execution drill-down ───────────────────────────
+
+type ExerciseDrillDownProps = {
+  workout: TodayWorkoutDetail;
+  updatingExerciseId: string | null;
+  onComplete: (sessionId: string, exerciseId: string) => void;
+  onSkip: (sessionId: string, exerciseId: string) => void;
+  onAdjust: (sessionId: string, exerciseId: string, form: ExerciseFeedbackFormState) => void;
+};
+
+function ExerciseDrillDown({
+  workout,
+  updatingExerciseId,
+  onComplete,
+  onSkip,
+  onAdjust,
+}: ExerciseDrillDownProps) {
+  const rows = buildExerciseDrillDownRows(workout);
+  const [adjustOpenIds, setAdjustOpenIds] = useState<Set<string>>(new Set());
+  const [formStateMap, setFormStateMap] = useState<Record<string, ExerciseFeedbackFormState>>({});
+  const [adjustErrorMap, setAdjustErrorMap] = useState<Record<string, string>>({});
+
+  if (rows.length === 0) return null;
+
+  const handleToggleAdjust = (rowId: string) => {
+    setAdjustOpenIds((prev) => toggleAdjustForm(prev, rowId));
+    // Pre-fill from existing execution when opening
+    if (!isAdjustFormOpen(adjustOpenIds, rowId)) {
+      const ex = workout.exercises.find((e) => e.id === rowId);
+      if (ex && !(rowId in formStateMap)) {
+        setFormStateMap((prev) => ({
+          ...prev,
+          [rowId]: exerciseFeedbackToFormState(ex.execution),
+        }));
+      }
+    }
+    setAdjustErrorMap((prev) => ({ ...prev, [rowId]: "" }));
+  };
+
+  const handleFormChange = (rowId: string, patch: Partial<ExerciseFeedbackFormState>) => {
+    setFormStateMap((prev) => ({
+      ...prev,
+      [rowId]: { ...getFormState(prev, rowId), ...patch },
+    }));
+  };
+
+  const getFormState = (
+    map: Record<string, ExerciseFeedbackFormState>,
+    rowId: string,
+  ): ExerciseFeedbackFormState =>
+    map[rowId] ?? {
+      perceivedEffort: "",
+      perceivedDifficulty: "",
+      discomfortFlag: false,
+      notes: "",
+      actualReps: "",
+      actualWeightKg: "",
+      loadAdjustmentNotes: "",
+    };
+
+  const handleAdjustSubmit = (rowId: string) => {
+    const form = getFormState(formStateMap, rowId);
+    const canSubmit = canSubmitExerciseExecutionUpdate({ form, status: "adjusted" });
+    if (!canSubmit) {
+      setAdjustErrorMap((prev) => ({
+        ...prev,
+        [rowId]: "Enter at least one value to save.",
+      }));
+      return;
+    }
+    setAdjustErrorMap((prev) => ({ ...prev, [rowId]: "" }));
+    onAdjust(workout.sessionId, rowId, form);
+    // Collapse on submit
+    setAdjustOpenIds((prev) => {
+      const next = new Set(prev);
+      next.delete(rowId);
+      return next;
+    });
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: 14,
+        borderTop: `1px solid ${D.line}`,
+        paddingTop: 14,
+      }}
+      aria-label="Exercise list"
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: 1.1,
+          textTransform: "uppercase",
+          color: D.mut2,
+          marginBottom: 10,
+        }}
+      >
+        Exercises
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {rows.map((row) => {
+          const isUpdating = updatingExerciseId === row.id;
+          const isCompleted = row.executionStatus === "completed";
+          const isSkipped = row.executionStatus === "skipped";
+          const isTerminal = isCompleted || isSkipped;
+          const adjustOpen = isAdjustFormOpen(adjustOpenIds, row.id);
+          const form = getFormState(formStateMap, row.id);
+          const canSaveAdjust = canSubmitExerciseExecutionUpdate({ form, status: "adjusted" });
+          const adjustError = adjustErrorMap[row.id] ?? "";
+
+          return (
+            <div key={row.id}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 12px",
+                  borderRadius: adjustOpen ? "10px 10px 0 0" : 10,
+                  background: isTerminal
+                    ? "rgba(255,255,255,0.03)"
+                    : "rgba(255,255,255,0.015)",
+                  border: `1px solid ${isTerminal ? "transparent" : D.line}`,
+                  borderBottom: adjustOpen ? `1px solid ${D.line2}` : undefined,
+                }}
+              >
+                {/* Status indicator */}
+                <div
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    background: isCompleted
+                      ? M.green
+                      : isSkipped
+                        ? D.mut2
+                        : row.executionStatus === "adjusted"
+                          ? M.amber
+                          : D.line2,
+                  }}
+                  aria-hidden="true"
+                />
+
+                {/* Name + prescription */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      color: isTerminal ? D.mut : D.ink,
+                      textDecoration: isSkipped ? "line-through" : "none",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {isUpdating ? "Saving…" : row.name}
+                  </div>
+                  <div style={{ fontSize: 12, color: D.mut2, marginTop: 2 }}>
+                    {row.executionSummary ?? row.prescriptionLabel}
+                  </div>
+                </div>
+
+                {/* Quick actions — only when not terminal */}
+                {!isTerminal && row.canUpdate ? (
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      aria-label={`Mark ${row.name} complete`}
+                      onClick={() => onComplete(workout.sessionId, row.id)}
+                      style={{
+                        padding: "5px 10px",
+                        borderRadius: 8,
+                        background: M.greenDim,
+                        color: M.green,
+                        border: "none",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: isUpdating ? "not-allowed" : "pointer",
+                        opacity: isUpdating ? 0.6 : 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Done
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      aria-label={`Skip ${row.name}`}
+                      onClick={() => onSkip(workout.sessionId, row.id)}
+                      style={{
+                        padding: "5px 10px",
+                        borderRadius: 8,
+                        background: "rgba(255,255,255,0.04)",
+                        color: D.mut,
+                        border: `1px solid ${D.line}`,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: isUpdating ? "not-allowed" : "pointer",
+                        opacity: isUpdating ? 0.6 : 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Skip
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      aria-label={adjustOpen ? `Close adjust form for ${row.name}` : `Adjust ${row.name}`}
+                      aria-expanded={adjustOpen}
+                      onClick={() => handleToggleAdjust(row.id)}
+                      style={{
+                        padding: "5px 10px",
+                        borderRadius: 8,
+                        background: adjustOpen ? M.amberDim : "rgba(255,255,255,0.04)",
+                        color: adjustOpen ? M.amber : D.mut,
+                        border: `1px solid ${adjustOpen ? M.amber + "44" : D.line}`,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: isUpdating ? "not-allowed" : "pointer",
+                        opacity: isUpdating ? 0.6 : 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Adjust
+                    </button>
+                  </div>
+                ) : (
+                  /* Terminal status badge */
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      color: isCompleted ? M.green : D.mut2,
+                      flexShrink: 0,
+                      padding: "3px 8px",
+                      borderRadius: 6,
+                      background: isCompleted ? M.greenDim : "rgba(255,255,255,0.04)",
+                    }}
+                  >
+                    {isCompleted ? "Done" : isSkipped ? "Skipped" : row.executionStatus}
+                  </span>
+                )}
+              </div>
+
+              {/* Inline adjust form — expands below the row */}
+              {adjustOpen && !isTerminal ? (
+                <div
+                  aria-label={`Adjust form for ${row.name}`}
+                  style={{
+                    padding: "14px 12px",
+                    background: "rgba(255,255,255,0.02)",
+                    border: `1px solid ${D.line}`,
+                    borderTop: "none",
+                    borderRadius: "0 0 10px 10px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  {/* Row 1: Reps + Weight */}
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <label
+                        htmlFor={`adjust-reps-${row.id}`}
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: 0.6,
+                          textTransform: "uppercase",
+                          color: D.mut2,
+                          marginBottom: 5,
+                        }}
+                      >
+                        Actual reps
+                      </label>
+                      <input
+                        id={`adjust-reps-${row.id}`}
+                        type="text"
+                        placeholder="e.g. 5"
+                        value={form.actualReps}
+                        disabled={isUpdating}
+                        maxLength={80}
+                        onChange={(e) => handleFormChange(row.id, { actualReps: e.target.value })}
+                        style={{
+                          width: "100%",
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          background: "rgba(255,255,255,0.04)",
+                          border: `1px solid ${D.line2}`,
+                          color: D.ink2,
+                          fontSize: 13,
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label
+                        htmlFor={`adjust-weight-${row.id}`}
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: 0.6,
+                          textTransform: "uppercase",
+                          color: D.mut2,
+                          marginBottom: 5,
+                        }}
+                      >
+                        Weight (kg)
+                      </label>
+                      <input
+                        id={`adjust-weight-${row.id}`}
+                        type="number"
+                        placeholder="e.g. 80"
+                        min={0.1}
+                        max={500}
+                        step={0.5}
+                        value={form.actualWeightKg}
+                        disabled={isUpdating}
+                        onChange={(e) => handleFormChange(row.id, { actualWeightKg: e.target.value })}
+                        style={{
+                          width: "100%",
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          background: "rgba(255,255,255,0.04)",
+                          border: `1px solid ${D.line2}`,
+                          color: D.ink2,
+                          fontSize: 13,
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 2: RPE + Difficulty */}
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <label
+                        htmlFor={`adjust-rpe-${row.id}`}
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: 0.6,
+                          textTransform: "uppercase",
+                          color: D.mut2,
+                          marginBottom: 5,
+                        }}
+                      >
+                        RPE (1–10)
+                      </label>
+                      <input
+                        id={`adjust-rpe-${row.id}`}
+                        type="number"
+                        placeholder="e.g. 8"
+                        min={1}
+                        max={10}
+                        step={1}
+                        value={form.perceivedEffort}
+                        disabled={isUpdating}
+                        onChange={(e) => handleFormChange(row.id, { perceivedEffort: e.target.value })}
+                        style={{
+                          width: "100%",
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          background: "rgba(255,255,255,0.04)",
+                          border: `1px solid ${D.line2}`,
+                          color: D.ink2,
+                          fontSize: 13,
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label
+                        htmlFor={`adjust-difficulty-${row.id}`}
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: 0.6,
+                          textTransform: "uppercase",
+                          color: D.mut2,
+                          marginBottom: 5,
+                        }}
+                      >
+                        Difficulty (1–10)
+                      </label>
+                      <input
+                        id={`adjust-difficulty-${row.id}`}
+                        type="number"
+                        placeholder="e.g. 7"
+                        min={1}
+                        max={10}
+                        step={1}
+                        value={form.perceivedDifficulty}
+                        disabled={isUpdating}
+                        onChange={(e) =>
+                          handleFormChange(row.id, { perceivedDifficulty: e.target.value })
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          background: "rgba(255,255,255,0.04)",
+                          border: `1px solid ${D.line2}`,
+                          color: D.ink2,
+                          fontSize: 13,
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  <div>
+                    <label
+                      htmlFor={`adjust-notes-${row.id}`}
+                      style={{
+                        display: "block",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                        color: D.mut2,
+                        marginBottom: 5,
+                      }}
+                    >
+                      Notes
+                    </label>
+                    <textarea
+                      id={`adjust-notes-${row.id}`}
+                      rows={2}
+                      placeholder="Any notes about how the set went…"
+                      value={form.notes}
+                      disabled={isUpdating}
+                      maxLength={500}
+                      onChange={(e) => handleFormChange(row.id, { notes: e.target.value })}
+                      style={{
+                        width: "100%",
+                        padding: "7px 10px",
+                        borderRadius: 8,
+                        background: "rgba(255,255,255,0.04)",
+                        border: `1px solid ${D.line2}`,
+                        color: D.ink2,
+                        fontSize: 13,
+                        lineHeight: 1.45,
+                        resize: "vertical",
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  {/* Load adjustment notes */}
+                  <div>
+                    <label
+                      htmlFor={`adjust-load-notes-${row.id}`}
+                      style={{
+                        display: "block",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                        color: D.mut2,
+                        marginBottom: 5,
+                      }}
+                    >
+                      Load adjustment notes
+                    </label>
+                    <input
+                      id={`adjust-load-notes-${row.id}`}
+                      type="text"
+                      placeholder="e.g. Reduced weight due to fatigue"
+                      value={form.loadAdjustmentNotes}
+                      disabled={isUpdating}
+                      maxLength={240}
+                      onChange={(e) =>
+                        handleFormChange(row.id, { loadAdjustmentNotes: e.target.value })
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "7px 10px",
+                        borderRadius: 8,
+                        background: "rgba(255,255,255,0.04)",
+                        border: `1px solid ${D.line2}`,
+                        color: D.ink2,
+                        fontSize: 13,
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+
+                  {/* Discomfort flag */}
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 9,
+                      cursor: isUpdating ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.discomfortFlag}
+                      disabled={isUpdating}
+                      onChange={(e) =>
+                        handleFormChange(row.id, { discomfortFlag: e.target.checked })
+                      }
+                      style={{ accentColor: M.amber, width: 15, height: 15 }}
+                      aria-label={`Flag discomfort for ${row.name}`}
+                    />
+                    <span style={{ fontSize: 13, color: D.ink2 }}>Flag discomfort</span>
+                  </label>
+
+                  {/* Error */}
+                  {adjustError ? (
+                    <p
+                      role="alert"
+                      style={{ fontSize: 12, color: M.red, margin: 0 }}
+                    >
+                      {adjustError}
+                    </p>
+                  ) : null}
+
+                  {/* Actions */}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      disabled={isUpdating || !canSaveAdjust}
+                      aria-label={`Save adjustments for ${row.name}`}
+                      onClick={() => handleAdjustSubmit(row.id)}
+                      style={{
+                        padding: "7px 14px",
+                        borderRadius: 9,
+                        background: canSaveAdjust && !isUpdating ? M.amber : "rgba(255,255,255,0.06)",
+                        color: canSaveAdjust && !isUpdating ? "#04130c" : D.mut,
+                        border: "none",
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        cursor: isUpdating || !canSaveAdjust ? "not-allowed" : "pointer",
+                        transition: "all 150ms ease",
+                      }}
+                    >
+                      {isUpdating ? "Saving…" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isUpdating}
+                      onClick={() => handleToggleAdjust(row.id)}
+                      style={{
+                        padding: "7px 14px",
+                        borderRadius: 9,
+                        background: "transparent",
+                        color: D.mut,
+                        border: `1px solid ${D.line}`,
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        cursor: isUpdating ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Movement card ───────────────────────────────────────────────
 
 type WorkoutCardProps = {
@@ -370,7 +862,9 @@ function MoveCard({
   selectedDate,
 }: WorkoutCardProps) {
   const { getToken } = useAuth();
+  const queryClient = useQueryClient();
   const [starting, setStarting] = useState(false);
+  const [updatingExerciseId, setUpdatingExerciseId] = useState<string | null>(null);
 
   const handleStart = async () => {
     if (starting) return;
@@ -379,6 +873,10 @@ function MoveCard({
       const token = await getToken();
       if (token && workout?.sessionId != null) {
         await startTodayWorkout(token, selectedDate);
+        // Refresh today + workout keys so the drill-down becomes visible
+        for (const queryKey of getWorkoutExecutionRefreshQueryKeys()) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
       }
     } catch {
       // swallow — not blocking for the card
@@ -387,10 +885,54 @@ function MoveCard({
     }
   };
 
+  const handleExerciseUpdate = async (
+    sessionId: string,
+    exerciseId: string,
+    action: "completed" | "skipped",
+  ) => {
+    if (updatingExerciseId) return;
+    setUpdatingExerciseId(exerciseId);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      await updateWorkoutSessionExercise(token, sessionId, exerciseId, buildQuickActionPayload(action));
+      for (const queryKey of getWorkoutExecutionRefreshQueryKeys()) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+    } catch {
+      // swallow — UI row shows saved state on next refresh
+    } finally {
+      setUpdatingExerciseId(null);
+    }
+  };
+
+  const handleExerciseAdjust = async (
+    sessionId: string,
+    exerciseId: string,
+    form: ExerciseFeedbackFormState,
+  ) => {
+    if (updatingExerciseId) return;
+    const payload = buildExerciseExecutionUpdatePayload({ form, status: "adjusted" });
+    if (!payload) return;
+    setUpdatingExerciseId(exerciseId);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      await updateWorkoutSessionExercise(token, sessionId, exerciseId, payload);
+      for (const queryKey of getWorkoutExecutionRefreshQueryKeys()) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+    } catch {
+      // swallow — UI row shows saved state on next refresh
+    } finally {
+      setUpdatingExerciseId(null);
+    }
+  };
+
   if (!workout) {
     return (
       <DarkCard style={{ marginBottom: 16 }}>
-        <CardHead icon="dumbbell" color={M.blue} title="Movement" />
+        <CardHead icon="dumbbell" color={M.blue} title="Movement" dark />
         <p style={{ fontSize: 13, color: D.mut, lineHeight: 1.55 }}>
           No workout scheduled today.{" "}
           <Link href="/training" style={{ color: M.blue, fontWeight: 600 }}>
@@ -450,6 +992,8 @@ function MoveCard({
     workout.status === "planned" &&
     canStartTodayWorkout(workout);
 
+  const showDrillDown = shouldShowExerciseDrillDown(workout);
+
   return (
     <DarkCard style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 13 }}>
@@ -489,28 +1033,46 @@ function MoveCard({
           </div>
 
           {workout.focus ? (
-            <div style={{ fontSize: 13, color: D.mut, marginBottom: exerciseLabels.length ? 13 : 0 }}>
+            <div style={{ fontSize: 13, color: D.mut, marginBottom: exerciseLabels.length && !showDrillDown ? 13 : 0 }}>
               {workout.focus}
             </div>
           ) : null}
 
-          {exerciseLabels.length > 0 ? (
+          {/* Exercise chip summary — shown only when drill-down is NOT visible */}
+          {exerciseLabels.length > 0 && !showDrillDown ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 14 }}>
               {exerciseLabels.map((label) => (
-                <ExerciseChip key={label} label={label} />
+                <Badge key={label} tone="blue" dark style={{ borderRadius: 8, fontSize: 12.5, fontWeight: 600 }}>{label}</Badge>
               ))}
               {workout.exercises.length > 4 ? (
-                <ExerciseChip label={`+${workout.exercises.length - 4} more`} />
+                <Badge tone="blue" dark style={{ borderRadius: 8, fontSize: 12.5, fontWeight: 600 }}>{`+${workout.exercises.length - 4} more`}</Badge>
               ) : null}
             </div>
           ) : null}
 
+          {/* Per-exercise drill-down (shown once session is active) */}
+          {showDrillDown ? (
+            <ExerciseDrillDown
+              workout={workout}
+              updatingExerciseId={updatingExerciseId}
+              onComplete={(sessionId, exerciseId) =>
+                void handleExerciseUpdate(sessionId, exerciseId, "completed")
+              }
+              onSkip={(sessionId, exerciseId) =>
+                void handleExerciseUpdate(sessionId, exerciseId, "skipped")
+              }
+              onAdjust={(sessionId, exerciseId, form) =>
+                void handleExerciseAdjust(sessionId, exerciseId, form)
+              }
+            />
+          ) : null}
+
           {showStartButton && !workoutItemDone ? (
-            <div style={{ marginBottom: 10 }}>
+            <div style={{ marginBottom: 10, marginTop: 10 }}>
               <button
                 type="button"
                 disabled={starting || isBusy}
-                onClick={handleStart}
+                onClick={() => void handleStart()}
                 style={{
                   padding: "8px 14px",
                   borderRadius: 10,
@@ -529,7 +1091,7 @@ function MoveCard({
           ) : null}
 
           {canMarkDone && !showStartButton ? (
-            <div style={{ marginBottom: 10 }}>
+            <div style={{ marginBottom: 10, marginTop: showDrillDown ? 14 : 10 }}>
               <button
                 type="button"
                 disabled={isBusy}
@@ -817,14 +1379,15 @@ function HabitsCard({ items, isBusy, onMark, updatingItemId }: HabitsCardProps) 
   return (
     <DarkCard>
       <CardHead
+        dark
         icon="spark"
         color={M.indigo}
         title="Habits today"
         right={
           total > 0 ? (
-            <Chip>
+            <Badge tone="neutral" dark style={{ fontSize: 12.5, fontWeight: 600 }}>
               {done} / {total}
-            </Chip>
+            </Badge>
           ) : null
         }
       />
@@ -1012,7 +1575,7 @@ function CheckinCard({ selectedDate, onCrisisSupportChange }: CheckinCardProps) 
 
   return (
     <DarkCard accent={M.amber} style={{ marginBottom: 16 }}>
-      <CardHead icon="heart" color={M.amber} title="Wellbeing check-in" />
+      <CardHead icon="heart" color={M.amber} title="Wellbeing check-in" dark />
 
       {showCrisisInCard && crisisDisplay.copy ? (
         <CrisisSupportPanel copy={crisisDisplay.copy} />
@@ -1229,6 +1792,7 @@ function ReflectCard({
   return (
     <DarkCard style={{ marginBottom: 16 }}>
       <CardHead
+        dark
         icon="moon"
         color={M.indigo}
         title="Reflection"
@@ -1356,7 +1920,7 @@ function EmptyHero() {
         </div>
         <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
           <Link
-            href="/goals"
+            href="/profile#goals"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -1565,12 +2129,12 @@ export function TodayWorkspace() {
     adherence.totalRequired > 0 &&
     adherence.completedRequired === adherence.totalRequired;
   const progressChip = allDone ? (
-    <Chip tone="green">
+    <Badge tone="green" dark style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 600 }}>
       <Icon name="checkSm" size={13} stroke={M.green} sw={2.4} />
       All done
-    </Chip>
+    </Badge>
   ) : (
-    <Chip>{formatTaskCountChip(adherence)}</Chip>
+    <Badge tone="neutral" dark style={{ fontSize: 12.5, fontWeight: 600 }}>{formatTaskCountChip(adherence)}</Badge>
   );
 
   return (

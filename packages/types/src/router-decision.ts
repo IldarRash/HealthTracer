@@ -6,6 +6,7 @@ import {
   type AgentToolName,
 } from "./agent-context.js";
 import { messagePreprocessorResultSchema } from "./message-preprocessor.js";
+import { ROUTER_TEXT_MAX_CHARS } from "./message-limits.js";
 
 // ---------------------------------------------------------------------------
 // Domain enum (only the three LLM domains; medical folds into health)
@@ -18,16 +19,31 @@ export type RouterDomain = z.infer<typeof routerDomainSchema>;
 /** Maximum number of domains the router may select per turn. */
 export const MAX_ROUTER_SELECTED_DOMAINS = 3 as const;
 
+/** Maximum hints of each kind (intent/tool/signal) kept per selected domain. */
+export const MAX_ROUTER_HINTS_PER_DOMAIN = 5 as const;
+
 // ---------------------------------------------------------------------------
 // Per-domain selection entry
 // ---------------------------------------------------------------------------
 
+// Caps are enforced by slicing IN-SCHEMA, never by rejection: a router LLM that
+// emits 6 valid hints (or 4 valid domains) must degrade to the cap, not fail
+// the whole parse and dump the turn onto the fallback route. The element
+// validations (known domain/tool names, hint length) still reject as before.
+const routerHintListSchema = z
+  .array(z.string().min(1).max(240))
+  .default([])
+  .transform((hints) => hints.slice(0, MAX_ROUTER_HINTS_PER_DOMAIN));
+
 export const routerSelectedDomainSchema = z.object({
   domain: routerDomainSchema,
   confidence: z.number().min(0).max(1),
-  intentHints: z.array(z.string().min(1).max(240)).max(5).default([]),
-  toolHints: z.array(agentToolNameSchema).max(5).default([]),
-  signalHints: z.array(z.string().min(1).max(240)).max(5).default([]),
+  intentHints: routerHintListSchema,
+  toolHints: z
+    .array(agentToolNameSchema)
+    .default([])
+    .transform((hints) => hints.slice(0, MAX_ROUTER_HINTS_PER_DOMAIN)),
+  signalHints: routerHintListSchema,
 });
 
 export type RouterSelectedDomain = z.infer<typeof routerSelectedDomainSchema>;
@@ -36,12 +52,22 @@ export type RouterSelectedDomain = z.infer<typeof routerSelectedDomainSchema>;
 // Optional direct-command signal (parallel to TurnDecision directCommand)
 // ---------------------------------------------------------------------------
 
+export const routerDirectCommandKindSchema = z.enum([
+  "today_summary_read",
+  "mark_today_workout_done",
+]);
+
+export type RouterDirectCommandKind = z.infer<typeof routerDirectCommandKindSchema>;
+
 export const routerDirectCommandSchema = z.object({
   detected: z.boolean(),
-  kind: z
-    .enum(["today_summary_read", "mark_today_workout_done"])
-    .nullable()
-    .optional(),
+  // LLM-tolerance boundary: the OpenAI wire schema can only express `kind` as a
+  // nullable enum, and live models have been observed emitting junk values
+  // (e.g. the literal string "null" for plan-creation turns). directCommand is
+  // telemetry-only, so an unknown kind degrades to null — it must NEVER fail
+  // the whole router parse and dump a valid domain selection onto the empty
+  // fallback route.
+  kind: routerDirectCommandKindSchema.nullable().catch(null).optional(),
   confidence: z.number().min(0).max(1).optional(),
 });
 
@@ -62,7 +88,7 @@ export type RouterAttachmentHint = z.infer<typeof routerAttachmentHintSchema>;
 
 export const routerRecentMessageHintSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
-  content: z.string().max(4000),
+  content: z.string().max(ROUTER_TEXT_MAX_CHARS),
 });
 
 export type RouterRecentMessageHint = z.infer<
@@ -81,8 +107,8 @@ export const routerAvailableDomainSchema = z.object({
 export type RouterAvailableDomain = z.infer<typeof routerAvailableDomainSchema>;
 
 export const routerDecisionRequestSchema = z.object({
-  originalText: z.string().min(1).max(4000),
-  normalizedText: z.string().min(1).max(4000),
+  originalText: z.string().min(1).max(ROUTER_TEXT_MAX_CHARS),
+  normalizedText: z.string().min(1).max(ROUTER_TEXT_MAX_CHARS),
   detectedLanguage: z.string().min(1).max(20).optional(),
   preprocessor: messagePreprocessorResultSchema,
   attachmentHints: z.array(routerAttachmentHintSchema).max(5).default([]),
@@ -105,11 +131,12 @@ export type RouterDecisionRequest = z.infer<typeof routerDecisionRequestSchema>;
 
 export const routerDecisionOutputSchema = z
   .object({
+    // Sliced in-schema (same rationale as the hint lists above): 4 valid
+    // domains degrade to the top 3, never to a whole-parse failure.
     selectedDomains: z
       .array(routerSelectedDomainSchema)
-      .max(MAX_ROUTER_SELECTED_DOMAINS)
-      .default([]),
-    contextNeeds: z.array(z.string().min(1).max(240)).max(10).default([]),
+      .default([])
+      .transform((domains) => domains.slice(0, MAX_ROUTER_SELECTED_DOMAINS)),
     directCommand: routerDirectCommandSchema.optional(),
     safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
     confidence: z.number().min(0).max(1),
@@ -198,7 +225,7 @@ export function clampRouterDecisionOutput(
       ...entry,
       toolHints: entry.toolHints
         .filter((t): t is AgentToolName => allowedTools.has(t as AgentToolName))
-        .slice(0, 5),
+        .slice(0, MAX_ROUTER_HINTS_PER_DOMAIN),
     }));
 
   const clampedSafetyFlags = output.safetyFlags.filter((f): f is AgentSafetyFlag =>
@@ -220,7 +247,6 @@ export function clampRouterDecisionOutput(
 export function createFallbackRouterDecision(): RouterDecisionOutput {
   return routerDecisionOutputSchema.parse({
     selectedDomains: [],
-    contextNeeds: [],
     safetyFlags: [],
     confidence: 0,
   });

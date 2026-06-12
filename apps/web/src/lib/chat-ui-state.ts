@@ -1,10 +1,12 @@
 import type {
   ChatMessage,
   ChatThread,
+  SuggestedQuickAction,
   WellbeingCrisisSupportCopy,
 } from "@health/types";
 import type { ChatMessageAttachmentPreview } from "./chat-message-attachments.js";
 import {
+  parseChatMessageSuggestedQuickActions,
   WELLBEING_CRISIS_SUPPORT_COPY,
   wellbeingCrisisEvaluationSchema,
 } from "@health/types";
@@ -14,7 +16,6 @@ import {
   WEEKLY_REVIEW_CHAT_PROMPT,
   type ChatWeeklyReviewPackView,
 } from "./weekly-review-ui-state";
-import { formatDateTimeMedium } from "./date-format";
 
 export type OptimisticChatMessage = {
   id: string;
@@ -29,32 +30,31 @@ export type OptimisticChatMessage = {
 export type DisplayChatMessage = ChatMessage | OptimisticChatMessage;
 
 export type SuggestedChatPrompt = {
-  /** Short coach-forward label shown on the prompt chip. */
-  label: string;
+  /** i18n key within Chat.suggestedPrompts namespace — resolved by the component. */
+  labelKey: string;
   /** Message sent to the coach when the chip is selected. */
   message: string;
 };
 
-export const CHAT_EMPTY_STATE_TITLE = "Start a conversation with your coach";
-
-export const CHAT_EMPTY_STATE_DESCRIPTION =
-  "Ask about your week, workouts, goals, nutrition, or how you're feeling.";
-
-export const SUGGESTED_CHAT_PROMPTS: readonly SuggestedChatPrompt[] = [
+/**
+ * Prompt chips for the chat empty state.
+ * Labels are i18n keys (Chat.suggestedPrompts.*); messages are semantic backend prompts.
+ */
+export const SUGGESTED_CHAT_PROMPT_DEFINITIONS: readonly SuggestedChatPrompt[] = [
   {
-    label: "Review my weekly progress",
+    labelKey: "reviewWeekly",
     message: WEEKLY_REVIEW_CHAT_PROMPT,
   },
   {
-    label: "Review my workout week",
+    labelKey: "reviewWorkouts",
     message: "Review my workout week",
   },
   {
-    label: "Help me adjust my goals",
+    labelKey: "adjustGoals",
     message: "Help me adjust my goals",
   },
   {
-    label: "What's in my nutrition plan?",
+    labelKey: "nutritionPlan",
     message: "What's in my nutrition plan?",
   },
 ];
@@ -109,10 +109,6 @@ export function mergeDisplayMessages(
   return [...serverMessages, optimisticMessage];
 }
 
-export function formatChatTimestamp(value: string): string {
-  return formatDateTimeMedium(value);
-}
-
 export function resolveChatMessageCrisisSupport(
   message: Pick<ChatMessage, "role" | "metadata">,
 ): WellbeingCrisisSupportCopy | null {
@@ -126,6 +122,24 @@ export function resolveChatMessageCrisisSupport(
   }
 
   return WELLBEING_CRISIS_SUPPORT_COPY;
+}
+
+/**
+ * Resolve persisted quick-action chips from an assistant message's metadata
+ * (metadata.suggestedQuickActions). The persisted metadata is the single source
+ * of truth — the live turn renders its assistant message only after the thread
+ * query refetch, so chips appear immediately on live turns AND survive a thread
+ * reload. Returns null for user messages, missing/invalid metadata, and
+ * turnError turns (the backend omits the key on those).
+ */
+export function resolveChatMessageSuggestedQuickActions(
+  message: Pick<ChatMessage, "role" | "metadata">,
+): SuggestedQuickAction[] | null {
+  if (message.role !== "assistant") {
+    return null;
+  }
+
+  return parseChatMessageSuggestedQuickActions(message.metadata);
 }
 
 export function resolveChatMessageWeeklyReview(

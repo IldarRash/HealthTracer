@@ -63,12 +63,13 @@ describe("attachment behavior config", () => {
           food_photo: "ephemeral_recognition",
           medical_document: "ephemeral_recognition",
           workout_attachment: "ephemeral_recognition",
+          document_file: "ephemeral_recognition",
         },
       },
     });
 
     expect(normalized.retention.byCategory.medical_document).toBe("ephemeral_recognition");
-    expect(normalized.safetyFloors.requireMedicalConsent).toBe(true);
+    expect(normalized.safetyFloors.enforceProviderIsolation).toBe(true);
   });
 
   describe("safety floors", () => {
@@ -77,7 +78,6 @@ describe("attachment behavior config", () => {
       const malicious = {
         ...defaults,
         safetyFloors: {
-          requireMedicalConsent: false,
           enforceProviderIsolation: false,
           requireOwnershipChecks: false,
           suppressMedicalPlanProposals: false,
@@ -86,7 +86,6 @@ describe("attachment behavior config", () => {
 
       const { config, warnings } = applyAttachmentBehaviorSafetyFloors(malicious);
 
-      expect(config.safetyFloors.requireMedicalConsent).toBe(true);
       expect(config.safetyFloors.enforceProviderIsolation).toBe(true);
       expect(config.safetyFloors.requireOwnershipChecks).toBe(true);
       expect(config.safetyFloors.suppressMedicalPlanProposals).toBe(true);
@@ -99,7 +98,6 @@ describe("attachment behavior config", () => {
         fileValue: {
           ...defaults,
           safetyFloors: {
-            requireMedicalConsent: false,
             enforceProviderIsolation: false,
             requireOwnershipChecks: false,
             suppressMedicalPlanProposals: false,

@@ -15,6 +15,7 @@ import {
   summarizeWorkoutPlanForCoaching,
   workoutAdaptationIncreasesVolumeOrLoad,
   updateWorkoutSessionExerciseSchema,
+  workoutExerciseSchema,
   workoutPlanExerciseSchema,
   workoutPlanPayloadSchema,
   workoutPlanProposalChangesSchema,
@@ -251,6 +252,20 @@ describe("normalizeWorkoutPlanPayload", () => {
   });
 });
 
+const pendingPogoJumpDefinition = {
+  name: "Pogo Jump",
+  aliases: [] as string[],
+  primaryMuscles: ["calves"],
+  secondaryMuscles: [] as string[],
+  equipment: ["bodyweight"],
+  movementPatterns: ["plyometric"],
+  modalities: ["plyometrics"],
+  difficulty: "intermediate",
+  instructions: ["Jump repeatedly with minimal ground contact time."],
+  safetyNotes: ["Land softly."],
+  source: "ai_generated",
+};
+
 describe("workout proposal helpers", () => {
   it("strips proposal extras before revision persistence", () => {
     const proposal = workoutPlanProposalChangesSchema.parse({
@@ -321,6 +336,117 @@ describe("workout proposal helpers", () => {
     );
 
     expect(errors.some((error) => error.includes("pendingExercises"))).toBe(true);
+  });
+
+  it("accepts the same pendingExerciseRef repeated across days with one shared definition (live regression)", () => {
+    // Live failure: the same exercise repeating across days produces the same
+    // name slug → same ref. Repeats are safe (the apply path caches per-ref
+    // resolution) and must share one pendingExercises definition.
+    const errors = getWorkoutProposalDomainErrors(
+      workoutPlanProposalChangesSchema.parse({
+        title: "Week 2 power",
+        summary: "Repeats the same exercise on two days.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Power",
+            exercises: [
+              {
+                pendingExerciseRef: "pogo-jump",
+                snapshot: { name: "Pogo Jump" },
+                sets: 2,
+                reps: "20",
+              },
+            ],
+          },
+          {
+            weekday: "thursday",
+            focus: "Power",
+            exercises: [
+              {
+                pendingExerciseRef: "pogo-jump",
+                snapshot: { name: "Pogo Jump" },
+                sets: 3,
+                reps: "15",
+              },
+            ],
+          },
+        ],
+        notes: [],
+        pendingExercises: {
+          "pogo-jump": pendingPogoJumpDefinition,
+        },
+      }),
+      { requireStructuredPlan: true },
+    );
+
+    expect(errors).toEqual([]);
+  });
+
+  it("still rejects a pendingExerciseRef without a pendingExercises definition", () => {
+    const errors = getWorkoutProposalDomainErrors(
+      workoutPlanProposalChangesSchema.parse({
+        title: "Missing definition",
+        summary: "Ref without catalog metadata.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Power",
+            exercises: [
+              {
+                pendingExerciseRef: "pogo-jump",
+                snapshot: { name: "Pogo Jump" },
+                sets: 2,
+                reps: "20",
+              },
+            ],
+          },
+        ],
+        notes: [],
+      }),
+      { requireStructuredPlan: true },
+    );
+
+    expect(
+      errors.some((error) =>
+        error.includes('pendingExercises must define catalog metadata for pendingExerciseRef "pogo-jump"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("still rejects orphan pendingExercises definitions not referenced by any exercise", () => {
+    const errors = getWorkoutProposalDomainErrors(
+      workoutPlanProposalChangesSchema.parse({
+        title: "Orphan definition",
+        summary: "Definition without a referencing exercise.",
+        days: [
+          {
+            weekday: "monday",
+            focus: "Power",
+            exercises: [
+              {
+                pendingExerciseRef: "pogo-jump",
+                snapshot: { name: "Pogo Jump" },
+                sets: 2,
+                reps: "20",
+              },
+            ],
+          },
+        ],
+        notes: [],
+        pendingExercises: {
+          "pogo-jump": pendingPogoJumpDefinition,
+          "unused-drill": { ...pendingPogoJumpDefinition, name: "Unused Drill" },
+        },
+      }),
+      { requireStructuredPlan: true },
+    );
+
+    expect(
+      errors.some((error) =>
+        error.includes('pendingExercises entry "unused-drill" is not referenced by any plan exercise'),
+      ),
+    ).toBe(true);
   });
 
   it("detects workout adaptations that increase volume or load", () => {
@@ -738,5 +864,34 @@ describe("workoutSessionExerciseExecutionSchema — userCompletionTimeMinutes (u
     };
     const payload = workoutPlanPayloadSchema.parse(rawInput);
     expect((payload as Record<string, unknown>)["userCompletionTimeMinutes"]).toBeUndefined();
+  });
+});
+
+describe("workoutExerciseSchema reps tolerance (LLM numeric reps)", () => {
+  it("normalizes numeric reps to a string", () => {
+    const exercise = workoutExerciseSchema.parse({ name: "Pogo Jump", sets: 2, reps: 20 });
+    expect(exercise.reps).toBe("20");
+  });
+
+  it("keeps string reps as-is", () => {
+    const exercise = workoutExerciseSchema.parse({ name: "Squat", reps: "8-12" });
+    expect(exercise.reps).toBe("8-12");
+  });
+
+  it("a full plan payload with numeric reps parses (regression: live LLM proposal was marked invalid)", () => {
+    const payload = workoutPlanPayloadSchema.parse({
+      title: "Week 2",
+      summary: "Stiffness and power.",
+      days: [
+        {
+          weekday: "monday",
+          focus: "Power",
+          exercises: [{ name: "Pogo Jump", reps: 20, sets: 2 }],
+        },
+      ],
+      notes: [],
+    });
+    const exercise = payload.days[0]!.exercises[0]! as { reps?: string | null };
+    expect(exercise.reps).toBe("20");
   });
 });

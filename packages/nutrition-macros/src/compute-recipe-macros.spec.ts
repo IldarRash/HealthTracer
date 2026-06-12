@@ -175,16 +175,16 @@ describe("computeRecipeMacros", () => {
     const result = computeRecipeMacros(ingredients, 1);
 
     // Should not be all zeros
-    expect(result.estimatedCalories).toBeGreaterThan(0);
+    expect(result.caloriesPerServing).toBeGreaterThan(0);
     // Should not be the old fake constants (550 cal, 25p, 45c, 20f)
-    expect(result.estimatedCalories).not.toBe(550);
-    expect(result.proteinGrams).not.toBe(25);
-    expect(result.carbsGrams).not.toBe(45);
-    expect(result.fatGrams).not.toBe(20);
+    expect(result.caloriesPerServing).not.toBe(550);
+    expect(result.proteinGramsPerServing).not.toBe(25);
+    expect(result.carbsGramsPerServing).not.toBe(45);
+    expect(result.fatGramsPerServing).not.toBe(20);
 
     // Chicken breast + oil should have notable protein and fat
-    expect(result.proteinGrams).toBeGreaterThan(10);
-    expect(result.fatGrams).toBeGreaterThan(3);
+    expect(result.proteinGramsPerServing).toBeGreaterThan(10);
+    expect(result.fatGramsPerServing).toBeGreaterThan(3);
   });
 
   it("divides macros correctly by servings", () => {
@@ -197,8 +197,8 @@ describe("computeRecipeMacros", () => {
     const result4 = computeRecipeMacros(ingredients, 4);
 
     // Per-serving values for 4 servings should be roughly 1/4 of single-serving
-    expect(result4.estimatedCalories).toBeLessThan(result1.estimatedCalories);
-    expect(result4.proteinGrams).toBeLessThan(result1.proteinGrams);
+    expect(result4.caloriesPerServing).toBeLessThan(result1.caloriesPerServing);
+    expect(result4.proteinGramsPerServing).toBeLessThan(result1.proteinGramsPerServing);
   });
 
   it("returns low confidence when all ingredients are unknown", () => {
@@ -230,7 +230,7 @@ describe("computeRecipeMacros", () => {
     const ingredients = [{ name: "chicken breast", unit: "200g", quantity: null }];
     const result0 = computeRecipeMacros(ingredients, 0);
     const result1 = computeRecipeMacros(ingredients, 1);
-    expect(result0.estimatedCalories).toBe(result1.estimatedCalories);
+    expect(result0.caloriesPerServing).toBe(result1.caloriesPerServing);
   });
 
   it("includes fiber in results", () => {
@@ -238,8 +238,8 @@ describe("computeRecipeMacros", () => {
       [{ name: "lentils", unit: "200g", quantity: null }],
       1,
     );
-    expect(result.fiberGrams).not.toBeNull();
-    expect((result.fiberGrams ?? 0)).toBeGreaterThan(0);
+    expect(result.fiberGramsPerServing).not.toBeNull();
+    expect((result.fiberGramsPerServing ?? 0)).toBeGreaterThan(0);
   });
 
   it("produces different macros for distinct TheMealDB-style recipes", () => {
@@ -278,20 +278,20 @@ describe("computeRecipeMacros", () => {
 
     // All three should have different calorie counts (not identical fake value)
     const cals = [
-      teriyakiResult.estimatedCalories,
-      boloResult.estimatedCalories,
-      stirFryResult.estimatedCalories,
+      teriyakiResult.caloriesPerServing,
+      boloResult.caloriesPerServing,
+      stirFryResult.caloriesPerServing,
     ];
     const uniqueCals = new Set(cals);
     expect(uniqueCals.size).toBeGreaterThanOrEqual(2);
 
     // Pasta bolognese should be higher calorie than veggie stir-fry (per serving)
-    expect(boloResult.estimatedCalories).toBeGreaterThan(stirFryResult.estimatedCalories);
+    expect(boloResult.caloriesPerServing).toBeGreaterThan(stirFryResult.caloriesPerServing);
   });
 
   it("handles empty ingredients list without throwing", () => {
     const result = computeRecipeMacros([], 2);
-    expect(result.estimatedCalories).toBeGreaterThanOrEqual(1); // clamped to 1
+    expect(result.caloriesPerServing).toBeGreaterThanOrEqual(1); // clamped to 1
     expect(result.confidence).toBe("low");
   });
 });

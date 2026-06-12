@@ -6,29 +6,40 @@ import type {
   AgentIntent,
   AgentTurnCapabilityPresentation,
   AgentTurnMetadata,
+  AgentTurnTelemetry,
   AgentToolName,
   AiStructuredOutput,
   BuildAgentContextRequest,
+  CandidateProposalSummary,
   ChatAttachmentCategory,
+  ChatProposalRevisionOriginal,
+  ContextCompressionQuality,
   ContextDepth,
   ContextTimeRange,
+  DeepReviewPromptContext,
   ProposalExplainerTurnContext,
-  RawAiProposal,
+  ProgressHistoryReviewSummary,
+  ProgressReporter,
   ResolvedCapabilityPresentationMetadata,
   UserLocale,
 } from "@health/types";
 import {
-  buildResponseModeExecutionMetadata,
+  agentTurnTelemetrySchema,
   createFallbackDomainAnswer,
-  isDeterministicResponseModeExecutorMode,
-  resolveResponseModeExecutorLoopPolicy,
+  deriveDeepReviewDataQuality,
 } from "@health/types";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
-import { CoachingContextService } from "../coaching-context/coaching-context.service.js";
+import {
+  CoachingContextService,
+  type ProgressHistoryLookbackOptions,
+} from "../coaching-context/coaching-context.service.js";
 import { ContextCompressionService } from "../coaching-context/context-compression.service.js";
 import { ContextExpansionPolicyService } from "../coaching-context/context-expansion-policy.service.js";
+import { ProgressHistoryAggregateService } from "../progress/progress-history-aggregate.service.js";
 import { mapContextSourceRefsToAgentCitations } from "../coaching-context/agent-prompt-context.js";
+import { AttachmentTextExtractionService } from "../chat-attachments/attachment-text-extraction.service.js";
+import type { AttachmentTextExtractionResult } from "../chat-attachments/attachment-text-extraction.service.js";
 import { ActionResolverService } from "./action-resolver.service.js";
 import { ActionVariantCatalogService } from "./action-variant-catalog.service.js";
 import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
@@ -37,11 +48,12 @@ import { DecisionMakerExecutorService } from "./decision-maker-executor.service.
 import type { DecisionMakerResult } from "./decision-maker-executor.service.js";
 import { DomainLlmExecutorService } from "./domain-llm-executor.service.js";
 import type { DomainLlmExecutorResult } from "./domain-llm-executor.service.js";
+import { aggregateUsageTotals, toUsageLogFields } from "./llm-cost-estimator.js";
 import { MessagePreprocessorService } from "./message-preprocessor.service.js";
 import { RouterLlmService } from "./router-llm.service.js";
 import type { RouterLlmResult } from "./router-llm.service.js";
 import { SystemPlannerService } from "./system-planner.service.js";
-import type { CapabilityPlanResult, DomainFanoutEntry, DomainFanoutPlan } from "./system-planner.service.js";
+import type { DomainFanoutEntry, DomainFanoutPlan } from "./system-planner.service.js";
 
 /**
  * Bounded attachment metadata passed into the orchestrator.
@@ -55,6 +67,8 @@ export interface AttachmentTurnContextItem {
   // "needs_consent" is never produced at runtime; retained for historical DB-row reads only.
   consentState: "granted" | "needs_consent" | "none";
   storageRef: string | null;
+  /** Original filename (e.g. "training-plan.pdf"). Used by text-extraction path for all domains. */
+  filename: string;
 }
 
 export interface AttachmentTurnContext {
@@ -63,7 +77,12 @@ export interface AttachmentTurnContext {
 
 export interface ProposalRevisionContext {
   supersededProposalId: string;
-  originalProposal: RawAiProposal;
+  /**
+   * Loose snapshot of the proposal being revised (proposedChanges is untyped).
+   * Modify must also work for proposals persisted as invalid; the payload is
+   * read-only LLM context here and is never applied without full validation.
+   */
+  originalProposal: ChatProposalRevisionOriginal;
   modificationFeedback: string;
 }
 
@@ -79,6 +98,12 @@ export interface OrchestrateCoachTurnInput {
   proposalRevision?: ProposalRevisionContext;
   proposalExplainer?: ProposalExplainerTurnContext;
   attachmentTurn?: AttachmentTurnContext;
+  /**
+   * Optional progress reporter for SSE streaming. Called at each coarse pipeline
+   * stage (routing, domains_running, synthesis). Failures are caught and swallowed —
+   * a throwing callback must never break the turn.
+   */
+  onProgress?: ProgressReporter;
 }
 
 export interface OrchestratedCoachTurnResult {
@@ -87,22 +112,25 @@ export interface OrchestratedCoachTurnResult {
   replySafetyErrors: string[];
   agentMetadata: AgentTurnMetadata;
   /**
-   * When true, the pipeline resolved a consent-gated outcome (e.g. a medical
-   * document save proposal from the decision-maker). The caller (ChatService)
-   * should surface a distinct consent prompt to the user. Nothing is
-   * auto-persisted — the proposal must be accepted through the normal
-   * proposal-accept flow.
-   *
-   * Only set on fan-out turns; undefined on deterministic gate-miss turns.
+   * COMPATIBILITY CODE (kept intentionally, per refactor-cleanup.md): plumbing
+   * held for the deferred medical special-save flow (attachment recognition →
+   * consent-gated save proposal → accept → persist health_document). When true,
+   * the pipeline resolved a consent-gated outcome; no client consumes the flag
+   * yet and nothing is auto-persisted — any proposal must still be accepted
+   * through the normal proposal-accept flow. Removal condition: remove this
+   * flag end-to-end if the special-save flow is descoped, or wire the client
+   * consent prompt when it ships.
    */
   consentRequired?: boolean;
+  /**
+   * Present when the AI pipeline could not produce an honest reply.
+   * reason=decision_failed: decision-maker failed after one retry.
+   * reason=reply_blocked: reply safety validation blocked the synthesized reply.
+   * When set, ChatService persists an empty message + turnError metadata instead
+   * of fake coach text.
+   */
+  turnError?: { reason: "decision_failed" | "reply_blocked" };
 }
-
-const FAN_OUT_SAFE_FALLBACK_REPLY =
-  "I could not safely process that response. Please try again with a wellness-focused question.";
-
-const DETERMINISTIC_PRE_AI_GATE_REPLY =
-  "That quick action should have been handled before the AI coach ran. Please try your request again.";
 
 @Injectable()
 export class AgentOrchestratorService {
@@ -121,6 +149,8 @@ export class AgentOrchestratorService {
     private readonly actionResolverService: ActionResolverService,
     private readonly decisionMakerExecutorService: DecisionMakerExecutorService,
     private readonly actionVariantCatalogService: ActionVariantCatalogService,
+    private readonly attachmentTextExtractionService: AttachmentTextExtractionService,
+    private readonly progressHistoryAggregateService: ProgressHistoryAggregateService,
   ) {
     this.provider = createCoachAiProvider(
       this.aiBehaviorConfigService.getCompiledPromptTemplates(),
@@ -134,6 +164,9 @@ export class AgentOrchestratorService {
   async orchestrateCoachTurn(
     input: OrchestrateCoachTurnInput,
   ): Promise<OrchestratedCoachTurnResult> {
+    const { onProgress } = input;
+    const turnStart = Date.now();
+
     const preprocessorResult = this.messagePreprocessorService.preprocess({
       userMessage: input.userMessage,
       hasAttachments: Boolean(input.attachmentTurn?.attachments.length),
@@ -145,6 +178,14 @@ export class AgentOrchestratorService {
     // RouterLlm is the only first-LLM routing stage for eligible turns.
     // Proposal-revision and proposal-explainer turns are the explicit non-router exceptions.
     const shouldRunRouter = !input.proposalRevision && !input.proposalExplainer;
+
+    // Emit routing stage before the router LLM call (pre-AI gate turns never reach
+    // the orchestrator so they never emit stage events — handled in ChatService).
+    if (shouldRunRouter) {
+      emitProgress(onProgress, { kind: "stage", stage: "routing" });
+    }
+
+    const routerStart = Date.now();
     const routerResult = shouldRunRouter
       ? await this.routerLlmService.route({
           preprocessorResult,
@@ -154,6 +195,7 @@ export class AgentOrchestratorService {
           recentMessages: input.recentMessages,
         })
       : undefined;
+    const routerLatencyMs = shouldRunRouter ? Date.now() - routerStart : undefined;
 
     const plan = await this.systemPlannerService.planTurn({
       userMessage: input.userMessage,
@@ -161,12 +203,25 @@ export class AgentOrchestratorService {
       proposalRevision: input.proposalRevision,
       attachmentTurn: input.attachmentTurn,
       routerResult,
+      preprocessorResult,
     });
     const { route } = plan;
     const capabilityTurnMetadata = toAgentTurnCapabilityPresentation(plan.presentationMetadata);
 
     // Build primary context packet for the current route (used as a fallback
     // for fan-out path metadata and for domain context building).
+    // Turn-level lookback grant for the planner-injected progress_history_review
+    // slice (Phase 3). The SAME options object (including the once-per-turn
+    // precomputed summary on review turns) is threaded into every packet build
+    // — primary + ≤3 domains — so the 6-query aggregation never runs per packet.
+    const progressHistoryLookback: ProgressHistoryLookbackOptions = {
+      requestedLookbackDays: plan.requestedLookbackDays,
+      grantedLookbackDays: plan.grantedLookbackDays,
+      responseLanguage: preprocessorResult.responseLanguage,
+      precomputedSummary: await this.precomputeProgressHistorySummary(input.auth, plan),
+    };
+
+    const contextStart = Date.now();
     const contextPacket = await this.coachingContextService.buildAgentContext(
       input.auth,
       {
@@ -175,16 +230,19 @@ export class AgentOrchestratorService {
         purpose: route.purpose,
         depth: route.depth,
         timeRange: route.timeRange,
-        includeDocuments: route.includeDocuments,
       },
       route,
-      { contextBudget: plan.contextBudget },
+      { contextBudget: plan.contextBudget, progressHistoryLookback },
     );
+    const contextLatencyMs = Date.now() - contextStart;
 
     const coachingContext = this.coachingContextService.toAgentPromptContext(contextPacket);
     const expansionPolicy = this.contextExpansionPolicyService.createPolicySnapshot(
       plan.contextBudget,
     );
+
+    // Compression dataQuality feeds the deepReview sufficiency block (worst-of).
+    let compressionDataQuality: ContextCompressionQuality | undefined;
 
     if (plan.requiresCompression) {
       const compression = await this.contextCompressionService.compressForTurn({
@@ -192,6 +250,8 @@ export class AgentOrchestratorService {
         reviewSignals: plan,
         budget: plan.contextBudget,
       });
+
+      compressionDataQuality = compression.summary?.dataQuality;
 
       if (compression.summary) {
         coachingContext.contextCompressionSummary = compression.summary;
@@ -224,6 +284,7 @@ export class AgentOrchestratorService {
           mimeType: attachment.mimeType,
           consentState: attachment.consentState,
           storageRef: attachment.storageRef,
+          filename: attachment.filename,
         })),
       };
     }
@@ -241,37 +302,24 @@ export class AgentOrchestratorService {
     }
 
     // ---------------------------------------------------------------------------
-    // Route selection
-    //
-    // S4: deterministic gate-miss (deterministic_read / deterministic_write) is
-    // handled INLINE by buildDeterministicGateMissResult — a rare safety-net for
-    // the case where a deterministic executor mode somehow reaches the orchestrator
-    // without the pre-AI gate having handled it. No ADDITIONAL LLM calls are made
-    // from this point; however, for eligible turns the router will already have run
-    // above (before SystemPlannerService produced the executorMode). The genuine
-    // zero-LLM path is the pre-AI gate in chat.service.ts (crisis, direct-path,
-    // quota), which returns before AiService is called.
-    //
-    // All other turns fan out through runFanOutTurn:
+    // All turns fan out through runFanOutTurn:
     //   - revision turns (router skipped; single-domain fan-out via the revision capability)
     //   - explainer-with-proposal turns (router skipped; read-only single-domain fan-out)
     //   - low-confidence / fallback turns (single-domain fan-out via "general" capability)
     //   - confident multi-domain turns (parallel fan-out; the primary case)
     //
     // Pre-AI gates (crisis, no-proposal explainer, direct-path, quota) never reach the
-    // orchestrator, so they are never in scope here (S4 holds at chat.service.ts).
+    // orchestrator — they return in ChatService before AiService is called.
+    // SystemPlannerService guarantees plan.executorMode is never deterministic by
+    // coercing any deterministic mode to the fan-out default (logged as pre_ai_gate.miss).
     // ---------------------------------------------------------------------------
-    if (isDeterministicResponseModeExecutorMode(plan.executorMode)) {
-      return this.buildDeterministicGateMissResult({
-        plan,
-        contextPacket,
-        capabilityTurnMetadata,
-        routerResult,
-        shouldRunRouter,
-      });
-    }
 
-    // Every non-deterministic turn fans out.
+    // Phase 4: deep-review sufficiency block — built only when the plan selected a
+    // review budget profile AND the packet carries the progress_history_review slice.
+    // Threaded into every domain request and the final-decision request so the
+    // {{deepReviewSuffix}} instruction frames observed vs uncertain + analyzed range.
+    const deepReview = buildDeepReviewPromptContext(plan, contextPacket, compressionDataQuality);
+
     return this.runFanOutTurn(input, {
       plan,
       contextPacket,
@@ -279,100 +327,13 @@ export class AgentOrchestratorService {
       capabilityTurnMetadata,
       routerResult,
       responseLanguage: preprocessorResult.responseLanguage,
+      progressHistoryLookback,
+      deepReview,
+      onProgress,
+      turnStart,
+      routerLatencyMs,
+      contextLatencyMs,
     });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private — deterministic gate-miss safety-net
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Handles deterministic gate-miss turns (executorMode = deterministic_read |
-   * deterministic_write) INLINE — a safety-net for turns that reach the orchestrator
-   * without the pre-AI gate having handled them (S4). No additional LLM calls are
-   * made from this point; for eligible turns the router may already have run above.
-   *
-   * Returns a canned reply with responseModeExecution.delegatedToPreAiGate=true
-   * and preAiGateDelegationMissed=true so downstream telemetry can flag the miss.
-   * The metadata shape mirrors what the pre-C6 ResponseModeExecutorService.buildDelegatedResult emitted.
-   */
-  private buildDeterministicGateMissResult(params: {
-    plan: CapabilityPlanResult;
-    contextPacket: AgentContextPacket;
-    capabilityTurnMetadata: AgentTurnCapabilityPresentation;
-    routerResult: RouterLlmResult | undefined;
-    shouldRunRouter: boolean;
-  }): OrchestratedCoachTurnResult {
-    const { plan, contextPacket, capabilityTurnMetadata, routerResult, shouldRunRouter } = params;
-    const { route } = plan;
-
-    const loopPolicy = resolveResponseModeExecutorLoopPolicy(plan.executorMode);
-    const providerMode = resolveAiCoachProviderMode();
-
-    // llmRouterInvoked is true when the router ran and returned a source="llm" result.
-    const llmRouterInvoked =
-      shouldRunRouter && routerResult?.source === "llm";
-
-    const responseModeExecution = buildResponseModeExecutionMetadata({
-      executorMode: plan.executorMode,
-      llmInvoked: false,
-      expectedResponseMode: plan.expectedResponseMode,
-      delegatedToPreAiGate: true,
-      preAiGateDelegationMissed: true,
-    });
-
-    const routing: AgentTurnMetadata["routing"] = {
-      confidence: route.confidence,
-      routingMethod: route.routingMethod,
-      llmRouterInvoked: llmRouterInvoked ?? false,
-      unifiedTurnDecisionInvoked: shouldRunRouter,
-      catalogIntentId: route.catalogIntentId,
-      safetyFlags: route.safetyFlags,
-      expectedResponseMode: route.expectedResponseMode,
-      contextSliceCount: route.requiredContextSlices.length,
-      loopIterations: 0,
-      maxLoopIterations: loopPolicy.maxLoopIterations,
-    };
-
-    const unifiedTurnDecision: AgentTurnMetadata["unifiedTurnDecision"] = routerResult
-      ? {
-          ran: shouldRunRouter,
-          source: routerResult.source,
-          confidence: routerResult.output.confidence,
-          routingMethod: "unified_turn_decision" as const,
-          ...(routerResult.validationErrors.length > 0
-            ? { validationErrorCount: routerResult.validationErrors.length }
-            : {}),
-        }
-      : { ran: shouldRunRouter };
-
-    return {
-      output: { reply: DETERMINISTIC_PRE_AI_GATE_REPLY, proposals: [] },
-      parseErrors: [],
-      replySafetyErrors: [],
-      agentMetadata: {
-        provider: providerMode,
-        intent: route.intent,
-        catalogIntentId: route.catalogIntentId,
-        primaryCapabilityId: capabilityTurnMetadata.primaryCapabilityId,
-        selectedCapabilityIds: [...capabilityTurnMetadata.selectedCapabilityIds],
-        capabilityPresentation: capabilityTurnMetadata,
-        purpose: contextPacket.purpose,
-        depth: contextPacket.depth,
-        timeRange: contextPacket.timeRange,
-        toolsInvoked: [],
-        citations: mapContextSourceRefsToAgentCitations(contextPacket.sourceRefs),
-        routing,
-        unifiedTurnDecision,
-        missingContextNotes: contextPacket.missingContextNotes,
-        responseModeExecution,
-        safety: {
-          status: "passed",
-          blockedReasons: [],
-          constraintsApplied: contextPacket.safetyConstraints,
-        },
-      },
-    };
   }
 
   // ---------------------------------------------------------------------------
@@ -391,10 +352,41 @@ export class AgentOrchestratorService {
       routerResult: RouterLlmResult | undefined;
       /** Resolved response language (hint ?? detected). Null = fall back to message detection. */
       responseLanguage: string | null;
+      /** Shared per-turn lookback options (incl. the once-per-turn precomputed summary). */
+      progressHistoryLookback: ProgressHistoryLookbackOptions;
+      /** Deep-review sufficiency block (Phase 4). Undefined on non-review turns. */
+      deepReview: DeepReviewPromptContext | undefined;
+      onProgress?: ProgressReporter;
+      /** Turn entry timestamp for total latency calculation. */
+      turnStart: number;
+      /** Router LLM latency in ms. Absent when router was skipped. */
+      routerLatencyMs: number | undefined;
+      /** Context loading latency in ms. */
+      contextLatencyMs: number;
     },
   ): Promise<OrchestratedCoachTurnResult> {
-    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage } = params;
+    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, progressHistoryLookback, deepReview, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
     const selectedDomains = plan.fanout.selectedDomains;
+
+    // Emit domains_running stage with the selected domain names (structural info only,
+    // no capabilities, intents, or content).
+    emitProgress(onProgress, {
+      kind: "stage",
+      stage: "domains_running",
+      selectedDomains: selectedDomains.map((d) => d.domain),
+    });
+
+    // Extract text from document_file attachments ONCE per turn, before the domain fan-out.
+    // The result map is shared across all domain executors so text is extracted only once.
+    // NEVER throws: extraction degrades gracefully per attachment.
+    // SAFETY: extracted text is NEVER persisted or logged — ephemeral context-only.
+    const attachmentTextMap = await this.attachmentTextExtractionService.extractTurnAttachmentTexts(
+      (input.attachmentTurn?.attachments ?? []).map((a) => ({
+        attachmentRefId: a.attachmentRefId,
+        mimeType: a.mimeType,
+        storageRef: a.storageRef,
+      })),
+    );
 
     // Build one bounded AgentContextPacket per selected domain.
     // Safety floors (documents/sensitive denied by default) are re-applied by
@@ -403,20 +395,25 @@ export class AgentOrchestratorService {
       input,
       selectedDomains,
       contextPacket,
+      progressHistoryLookback,
     );
 
     // Run selected domain LLMs concurrently.
     // Guard: Promise.all is wrapped so a rejected inner promise (which should never
     // happen since executeDomainLoopSafe never rejects) does not crash the turn.
+    const domainsStart = Date.now();
     const domainResults = await this.runDomainsConcurrently(
       input,
       selectedDomains,
       domainContextPackets,
       primaryCoachingContext,
       responseLanguage,
+      attachmentTextMap,
+      deepReview,
     );
+    const domainsLatencyMs = Date.now() - domainsStart;
 
-    // Structured log: router stage done (counts/ids/flags only — no message text).
+    // Structured log: router stage done (counts/ids/flags/tokens only — no message text).
     if (routerResult !== undefined) {
       this.logger.log({
         stage: "router_done",
@@ -428,10 +425,11 @@ export class AgentOrchestratorService {
           confidence: d.confidence,
         })),
         validationErrorCount: routerResult.validationErrors.length,
+        ...toUsageLogFields(routerResult.usage),
       });
     }
 
-    // Structured log: each domain done (counts/ids/flags only — no health content).
+    // Structured log: each domain done (counts/ids/flags/tokens only — no health content).
     for (const { domain, result } of domainResults) {
       this.logger.log({
         stage: "domain_done",
@@ -445,6 +443,7 @@ export class AgentOrchestratorService {
           result.domainAnswer.workoutCalorieEstimate !== undefined,
         hasWorkoutCaloriePerHourRate:
           result.domainAnswer.workoutCaloriePerHourRate !== undefined,
+        ...toUsageLogFields(result.usage),
       });
     }
 
@@ -460,30 +459,59 @@ export class AgentOrchestratorService {
     // Collect domain outputs for the decision-maker (only domain_answer entries).
     const domainOutputs = domainResults.map((r) => r.result.domainAnswer);
 
+    // Build the merged id→candidate map across all selected domains (Slice 2).
+    // Keys are cand_<domain>_<index>; ActionResolver uses this to resolve
+    // selectedProposalIds from the decision-maker into canonical payloads.
+    const mergedCandidateMap = buildMergedCandidateMap(domainResults);
+
+    // Build candidate summaries to pass to the decision-maker so it can pick
+    // IDs without seeing full payloads (intent + title + reason are enough).
+    const candidateProposalSummaries = buildCandidateProposalSummaries(domainResults);
+
     // Collect safety flags and constraints from the primary context packet.
     const safetyFlags = plan.route.safetyFlags ?? [];
     const safetyConstraints = contextPacket.safetyConstraints ?? [];
 
+    // Recent messages for the decision-maker — capped at 6 / 4000 chars each (Change 2).
+    const decisionRecentMessages = [...input.recentMessages]
+      .slice(-6)
+      .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
+
+    // Emit synthesis stage before the decision-maker LLM call.
+    emitProgress(onProgress, { kind: "stage", stage: "synthesis" });
+
     // Run the decision-maker LLM (Stage 9).
     // DecisionMakerExecutorService always resolves — degrades to fallback on error.
+    const decisionStart = Date.now();
     const decisionResult = await this.decisionMakerExecutorService.execute({
       userMessage: input.userMessage,
       domainOutputs,
+      candidateProposalSummaries,
       actionVariantCatalog,
       safetyFlags,
       safetyConstraints,
       provider: this.provider,
       responseLanguage,
+      recentMessages: decisionRecentMessages,
+      // Thread low-confidence flag from planner fanout so the decision template can
+      // ask a clarifying question rather than guess the domain (Change 2 / Slice 5).
+      lowConfidenceRoute: plan.fanout.lowConfidenceRoute,
+      // Phase 4: deep-review sufficiency framing for the decision template.
+      ...(deepReview !== undefined ? { deepReview } : {}),
     });
+    const decisionLatencyMs = Date.now() - decisionStart;
 
-    // Structured log: decision stage done (counts/ids/flags only — no text/health content).
+    // Structured log: decision stage done (counts/ids/flags/tokens only — no text/health content).
     this.logger.log({
       stage: "decision_done",
       degraded: decisionResult.degraded,
       degradedReasonCount: decisionResult.degradedReasons.length,
       selectedAction: decisionResult.output.selectedAction ?? null,
-      proposalCount: decisionResult.output.proposals.length,
+      selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
+      lowConfidenceRoute: plan.fanout.lowConfidenceRoute === true,
+      deepReview: deepReview !== undefined,
+      ...toUsageLogFields(decisionResult.usage),
     });
 
     // Extract the workout domain calorie estimate and rate from the fan-out results.
@@ -496,39 +524,71 @@ export class AgentOrchestratorService {
     const workoutCaloriePerHourRate = extractWorkoutCaloriePerHourRate(domainResults);
 
     // Resolve the decision-maker output through ActionResolver (Stage 10).
-    // ActionResolver filters proposals to the union of the selected domains'
-    // allowedProposalIntents. consentRequired is a forwarded LLM boolean — there
-    // is no consent-gated action variant currently in the catalog (medical-save is
-    // deferred). When a workout calorie estimate or rate is present, it is stamped
-    // onto workout proposals with provenance 'workout_llm' (R1/S8).
+    // ActionResolver resolves selectedProposalIds → canonical payloads from the
+    // merged candidate map, then filters to the union allowlist. consentRequired
+    // is a forwarded LLM boolean — no consent-gated action variant exists currently
+    // (medical-save is deferred). Workout calorie fields are scrubbed/re-stamped
+    // from the trusted workout domain answer only (R1/S8).
     const resolved = this.actionResolverService.resolveFinalDecisionOutput({
       finalDecision: decisionResult.output,
       selectedDomains,
+      candidateMap: mergedCandidateMap,
       workoutCalorieEstimate,
       workoutCaloriePerHourRate,
     });
 
+    // Decision-failed: decision-maker exhausted retries and could not produce an honest reply.
+    // Skip reply safety check (there is no reply to validate) and produce a typed error outcome.
+    const decisionFailed = Boolean(decisionResult.turnError?.reason === "decision_failed");
+
     // Safety floor: validate the decision-maker's synthesized reply for diagnosis/treatment language.
-    // This covers all turn types now (revision, explainer, fallback, confident multi-domain) — S9/R2.
-    // On failure, replace the reply with a safe fallback and drop all proposals (reply_blocked).
-    const replySafetyErrors = validateReplySafety(resolved.reply);
-    const replyBlocked = replySafetyErrors.length > 0;
+    // This covers all turn types (revision, explainer, fallback, confident multi-domain).
+    // On failure: reply replaced with empty content, proposals dropped (reply_blocked).
+    // Skip when decision already failed — there is no synthesized reply to validate.
+    const replySafetyErrors = decisionFailed ? [] : validateReplySafety(resolved.reply);
+    const replyBlocked = !decisionFailed && replySafetyErrors.length > 0;
 
-    // Carry the consent-required flag from ActionResolver: this is the LLM boolean
-    // forwarded from the decision-maker output (consentRequired). No consent-gated
-    // action variant currently exists in the catalog — medical-save is deferred.
-    // Surface it to ChatService for the ChatTurnResponse flag; nothing is auto-persisted.
-    const consentRequired = replyBlocked ? false : resolved.consentRequired;
+    // COMPATIBILITY CODE (kept intentionally, per refactor-cleanup.md): carry the
+    // consent-required flag from ActionResolver — the LLM boolean forwarded from the
+    // decision-maker output (consentRequired). This is plumbing held for the deferred
+    // medical special-save flow; no consent-gated action variant exists in the catalog
+    // and no client consumes the flag yet. Nothing is auto-persisted. Removal
+    // condition: remove end-to-end if the special-save flow is descoped, or wire the
+    // client consent prompt when it ships.
+    const consentRequired = (replyBlocked || decisionFailed) ? false : resolved.consentRequired;
 
-    const finalOutput: AiStructuredOutput = replyBlocked
-      ? { reply: FAN_OUT_SAFE_FALLBACK_REPLY, proposals: [] }
-      : { reply: resolved.reply, proposals: resolved.proposals };
+    // S2: honest degradation — no fake coach reply.
+    // - decision_failed: empty content marker (ChatService persists turnError metadata instead)
+    // - reply_blocked: empty content marker + safety metadata preserved
+    // - normal: the validated reply and proposals
+    const finalOutput: AiStructuredOutput =
+      decisionFailed || replyBlocked
+        ? { reply: " ", proposals: [] }
+        : { reply: resolved.reply, proposals: resolved.proposals };
 
-    // droppedByAllowlist = proposals the decision-maker emitted but ActionResolver filtered out.
-    // Clamped >=0 in case of unexpected shape mismatch.
-    const decisionProposalCount = decisionResult.output.proposals.length;
+    // Build the turn-level error for persistence.
+    const turnError: OrchestratedCoachTurnResult["turnError"] = decisionFailed
+      ? { reason: "decision_failed" }
+      : replyBlocked
+        ? { reason: "reply_blocked" }
+        : undefined;
+
+    // Separate the two drop categories:
+    //  - idResolutionDropCount: ids selected by decision-maker that were unknown or duplicate
+    //    in the candidate map (from resolved.parseErrors, produced by ActionResolverService).
+    //  - droppedByAllowlist: proposals that DID resolve from the candidate map but were then
+    //    filtered by the union allowlist (defense-in-depth). Computed as the difference between
+    //    the number of resolved proposals and the final after-allowlist count.
+    // These were previously conflated as a single droppedByAllowlist count.
+    const idResolutionDropCount = resolved.idResolutionDropCount;
     const resolvedProposalCount = resolved.proposals.length;
-    const droppedByAllowlist = Math.max(0, decisionProposalCount - resolvedProposalCount);
+    // droppedByAllowlist = ids that resolved successfully but were filtered by the allowlist.
+    // decisionSelectedIdCount - idResolutionDropCount = count that reached the allowlist step.
+    const decisionSelectedIdCount = decisionResult.output.selectedProposalIds.length;
+    const droppedByAllowlist = Math.max(
+      0,
+      decisionSelectedIdCount - idResolutionDropCount - resolvedProposalCount,
+    );
     const finalProposalCount = finalOutput.proposals.length;
 
     // Structured log: resolution stage done (counts/flags only — no text/health content).
@@ -536,6 +596,7 @@ export class AgentOrchestratorService {
       stage: "resolution_done",
       resolvedProposalCount,
       droppedByAllowlist,
+      idResolutionDropCount,
       replyBlocked,
       finalProposalCount,
     });
@@ -552,30 +613,104 @@ export class AgentOrchestratorService {
       );
     }
 
+    // Surface resolver diagnostics: unknown/duplicate ids are a dead output channel
+    // if not appended here. Append them to parseErrors so callers (ChatService) see them.
+    if (resolved.parseErrors.length > 0) {
+      parseErrors.push(...resolved.parseErrors.map((e) => `Resolver: ${e}`));
+    }
+
     const safetyStatus = replyBlocked
       ? ("reply_blocked" as const)
-      : degradedDomains.length === domainResults.length
-        ? ("parse_failed" as const)
-        : ("passed" as const);
+      : decisionFailed
+        ? ("provider_error" as const)
+        : degradedDomains.length === domainResults.length
+          ? ("parse_failed" as const)
+          : ("passed" as const);
+
+    const totalLatencyMs = Date.now() - turnStart;
+
+    const fanOutMetadata = buildFanOutTurnMetadata({
+      plan,
+      contextPacket,
+      capabilityTurnMetadata,
+      routerResult,
+      domainResults,
+      decisionResult,
+      deepReviewApplied: deepReview !== undefined,
+      resolvedProposalCount,
+      droppedByAllowlist,
+      idResolutionDropCount,
+      replyBlocked,
+      finalProposalCount,
+      contextLatencyMs,
+      domainsLatencyMs,
+      totalLatencyMs,
+    });
+
+    // ---------------------------------------------------------------------------
+    // Slice D: per-turn telemetry — one structured log per eligible turn.
+    // Safety floor: no user message text, no reply text, no health data.
+    // Counts, enums, durations, and token numbers only.
+    // ---------------------------------------------------------------------------
+    // Null-safe turn token aggregation from the same per-stage usage values that
+    // feed persisted metadata — no second usage source. Cost is an ESTIMATE from
+    // the code-owned price map; absent when no stage reported a priced model.
+    const turnUsageTotals = aggregateUsageTotals([
+      routerResult?.usage,
+      ...domainResults.map(({ result }) => result.usage),
+      decisionResult.usage,
+    ]);
+    const telemetry: AgentTurnTelemetry = {
+      event: "ai.turn_summary",
+      totalLatencyMs,
+      routerLatencyMs,
+      contextLatencyMs,
+      decisionLatencyMs,
+      domainLatencies: domainResults.map(({ domain, result }) => ({
+        domain,
+        latencyMs: result.usage?.latencyMs ?? 0,
+        ...(result.usage !== undefined ? { totalTokens: result.usage.totalTokens } : {}),
+      })),
+      totalPromptTokens: turnUsageTotals.promptTokens,
+      totalCompletionTokens: turnUsageTotals.completionTokens,
+      totalTokens: turnUsageTotals.totalTokens,
+      ...(turnUsageTotals.estimatedCostUsd !== undefined
+        ? { estimatedCostUsd: turnUsageTotals.estimatedCostUsd }
+        : {}),
+      selectedDomains: selectedDomains.map((d) => d.domain),
+      routerConfidence: routerResult?.output.confidence,
+      routerSource: routerResult?.source,
+      toolsRequestedPerDomain: domainResults.map(({ domain, result }) => ({
+        domain,
+        toolsInvoked: result.toolsInvoked,
+        toolsDeniedCount: 0,
+      })),
+      degradedDomains,
+      finalActionType: decisionResult.output.selectedAction ?? null,
+      proposalCount: finalProposalCount,
+      validationFailureClasses: [],
+    };
+    // Runtime-validate telemetry before logging to catch schema drift early.
+    // safeParse: a mismatch emits a warning but never fails the turn.
+    const telemetryValidation = agentTurnTelemetrySchema.safeParse(telemetry);
+    if (!telemetryValidation.success) {
+      this.logger.warn({
+        stage: "telemetry_validation_failed",
+        issues: telemetryValidation.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
+      });
+      this.logger.log(telemetry);
+    } else {
+      this.logger.log(telemetryValidation.data);
+    }
 
     return {
       output: finalOutput,
       parseErrors,
       replySafetyErrors,
       consentRequired,
+      ...(turnError !== undefined ? { turnError } : {}),
       agentMetadata: {
-        ...buildFanOutTurnMetadata({
-          plan,
-          contextPacket,
-          capabilityTurnMetadata,
-          routerResult,
-          domainResults,
-          decisionResult,
-          resolvedProposalCount,
-          droppedByAllowlist,
-          replyBlocked,
-          finalProposalCount,
-        }),
+        ...fanOutMetadata,
         safety: {
           status: safetyStatus,
           blockedReasons: replyBlocked ? replySafetyErrors : [],
@@ -583,6 +718,41 @@ export class AgentOrchestratorService {
         },
       },
     };
+  }
+
+  /**
+   * Aggregate the deep-review progress history ONCE per turn.
+   *
+   * On review turns the planner injects the progress_history_review slice into
+   * the primary route and into every fan-out domain entry — without this, each
+   * of up to four buildAgentContext calls would re-run the identical 6-query
+   * aggregation with its own `new Date()`. Non-review turns return undefined
+   * (and CoachingContextService keeps its lazy compute path for other callers).
+   */
+  private async precomputeProgressHistorySummary(
+    auth: ClerkAuthContext,
+    plan: DomainFanoutPlan,
+  ): Promise<ProgressHistoryReviewSummary | undefined> {
+    const wantsProgressHistory =
+      (plan.route.requiredContextSlices ?? []).some(
+        (slice) => slice.type === "progress_history_review",
+      ) ||
+      plan.fanout.selectedDomains.some((entry) =>
+        (entry.supplementaryContextSlices ?? []).some(
+          (slice) => slice.type === "progress_history_review",
+        ),
+      );
+
+    if (!wantsProgressHistory) {
+      return undefined;
+    }
+
+    // Mirrors CoachingContextService's lazy fallback: the planner grant when
+    // present, otherwise the plan budget's horizon.
+    return this.progressHistoryAggregateService.buildReviewSummaryForAuth(
+      auth,
+      plan.grantedLookbackDays ?? plan.contextBudget.maxLookbackDays,
+    );
   }
 
   /**
@@ -601,6 +771,7 @@ export class AgentOrchestratorService {
     input: OrchestrateCoachTurnInput,
     selectedDomains: readonly DomainFanoutEntry[],
     primaryContextPacket: AgentContextPacket,
+    progressHistoryLookback: ProgressHistoryLookbackOptions,
   ): Promise<AgentContextPacket[]> {
     return Promise.all(
       selectedDomains.map(async (domainEntry) => {
@@ -619,8 +790,13 @@ export class AgentOrchestratorService {
             // No route passed: CoachingContextService derives context slices from
             // the request's purpose/depth/timeRange and the contextBudget options.
             undefined,
-            // Re-apply per-domain context budget (safety floors are enforced at build time).
-            { contextBudget: domainEntry.contextBudget },
+            // Re-apply per-domain context budget (safety floors are enforced at build
+            // time) and thread the planner-injected review slices + lookback grant.
+            {
+              contextBudget: domainEntry.contextBudget,
+              supplementarySliceRequests: domainEntry.supplementaryContextSlices,
+              progressHistoryLookback,
+            },
           );
         } catch {
           // Degrade gracefully — reuse the primary packet for this domain.
@@ -646,6 +822,8 @@ export class AgentOrchestratorService {
     domainContextPackets: AgentContextPacket[],
     primaryCoachingContext: Record<string, unknown>,
     responseLanguage: string | null,
+    attachmentTextMap: ReadonlyMap<string, AttachmentTextExtractionResult>,
+    deepReview: DeepReviewPromptContext | undefined,
   ): Promise<Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>> {
     try {
       const results = await Promise.all(
@@ -657,6 +835,7 @@ export class AgentOrchestratorService {
               domain: domainEntry.domain,
               result: {
                 domainAnswer: createFallbackDomainAnswer(domainEntry.domain),
+                candidateMap: new Map(),
                 degraded: true,
                 degradedReasons: ["No context packet available for domain."],
                 loopIterations: 0,
@@ -718,6 +897,9 @@ export class AgentOrchestratorService {
             orchestratorInput: input,
             provider: this.provider,
             responseLanguage,
+            attachmentTextMap,
+            // Phase 4: same deepReview block for every selected domain.
+            ...(deepReview !== undefined ? { deepReview } : {}),
           });
 
           return { domain: domainEntry.domain, result: domainResult };
@@ -735,6 +917,7 @@ export class AgentOrchestratorService {
         domain: domainEntry.domain,
         result: {
           domainAnswer: createFallbackDomainAnswer(domainEntry.domain),
+          candidateMap: new Map(),
           degraded: true,
           degradedReasons: [message],
           loopIterations: 0,
@@ -745,7 +928,6 @@ export class AgentOrchestratorService {
   }
 
 }
-
 
 // ---------------------------------------------------------------------------
 // Module-level helpers
@@ -793,14 +975,24 @@ function buildFanOutTurnMetadata(params: {
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>;
   /** The full decision-maker result (output + degraded flag). */
   decisionResult: DecisionMakerResult;
+  /** True when the turn carried a deepReview block (Phase 4). Boolean only — no health data. */
+  deepReviewApplied: boolean;
   /** Proposal count after ActionResolver (union-allowlist filtering applied). */
   resolvedProposalCount: number;
-  /** Proposals emitted by decision-maker but dropped by ActionResolver allowlist. */
+  /** Proposals dropped by ActionResolver allowlist (resolved but outside union allowlist). */
   droppedByAllowlist: number;
+  /** Proposals dropped because selectedProposalIds were unknown or duplicate in the candidate map. */
+  idResolutionDropCount: number;
   /** True when reply safety validation blocked the reply. */
   replyBlocked: boolean;
   /** Final proposal count after reply-block zeroing. */
   finalProposalCount: number;
+  /** Context loading latency in ms. */
+  contextLatencyMs: number;
+  /** Combined domain LLMs latency in ms (parallel wall-clock time). */
+  domainsLatencyMs: number;
+  /** Total turn wall-clock latency in ms. */
+  totalLatencyMs: number;
 }): AgentTurnMetadata {
   const {
     plan,
@@ -809,10 +1001,15 @@ function buildFanOutTurnMetadata(params: {
     routerResult,
     domainResults,
     decisionResult,
+    deepReviewApplied,
     resolvedProposalCount,
     droppedByAllowlist,
+    idResolutionDropCount,
     replyBlocked,
     finalProposalCount,
+    contextLatencyMs,
+    domainsLatencyMs,
+    totalLatencyMs,
   } = params;
   const { route } = plan;
 
@@ -857,6 +1054,7 @@ function buildFanOutTurnMetadata(params: {
             confidence: d.confidence,
           })),
           blockedFallback: degradedDomains.length === domainResults.length && domainResults.length > 0,
+          ...(routerResult.usage !== undefined ? { usage: routerResult.usage } : {}),
         }
       : {
           ran: false,
@@ -869,20 +1067,33 @@ function buildFanOutTurnMetadata(params: {
       candidateProposalCount: result.domainAnswer.candidateProposals.length,
       loopIterations: result.loopIterations,
       toolsInvoked: result.toolsInvoked,
+      toolsDeniedCount: 0,
       hasWorkoutCalorieEstimate: result.domainAnswer.workoutCalorieEstimate !== undefined,
+      ...(result.usage !== undefined ? { usage: result.usage } : {}),
     })),
     decision: {
       degraded: decisionResult.degraded,
       selectedAction: decisionResult.output.selectedAction ?? null,
-      proposalCount: decisionResult.output.proposals.length,
+      selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
+      ...(plan.fanout.lowConfidenceRoute === true
+        ? { lowConfidenceRoute: true as const }
+        : {}),
+      // Phase 4: boolean-only deep-review marker (mirrors lowConfidenceRoute surfacing).
+      ...(deepReviewApplied ? { deepReview: true as const } : {}),
+      ...(decisionResult.usage !== undefined ? { usage: decisionResult.usage } : {}),
     },
     resolution: {
       resolvedProposalCount,
       droppedByAllowlist,
+      idResolutionDropCount,
       replyBlocked,
       finalProposalCount,
+      validationFailureClasses: [],
     },
+    totalLatencyMs,
+    contextLatencyMs,
+    domainsLatencyMs,
   };
 
   return {
@@ -915,8 +1126,6 @@ function buildFanOutTurnMetadata(params: {
       executorMode: plan.executorMode,
       llmInvoked: true,
       expectedResponseMode: route.expectedResponseMode,
-      delegatedToPreAiGate: false,
-      preAiGateDelegationMissed: false,
     },
     fanOut,
     safety: {
@@ -973,8 +1182,137 @@ function buildDomainContextRequest(
     intent: CAPABILITY_TO_INTENT[cap] ?? "general",
     depth: CAPABILITY_TO_DEPTH[cap] ?? "medium",
     timeRange: CAPABILITY_TO_TIME_RANGE[cap] ?? "14d",
-    includeDocuments: false,
   };
+}
+
+/**
+ * Build the deep-review sufficiency block for this turn (Phase 4).
+ *
+ * Built ONLY when:
+ *  - the planner selected a review budget profile (deep_review / deep_history), AND
+ *  - the primary context packet carries the progress_history_review slice
+ *    (its numeric-only ProgressHistoryReviewSummary).
+ *
+ * Field sources (per the Phase 4 spec):
+ *  - requestedPeriodDays ← plan.requestedLookbackDays (null when none was asked)
+ *  - grantedPeriodDays   ← plan.grantedLookbackDays, falling back to the
+ *    summary's own grantedPeriodDays when the plan grant is null (e.g. a review
+ *    profile triggered without an explicit lookback phrase)
+ *  - dataQuality         ← worst of the summary's per-domain dataSufficiency
+ *    values and the compression summary's dataQuality when present
+ *
+ * Returns undefined on every non-review turn — the suffix stays empty and the
+ * static prompt prefixes remain untouched.
+ */
+function buildDeepReviewPromptContext(
+  plan: DomainFanoutPlan,
+  contextPacket: AgentContextPacket,
+  compressionDataQuality: ContextCompressionQuality | undefined,
+): DeepReviewPromptContext | undefined {
+  const profile = plan.contextBudget.profile;
+
+  if (profile !== "deep_review" && profile !== "deep_history") {
+    return undefined;
+  }
+
+  const progressHistory = [contextPacket.slice, ...contextPacket.supplementarySlices]
+    .map((slice) => slice.progressHistory)
+    .find((summary) => summary !== undefined);
+
+  if (!progressHistory) {
+    return undefined;
+  }
+
+  return {
+    requestedPeriodDays: plan.requestedLookbackDays,
+    grantedPeriodDays: plan.grantedLookbackDays ?? progressHistory.grantedPeriodDays,
+    dataQuality: deriveDeepReviewDataQuality(
+      progressHistory.dataSufficiency,
+      compressionDataQuality ?? null,
+    ),
+  };
+}
+
+/**
+ * Build the merged id→candidate map across all domain results (Slice 2).
+ *
+ * Merges each domain's candidateMap into one unified map. The IDs are
+ * guaranteed unique by construction (`cand_<domain>_<index>`) — each domain
+ * produces distinct key prefixes. The merged map is passed to ActionResolverService
+ * to resolve selectedProposalIds into canonical payloads.
+ *
+ * Degraded domains contribute empty maps (no candidates available).
+ */
+function buildMergedCandidateMap(
+  domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,
+): ReadonlyMap<string, Record<string, unknown>> {
+  const merged = new Map<string, Record<string, unknown>>();
+
+  for (const { result } of domainResults) {
+    for (const [id, candidate] of result.candidateMap) {
+      merged.set(id, candidate);
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Build CandidateProposalSummary[] for the decision-maker request (Slice 2).
+ *
+ * For each domain result, builds a summary entry per candidate: id + intent + title + reason.
+ * The decision-maker picks IDs from this list without needing the full payload.
+ * Degraded domains contribute no summaries.
+ */
+function buildCandidateProposalSummaries(
+  domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>,
+): CandidateProposalSummary[] {
+  const summaries: CandidateProposalSummary[] = [];
+
+  for (const { domain, result } of domainResults) {
+    if (result.degraded) {
+      continue;
+    }
+
+    result.domainAnswer.candidateProposals.forEach((candidate, index) => {
+      const id = `cand_${domain}_${index}`;
+      const intent = typeof candidate["intent"] === "string" ? candidate["intent"] : "";
+      const title = typeof candidate["title"] === "string" ? candidate["title"] : "";
+      const reason = typeof candidate["reason"] === "string" ? candidate["reason"] : "";
+
+      // Only include summaries with both title and reason non-empty — this matches
+      // candidateProposalSummarySchema which requires both fields as .min(1).
+      // A candidate missing either field would fail Zod parse in the decision-maker request;
+      // dropping it here is safer than letting it reach the decision-maker truncated or empty.
+      if (intent && title && reason) {
+        summaries.push({ id, intent, title: title.slice(0, 200), reason: reason.slice(0, 500) });
+      }
+    });
+  }
+
+  return summaries;
+}
+
+/**
+ * Safely emit a progress event via the optional reporter.
+ *
+ * Failures are swallowed — a throwing callback must never break the turn.
+ * Only structural stage events are emitted here; `turn_accepted` and `final`
+ * are emitted by ChatService which holds the full response shape.
+ */
+function emitProgress(
+  onProgress: ProgressReporter | undefined,
+  event: Parameters<ProgressReporter>[0],
+): void {
+  if (!onProgress) {
+    return;
+  }
+
+  try {
+    onProgress(event);
+  } catch {
+    // Swallow — progress reporting must never affect turn correctness.
+  }
 }
 
 /**

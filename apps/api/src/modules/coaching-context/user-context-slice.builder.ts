@@ -7,7 +7,6 @@ import type {
   GetUserContextSliceInput,
   ParsedGetUserContextSliceInput,
   NutritionPlanPayload,
-  RagContextResult,
   UserContextSlice,
   UserMemoryCategory,
   UserMemoryItem,
@@ -24,13 +23,10 @@ import {
 export function resolveSliceOptions(input: ParsedGetUserContextSliceInput): {
   depth: ContextDepth;
   timeRange: ContextTimeRange;
-  includeDocuments: boolean;
 } {
   return {
     depth: input.depth ?? resolveDefaultDepthForPurpose(input.purpose),
     timeRange: input.timeRange ?? resolveDefaultTimeRangeForPurpose(input.purpose),
-    includeDocuments:
-      input.includeDocuments ?? input.purpose === "health_context",
   };
 }
 
@@ -124,24 +120,30 @@ export function buildUserContextSliceFromSnapshot(
         weeklyProgress: summarizeWeeklyProgress(snapshot, "medium"),
       });
 
-    case "health_context": {
-      const documentContext = resolved.includeDocuments
-        ? snapshot.documentContext
-        : undefined;
-      const ragResults = resolved.includeDocuments
-        ? buildRagResults(snapshot)
-        : undefined;
+    // Deep-review numeric aggregates plus a small recent-baseline contrast.
+    // Deliberately NO wellbeingSummary / recoveryContext (sensitive-context
+    // floor stays untouched) and NO documentContext / ragResults — trends reach
+    // the review only as the numbers-only progressHistory packet.
+    case "progress_history_review":
+      return userContextSliceSchema.parse({
+        ...base,
+        progressHistory: snapshot.progressHistory ?? undefined,
+        activeWorkoutPlan: summarizeWorkoutPlan(snapshot),
+        recentWorkoutExecution: extractWorkoutExecution(snapshot),
+        weeklyProgress: summarizeWeeklyProgress(snapshot, "small"),
+      });
 
-      if (resolved.includeDocuments) {
-        appendDocumentSourceRefs(sourceRefs, snapshot, ragResults ?? []);
-      }
+    case "health_context": {
+      // biomarkerContext is structured, user-visible, consent-gated data and is
+      // exempt from the allowDocuments budget floor by design — eligibility is
+      // enforced where the summary is built (BiomarkersService), not here.
+      appendBiomarkerSourceRefs(sourceRefs, snapshot);
 
       return userContextSliceSchema.parse({
         ...base,
         userProfile: snapshot.personalContextSummary,
         activeGoals: mapGoals(snapshot),
-        documentContext,
-        ragResults,
+        biomarkerContext: snapshot.biomarkerContext,
         metricsSummary: snapshot.metricsSummary,
       });
     }
@@ -270,41 +272,19 @@ function summarizeWeeklyProgress(
   };
 }
 
-function appendDocumentSourceRefs(
+function appendBiomarkerSourceRefs(
   sourceRefs: ContextSourceRef[],
   snapshot: CoachingContextSnapshot,
-  ragResults: RagContextResult[],
 ) {
-  const generatedAt = snapshot.documentContext.generatedAt;
+  const generatedAt = snapshot.biomarkerContext.generatedAt;
 
-  for (const item of snapshot.documentContext.items.slice(0, 5)) {
+  for (const item of snapshot.biomarkerContext.items.slice(0, 5)) {
     sourceRefs.push({
-      domain: "document",
-      label: item.title,
-      referenceId: item.documentId,
+      domain: "biomarker",
+      label: item.displayLabel,
       generatedAt,
     });
   }
-
-  for (const rag of ragResults) {
-    sourceRefs.push({
-      domain: "rag",
-      label: rag.title,
-      referenceId: rag.documentId,
-      generatedAt,
-    });
-  }
-}
-
-function buildRagResults(snapshot: CoachingContextSnapshot): RagContextResult[] {
-  return snapshot.documentContext.items.slice(0, 5).map((item) => ({
-    documentId: item.documentId,
-    summaryId: item.summaryId,
-    title: item.title,
-    snippet: item.summarySnippet,
-    provenance: "approved_document_summary",
-    consentScope: "semantic_indexing",
-  }));
 }
 
 function buildPlaceholderSnapshots(

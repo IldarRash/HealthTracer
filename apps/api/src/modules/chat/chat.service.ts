@@ -1,25 +1,36 @@
 import { validateProposalSafety } from "@health/ai";
+import type { ProviderUsage } from "@health/ai";
 import type {
   ChatMessage,
   ChatThread,
   ChatTurnResponse,
   CreateChatThreadInput,
+  ProgressReporter,
+  ProposalValidationFailureClass,
   RawAiProposal,
   SendChatMessageInput,
 } from "@health/types";
 import {
+  classifyProposalValidationFailure,
+  deriveQuickActionsForTurn,
+  detectPreprocessorLanguage,
   evaluateWellbeingCrisisFromText,
   formatWellbeingCrisisSupportReply,
   getTodayIsoDateInTimezone,
   isWeeklyReviewChatMessage,
   mergeDeterministicChatProposals,
+  normalizePreprocessorText,
+  resolvePreprocessorResponseLanguage,
+  resolveQuotaLimitReply,
   shouldTriggerRecipeRecommendationRequest,
 } from "@health/types";
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { AiService } from "../ai/ai.service.js";
 import type { AttachmentTurnContext } from "../ai/agent-orchestrator.service.js";
 import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
+import { AiDailyUsageTelemetryService } from "../ai/ai-daily-usage-telemetry.service.js";
+import { ProposalRepairService } from "../ai/proposal-repair.service.js";
 import {
   AiMessageQuotaExceededError,
   EntitlementsService,
@@ -27,6 +38,10 @@ import {
 import { ChatAttachmentsService } from "../chat-attachments/chat-attachments.service.js";
 import { ChatTurnAttachmentStageService } from "../chat-attachments/chat-turn-attachment-stage.service.js";
 import { ProgressWeeklyReviewService } from "../progress/progress-weekly-review.service.js";
+import {
+  ProposalNormalizationService,
+  type ProposalNormalizationContext,
+} from "../proposals/proposal-normalization.service.js";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
 import { RecipesService } from "../recipes/recipes.service.js";
 import { UsersService } from "../users/users.service.js";
@@ -39,13 +54,25 @@ import { toAiProposal } from "../proposals/proposal.mapper.js";
 
 const AI_RECENT_MESSAGE_LIMIT = 20;
 
+/**
+ * Per-turn self-repair budget. Each repair is a bounded (~10s) sequential LLM
+ * call inside the `validating` SSE stage, so a turn with many schema-invalid
+ * proposals must not stack repairs; beyond the budget proposals skip repair
+ * and persist invalid as normal.
+ */
+const MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN = 2;
+
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly usersService: UsersService,
     private readonly aiService: AiService,
     private readonly proposalValidationService: ProposalValidationService,
+    private readonly proposalNormalizationService: ProposalNormalizationService,
+    private readonly proposalRepairService: ProposalRepairService,
     private readonly progressWeeklyReviewService: ProgressWeeklyReviewService,
     private readonly wellbeingCheckInsService: WellbeingCheckInsService,
     private readonly recipesService: RecipesService,
@@ -55,6 +82,7 @@ export class ChatService {
     private readonly proposalExplainerService: ProposalExplainerService,
     private readonly aiBehaviorConfigService: AiBehaviorConfigService,
     private readonly entitlementsService: EntitlementsService,
+    private readonly aiDailyUsageTelemetryService: AiDailyUsageTelemetryService,
   ) {}
 
   async listThreads(auth: ClerkAuthContext): Promise<ChatThread[]> {
@@ -102,6 +130,7 @@ export class ChatService {
     auth: ClerkAuthContext,
     threadId: string,
     input: SendChatMessageInput,
+    onProgress?: ProgressReporter,
   ): Promise<ChatTurnResponse> {
     const user = await this.usersService.resolveFromAuth(auth);
     const thread = await this.chatRepository.findThreadById(user.id, threadId);
@@ -263,8 +292,17 @@ export class ChatService {
       await this.entitlementsService.assertAiMessageAllowed(user.id, todayIsoDate);
     } catch (error) {
       if (error instanceof AiMessageQuotaExceededError) {
-        const quotaReply =
-          "You've reached today's free AI message limit — upgrade to Pro for unlimited coaching.";
+        // Deterministic system reply — copy lives in repo config (no-stubs rule),
+        // selected by the turn's response language using the same resolution the
+        // AI pipeline uses (MessagePreprocessor): persisted locale hint takes
+        // precedence, then script detection on the message text.
+        const quotaReply = resolveQuotaLimitReply(
+          this.aiBehaviorConfigService.getChat(),
+          resolvePreprocessorResponseLanguage(
+            detectPreprocessorLanguage(normalizePreprocessorText(messageContent)),
+            user.locale ?? null,
+          ),
+        );
         const assistantMessage = await this.chatRepository.createMessage(
           threadId,
           "assistant",
@@ -299,6 +337,11 @@ export class ChatService {
       todayIsoDate,
     );
 
+    // Emit preprocessing stage before the AI pipeline runs.
+    // Pre-AI gate turns (crisis, direct-path, quota, no-proposal explainer) return
+    // early above without emitting any stage events — that is by design.
+    emitStageProgress(onProgress, "preprocessing");
+
     const generated = await this.aiService.generateCoachResponse({
       auth,
       userMessage: messageContent,
@@ -322,19 +365,27 @@ export class ChatService {
                 mimeType: meta.mimeType,
                 consentState: meta.consentState,
                 storageRef: meta.storageRef,
+                filename: meta.filename,
               })),
             } satisfies AttachmentTurnContext,
           }
         : {}),
+      onProgress,
     });
 
     // Record AI message usage after a successful LLM response (not on error).
     // Awaited so the per-day counter is consistent before the next request is
     // served (closes the sequential check-then-act quota-bypass window). A
     // bookkeeping failure must not break an already-generated chat response, so
-    // the increment error is swallowed rather than surfaced to the user.
+    // the increment error is swallowed rather than surfaced to the user. The
+    // upserted day count feeds the ai.daily_usage telemetry line (null on failure).
+    let aiUsageMessageCount: number | null = null;
+
     try {
-      await this.entitlementsService.recordAiMessageUsage(user.id, todayIsoDate);
+      aiUsageMessageCount = await this.entitlementsService.recordAiMessageUsage(
+        user.id,
+        todayIsoDate,
+      );
     } catch {
       // Usage increment failed — intentionally not surfaced to the user.
     }
@@ -388,116 +439,152 @@ export class ChatService {
       }
     }
 
+    // Emit validating stage before the proposal safety + domain validation stack.
+    // The reply text and proposals are ONLY visible to the user after this stage
+    // completes (they're in the `final` SSE event) — this is the safety floor.
+    emitStageProgress(onProgress, "validating");
+
+    // Server turn state for trusted normalization stamping — built once per turn,
+    // never sourced from LLM output.
+    const proposalNormalizationContext: ProposalNormalizationContext = {
+      userId: user.id,
+      nowIso: new Date().toISOString(),
+      turnAttachments: attachmentMetadata.map((meta) => ({
+        id: meta.refId,
+        mimeType: meta.mimeType,
+        category: meta.category,
+      })),
+    };
+
+    // Normalize + validate (+ self-repair) every proposal BEFORE persisting the
+    // assistant message, so repair telemetry can ride on metadata.agent. The
+    // assistant reply text is never regenerated by repair. Repair-call usages
+    // (token counts only) are collected for the ai.daily_usage telemetry line.
+    const repairStats: RepairTurnStats = { attempted: 0, succeeded: 0, usages: [] };
+    const processedProposals: ProcessedProposal[] = [];
+
+    if (!isProposalExplainerTurn) {
+      for (const rawProposal of proposalsToPersist) {
+        try {
+          processedProposals.push(
+            await this.validateAndRepairProposal(
+              user.id,
+              rawProposal,
+              proposalNormalizationContext,
+              repairStats,
+            ),
+          );
+        } catch (error) {
+          // Fault isolation: a transient failure inside the validation stack
+          // (e.g. a DB error in an async ownership check) degrades THIS proposal
+          // to an honest invalid result instead of killing the whole paid turn.
+          // Privacy floor: intent + error name only — never payloads or raw
+          // error messages (DB-driver errors can embed payload values).
+          this.logger.warn("proposal_validation.unavailable", {
+            intent: rawProposal.intent,
+            error: error instanceof Error ? error.name : "unknown",
+          });
+          this.logProposalValidationOutcome({
+            intent: rawProposal.intent,
+            targetDomain: rawProposal.targetDomain,
+            validationStatus: "invalid",
+            errorCount: 1,
+            failureClass: "other",
+            repairAttempted: false,
+            repairSucceeded: false,
+            normalized: false,
+          });
+
+          processedProposals.push({
+            proposal: rawProposal,
+            validationStatus: "invalid",
+            validationErrors: ["proposal_validation_unavailable"],
+          });
+        }
+      }
+    }
+
+    // One ai.daily_usage line per LLM-backed turn: the day's running message
+    // count from the chat_ai_usage_daily upsert (no extra query) plus this
+    // turn's stage token usage (router + domains + decision + repair calls).
+    const fanOutDiagnostics = generated.agentMetadata.fanOut;
+
+    this.aiDailyUsageTelemetryService.recordTurn({
+      userId: user.id,
+      usageDate: todayIsoDate,
+      messageCount: aiUsageMessageCount,
+      usages: [
+        fanOutDiagnostics?.router?.usage,
+        ...(fanOutDiagnostics?.domains ?? []).map((domain) => domain.usage),
+        fanOutDiagnostics?.decision?.usage,
+        ...repairStats.usages,
+      ],
+    });
+
+    // S2: honest degradation — when turnError is set, persist an error marker instead
+    // of fake coach text. The assistant message content is empty (space placeholder
+    // that satisfies the DB not-null constraint) and turnError is stored in metadata
+    // so the frontend can render an error card instead of coach prose.
+    const assistantMessageContent = generated.turnError ? " " : generated.output.reply;
+
+    // Derive suggested quick actions for LLM-backed turns only.
+    // Excluded: turnError turns (honest degradation — no coach text to follow up).
+    // Selected domains come from the fan-out diagnostics on the agent metadata.
+    // Persisted in assistant message metadata so chips survive a thread reload,
+    // and mirrored on the turn response for the live path.
+    const suggestedQuickActions = generated.turnError
+      ? undefined
+      : deriveQuickActionsForTurn({
+          selectedDomains: (generated.agentMetadata.fanOut?.domains ?? []).map((d) => d.domain),
+          quickActionsConfig: this.aiBehaviorConfigService.getSuggestedQuickActions(),
+        });
     const assistantMessage = await this.chatRepository.createMessage(
       threadId,
       "assistant",
-      generated.output.reply,
+      assistantMessageContent,
       {
         parseErrors: generated.parseErrors,
         replySafetyErrors: generated.replySafetyErrors,
-        agent: generated.agentMetadata,
+        // Repair telemetry (counts only) rides on the agent metadata when attempted.
+        agent:
+          repairStats.attempted > 0
+            ? {
+                ...generated.agentMetadata,
+                repair: { attempted: repairStats.attempted, succeeded: repairStats.succeeded },
+              }
+            : generated.agentMetadata,
         ...(weeklyReviewMetadata ?? {}),
+        // turnError and turnDegraded are a PERMANENT split with disjoint reasons
+        // (see packages/types/src/chat-turn.ts):
+        //   turnError    = reply ABSENT (decision_failed | reply_blocked); content is " "
+        //                  and the frontend renders an error card + retry.
+        //   turnDegraded = reply PRESENT but a stage degraded (parse_failed |
+        //                  provider_error); quality/telemetry marker only, no card.
+        // When turnError is set, turnDegraded is never written.
+        ...(generated.turnError
+          ? { turnError: generated.turnError }
+          : generated.degraded
+            ? { turnDegraded: { degraded: true, reason: generated.degraded.reason } }
+            : {}),
+        ...(suggestedQuickActions && suggestedQuickActions.length > 0
+          ? { suggestedQuickActions }
+          : {}),
       },
     );
 
     const createdProposals = [];
 
-    if (!isProposalExplainerTurn) {
-      for (const rawProposal of proposalsToPersist) {
-        const safetyErrors = validateProposalSafety(rawProposal);
-        const validation = this.proposalValidationService.validateRawProposal(rawProposal);
-        const ownershipErrors =
-          await this.proposalValidationService.validateCorrelationEvidenceOwnership(
-            user.id,
-            rawProposal.evidenceRefs,
-          );
-        const provenanceErrors =
-          await this.proposalValidationService.validateProvenanceOwnership(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const progressLinkedProvenanceErrors =
-          this.proposalValidationService.validateProgressLinkedProvenanceRequired(
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const goalHierarchyErrors =
-          await this.proposalValidationService.validateGoalProposalHierarchy(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const todaySourceRefErrors =
-          await this.proposalValidationService.validateTodayChecklistGoalSourceRefs(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const recoveryAdaptationErrors =
-          await this.proposalValidationService.validateRecoveryAwareWorkoutAdaptation(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const habitProposalContextErrors =
-          await this.proposalValidationService.validateHabitProposalContext(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const wellbeingProposalContextErrors =
-          await this.proposalValidationService.validateWellbeingCheckinProposalContext(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const nutritionIncidentImageRefErrors =
-          await this.proposalValidationService.validateNutritionIncidentImageRefOwnership(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const recipeRecommendationContextErrors =
-          await this.proposalValidationService.validateRecipeRecommendationProposalContext(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const chatAttachmentProposalRefErrors =
-          await this.proposalValidationService.validateChatAttachmentProposalRefs(
-            user.id,
-            rawProposal.intent,
-            rawProposal.proposedChanges,
-          );
-        const validationErrors = [
-          ...safetyErrors,
-          ...validation.errors,
-          ...ownershipErrors,
-          ...provenanceErrors,
-          ...progressLinkedProvenanceErrors,
-          ...goalHierarchyErrors,
-          ...todaySourceRefErrors,
-          ...recoveryAdaptationErrors,
-          ...habitProposalContextErrors,
-          ...wellbeingProposalContextErrors,
-          ...nutritionIncidentImageRefErrors,
-          ...recipeRecommendationContextErrors,
-          ...chatAttachmentProposalRefErrors,
-        ];
-        const validationStatus = validationErrors.length === 0 ? "valid" : "invalid";
+    for (const processed of processedProposals) {
+      const record = await this.chatRepository.createProposal(
+        user.id,
+        threadId,
+        assistantMessage.id,
+        processed.proposal,
+        processed.validationStatus,
+        processed.validationErrors,
+      );
 
-        const record = await this.chatRepository.createProposal(
-          user.id,
-          threadId,
-          assistantMessage.id,
-          rawProposal,
-          validationStatus,
-          validationErrors,
-        );
-
-        createdProposals.push(toAiProposal(record));
-      }
+      createdProposals.push(toAiProposal(record));
     }
 
     const title =
@@ -514,17 +601,361 @@ export class ChatService {
       assistantMessage: toChatMessage(assistantMessage),
       proposals: createdProposals,
       ...(attachmentOutcomes.length > 0 ? { attachmentOutcomes } : {}),
-      // consentRequired is produced (from ActionResolver → LLM output) but not currently
-      // consumed by any client gate. It is surfaced here for the deferred medical special-save
-      // flow (proposal-driven recognition → consent-gated proposal → accept → persist
-      // health_document). Do not remove — add enforcement when that flow is implemented.
+      // COMPATIBILITY CODE (kept intentionally, per refactor-cleanup.md):
+      // consentRequired is produced (ActionResolver → decision-maker LLM output) but no
+      // client consumes it yet. It is plumbing held for the deferred medical special-save
+      // flow (attachment recognition → consent-gated save proposal → accept → persist
+      // health_document). Removal condition: remove this flag end-to-end if the
+      // special-save flow is descoped, or wire the client consent prompt when it ships.
       ...(generated.consentRequired === true ? { consentRequired: true } : {}),
+      // S2: thread the turn-level error to the response so SSE final event and sync
+      // response both carry it. The frontend renders an error card instead of coach prose.
+      ...(generated.turnError ? { turnError: generated.turnError } : {}),
+      ...(suggestedQuickActions && suggestedQuickActions.length > 0
+        ? { suggestedQuickActions }
+        : {}),
     };
   }
+
+  /**
+   * Per-proposal pipeline: normalize → validate → (eligible-invalid only)
+   * self-repair → re-normalize + re-run the FULL validation stack → final result.
+   *
+   * Repair eligibility uses `classifyProposalValidationFailure`: only
+   * schema/domain-class failures are repaired — NEVER safety-class (the LLM must
+   * not be asked to write around safety floors) and NEVER ownership-class
+   * (server-side facts the LLM cannot fix). A failed/still-invalid repair keeps
+   * the honest invalid card exactly as before.
+   *
+   * `repairStats` is mutated so the caller can attach `{ attempted, succeeded }`
+   * turn telemetry to the assistant-message agent metadata and thread repair
+   * token usage into the ai.daily_usage line. It also enforces the per-turn
+   * repair budget (`MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN`): proposals beyond
+   * the budget skip repair and persist invalid as normal.
+   *
+   * Every completed pass emits exactly one `proposal.validation` outcome event
+   * (enums/counts/flags only — never error strings or payload contents).
+   */
+  private async validateAndRepairProposal(
+    userId: string,
+    rawProposal: RawAiProposal,
+    normalizationContext: ProposalNormalizationContext,
+    repairStats: RepairTurnStats,
+  ): Promise<ProcessedProposal> {
+    let proposal = await this.normalizeProposalChanges(rawProposal, normalizationContext);
+    let normalized = proposal !== rawProposal;
+    let stack = await this.runProposalValidationStack(userId, proposal);
+    let repairAttempted = false;
+
+    if (stack.validationErrors.length === 0) {
+      this.logProposalValidationOutcome({
+        intent: proposal.intent,
+        targetDomain: proposal.targetDomain,
+        validationStatus: "valid",
+        errorCount: 0,
+        repairAttempted: false,
+        repairSucceeded: false,
+        normalized,
+      });
+
+      return { proposal, validationStatus: "valid", validationErrors: [] };
+    }
+
+    let failureClass: ProposalValidationFailureClass = classifyProposalValidationFailure({
+      safetyErrors: stack.safetyErrors,
+      schemaErrors: stack.schemaErrors,
+      ownershipErrors: stack.ownershipErrors,
+    });
+
+    if (failureClass === "schema" && this.proposalRepairService.isAvailable) {
+      if (repairStats.attempted >= MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN) {
+        // Budget exhausted: skip repair, persist invalid as normal.
+        // Privacy floor: intent + failure class only — never payloads.
+        this.logger.warn("proposal_repair.budget_exhausted", {
+          intent: proposal.intent,
+          failureClass,
+        });
+      } else {
+        repairStats.attempted += 1;
+        repairAttempted = true;
+        // In-flight signal before the bounded (~10s) repair call.
+        // Privacy floor: intent + failure class + error count only — never payloads.
+        this.logger.log("proposal_repair.attempted", {
+          intent: proposal.intent,
+          failureClass,
+          errorCount: stack.validationErrors.length,
+        });
+
+        const repaired = await this.proposalRepairService.tryRepair(
+          proposal,
+          stack.validationErrors,
+        );
+
+        if (repaired) {
+          if (repaired.usage) {
+            repairStats.usages.push(repaired.usage);
+          }
+
+          // The repaired payload goes back through the SAME normalize + full
+          // validation stack — repair never bypasses any check.
+          const renormalized = await this.normalizeProposalChanges(
+            repaired.proposal,
+            normalizationContext,
+          );
+
+          normalized = normalized || renormalized !== repaired.proposal;
+
+          const repairedStack = await this.runProposalValidationStack(userId, renormalized);
+
+          if (repairedStack.validationErrors.length === 0) {
+            repairStats.succeeded += 1;
+            this.logProposalValidationOutcome({
+              intent: renormalized.intent,
+              targetDomain: renormalized.targetDomain,
+              validationStatus: "valid",
+              errorCount: 0,
+              repairAttempted: true,
+              repairSucceeded: true,
+              normalized,
+            });
+
+            return { proposal: renormalized, validationStatus: "valid", validationErrors: [] };
+          }
+
+          // Still invalid: persist the repaired payload with its FINAL errors.
+          proposal = renormalized;
+          stack = repairedStack;
+          failureClass = classifyProposalValidationFailure({
+            safetyErrors: stack.safetyErrors,
+            schemaErrors: stack.schemaErrors,
+            ownershipErrors: stack.ownershipErrors,
+          });
+        }
+      }
+    }
+
+    this.logProposalValidationOutcome({
+      intent: proposal.intent,
+      targetDomain: proposal.targetDomain,
+      validationStatus: "invalid",
+      errorCount: stack.validationErrors.length,
+      failureClass,
+      repairAttempted,
+      repairSucceeded: false,
+      normalized,
+    });
+
+    return {
+      proposal,
+      validationStatus: "invalid",
+      validationErrors: stack.validationErrors,
+    };
+  }
+
+  /**
+   * One `proposal.validation` stdout event per processed proposal — the single
+   * outcome line for the normalize → validate → repair pipeline (replaces the
+   * former `proposal_repair.succeeded` / `proposal_repair.still_invalid` /
+   * "Proposal validation failed" lines).
+   *
+   * Privacy floor: intent/domain enums, status, counts, and booleans only —
+   * NO error strings and NO payload contents.
+   */
+  private logProposalValidationOutcome(outcome: {
+    intent: string;
+    targetDomain: string;
+    validationStatus: "valid" | "invalid";
+    errorCount: number;
+    failureClass?: ProposalValidationFailureClass;
+    repairAttempted: boolean;
+    repairSucceeded: boolean;
+    normalized: boolean;
+  }): void {
+    const line = { event: "proposal.validation" as const, ...outcome };
+
+    if (outcome.validationStatus === "valid") {
+      this.logger.log(line);
+    } else {
+      this.logger.warn(line);
+    }
+  }
+
+  /**
+   * Bridge known LLM shape variance to the canonical payload form before the
+   * schema + domain validation stack runs. Must happen before validateRawProposal.
+   */
+  private async normalizeProposalChanges(
+    rawProposal: RawAiProposal,
+    normalizationContext: ProposalNormalizationContext,
+  ): Promise<RawAiProposal> {
+    const normalizedChanges = await this.proposalNormalizationService.normalizeProposal(
+      rawProposal.intent,
+      rawProposal.proposedChanges,
+      normalizationContext,
+    );
+
+    if (normalizedChanges === rawProposal.proposedChanges) {
+      return rawProposal;
+    }
+
+    // Cast is safe: normalizers only reshape intent-owned payload fields and
+    // preserve everything else; the full validation stack re-parses afterwards.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return { ...rawProposal, proposedChanges: normalizedChanges } as any as RawAiProposal;
+  }
+
+  /**
+   * The full proposal validation stack — exactly the same checks in the same
+   * order as before extraction. Returns the three classification buckets
+   * (safety / schema / ownership-context) plus the combined error list, so the
+   * caller can classify failures and decide repair eligibility.
+   */
+  private async runProposalValidationStack(
+    userId: string,
+    rawProposal: RawAiProposal,
+  ): Promise<ProposalValidationStackResult> {
+    const safetyErrors = validateProposalSafety(rawProposal);
+    const validation = this.proposalValidationService.validateRawProposal(rawProposal);
+    const ownershipErrors =
+      await this.proposalValidationService.validateCorrelationEvidenceOwnership(
+        userId,
+        rawProposal.evidenceRefs,
+      );
+    const provenanceErrors =
+      await this.proposalValidationService.validateProvenanceOwnership(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const progressLinkedProvenanceErrors =
+      this.proposalValidationService.validateProgressLinkedProvenanceRequired(
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const goalHierarchyErrors =
+      await this.proposalValidationService.validateGoalProposalHierarchy(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const todaySourceRefErrors =
+      await this.proposalValidationService.validateTodayChecklistGoalSourceRefs(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const recoveryAdaptationErrors =
+      await this.proposalValidationService.validateRecoveryAwareWorkoutAdaptation(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const habitProposalContextErrors =
+      await this.proposalValidationService.validateHabitProposalContext(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const wellbeingProposalContextErrors =
+      await this.proposalValidationService.validateWellbeingCheckinProposalContext(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const nutritionIncidentImageRefErrors =
+      await this.proposalValidationService.validateNutritionIncidentImageRefOwnership(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const recipeRecommendationContextErrors =
+      await this.proposalValidationService.validateRecipeRecommendationProposalContext(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+    const chatAttachmentProposalRefErrors =
+      await this.proposalValidationService.validateChatAttachmentProposalRefs(
+        userId,
+        rawProposal.intent,
+        rawProposal.proposedChanges,
+      );
+
+    // All non-safety, non-schema errors from domain checks are ownership/context errors.
+    const combinedOwnershipErrors: string[] = [
+      ...ownershipErrors,
+      ...provenanceErrors,
+      ...progressLinkedProvenanceErrors,
+      ...goalHierarchyErrors,
+      ...todaySourceRefErrors,
+      ...recoveryAdaptationErrors,
+      ...habitProposalContextErrors,
+      ...wellbeingProposalContextErrors,
+      ...nutritionIncidentImageRefErrors,
+      ...recipeRecommendationContextErrors,
+      ...chatAttachmentProposalRefErrors,
+    ];
+
+    return {
+      safetyErrors,
+      schemaErrors: validation.errors,
+      ownershipErrors: combinedOwnershipErrors,
+      validationErrors: [...safetyErrors, ...validation.errors, ...combinedOwnershipErrors],
+    };
+  }
+}
+
+/**
+ * Mutable per-turn repair telemetry: attempt/success counts for the assistant
+ * message agent metadata plus the repair calls' token usage (numbers only) for
+ * the ai.daily_usage line.
+ */
+interface RepairTurnStats {
+  attempted: number;
+  succeeded: number;
+  usages: ProviderUsage[];
+}
+
+/** Final per-proposal result, ready for persistence next to the assistant message. */
+interface ProcessedProposal {
+  proposal: RawAiProposal;
+  validationStatus: "valid" | "invalid";
+  validationErrors: string[];
+}
+
+/** Bucketed output of the validation stack (buckets feed failure classification). */
+interface ProposalValidationStackResult {
+  safetyErrors: string[];
+  schemaErrors: string[];
+  ownershipErrors: string[];
+  /** safety + schema + ownership, in the exact pre-extraction order. */
+  validationErrors: string[];
 }
 
 function truncateTitle(content: string): string {
   const trimmed = content.trim();
 
   return trimmed.length <= 80 ? trimmed : `${trimmed.slice(0, 77)}...`;
+}
+
+/**
+ * Safely emit a coarse stage progress event.
+ *
+ * Failures are swallowed — a throwing callback must never break the turn.
+ * Privacy: stage events carry no user content, reply text, proposal payloads,
+ * or health data — only the stage name.
+ */
+function emitStageProgress(
+  onProgress: ProgressReporter | undefined,
+  stage: import("@health/types").ChatTurnStreamStage,
+): void {
+  if (!onProgress) {
+    return;
+  }
+
+  try {
+    onProgress({ kind: "stage", stage });
+  } catch {
+    // Swallow — progress reporting must never affect turn correctness.
+  }
 }

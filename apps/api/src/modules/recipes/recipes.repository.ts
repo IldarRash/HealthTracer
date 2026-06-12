@@ -1,7 +1,24 @@
 import { recipes, userRecipeRecommendations } from "@health/db";
-import type { RecipeIngredient, RecipeListQuery, RecipeMacroEstimates, RecipeMealType } from "@health/types";
+import type {
+  RecipeIngredient,
+  RecipeListQuery,
+  RecipeMealType,
+  RecipePerServingMacros,
+} from "@health/types";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { DATABASE } from "../../database/database.tokens.js";
 import type { HealthDatabase } from "../../database/database.types.js";
 import type { ProviderRecipeDraft } from "./recipe-catalog-provider.js";
@@ -19,7 +36,7 @@ export interface CreateUserRecipeInput {
   allergenTags: string[];
   prepMinutes?: number | null;
   cookMinutes?: number | null;
-  macroEstimates: RecipeMacroEstimates;
+  macroEstimates: RecipePerServingMacros;
   confidence: "high" | "medium" | "low";
   dedupeKey: string;
 }
@@ -36,7 +53,7 @@ export interface UpdateUserRecipeInput {
   allergenTags?: string[];
   prepMinutes?: number | null;
   cookMinutes?: number | null;
-  macroEstimates?: RecipeMacroEstimates;
+  macroEstimates?: RecipePerServingMacros;
   confidence?: "high" | "medium" | "low";
   dedupeKey?: string;
 }
@@ -61,6 +78,15 @@ const OPEN_RECOMMENDATION_STATUSES = ["pending", "accepted"] as const;
 export class RecipesRepository {
   constructor(@Inject(DATABASE) private readonly db: HealthDatabase) {}
 
+  async countActiveProviderRecipes(): Promise<number> {
+    const [row] = await this.db
+      .select({ value: count() })
+      .from(recipes)
+      .where(and(eq(recipes.status, "active"), isNotNull(recipes.provider)));
+
+    return row?.value ?? 0;
+  }
+
   async listActiveRecipes(filters: RecipeListQuery, userId?: string | null) {
     const conditions = [eq(recipes.status, "active")];
 
@@ -82,20 +108,20 @@ export class RecipesRepository {
       }
     }
 
-    if (filters.minEstimatedCalories !== undefined) {
-      conditions.push(gte(recipes.estimatedCalories, filters.minEstimatedCalories));
+    if (filters.minCaloriesPerServing !== undefined) {
+      conditions.push(gte(recipes.caloriesPerServing, filters.minCaloriesPerServing));
     }
 
-    if (filters.maxEstimatedCalories !== undefined) {
-      conditions.push(lte(recipes.estimatedCalories, filters.maxEstimatedCalories));
+    if (filters.maxCaloriesPerServing !== undefined) {
+      conditions.push(lte(recipes.caloriesPerServing, filters.maxCaloriesPerServing));
     }
 
-    if (filters.minProteinGrams !== undefined) {
-      conditions.push(gte(recipes.proteinGrams, filters.minProteinGrams));
+    if (filters.minProteinGramsPerServing !== undefined) {
+      conditions.push(gte(recipes.proteinGramsPerServing, filters.minProteinGramsPerServing));
     }
 
-    if (filters.maxProteinGrams !== undefined) {
-      conditions.push(lte(recipes.proteinGrams, filters.maxProteinGrams));
+    if (filters.maxProteinGramsPerServing !== undefined) {
+      conditions.push(lte(recipes.proteinGramsPerServing, filters.maxProteinGramsPerServing));
     }
 
     return this.db
@@ -124,6 +150,15 @@ export class RecipesRepository {
       .select()
       .from(recipes)
       .where(and(inArray(recipes.id, recipeIds), eq(recipes.status, "active")));
+  }
+
+  async listActiveCuratedRecipeNames(): Promise<string[]> {
+    const rows = await this.db
+      .select({ name: recipes.name })
+      .from(recipes)
+      .where(and(eq(recipes.status, "active"), sql`${recipes.provider} IS NULL`));
+
+    return rows.map((row) => row.name);
   }
 
   async findActiveRecipeByProviderExternalId(provider: string, externalId: string) {
@@ -158,11 +193,11 @@ export class RecipesRepository {
         ingredients: input.ingredients,
         preparationSteps: input.preparationSteps,
         servings: input.servings,
-        estimatedCalories: input.macroEstimates.estimatedCalories,
-        proteinGrams: input.macroEstimates.proteinGrams,
-        carbsGrams: input.macroEstimates.carbsGrams,
-        fatGrams: input.macroEstimates.fatGrams,
-        fiberGrams: input.macroEstimates.fiberGrams ?? null,
+        caloriesPerServing: input.macroEstimates.caloriesPerServing,
+        proteinGramsPerServing: input.macroEstimates.proteinGramsPerServing,
+        carbsGramsPerServing: input.macroEstimates.carbsGramsPerServing,
+        fatGramsPerServing: input.macroEstimates.fatGramsPerServing,
+        fiberGramsPerServing: input.macroEstimates.fiberGramsPerServing ?? null,
         mealTypes: input.mealTypes,
         tags: input.tags,
         restrictionTags: input.restrictionTags,
@@ -230,11 +265,11 @@ export class RecipesRepository {
         ingredients: input.ingredients as Record<string, unknown>[],
         preparationSteps: input.preparationSteps,
         servings: input.servings,
-        estimatedCalories: input.macroEstimates.estimatedCalories,
-        proteinGrams: input.macroEstimates.proteinGrams,
-        carbsGrams: input.macroEstimates.carbsGrams,
-        fatGrams: input.macroEstimates.fatGrams,
-        fiberGrams: input.macroEstimates.fiberGrams ?? null,
+        caloriesPerServing: input.macroEstimates.caloriesPerServing,
+        proteinGramsPerServing: input.macroEstimates.proteinGramsPerServing,
+        carbsGramsPerServing: input.macroEstimates.carbsGramsPerServing,
+        fatGramsPerServing: input.macroEstimates.fatGramsPerServing,
+        fiberGramsPerServing: input.macroEstimates.fiberGramsPerServing ?? null,
         mealTypes: input.mealTypes,
         tags: input.tags,
         restrictionTags: input.restrictionTags,
@@ -302,11 +337,11 @@ export class RecipesRepository {
     }
 
     if (input.macroEstimates !== undefined) {
-      patch.estimatedCalories = input.macroEstimates.estimatedCalories;
-      patch.proteinGrams = input.macroEstimates.proteinGrams;
-      patch.carbsGrams = input.macroEstimates.carbsGrams;
-      patch.fatGrams = input.macroEstimates.fatGrams;
-      patch.fiberGrams = input.macroEstimates.fiberGrams ?? null;
+      patch.caloriesPerServing = input.macroEstimates.caloriesPerServing;
+      patch.proteinGramsPerServing = input.macroEstimates.proteinGramsPerServing;
+      patch.carbsGramsPerServing = input.macroEstimates.carbsGramsPerServing;
+      patch.fatGramsPerServing = input.macroEstimates.fatGramsPerServing;
+      patch.fiberGramsPerServing = input.macroEstimates.fiberGramsPerServing ?? null;
     }
 
     if (input.confidence !== undefined) {

@@ -22,6 +22,7 @@ import {
   shouldTriggerRecipeRecommendationRequest,
   shouldTriggerWellbeingCheckinProposal,
 } from "./chat-action-proposals.js";
+import { contextSliceRequestSchema } from "./agent-context.js";
 import { AGENT_CAPABILITY_CONFIGS, getCapabilityConfig } from "./capability-config.js";
 import {
   applyContextBudgetSafetyFloor,
@@ -56,6 +57,10 @@ import {
   type DomainConfig,
 } from "./domain-config.js";
 import { medicalDocumentPersistenceStatusSchema } from "./chat-attachments.js";
+import {
+  classifyProposalValidationFailure,
+  proposalValidationFailureClassSchema,
+} from "./index.js";
 
 describe("ai behavior safety invariants", () => {
   describe("invalid config fail-closed loading", () => {
@@ -136,6 +141,11 @@ describe("ai behavior safety invariants", () => {
                 allowDocuments: true,
                 allowSensitiveHealthContext: true,
               },
+              deep_history: {
+                ...defaults.contextBudgets.profiles.deep_history,
+                allowDocuments: true,
+                allowSensitiveHealthContext: true,
+              },
             },
           },
         },
@@ -143,14 +153,13 @@ describe("ai behavior safety invariants", () => {
       });
 
       expect(loaded.source).toBe("file");
-      expect(loaded.config.contextBudgets.profiles.default.allowDocuments).toBe(false);
-      expect(loaded.config.contextBudgets.profiles.default.allowSensitiveHealthContext).toBe(
-        false,
-      );
-      expect(loaded.config.contextBudgets.profiles.deep_review.allowDocuments).toBe(false);
-      expect(loaded.config.contextBudgets.profiles.deep_review.allowSensitiveHealthContext).toBe(
-        false,
-      );
+
+      for (const profile of ["default", "deep_review", "deep_history"] as const) {
+        expect(loaded.config.contextBudgets.profiles[profile].allowDocuments).toBe(false);
+        expect(loaded.config.contextBudgets.profiles[profile].allowSensitiveHealthContext).toBe(
+          false,
+        );
+      }
       expect(
         loaded.warnings.some((warning) => warning.includes("document/sensitive-health")),
       ).toBe(true);
@@ -221,37 +230,30 @@ describe("ai behavior safety invariants", () => {
       expect(detectProposalExplainerRequestFromConfig(config, "Why this proposal?")).toBe(false);
     });
 
-    it("falls back to default prompt templates when config bodies are invalid", () => {
+    it("falls back to default prompt templates when config body for router is invalid", () => {
       const compiled = compilePromptTemplates({
         templates: {
-          openai_coach_loop: {
-            templateKey: "openai_coach_loop",
+          router: {
+            templateKey: "router",
             body: "Broken template without placeholders",
             placeholders: [],
           },
         },
       });
 
-      expect(compiled.templates.openai_coach_loop.source).toBe("default");
-      expect(
-        compiled.renderCoachLoop({
-          iteration: "1",
-          maxIterations: "3",
-          selectedIntentLabel: "general",
-          intentInstructions: "Coach",
-          intentSafetyGuidance: "none",
-          allowedTools: "getUserContextSlice",
-          allowedProposalIntents: "none",
-          taskPurpose: "general_chat",
-          taskIntent: "general",
-          expectedResponseMode: "advice_only",
-          safetyFlags: "none",
-          missingContextNotes: "none",
-          priorToolResultsJson: "none",
-          safetyConstraints: "Stay conservative",
-          coachingContextJson: "{}",
-        }),
-      ).toContain("AI wellness coach");
+      expect(compiled.templates.router.source).toBe("default");
+      // Fallback renders the default router body which references wellness domains.
+      const rendered = compiled.renderRouterDecision({
+        normalizedText: "test",
+        originalText: "test",
+        detectedLanguage: "en",
+        preprocessorJson: "{}",
+        attachmentHintsJson: "[]",
+        recentMessageHintsJson: "[]",
+        availableDomainsJson: "[]",
+        safetyGuardrailsJson: "[]",
+      });
+      expect(rendered).toContain("domain router");
     });
   });
 
@@ -594,8 +596,11 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
       expect(errors.some((e) => e.includes('forbidden field "kind"'))).toBe(true);
     });
 
-    it("rejects selectedDomains > MAX_ROUTER_SELECTED_DOMAINS (3) via schema", () => {
-      const result = routerDecisionOutputSchema.safeParse({
+    it("caps selectedDomains > MAX_ROUTER_SELECTED_DOMAINS (3) by slicing in-schema, never rejecting", () => {
+      // The cap is still enforced — but as graceful degradation (keep the top
+      // 3) instead of a whole-parse failure that would dump the turn onto the
+      // fallback route.
+      const parsed = routerDecisionOutputSchema.parse({
         selectedDomains: [
           { domain: "workout", confidence: 0.9, intentHints: [], toolHints: [], signalHints: [] },
           { domain: "nutrition", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
@@ -604,7 +609,7 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
         ],
         confidence: 0.9,
       });
-      expect(result.success).toBe(false);
+      expect(parsed.selectedDomains).toHaveLength(MAX_ROUTER_SELECTED_DOMAINS);
     });
 
     it("clampRouterDecisionOutput caps selectedDomains to MAX_ROUTER_SELECTED_DOMAINS", () => {
@@ -686,8 +691,6 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
         llmId: "workout_coach",
         intents: [],
         tools: ["getUserContextSlice", "dangerousWriteTool" as never],
-        signals: [],
-        prompts: [],
         safetyNotes: [],
       };
 
@@ -715,8 +718,6 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
           },
         ],
         tools: ["getUserContextSlice"],
-        signals: [],
-        prompts: [],
         safetyNotes: [],
       };
 
@@ -733,8 +734,6 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
         llmId: "workout_coach",
         intents: [],
         tools: [],
-        signals: [],
-        prompts: [],
         safetyNotes: [],
       };
 
@@ -835,12 +834,12 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
   });
 
   // -------------------------------------------------------------------------
-  // 4. Consent-gated medical save NEVER auto-persists a health_documents row.
-  //    The medical_document_save action must yield consentRequired=true and
-  //    proposals must not directly create health_documents.
+  // 4. Consent-gated medical save NEVER auto-persists structured health rows
+  //    (lab_reports / biomarker_readings). A medical save must yield
+  //    consentRequired=true and proposals must not directly create those rows.
   // -------------------------------------------------------------------------
 
-  describe("consent-gated medical save never auto-persists health_documents", () => {
+  describe("consent-gated medical save never auto-persists structured health rows", () => {
     it("FinalDecisionOutput consentRequired=true is accepted and signals consent gate", () => {
       const parsed = finalDecisionOutputSchema.parse({
         reply: "I found relevant health context. Do you consent to saving it as a document?",
@@ -857,7 +856,7 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
       expect(parsed.consentRequired).toBe(false);
     });
 
-    it("medicalDocumentPersistenceStatusSchema only allows 'attachment_context_only' (not a health_documents row)", () => {
+    it("medicalDocumentPersistenceStatusSchema only allows 'attachment_context_only' (never a persisted health row)", () => {
       // This is the only valid persistence status for new writes.
       // 'saved_health_document' is the legacy schema and must not be the new write value.
       expect(medicalDocumentPersistenceStatusSchema.parse("attachment_context_only")).toBe(
@@ -954,29 +953,16 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
       expect(clamped.allowSensitiveHealthContext).toBe(false);
     });
 
-    it("context expansion request with includeDocuments=true is denied when policy disallows documents", () => {
-      const result = evaluateContextExpansionRequest({
-        budget: {
-          ...DEFAULT_CONTEXT_BUDGET_POLICY,
-          maxExpansionRounds: 2,
-          maxSlicesPerExpansionRound: 2,
-        },
-        request: {
-          roundIndex: 0,
-          reason: "Need medical document context for health domain.",
-          requestedSlices: [
-            {
-              type: "health_context",
-              includeDocuments: true,
-            },
-          ],
-        },
-      });
+    it("context slice requests cannot ask for documents — the field no longer exists in the contract", () => {
+      // Stronger-than-runtime guard: document expansion is structurally impossible.
+      // contextSliceRequestSchema is .strip()-free zod object — the legacy
+      // includeDocuments key is simply not part of the parsed contract anymore.
+      const parsed = contextSliceRequestSchema.parse({
+        type: "health_context",
+        includeDocuments: true,
+      } as Record<string, unknown>);
 
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.errors.some((e) => e.includes("Document expansion"))).toBe(true);
-      }
+      expect("includeDocuments" in parsed).toBe(false);
     });
 
     it("context expansion request without documents is approved under default budget", () => {
@@ -1011,6 +997,101 @@ describe("Phase 8d: fan-out pipeline safety regression", () => {
       expect(clamped.maxSlices).toBe(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxSlices);
       expect(clamped.maxRawItems).toBe(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxRawItems);
       expect(clamped.maxLookbackDays).toBe(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxLookbackDays);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Slice C6 — proposal validation failure classification
+  // ---------------------------------------------------------------------------
+
+  describe("proposal validation failure classification (Slice C6)", () => {
+    it("proposalValidationFailureClassSchema accepts all five classes", () => {
+      for (const cls of ["safety", "schema", "ownership", "unsupported-intent", "other"] as const) {
+        expect(proposalValidationFailureClassSchema.parse(cls)).toBe(cls);
+      }
+    });
+
+    it("classifies safety errors with highest priority", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: ["Unsafe medical wording detected"],
+          schemaErrors: ["Field missing"],
+          ownershipErrors: ["Resource not owned"],
+        }),
+      ).toBe("safety");
+    });
+
+    it("classifies schema errors when safety is clean", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: ["proposedChanges: Required"],
+          ownershipErrors: [],
+        }),
+      ).toBe("schema");
+    });
+
+    it("classifies ownership errors when safety and schema are clean", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: [],
+          ownershipErrors: ["sourceSummaryId: Weekly progress summary was not found"],
+        }),
+      ).toBe("ownership");
+    });
+
+    it("classifies unsupported-intent errors when safety, schema, and ownership are clean", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: [],
+          ownershipErrors: [],
+          unsupportedIntentErrors: ["Intent not supported in active catalog"],
+        }),
+      ).toBe("unsupported-intent");
+    });
+
+    it("classifies as 'other' when all buckets are empty (defensive)", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: [],
+          ownershipErrors: [],
+        }),
+      ).toBe("other");
+    });
+
+    it("safety takes priority over schema even when both have errors", () => {
+      const result = classifyProposalValidationFailure({
+        safetyErrors: ["unsafe"],
+        schemaErrors: ["malformed"],
+        ownershipErrors: ["missing resource"],
+        unsupportedIntentErrors: ["unsupported"],
+      });
+
+      expect(result).toBe("safety");
+    });
+
+    it("schema takes priority over ownership", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: ["parse error"],
+          ownershipErrors: ["not owned"],
+        }),
+      ).toBe("schema");
+    });
+
+    it("ownership takes priority over unsupported-intent", () => {
+      expect(
+        classifyProposalValidationFailure({
+          safetyErrors: [],
+          schemaErrors: [],
+          ownershipErrors: ["not found"],
+          unsupportedIntentErrors: ["unsupported"],
+        }),
+      ).toBe("ownership");
     });
   });
 });

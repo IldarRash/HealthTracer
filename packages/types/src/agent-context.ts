@@ -1,11 +1,13 @@
 import { z } from "zod";
+import { aiBiomarkerContextSummarySchema } from "./biomarker-context.js";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
-import { aiDocumentContextSummarySchema } from "./documents.js";
 import { aiMetricsContextSummarySchema } from "./device-metrics.js";
 import { personalContextSummarySchema } from "./goal-hierarchy.js";
 import { habitAdherencePlanSummarySchema } from "./habits.js";
 import { aiRecoveryContextSummarySchema } from "./recovery.js";
 import { aiWellbeingContextSummarySchema } from "./wellbeing-check-ins.js";
+import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
+import { progressHistoryReviewSummarySchema } from "./progress-history.js";
 
 const progressDataStatusValues = ["sufficient", "partial", "insufficient"] as const;
 const trendDirectionValues = ["up", "down", "stable", "unknown"] as const;
@@ -18,6 +20,8 @@ export const contextSlicePurposeSchema = z.enum([
   "weekly_review",
   "longevity_overview",
   "health_context",
+  // Deep-review numeric aggregates (planner-injected on review budget profiles).
+  "progress_history_review",
 ]);
 
 export type ContextSlicePurpose = z.infer<typeof contextSlicePurposeSchema>;
@@ -88,7 +92,6 @@ export const contextSliceRequestSchema = z.object({
   type: contextSlicePurposeSchema,
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
-  includeDocuments: z.boolean().optional(),
 });
 
 export type ContextSliceRequest = z.infer<typeof contextSliceRequestSchema>;
@@ -123,7 +126,6 @@ export const getUserContextSliceInputSchema = z.object({
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
   includeRawData: z.boolean().default(false),
-  includeDocuments: z.boolean().default(false),
 });
 
 export type GetUserContextSliceInput = z.input<typeof getUserContextSliceInputSchema>;
@@ -255,17 +257,6 @@ export const contextSourceRefSchema = z.object({
 
 export type ContextSourceRef = z.infer<typeof contextSourceRefSchema>;
 
-export const ragContextResultSchema = z.object({
-  documentId: z.string().uuid(),
-  summaryId: z.string().uuid(),
-  title: z.string().min(1).max(160),
-  snippet: z.string().min(1).max(500),
-  provenance: z.string().min(1).max(240),
-  consentScope: z.string().min(1).max(80),
-});
-
-export type RagContextResult = z.infer<typeof ragContextResultSchema>;
-
 export const userContextSliceSchema = z.object({
   purpose: contextSlicePurposeSchema,
   depth: contextDepthSchema,
@@ -292,11 +283,21 @@ export const userContextSliceSchema = z.object({
   recentHabitAdherence: habitAdherencePlanSummarySchema.nullable().optional(),
   weeklyProgress: weeklyProgressContextSummarySchema.nullable().optional(),
   recentWorkoutExecution: workoutExecutionSummarySchema.nullable().optional(),
+  /**
+   * Deep-review numeric aggregates (progress_history_review slices only).
+   * Numbers/enums/ISO dates by construction — structurally unable to carry
+   * free text, so it is NOT gated by allowSensitiveHealthContext.
+   */
+  progressHistory: progressHistoryReviewSummarySchema.optional(),
   metricsSummary: aiMetricsContextSummarySchema.optional(),
   wellbeingSummary: aiWellbeingContextSummarySchema.optional(),
   recoveryContext: aiRecoveryContextSummarySchema.optional(),
-  documentContext: aiDocumentContextSummarySchema.optional(),
-  ragResults: z.array(ragContextResultSchema).max(5).optional(),
+  /**
+   * Structured, catalog-labeled, consent-gated biomarker readings.
+   * Exempt from the `allowDocuments` context-budget floor by design: this is
+   * user-visible, user-editable structured state — never document-derived text.
+   */
+  biomarkerContext: aiBiomarkerContextSummarySchema.optional(),
   relevantMemories: z.array(userMemoryItemSchema).max(20).default([]),
   snapshots: z.array(contextSnapshotItemSchema).max(5).default([]),
   recommendationConstraints: z.array(z.string().min(1).max(240)).max(10).default([]),
@@ -306,12 +307,11 @@ export const userContextSliceSchema = z.object({
 export type UserContextSlice = z.infer<typeof userContextSliceSchema>;
 
 export const buildAgentContextRequestSchema = z.object({
-  userMessage: z.string().min(1).max(4000),
+  userMessage: z.string().min(1).max(MAX_CHAT_USER_MESSAGE_CHARS),
   intent: agentIntentSchema.optional(),
   purpose: contextSlicePurposeSchema.optional(),
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
-  includeDocuments: z.boolean().optional(),
 });
 
 export type BuildAgentContextRequest = z.infer<typeof buildAgentContextRequestSchema>;
@@ -350,7 +350,6 @@ export const intentRouteResultSchema = z.object({
   purpose: contextSlicePurposeSchema,
   depth: contextDepthSchema,
   timeRange: contextTimeRangeSchema,
-  includeDocuments: z.boolean(),
   routingMethod: agentRoutingMethodSchema,
   requiredContextSlices: z.array(contextSliceRequestSchema).min(1).max(MAX_CONTEXT_SLICES),
   safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
@@ -378,11 +377,160 @@ export type AgentSafetyMetadata = z.infer<typeof agentSafetyMetadataSchema>;
 
 export const agentToolNameSchema = z.enum([
   "getUserContextSlice",
-  "getDocumentContext",
+  // getDocumentContext removed: under the code-level allowDocuments=false budget floor
+  // it always returns empty, advertising a capability chat runtime cannot deliver.
+  // Document context in chat is intentionally unavailable; the consent-scoped design is deferred.
   "getWeeklyProgressContext",
+  "searchExerciseCatalog",
+  "searchRecipeCatalog",
+  "getActivePlanDetail",
+  "getRecentAdherence",
+  "getProgressHistory",
 ]);
 
 export type AgentToolName = z.infer<typeof agentToolNameSchema>;
+
+// ---------------------------------------------------------------------------
+// Slice B — new read-only context tool input/result schemas
+// All tools are ownership-scoped via userId from the orchestrating context.
+// ---------------------------------------------------------------------------
+
+export const searchExerciseCatalogInputSchema = z
+  .object({
+    query: z.string().min(1).max(200).optional(),
+    muscle: z.string().min(1).max(80).optional(),
+    equipment: z.string().min(1).max(80).optional(),
+    difficulty: z.enum(["beginner", "intermediate", "advanced"]).optional(),
+    limit: z.number().int().min(1).max(10).default(10),
+  })
+  .strict();
+
+export type SearchExerciseCatalogInput = z.input<typeof searchExerciseCatalogInputSchema>;
+
+export const exerciseCatalogItemSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(160),
+  primaryMuscles: z.array(z.string().min(1).max(80)).max(10).default([]),
+  equipment: z.array(z.string().min(1).max(80)).max(10).default([]),
+  difficulty: z.string().nullable(),
+  hasMedia: z.boolean(),
+});
+
+export type ExerciseCatalogItem = z.infer<typeof exerciseCatalogItemSchema>;
+
+export const searchExerciseCatalogResultSchema = z.object({
+  items: z.array(exerciseCatalogItemSchema).max(10),
+  total: z.number().int().nonnegative(),
+});
+
+export type SearchExerciseCatalogResult = z.infer<typeof searchExerciseCatalogResultSchema>;
+
+export const searchRecipeCatalogInputSchema = z
+  .object({
+    mealType: z.string().min(1).max(80).optional(),
+    tags: z.array(z.string().min(1).max(80)).max(5).optional(),
+    restrictions: z.array(z.string().min(1).max(80)).max(5).optional(),
+    limit: z.number().int().min(1).max(10).default(10),
+  })
+  .strict();
+
+export type SearchRecipeCatalogInput = z.input<typeof searchRecipeCatalogInputSchema>;
+
+export const recipeCatalogItemSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(160),
+  mealTypes: z.array(z.string().min(1).max(80)).max(10).default([]),
+  estimatedCalories: z.number().int().nonnegative().nullable(),
+  proteinGrams: z.number().int().nonnegative().nullable(),
+  carbsGrams: z.number().int().nonnegative().nullable(),
+  fatGrams: z.number().int().nonnegative().nullable(),
+  tags: z.array(z.string().min(1).max(80)).max(20).default([]),
+  confidence: z.string().min(1).max(40).nullable(),
+});
+
+export type RecipeCatalogItem = z.infer<typeof recipeCatalogItemSchema>;
+
+export const searchRecipeCatalogResultSchema = z.object({
+  items: z.array(recipeCatalogItemSchema).max(10),
+  total: z.number().int().nonnegative(),
+});
+
+export type SearchRecipeCatalogResult = z.infer<typeof searchRecipeCatalogResultSchema>;
+
+export const getActivePlanDetailInputSchema = z
+  .object({
+    domain: z.enum(["workout", "nutrition"]),
+  })
+  .strict();
+
+export type GetActivePlanDetailInput = z.input<typeof getActivePlanDetailInputSchema>;
+
+export const activePlanDetailSchema = z.object({
+  domain: z.enum(["workout", "nutrition"]),
+  planId: z.string().uuid().nullable(),
+  revisionId: z.string().uuid().nullable(),
+  title: z.string().min(1).max(160).nullable(),
+  summary: z.string().min(1).max(1000).nullable(),
+  dayCount: z.number().int().nonnegative().nullable(),
+  sessionCount: z.number().int().nonnegative().nullable(),
+  caloriesPerDay: z.number().int().positive().nullable(),
+  macroSummary: z
+    .object({
+      proteinGrams: z.number().int().nonnegative().nullable(),
+      carbsGrams: z.number().int().nonnegative().nullable(),
+      fatGrams: z.number().int().nonnegative().nullable(),
+    })
+    .nullable(),
+});
+
+export type ActivePlanDetail = z.infer<typeof activePlanDetailSchema>;
+
+export const getRecentAdherenceInputSchema = z
+  .object({
+    domain: z.enum(["workout", "nutrition", "health"]).optional(),
+  })
+  .strict();
+
+export type GetRecentAdherenceInput = z.input<typeof getRecentAdherenceInputSchema>;
+
+export const recentAdherenceResultSchema = z.object({
+  periodDays: z.literal(7),
+  workout: z
+    .object({
+      plannedCount: z.number().int().nonnegative(),
+      completedCount: z.number().int().nonnegative(),
+      adherencePercent: z.number().min(0).max(100).nullable(),
+    })
+    .nullable(),
+  nutrition: z
+    .object({
+      loggedDays: z.number().int().nonnegative(),
+      adherencePercent: z.number().min(0).max(100).nullable(),
+    })
+    .nullable(),
+  habits: z
+    .object({
+      activeCount: z.number().int().nonnegative(),
+      adherencePercent: z.number().min(0).max(100).nullable(),
+    })
+    .nullable(),
+});
+
+export type RecentAdherenceResult = z.infer<typeof recentAdherenceResultSchema>;
+
+/**
+ * getProgressHistory — adaptive-lookback numeric progress aggregates.
+ * periodDays is clamped server-side (min 7, granularity-ladder cap); the result
+ * is a ProgressHistoryReviewSummary (numbers/enums/ISO dates only — see
+ * progress-history.ts). Allowlisted only on review capabilities.
+ */
+export const getProgressHistoryInputSchema = z
+  .object({
+    periodDays: z.number().int().min(1).max(36500),
+  })
+  .strict();
+
+export type GetProgressHistoryInput = z.input<typeof getProgressHistoryInputSchema>;
 
 export const agentToolCallRequestSchema = z.object({
   tool: agentToolNameSchema,
@@ -406,14 +554,9 @@ export type AgentGetUserContextSliceToolResult = z.infer<
   typeof agentGetUserContextSliceToolResultSchema
 >;
 
-export const agentGetDocumentContextToolResultSchema = z.object({
-  documentContext: aiDocumentContextSummarySchema,
-  ragResults: z.array(ragContextResultSchema),
-});
-
-export type AgentGetDocumentContextToolResult = z.infer<
-  typeof agentGetDocumentContextToolResultSchema
->;
+// agentGetDocumentContextToolResultSchema removed: getDocumentContext tool removed from
+// chat pipeline (always returned empty under allowDocuments=false budget floor).
+// Document context in chat is intentionally unavailable; consent-scoped design deferred.
 
 export const agentGetWeeklyProgressContextToolResultSchema =
   weeklyProgressContextSummarySchema.nullable();
@@ -483,7 +626,12 @@ export function validateAgentLoopOutputShape(value: unknown): string[] {
 }
 
 export const agentCitationSchema = z.object({
-  sourceType: z.enum(["structured_state", "document_summary", "memory", "snapshot"]),
+  sourceType: z.enum([
+    "structured_state",
+    "biomarker_reading",
+    "memory",
+    "snapshot",
+  ]),
   label: z.string().min(1).max(160),
   referenceId: z.string().uuid().optional(),
 });
@@ -541,6 +689,25 @@ export type AgentUnifiedTurnDecisionMetadata = z.infer<
 // ---------------------------------------------------------------------------
 const fanOutDomainEnumSchema = z.enum(["workout", "nutrition", "health"]);
 
+/**
+ * Per-call token and latency usage from the provider.
+ * Optional/additive — absent on fallback paths where no LLM call was made.
+ * Numbers only; never contains prompts, content, or health data.
+ */
+export const agentProviderUsageSchema = z.object({
+  promptTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  /** Wall-clock time of the provider call including retries (ms). */
+  latencyMs: z.number().int().nonnegative(),
+  /** Number of retries consumed (0 = first attempt succeeded). */
+  retries: z.number().int().nonnegative(),
+  /** Model id used for this stage call (e.g. "gpt-4o-mini"). Absent on fallback/non-LLM paths. */
+  model: z.string().min(1).optional(),
+});
+
+export type AgentProviderUsage = z.infer<typeof agentProviderUsageSchema>;
+
 export const agentFanOutRouterDiagnosticsSchema = z.object({
   ran: z.boolean(),
   source: z.enum(["llm", "fallback"]).optional(),
@@ -555,6 +722,8 @@ export const agentFanOutRouterDiagnosticsSchema = z.object({
     .max(3)
     .default([]),
   blockedFallback: z.boolean().optional(),
+  /** Token + latency usage for the router LLM call. Absent on fallback paths. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutDomainDiagnosticsSchema = z.object({
@@ -564,21 +733,44 @@ export const agentFanOutDomainDiagnosticsSchema = z.object({
   candidateProposalCount: z.number().int().min(0).max(5),
   loopIterations: z.number().int().min(0).max(20),
   toolsInvoked: z.array(agentToolNameSchema).max(15).default([]),
+  /** Tools requested by the domain LLM that were not in the allowlist. Counts only — no tool names to avoid leaking capability hints. */
+  toolsDeniedCount: z.number().int().min(0).max(15).default(0),
   hasWorkoutCalorieEstimate: z.boolean().default(false),
+  /** Accumulated token + latency usage across all loop iterations for this domain. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutDecisionDiagnosticsSchema = z.object({
   degraded: z.boolean(),
   selectedAction: z.string().min(1).max(80).nullable().default(null),
-  proposalCount: z.number().int().min(0).max(5),
+  /** Number of candidate IDs selected by the decision-maker (Slice 2: selection-by-ID). */
+  selectedProposalIdCount: z.number().int().min(0).max(5),
   consentRequired: z.boolean().default(false),
+  /**
+   * True when the planner emitted a low-confidence route (Slice 5: clarifying-question
+   * fallback). Forwarded from the fan-out plan so telemetry can correlate low-confidence
+   * turns with decision-maker outputs. Optional/back-compat: absent on pre-Slice-5 rows.
+   */
+  lowConfidenceRoute: z.boolean().optional(),
+  /**
+   * True when this turn carried a deep-review sufficiency block (Phase 4) into
+   * the domain/decision requests. Boolean only — never period numbers or any
+   * health data. Absent on non-review turns.
+   */
+  deepReview: z.boolean().optional(),
+  /** Token + latency usage for the decision-maker LLM call. Absent on fallback paths. */
+  usage: agentProviderUsageSchema.optional(),
 });
 
 export const agentFanOutResolutionDiagnosticsSchema = z.object({
   resolvedProposalCount: z.number().int().min(0).max(5),
   droppedByAllowlist: z.number().int().min(0).max(10),
+  /** Proposals dropped because selectedProposalIds contained unknown or duplicate IDs. */
+  idResolutionDropCount: z.number().int().min(0).max(10).default(0),
   replyBlocked: z.boolean(),
   finalProposalCount: z.number().int().min(0).max(5),
+  /** Validation failure classes from ChatService proposal persistence. Populated post-orchestration. */
+  validationFailureClasses: z.array(z.string().min(1).max(80)).max(10).default([]),
 });
 
 export const agentFanOutDiagnosticsSchema = z.object({
@@ -586,9 +778,74 @@ export const agentFanOutDiagnosticsSchema = z.object({
   domains: z.array(agentFanOutDomainDiagnosticsSchema).max(3).default([]),
   decision: agentFanOutDecisionDiagnosticsSchema.optional(),
   resolution: agentFanOutResolutionDiagnosticsSchema.optional(),
+  /** Total turn wall-clock latency in milliseconds (from orchestrateCoachTurn entry to return). */
+  totalLatencyMs: z.number().int().nonnegative().optional(),
+  /** Context loading latency (building per-domain AgentContextPackets) in milliseconds. */
+  contextLatencyMs: z.number().int().nonnegative().optional(),
+  /** Parallel wall-clock latency for all domain LLM loops combined (Promise.all duration). */
+  domainsLatencyMs: z.number().int().nonnegative().optional(),
 });
 
 export type AgentFanOutDiagnostics = z.infer<typeof agentFanOutDiagnosticsSchema>;
+
+// ---------------------------------------------------------------------------
+// Turn-level telemetry summary — emitted as a single structured log line
+// per eligible AI turn. Safety floor: no user message text, no reply text,
+// no health data — counts/enums/durations only.
+// ---------------------------------------------------------------------------
+export const agentTurnTelemetrySchema = z.object({
+  event: z.literal("ai.turn_summary"),
+  // Timing
+  totalLatencyMs: z.number().int().nonnegative(),
+  routerLatencyMs: z.number().int().nonnegative().optional(),
+  contextLatencyMs: z.number().int().nonnegative().optional(),
+  decisionLatencyMs: z.number().int().nonnegative().optional(),
+  domainLatencies: z
+    .array(
+      z.object({
+        domain: fanOutDomainEnumSchema,
+        latencyMs: z.number().int().nonnegative(),
+        /** Accumulated token count for this domain's LLM loop. Absent on fallback paths. */
+        totalTokens: z.number().int().nonnegative().optional(),
+      }),
+    )
+    .max(3)
+    .default([]),
+  // Token usage — aggregated across router + domain + decision stage ProviderUsage.
+  // Numbers only; degraded/missing stages contribute zero.
+  totalPromptTokens: z.number().int().nonnegative().optional(),
+  totalCompletionTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  /**
+   * ESTIMATE ONLY — derived from the code-owned per-model price map
+   * (apps/api llm-cost-estimator). Absent when no stage reported a priced model.
+   * Never a billing source of truth.
+   */
+  estimatedCostUsd: z.number().nonnegative().optional(),
+  // Routing
+  selectedDomains: z.array(fanOutDomainEnumSchema).max(3).default([]),
+  routerConfidence: z.number().min(0).max(1).optional(),
+  routerSource: z.enum(["llm", "fallback"]).optional(),
+  // Tool usage per domain (counts/names — no content)
+  toolsRequestedPerDomain: z
+    .array(
+      z.object({
+        domain: fanOutDomainEnumSchema,
+        toolsInvoked: z.array(agentToolNameSchema).max(15),
+        toolsDeniedCount: z.number().int().min(0).max(15),
+      }),
+    )
+    .max(3)
+    .default([]),
+  // Degradation
+  degradedDomains: z.array(fanOutDomainEnumSchema).max(3).default([]),
+  // Outcome
+  finalActionType: z.string().min(1).max(80).nullable(),
+  proposalCount: z.number().int().min(0).max(5),
+  validationFailureClasses: z.array(z.string().min(1).max(80)).max(10).default([]),
+});
+
+export type AgentTurnTelemetry = z.infer<typeof agentTurnTelemetrySchema>;
 
 export const agentTurnMetadataSchema = z.object({
   provider: z.literal("openai"),
@@ -617,11 +874,8 @@ export const agentTurnMetadataSchema = z.object({
       ]),
       llmInvoked: z.boolean(),
       expectedResponseMode: expectedResponseModeSchema,
-      delegatedToPreAiGate: z.boolean().optional(),
-      preAiGateDelegationMissed: z.boolean().optional(),
       handlerPath: z
         .enum([
-          "pre_ai_gate_delegation",
           "single_final_answer",
           "bounded_tool_loop",
           "proposal_bounded_loop",
@@ -636,6 +890,16 @@ export const agentTurnMetadataSchema = z.object({
   missingContextNotes: z.array(z.string().min(1).max(240)).max(5).default([]),
   /** Per-stage fan-out diagnostics (router/domains/decision/resolution). Optional/additive. */
   fanOut: agentFanOutDiagnosticsSchema.optional(),
+  /**
+   * Proposal self-repair telemetry for this turn (counts only — never payloads).
+   * Present only when at least one repair was attempted.
+   */
+  repair: z
+    .object({
+      attempted: z.number().int().min(0),
+      succeeded: z.number().int().min(0),
+    })
+    .optional(),
 });
 
 export type AgentTurnMetadata = z.infer<typeof agentTurnMetadataSchema>;
@@ -649,7 +913,7 @@ export const DEFAULT_AGENT_SAFETY_CONSTRAINTS = [
   "Do not prescribe medication or claim to treat diseases.",
   "Prefer wellness coaching, habits, and structured plan suggestions.",
   "Plan changes must be proposals requiring user approval.",
-  "Do not expose raw health documents or private wellbeing notes.",
+  "Do not expose raw lab reports or private wellbeing notes.",
 ] as const;
 
 export const INTENT_TO_SLICE_PURPOSE: Record<AgentIntent, ContextSlicePurpose> = {
@@ -674,6 +938,7 @@ export function resolveDefaultDepthForPurpose(purpose: ContextSlicePurpose): Con
     case "weekly_review":
     case "longevity_overview":
     case "health_context":
+    case "progress_history_review":
       return "large";
   }
 }
@@ -694,11 +959,11 @@ export function resolveDefaultTimeRangeForPurpose(
       return "90d";
     case "health_context":
       return "30d";
+    // Display metadata only — the real review lookback is the turn-level
+    // grantedLookbackDays threaded by the planner (clamped per budget profile).
+    case "progress_history_review":
+      return "90d";
   }
-}
-
-export function shouldIncludeDocumentsForPurpose(purpose: ContextSlicePurpose): boolean {
-  return purpose === "health_context";
 }
 
 export function resolveDefaultExpectedResponseMode(
@@ -731,8 +996,6 @@ export function normalizeContextSlicePlan(
       type: request.type,
       depth: request.depth ?? resolveDefaultDepthForPurpose(request.type),
       timeRange: request.timeRange ?? resolveDefaultTimeRangeForPurpose(request.type),
-      includeDocuments:
-        request.includeDocuments ?? shouldIncludeDocumentsForPurpose(request.type),
     });
 
     if (normalized.length >= MAX_CONTEXT_SLICES) {
@@ -745,7 +1008,6 @@ export function normalizeContextSlicePlan(
       type: "general_chat",
       depth: resolveDefaultDepthForPurpose("general_chat"),
       timeRange: resolveDefaultTimeRangeForPurpose("general_chat"),
-      includeDocuments: false,
     });
   }
 
@@ -757,7 +1019,6 @@ export function buildContextSliceRequestForIntent(
   options?: {
     depth?: ContextDepth;
     timeRange?: ContextTimeRange;
-    includeDocuments?: boolean;
   },
 ): ContextSliceRequest {
   const purpose = INTENT_TO_SLICE_PURPOSE[intent];
@@ -766,7 +1027,6 @@ export function buildContextSliceRequestForIntent(
     type: purpose,
     depth: options?.depth ?? resolveDefaultDepthForPurpose(purpose),
     timeRange: options?.timeRange ?? resolveDefaultTimeRangeForPurpose(purpose),
-    includeDocuments: options?.includeDocuments ?? shouldIncludeDocumentsForPurpose(purpose),
   };
 }
 
@@ -792,7 +1052,6 @@ export function buildRouteFromCatalogIntent(input: {
     purpose: primary.type,
     depth: primary.depth ?? resolveDefaultDepthForPurpose(primary.type),
     timeRange: primary.timeRange ?? resolveDefaultTimeRangeForPurpose(primary.type),
-    includeDocuments: primary.includeDocuments ?? shouldIncludeDocumentsForPurpose(primary.type),
     routingMethod: input.routingMethod,
     requiredContextSlices: slicePlan,
     safetyFlags: input.safetyFlags ?? [],

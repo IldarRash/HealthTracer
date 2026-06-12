@@ -9,6 +9,7 @@ import {
   getChatAttachmentSizeError,
   isChatAttachmentExpired,
   isChatAttachmentImageMimeType,
+  inferProvisionalAttachmentCategory,
 } from "@health/types";
 import {
   BadRequestException,
@@ -16,7 +17,6 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { resolve } from "node:path";
 import type { ClerkAuthContext } from "../../auth.types.js";
 import { env } from "../../env.js";
 import { AiBehaviorConfigService } from "../ai/ai-behavior-config.service.js";
@@ -41,8 +41,9 @@ export class ChatAttachmentsService {
     private readonly usersService: UsersService,
     private readonly aiBehaviorConfigService: AiBehaviorConfigService,
   ) {
-    const storageRoot = resolve(process.cwd(), env.CHAT_ATTACHMENT_STORAGE_PATH);
-    this.storage = new LocalChatAttachmentStorageAdapter(storageRoot);
+    this.storage = new LocalChatAttachmentStorageAdapter(env.CHAT_ATTACHMENT_STORAGE_PATH, {
+      allowInProduction: env.STORAGE_ALLOW_LOCAL_IN_PRODUCTION === true,
+    });
   }
 
   async createAttachment(
@@ -60,15 +61,20 @@ export class ChatAttachmentsService {
       }
     }
 
-    // Attachments are images-only (context-only pipeline).
-    // Validate MIME and size using the "unclassified" category (image allowlist).
-    const mimeError = getChatAttachmentMimeTypeError("unclassified", input.mimeType);
+    // Infer category from MIME type (document_file for PDF/text/markdown; unclassified for images).
+    // This is MIME-based inference only — no LLM classification, no user declaration required.
+    const inferredCategory = inferProvisionalAttachmentCategory(input.mimeType);
+
+    // Validate MIME against the inferred category's allowlist (images → unclassified allowlist,
+    // documents → document_file allowlist). Returns a non-null error for unsupported MIMEs.
+    const mimeError = getChatAttachmentMimeTypeError(inferredCategory, input.mimeType);
 
     if (mimeError) {
       throw new BadRequestException(mimeError);
     }
 
-    const sizeError = getChatAttachmentSizeError("unclassified", content.byteLength);
+    // Validate size against the inferred category's cap (document_file: 5 MiB; images: 10 MiB).
+    const sizeError = getChatAttachmentSizeError(inferredCategory, content.byteLength);
 
     if (sizeError) {
       throw new BadRequestException(sizeError);
@@ -77,12 +83,15 @@ export class ChatAttachmentsService {
     const attachmentId = crypto.randomUUID();
     const storageKey = await this.storage.store(user.id, attachmentId, content, input.mimeType);
 
+    const categorySource =
+      inferredCategory === "document_file" ? "mime_inferred" : "default_unclassified";
+
     const row = await this.chatAttachmentsRepository.create({
       id: attachmentId,
       userId: user.id,
       threadId: input.threadId ?? null,
-      category: "unclassified",
-      categorySource: "default_unclassified",
+      category: inferredCategory,
+      categorySource,
       status: "queued",
       filename: input.filename,
       mimeType: input.mimeType,
@@ -90,7 +99,9 @@ export class ChatAttachmentsService {
       storageKey,
       linkedImageRefId: null,
       consent: null,
-      retentionPolicy: this.resolveRetentionPolicy("unclassified"),
+      // Attachments are context-only — never linked to persisted health data
+      // (no lab_reports / biomarker_readings creation from the attachment path).
+      retentionPolicy: this.resolveRetentionPolicy(inferredCategory),
     });
 
     return toChatAttachmentRecord(row);

@@ -7,17 +7,20 @@ import {
   type ContextDepth,
   type ContextSliceRequest,
 } from "./agent-context.js";
+import { interpolateBehaviorTemplate } from "./behavior-template.js";
 import { isoDateSchema } from "./dates.js";
+import { PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS } from "./progress-history.js";
 
 export const CONTEXT_BUDGET_ABSOLUTE_LIMITS = {
   maxSlices: 10,
   maxRawItems: 100,
-  maxLookbackDays: 365,
+  // Aligned with the Phase 1 monthly granularity ladder (24 calendar months).
+  maxLookbackDays: PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS,
   maxExpansionRounds: 5,
   maxSlicesPerExpansionRound: 10,
 } as const;
 
-export const contextBudgetProfileSchema = z.enum(["default", "deep_review"]);
+export const contextBudgetProfileSchema = z.enum(["default", "deep_review", "deep_history"]);
 
 export type ContextBudgetProfile = z.infer<typeof contextBudgetProfileSchema>;
 
@@ -31,6 +34,12 @@ export const contextBudgetPolicySchema = z.object({
     .int()
     .min(1)
     .max(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxLookbackDays),
+  /**
+   * Code-level safety floor (always false). `allowDocuments` governs raw
+   * document-derived text in chat context — none exists post-biomarkers.
+   * `biomarkerContext` is structured, user-visible, consent-gated data and is
+   * exempt from this floor by design.
+   */
   allowDocuments: z.boolean().default(false),
   allowSensitiveHealthContext: z.boolean().default(false),
   requiresCompression: z.boolean().default(false),
@@ -76,7 +85,31 @@ export const DEEP_REVIEW_CONTEXT_BUDGET_POLICY: ContextBudgetPolicy = {
   maxSlicesPerExpansionRound: 3,
 };
 
-/** Config cannot relax document or sensitive-health exposure; enforced after load and resolve. */
+/**
+ * Long / full-history retrospective reviews (requested lookback beyond the
+ * deep_review horizon). Monthly aggregation granularity, mandatory
+ * compression; maxLookbackDays equals the Phase 1 monthly ladder grant so a
+ * full-history ask is clamped, never refused. Safety floors stay denied.
+ */
+export const DEEP_HISTORY_CONTEXT_BUDGET_POLICY: ContextBudgetPolicy = {
+  profile: "deep_history",
+  maxSlices: 6,
+  maxDepth: "large",
+  maxRawItems: 60,
+  maxLookbackDays: PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS,
+  allowDocuments: false,
+  allowSensitiveHealthContext: false,
+  requiresCompression: true,
+  maxExpansionRounds: 2,
+  maxSlicesPerExpansionRound: 3,
+};
+
+/**
+ * Config cannot relax document or sensitive-health exposure; enforced after load
+ * and resolve. `allowDocuments` governs raw document-derived text (none exists
+ * post-biomarkers); `biomarkerContext` is structured, user-visible, consent-gated
+ * data and is exempt by design.
+ */
 export const CONTEXT_BUDGET_CONFIG_SAFETY_FLOOR = {
   allowDocuments: false,
   allowSensitiveHealthContext: false,
@@ -102,6 +135,59 @@ export function applyContextBudgetSafetyFloor(policy: ContextBudgetPolicy): Cont
     allowDocuments: CONTEXT_BUDGET_CONFIG_SAFETY_FLOOR.allowDocuments,
     allowSensitiveHealthContext: CONTEXT_BUDGET_CONFIG_SAFETY_FLOOR.allowSensitiveHealthContext,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Degradation notes (config-sourced honest clamp copy — never hardcoded prose)
+// ---------------------------------------------------------------------------
+
+const degradationNoteTemplateSchema = z.object({
+  en: z.string().min(1).max(500),
+  ru: z.string().min(1).max(500),
+});
+
+export const contextBudgetDegradationNotesSchema = z.object({
+  /**
+   * Shown when the requested lookback exceeds what the active budget profile
+   * grants. Placeholders: {{grantedMonths}}, {{requestedMonths}},
+   * {{grantedDays}}, {{requestedDays}}.
+   */
+  lookbackClamped: degradationNoteTemplateSchema,
+});
+
+export type ContextBudgetDegradationNotes = z.infer<typeof contextBudgetDegradationNotesSchema>;
+
+/** Built-in fail-closed defaults; config can override copy, never remove the note. */
+export const DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES: ContextBudgetDegradationNotes = {
+  lookbackClamped: {
+    en: "Showing the last {{grantedMonths}} months of the requested {{requestedMonths}} — older data is summarized monthly.",
+    ru: "Показаны последние {{grantedMonths}} мес. из запрошенных {{requestedMonths}} — более старые данные сведены в помесячную сводку.",
+  },
+};
+
+function lookbackDaysToApproxMonths(days: number): number {
+  return Math.max(1, Math.round(days / 30.44));
+}
+
+/**
+ * Render the lookback-clamp degradation note from config templates.
+ * Pure; language falls back to English for unknown/null languages.
+ */
+export function buildLookbackClampNote(
+  notes: ContextBudgetDegradationNotes,
+  grantedLookbackDays: number,
+  requestedLookbackDays: number,
+  language: string | null | undefined,
+): string {
+  const template =
+    language === "ru" ? notes.lookbackClamped.ru : notes.lookbackClamped.en;
+
+  return interpolateBehaviorTemplate(template, {
+    grantedMonths: lookbackDaysToApproxMonths(grantedLookbackDays),
+    requestedMonths: lookbackDaysToApproxMonths(requestedLookbackDays),
+    grantedDays: grantedLookbackDays,
+    requestedDays: requestedLookbackDays,
+  });
 }
 
 const CONTEXT_DEPTH_ORDER: Record<ContextDepth, number> = {
@@ -143,7 +229,6 @@ export const contextCompressionRequestSchema = z
       .int()
       .min(1)
       .max(CONTEXT_BUDGET_ABSOLUTE_LIMITS.maxLookbackDays),
-    includeDocuments: z.boolean().default(false),
     domainBuckets: z.array(z.string().min(1).max(80)).max(10).default([]),
   })
   .strict();
@@ -268,12 +353,18 @@ function formatZodIssues(error: z.ZodError): string[] {
   });
 }
 
+const CONTEXT_BUDGET_PROFILE_POLICIES: Readonly<
+  Record<ContextBudgetProfile, ContextBudgetPolicy>
+> = {
+  default: DEFAULT_CONTEXT_BUDGET_POLICY,
+  deep_review: DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
+  deep_history: DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+};
+
 export function resolveContextBudgetPolicyForProfile(
   profile: ContextBudgetProfile = "default",
 ): ContextBudgetPolicy {
-  return profile === "deep_review"
-    ? { ...DEEP_REVIEW_CONTEXT_BUDGET_POLICY }
-    : { ...DEFAULT_CONTEXT_BUDGET_POLICY };
+  return { ...CONTEXT_BUDGET_PROFILE_POLICIES[profile] };
 }
 
 export function clampContextDepth(requested: ContextDepth, maxDepth: ContextDepth): ContextDepth {
@@ -395,15 +486,6 @@ export function evaluateContextExpansionRequest(input: {
     );
   }
 
-  for (const slice of request.requestedSlices) {
-    if (slice.includeDocuments === true && !budget.allowDocuments) {
-      errors.push(
-        `requestedSlices: Document expansion is not allowed by the active context budget policy.`,
-      );
-      break;
-    }
-  }
-
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -414,8 +496,6 @@ export function evaluateContextExpansionRequest(input: {
       depth: slice.depth
         ? clampContextDepth(slice.depth, budget.maxDepth)
         : undefined,
-      includeDocuments:
-        slice.includeDocuments === true ? budget.allowDocuments : slice.includeDocuments,
     }),
   );
 

@@ -31,20 +31,23 @@ describe("shell UI state", () => {
     ]);
   });
 
-  it("shows secondary wayfinding only on Training and Nutrition routes", () => {
+  it("shows secondary wayfinding only on Training, Nutrition, and Biomarkers routes", () => {
     expect(shouldShowRouteWayfinding("/training")).toBe(true);
-    expect(shouldShowRouteWayfinding("/progress")).toBe(true);
     expect(shouldShowRouteWayfinding("/training/session-1")).toBe(true);
     expect(shouldShowRouteWayfinding("/nutrition")).toBe(true);
+    expect(shouldShowRouteWayfinding("/biomarkers")).toBe(true);
+    expect(shouldShowRouteWayfinding("/biomarkers/vitamin_d")).toBe(true);
     expect(shouldShowRouteWayfinding("/recipes")).toBe(true);
     expect(shouldShowRouteWayfinding("/nutrition/meal-plan")).toBe(true);
     expect(shouldShowRouteWayfinding("/today")).toBe(false);
     expect(shouldShowRouteWayfinding("/longevity")).toBe(false);
     expect(shouldShowRouteWayfinding("/profile")).toBe(false);
+    expect(shouldShowRouteWayfinding("/chat")).toBe(false);
+    // Deleted alias routes — no wayfinding.
+    expect(shouldShowRouteWayfinding("/progress")).toBe(false);
     expect(shouldShowRouteWayfinding("/goals")).toBe(false);
     expect(shouldShowRouteWayfinding("/documents")).toBe(false);
     expect(shouldShowRouteWayfinding("/metrics")).toBe(false);
-    expect(shouldShowRouteWayfinding("/chat")).toBe(false);
   });
 
   it("maps dashboard layout pages to structured non-chat canvas", () => {
@@ -62,22 +65,25 @@ describe("shell UI state", () => {
       expect(resolveRouteTheme("/training/session-1")).toBe("dark");
       expect(resolveRouteTheme("/nutrition")).toBe("dark");
       expect(resolveRouteTheme("/nutrition/plan")).toBe("dark");
-      expect(resolveRouteTheme("/progress")).toBe("dark");
-      expect(resolveRouteTheme("/metrics")).toBe("dark");
-      expect(resolveRouteTheme("/metrics/overview")).toBe("dark");
+      expect(resolveRouteTheme("/nutrition/grocery-list")).toBe("dark");
+      expect(resolveRouteTheme("/recipes")).toBe("dark");
+      expect(resolveRouteTheme("/recipes/my-recipe")).toBe("dark");
+      expect(resolveRouteTheme("/biomarkers")).toBe("dark");
+      expect(resolveRouteTheme("/biomarkers/vitamin_d")).toBe("dark");
     });
 
     it("returns light for chat, profile, onboarding, billing, and root", () => {
       expect(resolveRouteTheme("/chat")).toBe("light");
       expect(resolveRouteTheme("/chat/thread-1")).toBe("light");
       expect(resolveRouteTheme("/profile")).toBe("light");
-      expect(resolveRouteTheme("/goals")).toBe("light");
-      expect(resolveRouteTheme("/documents")).toBe("light");
-      expect(resolveRouteTheme("/recipes")).toBe("light");
-      expect(resolveRouteTheme("/proposals")).toBe("light");
       expect(resolveRouteTheme("/onboarding")).toBe("light");
       expect(resolveRouteTheme("/billing")).toBe("light");
       expect(resolveRouteTheme("/")).toBe("light");
+      // Deleted alias routes resolve to light (404 but no dark override).
+      expect(resolveRouteTheme("/goals")).toBe("light");
+      expect(resolveRouteTheme("/documents")).toBe("light");
+      expect(resolveRouteTheme("/metrics")).toBe("light");
+      expect(resolveRouteTheme("/progress")).toBe("light");
     });
   });
 });

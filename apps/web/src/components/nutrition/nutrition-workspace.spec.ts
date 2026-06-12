@@ -85,6 +85,18 @@ describe("NutritionWorkspace read-only contracts", () => {
     expect(workspaceSource).toContain("repeat(4, 1fr)");
   });
 
+  it("mounts RecipeRecommendationsPanel embedded inside the done state", () => {
+    expect(workspaceSource).toContain("RecipeRecommendationsPanel");
+    expect(workspaceSource).toContain("embedded");
+  });
+
+  it("distinguishes generic catalog ideas from plan-fit recommendations", () => {
+    expect(workspaceSource).toContain("Generic catalog");
+    expect(workspaceSource).toContain("Plan-fit suggestions matched to your active nutrition revision");
+    expect(workspaceSource).toContain("Meal ideas");
+    expect(workspaceSource).toContain("Recommended for you");
+  });
+
   it("wires AdherencePanel's four sub-states inside the done screen", () => {
     expect(workspaceSource).toContain("AdherencePanel");
     expect(workspaceSource).toContain('state="loading"');
@@ -128,7 +140,7 @@ describe("NutritionWorkspace read-only contracts", () => {
     expect(workspaceSource).not.toContain("RECIPE_INGREDIENTS");
     expect(workspaceSource).toContain("recipe.preparationSteps");
     expect(workspaceSource).toContain("recipe.ingredients");
-    expect(workspaceSource).toContain("recipe.macroEstimates");
+    expect(workspaceSource).toContain("recipe.perServingMacros");
     expect(workspaceSource).toContain("PlayBadge");
     expect(workspaceSource).toContain("Log in Today");
   });

@@ -30,14 +30,14 @@ describe("TheMealDB recipe mapper", () => {
     expect(draft.name).toBe("Teriyaki Chicken Casserole");
 
     // Macros must be COMPUTED from ingredients — not the old fake constant
-    expect(draft.macroEstimates.estimatedCalories).not.toBe(550);
-    expect(draft.macroEstimates.proteinGrams).not.toBe(25);
-    expect(draft.macroEstimates.carbsGrams).not.toBe(45);
-    expect(draft.macroEstimates.fatGrams).not.toBe(20);
+    expect(draft.macroEstimates.caloriesPerServing).not.toBe(550);
+    expect(draft.macroEstimates.proteinGramsPerServing).not.toBe(25);
+    expect(draft.macroEstimates.carbsGramsPerServing).not.toBe(45);
+    expect(draft.macroEstimates.fatGramsPerServing).not.toBe(20);
 
     // Chicken + soy sauce → must have meaningful protein and calories
-    expect(draft.macroEstimates.estimatedCalories).toBeGreaterThan(0);
-    expect(draft.macroEstimates.proteinGrams).toBeGreaterThan(0);
+    expect(draft.macroEstimates.caloriesPerServing).toBeGreaterThan(0);
+    expect(draft.macroEstimates.proteinGramsPerServing).toBeGreaterThan(0);
 
     // Confidence is set from computed result (not hardcoded "low")
     expect(["high", "medium", "low"]).toContain(draft.confidence);
@@ -94,17 +94,17 @@ describe("TheMealDB recipe mapper", () => {
     }
 
     // Calorie counts must differ (chicken-only vs pasta + meat)
-    expect(chickenDraft.macroEstimates.estimatedCalories).not.toBe(
-      pastaDraft.macroEstimates.estimatedCalories,
+    expect(chickenDraft.macroEstimates.caloriesPerServing).not.toBe(
+      pastaDraft.macroEstimates.caloriesPerServing,
     );
 
     // Chicken recipe should have higher protein relative to carbs
-    expect(chickenDraft.macroEstimates.proteinGrams).toBeGreaterThan(
-      chickenDraft.macroEstimates.carbsGrams,
+    expect(chickenDraft.macroEstimates.proteinGramsPerServing).toBeGreaterThan(
+      chickenDraft.macroEstimates.carbsGramsPerServing,
     );
 
     // Pasta recipe should have notable carbs
-    expect(pastaDraft.macroEstimates.carbsGrams).toBeGreaterThan(0);
+    expect(pastaDraft.macroEstimates.carbsGramsPerServing).toBeGreaterThan(0);
   });
 
   it("parses ingredients and preparation steps from sparse provider payloads", () => {

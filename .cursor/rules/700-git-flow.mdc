@@ -12,4 +12,4 @@ alwaysApply: true
 - If the user wants the agent to commit/push anyway, first explain the authorship risk and ask for explicit permission to use a verified workaround.
 - Never stage or commit `.env`, secrets, credentials, private health data, `.idea/`, `.turbo/`, `.next/`, `tsconfig.tsbuildinfo`, or local runtime artifacts such as `.data/`, logs, caches, and generated test output.
 - Do not disturb unrelated staged or unstaged user changes. If staged changes already exist, preserve them unless the user asks otherwise.
-- For Railway deploys with Drizzle migrations under `packages/db/drizzle`, call out the required manual Railway migration step after push/deploy and do not mark deployment verification complete until it is done.
+- For Railway deploys with Drizzle migrations under `packages/db/drizzle`, migrations are applied automatically by the `health-api` pre-deploy command (`apps/api/railway.json`); verify the pre-deploy step succeeded in the deploy logs before marking deployment verification complete.

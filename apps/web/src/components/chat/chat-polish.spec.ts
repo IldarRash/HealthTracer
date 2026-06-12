@@ -4,9 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { WELLBEING_CRISIS_SUPPORT_COPY } from "@health/types";
 import {
-  CHAT_EMPTY_STATE_DESCRIPTION,
-  CHAT_EMPTY_STATE_TITLE,
-  SUGGESTED_CHAT_PROMPTS,
+  SUGGESTED_CHAT_PROMPT_DEFINITIONS,
 } from "../../lib/chat-ui-state.js";
 import {
   INLINE_PROPOSAL_VALIDATION_HEADING,
@@ -58,10 +56,9 @@ const CHAT_USER_VISIBLE_SOURCES = [
   crisisPanelSource,
   chatBubbleSource,
   readSource(join(chatDir, "chat-composer-attachments.tsx")),
-  readSource(join(chatDir, "chat-attachment-outcome-panel.tsx")),
-  JSON.stringify(SUGGESTED_CHAT_PROMPTS),
-  CHAT_EMPTY_STATE_TITLE,
-  CHAT_EMPTY_STATE_DESCRIPTION,
+  // chat-attachment-outcome-panel.tsx was deleted (W3) — attachment status never
+  // leaves "queued" at runtime, so the panel was dead noise.
+  JSON.stringify(SUGGESTED_CHAT_PROMPT_DEFINITIONS),
   INLINE_PROPOSAL_VALIDATION_HEADING,
   JSON.stringify(WELLBEING_CRISIS_SUPPORT_COPY),
 ];
@@ -76,10 +73,11 @@ const FORBIDDEN_CHAT_TERMS = [
 ];
 
 describe("Chat workspace prompt wiring", () => {
-  it("renders chip labels but sends the full prompt message", () => {
+  it("renders chip labels from i18n but sends the full prompt message", () => {
     expect(chatWorkspaceSource).toContain("handlePromptSelect(prompt.message)");
     expect(chatWorkspaceSource).not.toMatch(/handlePromptSelect\(prompt\.label\)/);
-    expect(chatWorkspaceSource).toMatch(/\{prompt\.label\}/);
+    // i18n key rendered via t(`suggestedPrompts.${prompt.labelKey}`)
+    expect(chatWorkspaceSource).toContain("prompt.labelKey");
     expect(chatWorkspaceSource).toContain("key={prompt.message}");
   });
 
@@ -97,26 +95,23 @@ describe("Chat workspace prompt wiring", () => {
 });
 
 describe("Chat polish copy and labels", () => {
-  it("uses coach-forward prompt chip labels with shorter display text", () => {
-    for (const prompt of SUGGESTED_CHAT_PROMPTS) {
-      expect(prompt.label.length).toBeLessThanOrEqual(40);
-      expect(prompt.label).not.toContain("typed adaptation");
-      expect(prompt.label).not.toContain("cross-domain");
+  it("uses i18n keys for prompt chip labels (not hardcoded strings)", () => {
+    for (const prompt of SUGGESTED_CHAT_PROMPT_DEFINITIONS) {
+      expect(prompt.labelKey).toBeTruthy();
+      expect(typeof prompt.labelKey).toBe("string");
     }
-
-    expect(SUGGESTED_CHAT_PROMPTS[0]?.label).toBe("Review my weekly progress");
-    expect(SUGGESTED_CHAT_PROMPTS[0]?.message).toBe(WEEKLY_REVIEW_CHAT_PROMPT);
+    expect(SUGGESTED_CHAT_PROMPT_DEFINITIONS[0]?.labelKey).toBe("reviewWeekly");
+    expect(SUGGESTED_CHAT_PROMPT_DEFINITIONS[0]?.message).toBe(WEEKLY_REVIEW_CHAT_PROMPT);
   });
 
   it("keeps weekly review backend prompt semantics on the first chip message", () => {
-    expect(SUGGESTED_CHAT_PROMPTS[0]?.message.toLowerCase()).toContain("approve individually");
+    expect(SUGGESTED_CHAT_PROMPT_DEFINITIONS[0]?.message.toLowerCase()).toContain("approve individually");
   });
 
-  it("uses clearer empty state copy in the chat workspace", () => {
-    expect(chatWorkspaceSource).toContain("CHAT_EMPTY_STATE_TITLE");
-    expect(chatWorkspaceSource).toContain("CHAT_EMPTY_STATE_DESCRIPTION");
-    expect(CHAT_EMPTY_STATE_TITLE).toContain("coach");
-    expect(CHAT_EMPTY_STATE_DESCRIPTION).toContain("week");
+  it("uses i18n keys for empty state copy in the chat workspace", () => {
+    expect(chatWorkspaceSource).toContain('t("emptyStateTitle")');
+    expect(chatWorkspaceSource).toContain('t("emptyStateDescription")');
+    expect(chatWorkspaceSource).toContain("SUGGESTED_CHAT_PROMPT_DEFINITIONS");
   });
 
   it("routes inline proposals through specialized or generic cards", () => {
@@ -180,8 +175,8 @@ describe("Chat polish copy and labels", () => {
   it("exposes Apply, Modify, and Reject affordances with decision accessibility", () => {
     // The generic card still owns its own affordances directly.
     expect(genericInlineProposalSource).toContain('"Apply"');
-    expect(genericInlineProposalSource).toContain("\n              Modify\n");
-    expect(genericInlineProposalSource).toContain("\n              Reject\n");
+    expect(genericInlineProposalSource).toContain("Modify");
+    expect(genericInlineProposalSource).toContain("Reject");
     expect(genericInlineProposalSource).toContain('decisionMutation.mutate("accept")');
     expect(genericInlineProposalSource).toContain('decisionMutation.mutate("reject")');
     expect(genericInlineProposalSource).toContain("aria-busy={isActionPending");
@@ -194,8 +189,8 @@ describe("Chat polish copy and labels", () => {
     expect(wellbeingProposalSource).toContain('"Apply"');
     expect(nutritionProposalSource).toContain('"Apply"');
     // The shell carries the shared affordances.
-    expect(proposalCardShellSource).toContain("\n              Modify\n");
-    expect(proposalCardShellSource).toContain("\n              Reject\n");
+    expect(proposalCardShellSource).toContain("Modify");
+    expect(proposalCardShellSource).toContain("Reject");
     expect(proposalCardShellSource).toContain('decisionMutation.mutate("accept")');
     expect(proposalCardShellSource).toContain('decisionMutation.mutate("reject")');
     expect(proposalCardShellSource).toContain("aria-busy={isActionPending");

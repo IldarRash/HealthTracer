@@ -30,6 +30,9 @@ COPY packages/db/package.json ./packages/db/
 COPY packages/types/package.json ./packages/types/
 COPY packages/ui/package.json ./packages/ui/
 
+# Intentionally NOT --prod: the Railway pre-deploy migration
+# (pnpm --dir packages/db db:migrate, from apps/api/railway.json) needs
+# drizzle-kit, a devDependency of @health/db, present in the image.
 RUN pnpm install --frozen-lockfile --filter @health/api...
 
 FROM deps AS runner

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
+import { llmInt } from "./llm-coerce.js";
 
 export const habitCategorySchema = z.enum([
   "hydration",
@@ -50,13 +51,15 @@ export const habitBooleanTargetSchema = z.object({
 
 export const habitCountTargetSchema = z.object({
   type: z.literal("count"),
-  value: z.number().int().positive().max(100),
+  // LLMs may emit decimals (e.g. 7.5 servings); round to int instead of failing.
+  value: llmInt(z.number().positive().max(100)),
   unit: z.string().min(1).max(40).optional(),
 });
 
 export const habitDurationTargetSchema = z.object({
   type: z.literal("duration_minutes"),
-  value: z.number().int().positive().max(480),
+  // LLMs may emit decimals (e.g. 29.5 min); round to int instead of failing.
+  value: llmInt(z.number().positive().max(480)),
 });
 
 export const habitNumericTargetSchema = z.object({

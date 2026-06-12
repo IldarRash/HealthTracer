@@ -157,6 +157,13 @@ function buildCompressionUserContent(
     appendBoundedSliceFindings(slice, findings, risks, allowSensitiveHealth);
   }
 
+  // Deep-review numeric aggregates: numbers/enums/ISO dates only by schema
+  // construction, so deliberately NOT gated by allowSensitiveHealth (the
+  // wellbeing/recovery free-text gates above stay exactly as they are). The
+  // payload is already bounded by the per-granularity bucket caps. All slices
+  // in a turn share the same turn-level summary, so the first one suffices.
+  const progressHistory = slices.find((slice) => slice.progressHistory)?.progressHistory;
+
   const content = {
     sliceSummaries: findings.slice(0, 20),
     risks: risks.slice(0, 10),
@@ -167,14 +174,16 @@ function buildCompressionUserContent(
       label: ref.label,
       ...(ref.referenceId ? { referenceId: ref.referenceId } : {}),
     })),
+    ...(progressHistory ? { progressHistory } : {}),
   };
 
   return `Health context for compression:\n${JSON.stringify(content, null, 2)}`;
 }
 
 /**
- * Reads only the non-document, already-bounded fields from a slice.
- * Deliberately does NOT read documentContext or ragResults (S5).
+ * Reads only the already-bounded, non-sensitive fields from a slice.
+ * Document-derived slice fields no longer exist in the contract (documents
+ * module deleted); the sourceRef-domain strip above stays as a defensive floor.
  */
 function appendBoundedSliceFindings(
   slice: UserContextSlice,
@@ -233,9 +242,8 @@ function appendBoundedSliceFindings(
     risks.push(slice.recommendationConstraints[0]!.slice(0, 240));
   }
 
-  // S5: documentContext and ragResults are intentionally NOT read here.
-  // We never echo raw document text; document sourceRefs are stripped upstream
-  // when budget.allowDocuments is false.
+  // We never echo raw document text; document-domain sourceRefs are stripped
+  // upstream when budget.allowDocuments is false (defensive floor).
 }
 
 function mapPurposeToFocusArea(purpose: ContextSlicePurpose): string {
@@ -246,6 +254,8 @@ function mapPurposeToFocusArea(purpose: ContextSlicePurpose): string {
       return "Nutrition alignment";
     case "weekly_review":
       return "Weekly progress";
+    case "progress_history_review":
+      return "Long-range progress history";
     case "longevity_overview":
       return "Long-term wellness";
     case "health_context":
@@ -264,6 +274,7 @@ function mapPurposeToDomain(purpose: ContextSlicePurpose): string {
     case "nutrition_adaptation":
       return "nutrition";
     case "weekly_review":
+    case "progress_history_review":
       return "progress";
     case "longevity_overview":
       return "longevity";

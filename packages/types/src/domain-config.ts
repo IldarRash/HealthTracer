@@ -17,7 +17,6 @@ import {
 export const domainConfigDomainSchema = z.enum([
   "workout",
   "nutrition",
-  "medical",
   "health",
 ]);
 
@@ -35,20 +34,10 @@ export const domainIntentEntrySchema = z.object({
 
 export type DomainIntentEntry = z.infer<typeof domainIntentEntrySchema>;
 
-export const domainSignalEntrySchema = z.object({
-  id: z.string().min(1).max(120),
-  patterns: z.array(z.string().min(1).max(500)).max(20).optional(),
-});
-
-export type DomainSignalEntry = z.infer<typeof domainSignalEntrySchema>;
-
-export const domainPromptEntrySchema = z.object({
-  key: z.string().min(1).max(120),
-  body: z.string().min(1).max(8000),
-  placeholders: z.array(z.string().min(1).max(120)).max(20).optional(),
-});
-
-export type DomainPromptEntry = z.infer<typeof domainPromptEntrySchema>;
+// DomainSignalEntry and DomainPromptEntry removed: signals[] and prompts[] are
+// parsed from YAML but never read by any runtime service. Live fan-out domain
+// prompts come from prompt-template-defaults.ts; direct-path signals live in
+// message-preprocessor.ts. These schema fields were dead weight.
 
 // ---------------------------------------------------------------------------
 // Main per-domain config schema (strict — unknown keys are rejected)
@@ -59,9 +48,10 @@ export const domainConfigSchema = z
     domain: domainConfigDomainSchema,
     llmId: z.string().min(1).max(120),
     intents: z.array(domainIntentEntrySchema).max(20).default([]),
-    tools: z.array(agentToolNameSchema).max(5).default([]),
-    signals: z.array(domainSignalEntrySchema).max(30).default([]),
-    prompts: z.array(domainPromptEntrySchema).max(20).default([]),
+    // Cap = the full catalog of agent tool names: YAML narrows the catalog, so a
+    // valid narrowing can legitimately list every catalog tool. A tighter cap
+    // (the old 5) made the schema reject narrowings the runtime would accept.
+    tools: z.array(agentToolNameSchema).max(agentToolNameSchema.options.length).default([]),
     safetyNotes: z.array(z.string().min(1).max(500)).max(20).default([]),
   })
   .strict();
@@ -93,7 +83,6 @@ export type DomainConfigLoadResult = {
 
 const WORKOUT_LLM_ID = "workout_coach" as const;
 const NUTRITION_LLM_ID = "nutrition_coach" as const;
-const MEDICAL_LLM_ID = "health_coach" as const;
 const HEALTH_LLM_ID = "health_coach" as const;
 
 export const DEFAULT_DOMAIN_CONFIGS: DomainConfigBundle = {
@@ -119,33 +108,6 @@ export const DEFAULT_DOMAIN_CONFIGS: DomainConfigBundle = {
       },
     ],
     tools: ["getUserContextSlice", "getWeeklyProgressContext"],
-    signals: [
-      {
-        id: "fatigue",
-        patterns: [
-          String.raw`\b(tired|fatigue|sore|exhausted|worn\s+out)\b`,
-        ],
-      },
-      {
-        id: "pain",
-        patterns: [
-          String.raw`\b(pain|hurt|injury|injured|ache)\b`,
-        ],
-      },
-      {
-        id: "workout_request",
-        patterns: [
-          String.raw`\b(workout|exercise|training|session|gym|lift|run|cardio)\b`,
-        ],
-      },
-    ],
-    prompts: [
-      {
-        key: "workout_domain_system",
-        body: "You are a certified strength and conditioning coach. Review the user's current workout plan and recent execution. Propose structured, evidence-based workout plan changes when warranted. Respect fatigue, pain, and recovery signals. Never diagnose or prescribe medical treatment.",
-        placeholders: [],
-      },
-    ],
     safetyNotes: [
       "Respect reported fatigue, pain, and injury signals — prefer lighter adaptations before rewrites.",
       "Do not prescribe medical treatment or recovery protocols.",
@@ -180,72 +142,10 @@ export const DEFAULT_DOMAIN_CONFIGS: DomainConfigBundle = {
       },
     ],
     tools: ["getUserContextSlice", "getWeeklyProgressContext"],
-    signals: [
-      {
-        id: "meal_reference",
-        patterns: [
-          String.raw`\b(meal|food|eat|diet|calories|protein|carb|fat|macro|recipe|nutrition)\b`,
-        ],
-      },
-      {
-        id: "hunger",
-        patterns: [
-          String.raw`\b(hungry|hunger|starving|appetite)\b`,
-        ],
-      },
-    ],
-    prompts: [
-      {
-        key: "nutrition_domain_system",
-        body: "You are a registered dietitian coach. Review the user's nutrition plan and recent adherence. Propose typed nutrition plan adjustments, recipe recommendations, or meal incident logs when appropriate. Keep calorie estimates clearly approximate. Do not provide medical diet prescriptions or diagnose eating disorders.",
-        placeholders: [],
-      },
-    ],
     safetyNotes: [
       "Do not provide medical diet prescriptions or eating disorder guidance.",
       "Keep calorie and macro estimates clearly approximate and editable.",
       "Nutrition incident proposals must remain reviewable before applying.",
-    ],
-  },
-
-  medical: {
-    domain: "medical",
-    llmId: MEDICAL_LLM_ID,
-    intents: [
-      {
-        id: "review_health_context",
-        description:
-          "Provide conservative wellness coaching informed by consent-approved health document summaries.",
-        mapsToCapabilityId: "ask_health_context",
-      },
-    ],
-    tools: ["getDocumentContext", "getUserContextSlice"],
-    signals: [
-      {
-        id: "medical_reference",
-        patterns: [
-          String.raw`\b(lab|blood\s+test|report|diagnosis|doctor|physician|medical|health\s+document)\b`,
-        ],
-      },
-      {
-        id: "symptoms",
-        patterns: [
-          String.raw`\b(symptom|pain|dizzy|nausea|fever|breathing|chest)\b`,
-        ],
-      },
-    ],
-    prompts: [
-      {
-        key: "medical_domain_system",
-        body: "You are a wellness coach reviewing consent-approved health document summaries. Provide conservative coaching context only. Never diagnose, interpret labs as medical treatment guidance, or prescribe treatment. Refer the user to their healthcare provider for medical questions. Use only approved document summaries — never raw document contents.",
-        placeholders: [],
-      },
-    ],
-    safetyNotes: [
-      "Never diagnose, prescribe treatment, or interpret labs as medical guidance.",
-      "Use only consent-approved document summaries — never raw document contents.",
-      "Medical document save is a consent-gated proposal; never auto-persist health_documents.",
-      "Direct users to their healthcare provider for medical questions.",
     ],
   },
 
@@ -265,26 +165,7 @@ export const DEFAULT_DOMAIN_CONFIGS: DomainConfigBundle = {
         mapsToCapabilityId: "longevity_overview",
       },
     ],
-    // getDocumentContext is intentionally omitted: longevity_overview (one of the two
-    // intents in this domain) does not allow getDocumentContext. Keeping it here
-    // causes intersectDomainConfigWithCatalog to emit a warning on every load.
-    // Document context for health questions is handled by the medical domain config.
     tools: ["getUserContextSlice"],
-    signals: [
-      {
-        id: "health_question",
-        patterns: [
-          String.raw`\b(health|wellness|longevity|habit|stress|sleep|mental|recovery)\b`,
-        ],
-      },
-    ],
-    prompts: [
-      {
-        key: "health_domain_system",
-        body: "You are a holistic wellness coach. Focus on sustainable habits, recovery, sleep, stress management, and long-term healthspan. Use approved user health context conservatively. Never diagnose, prescribe treatment, or make medical-certainty claims.",
-        placeholders: [],
-      },
-    ],
     safetyNotes: [
       "Do not diagnose or prescribe medical treatment.",
       "Avoid medical-certainty language for health context.",

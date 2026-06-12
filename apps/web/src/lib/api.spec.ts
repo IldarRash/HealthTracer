@@ -4,6 +4,8 @@ import {
   completeWorkoutSession,
   completeOnboarding,
   decideProposal,
+  getChatThread,
+  listProposals,
   sendChatMessage,
   uploadChatAttachment,
   apiQueryKeys,
@@ -16,7 +18,6 @@ import {
   getActiveNutritionPlan,
   getActiveWorkoutPlan,
   getActiveHabitPlan,
-  getDocumentsRefreshQueryKeys,
   getHabitAdherence,
   buildHabitAdherenceQueryString,
   buildWellbeingAggregatesQueryString,
@@ -49,20 +50,21 @@ import {
   getTodayHistory,
   buildRecipeListQueryString,
   buildRecipeNutritionIncidentProposal,
-  createDocument,
-  deleteDocument,
-  extractDocumentSignals,
+  createBiomarkerReading,
+  createLabReport,
+  deleteBiomarkerReading,
+  deleteLabReport,
+  extractLabReport,
   generateRecipeRecommendations,
-  getDocument,
+  getBiomarkerHistory,
+  getBiomarkersDashboard,
+  getBiomarkersRefreshQueryKeys,
+  getLabReport,
   grantDeviceConsent,
-  listDocumentSignals,
-  listDocuments,
+  listLabReports,
   listDeviceConnections,
   listHealthMetricSnapshots,
-  previewCorrelationInsights,
   previewHealthMetricsAiContext,
-  parseDocument,
-  reviewDocumentSignal,
   syncHealthMetrics,
   listRecipeRecommendations,
   listRecipes,
@@ -71,11 +73,10 @@ import {
   listWorkoutRevisions,
   parseApiErrorBody,
   getApiErrorMessage,
-  reviewDocumentSummary,
   scheduleWorkoutSession,
   startTodayWorkout,
-  searchDocuments,
-  updateDocumentConsent,
+  updateBiomarkerReading,
+  updateLabReportConsent,
   updateTodayFeedback,
   updateRecipeRecommendationStatus,
   updateTodayItemStatus,
@@ -1861,9 +1862,9 @@ describe("web api helpers", () => {
     expect(
       buildRecipeListQueryString({
         tags: ["high-protein"],
-        minProteinGrams: 20,
+        minProteinGramsPerServing: 20,
       }),
-    ).toBe("?tags=high-protein&minProteinGrams=20");
+    ).toBe("?tags=high-protein&minProteinGramsPerServing=20");
   });
 
   it("parses recipe catalog and recommendation responses", async () => {
@@ -1874,12 +1875,12 @@ describe("web api helpers", () => {
       ingredients: [{ name: "Greek yogurt", quantity: 1, unit: "cup" }],
       preparationSteps: ["Combine ingredients in a bowl."],
       servings: 1,
-      macroEstimates: {
-        estimatedCalories: 320,
-        proteinGrams: 24,
-        carbsGrams: 30,
-        fatGrams: 10,
-        fiberGrams: 4,
+      perServingMacros: {
+        caloriesPerServing: 320,
+        proteinGramsPerServing: 24,
+        carbsGramsPerServing: 30,
+        fatGramsPerServing: 10,
+        fiberGramsPerServing: 4,
       },
       mealTypes: ["breakfast"],
       tags: ["high-protein"],
@@ -2155,377 +2156,288 @@ describe("web api helpers", () => {
     expect(result.data).toEqual([]);
   });
 
-  it("calls document API helpers across upload, parse, approve, search, revoke, and delete", async () => {
-    const documentId = "3f98f3dd-806d-4386-8c5f-43499626c5d6";
-    const summaryId = "14a08176-64a7-4a2d-8a44-581807368394";
+  it("calls lab report API helpers across upload, extract, consent, and delete", async () => {
+    const reportId = "3f98f3dd-806d-4386-8c5f-43499626c5d6";
     const now = "2026-05-22T12:00:00.000Z";
-    const baseDocument = {
-      id: documentId,
+    const fileContentBase64 = Buffer.from("%PDF-1.4 labs", "utf8").toString("base64");
+    const baseReport = {
+      id: reportId,
       userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
-      documentType: "other",
-      title: "Synthetic wellness note",
-      storageReference: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81/doc.txt",
-      mimeType: "text/plain",
+      title: "Spring panel",
+      storageReference: "lab-reports/spring.pdf",
+      mimeType: "application/pdf",
       fileSizeBytes: 128,
-      parseStatus: "uploaded",
-      signalExtractionStatus: "not_started",
-      signalExtractionFailureReason: null,
-      signalExtractedAt: null,
-      consentScopes: [
-        "upload_storage",
-        "parse_ocr",
-        "ai_summarization",
-        "semantic_indexing",
-        "coach_chat_context",
-      ],
-      consentVersion: "v1",
-      consentGrantedAt: now,
-      parseFailureReason: null,
-      revokedAt: null,
-      deletedAt: null,
+      status: "uploaded",
+      failureCode: null,
+      observedAt: null,
+      unmappedMarkerCount: 0,
+      consentVersion: "v2",
+      storeParseConsentAt: now,
+      coachContextConsentAt: null,
+      extractedAt: null,
       uploadedAt: now,
       createdAt: now,
       updatedAt: now,
     };
-    const summary = {
-      id: summaryId,
-      healthDocumentId: documentId,
-      userId: baseDocument.userId,
-      summaryText: "Synthetic wellness summary for coaching context review.",
-      extractedConstraints: ["Prefers low-impact cardio"],
-      reviewStatus: "pending_review",
-      reviewedAt: null,
-      generatedAt: now,
-      generatorVersion: "dev-v1",
-      createdAt: now,
-      updatedAt: now,
-    };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      const method = init?.method ?? "GET";
-
-      if (method === "GET" && path.endsWith("/documents")) {
-        return new Response(JSON.stringify({ documents: [baseDocument] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (method === "POST" && path.endsWith("/documents")) {
-        return new Response(JSON.stringify({ ...baseDocument, summary: null }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (method === "GET" && path.endsWith(`/documents/${documentId}`)) {
-        return new Response(JSON.stringify({ ...baseDocument, summary }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      if (method === "POST" && path.endsWith(`/documents/${documentId}/parse`)) {
-        return new Response(
-          JSON.stringify({ ...baseDocument, parseStatus: "summary_ready", summary }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      if (method === "PATCH" && path.endsWith(`/documents/${documentId}/summary/review`)) {
-        return new Response(
-          JSON.stringify({ ...summary, reviewStatus: "approved", reviewedAt: now }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      if (method === "GET" && path.includes("/documents/search?")) {
-        return new Response(
-          JSON.stringify({
-            results: [
-              {
-                documentId,
-                summaryId,
-                documentType: "other",
-                title: baseDocument.title,
-                summarySnippet: "Synthetic wellness summary for coaching context review.",
-                extractedConstraints: ["Prefers low-impact cardio"],
-                generatedAt: now,
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      if (method === "PATCH" && path.endsWith(`/documents/${documentId}/consent`)) {
-        return new Response(
-          JSON.stringify({
-            ...baseDocument,
-            parseStatus: "revoked",
-            revokedAt: now,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      if (method === "DELETE" && path.endsWith(`/documents/${documentId}`)) {
-        return new Response(
-          JSON.stringify({
-            ...baseDocument,
-            deletedAt: now,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      return new Response("not found", { status: 404 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    expect((await listDocuments(token)).data).toHaveLength(1);
-    expect(
-      (
-        await createDocument(token, {
-          documentType: "other",
-          title: "Synthetic wellness note",
-          consentScopes: ["upload_storage", "parse_ocr", "ai_summarization"],
-          consentVersion: "v1",
-          mimeType: "text/plain",
-          sampleText: "Synthetic wellness note for test coverage only.",
-        })
-      ).data?.summary,
-    ).toBeNull();
-    expect((await getDocument(token, documentId)).data?.summary?.reviewStatus).toBe(
-      "pending_review",
-    );
-    expect((await parseDocument(token, documentId)).data?.parseStatus).toBe("summary_ready");
-    expect(
-      (await reviewDocumentSummary(token, documentId, { reviewStatus: "approved" })).data
-        ?.reviewStatus,
-    ).toBe("approved");
-    expect((await searchDocuments(token, "low-impact", 5)).data?.results).toHaveLength(1);
-    expect((await updateDocumentConsent(token, documentId, { revoke: true })).data?.revokedAt).toBe(
-      now,
-    );
-    expect((await deleteDocument(token, documentId)).data?.deletedAt).toBe(now);
-
-    expect(String(fetchMock.mock.calls[5]?.[0])).toContain("/documents/search?q=low-impact&limit=5");
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
-      title: "Synthetic wellness note",
-      sampleText: "Synthetic wellness note for test coverage only.",
-    });
-    expect(JSON.parse(String(fetchMock.mock.calls[6]?.[1]?.body))).toEqual({ revoke: true });
-  });
-
-  it("posts fileContentBase64 payloads for supported document uploads", async () => {
-    const token = "test-token";
-    const now = "2026-05-22T12:00:00.000Z";
-    const documentId = "aa639495-cf87-4110-a1b0-b11900a01285";
-    const fileContentBase64 = Buffer.from("%PDF-1.4 wellness sample", "utf8").toString("base64");
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      const method = init?.method ?? "GET";
-
-      if (method === "POST" && path.endsWith("/documents")) {
-        return new Response(
-          JSON.stringify({
-            id: documentId,
-            userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
-            documentType: "lab_report",
-            title: "Lab PDF upload",
-            storageReference: "local://documents/lab.pdf",
-            mimeType: "application/pdf",
-            fileSizeBytes: Buffer.from(fileContentBase64, "base64").byteLength,
-            parseStatus: "uploaded",
-            signalExtractionStatus: "not_started",
-            signalExtractionFailureReason: null,
-            signalExtractedAt: null,
-            consentScopes: ["upload_storage", "parse_ocr"],
-            consentVersion: "v1",
-            consentGrantedAt: now,
-            parseFailureReason: null,
-            revokedAt: null,
-            deletedAt: null,
-            uploadedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            summary: null,
-          }),
-          { status: 201, headers: { "Content-Type": "application/json" } },
-        );
-      }
-
-      return new Response("not found", { status: 404 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await createDocument(token, {
-      documentType: "lab_report",
-      title: "Lab PDF upload",
-      consentScopes: ["upload_storage", "parse_ocr"],
-      consentVersion: "v1",
-      mimeType: "application/pdf",
-      fileContentBase64,
-    });
-
-    expect(result.data?.mimeType).toBe("application/pdf");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      documentType: "lab_report",
-      title: "Lab PDF upload",
-      consentScopes: ["upload_storage", "parse_ocr"],
-      consentVersion: "v1",
-      mimeType: "application/pdf",
-      fileContentBase64,
-    });
-  });
-
-  it("calls document signal and correlation preview API helpers", async () => {
-    const documentId = "3f98f3dd-806d-4386-8c5f-43499626c5d6";
-    const signalId = "4a98f3dd-806d-4386-8c5f-43499626c5d7";
-    const now = "2026-05-22T12:00:00.000Z";
-    const signal = {
-      id: signalId,
-      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
-      healthDocumentId: documentId,
-      signalKey: "vitamin_d",
-      displayLabel: "Vitamin D",
-      valueText: "28",
+    const reading = {
+      id: "14a08176-64a7-4a2d-8a44-581807368394",
+      userId: baseReport.userId,
+      labReportId: reportId,
+      biomarkerKey: "vitamin_d",
+      value: 28,
+      valueText: null,
       unit: "ng/mL",
       referenceRangeText: "30-100 ng/mL",
       observedAt: "2026-05-01",
-      sourceSection: "Lab results",
-      confidenceScore: 0.85,
-      reviewStatus: "pending_review",
-      ignoredReason: null,
-      extractedAt: now,
-      reviewedAt: null,
+      source: "extraction",
+      confidence: 0.85,
+      userEdited: false,
       createdAt: now,
       updatedAt: now,
     };
-    const signalListResponse = {
-      documentId,
-      extractionStatus: "ready",
-      extractionFailureReason: null,
-      extractedAt: now,
-      signals: [signal],
-      ignoredContentExplanation: null,
-    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const path = String(input);
-        const method = init?.method ?? "GET";
+      if (method === "GET" && path.endsWith("/lab-reports")) {
+        return new Response(JSON.stringify({ reports: [baseReport] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
-        if (method === "GET" && path.endsWith(`/documents/${documentId}/signals`)) {
-          return new Response(JSON.stringify(signalListResponse), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
+      if (method === "POST" && path.endsWith("/lab-reports")) {
+        return new Response(JSON.stringify(baseReport), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
-        if (method === "POST" && path.endsWith(`/documents/${documentId}/extract-signals`)) {
-          return new Response(JSON.stringify(signalListResponse), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
+      if (method === "GET" && path.endsWith(`/lab-reports/${reportId}`)) {
+        return new Response(
+          JSON.stringify({ report: baseReport, readings: [reading] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
 
-        if (
-          method === "PATCH" &&
-          path.endsWith(`/documents/${documentId}/signals/${signalId}/review`)
-        ) {
-          return new Response(
-            JSON.stringify({ ...signal, reviewStatus: "approved", reviewedAt: now }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
+      if (method === "POST" && path.endsWith(`/lab-reports/${reportId}/extract`)) {
+        return new Response(
+          JSON.stringify({
+            report: { ...baseReport, status: "extracted", extractedAt: now },
+            readings: [reading],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
 
-        if (method === "GET" && path.endsWith("/documents/correlations/preview")) {
-          return new Response(
-            JSON.stringify({
-              insights: [
-                {
-                  id: "insight-abc",
-                  headline: "Sleep and training completion may be linked",
-                  summary:
-                    "Recent sleep summaries and lower training completion appeared around the same period.",
-                  coachingDomain: "recovery",
-                  evidenceRefs: [
-                    {
-                      type: "health_metric_aggregate",
-                      id: "sleep:2026-05-15:2026-05-21",
-                      label: "Recent sleep summary",
-                    },
-                  ],
-                  confidence: "medium",
-                },
-              ],
-              generatedAt: now,
-              dataStatus: "sufficient",
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
+      if (method === "PATCH" && path.endsWith(`/lab-reports/${reportId}/consent`)) {
+        return new Response(
+          JSON.stringify({ ...baseReport, coachContextConsentAt: now }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
 
-        return new Response("not found", { status: 404 });
-      }),
-    );
+      if (method === "DELETE" && path.endsWith(`/lab-reports/${reportId}`)) {
+        return new Response(JSON.stringify(baseReport), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
-    expect((await listDocumentSignals(token, documentId)).data?.signals).toHaveLength(1);
-    expect((await extractDocumentSignals(token, documentId)).data?.extractionStatus).toBe("ready");
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect((await listLabReports(token)).data).toHaveLength(1);
     expect(
-      (await reviewDocumentSignal(token, documentId, signalId, { reviewStatus: "approved" })).data
-        ?.reviewStatus,
-    ).toBe("approved");
-    expect((await previewCorrelationInsights(token)).data?.insights).toHaveLength(1);
+      (
+        await createLabReport(token, {
+          title: "Spring panel",
+          mimeType: "application/pdf",
+          fileContentBase64,
+          consent: { storeAndParse: true, coachChat: false },
+          consentVersion: "v2",
+        })
+      ).data?.status,
+    ).toBe("uploaded");
+    expect((await getLabReport(token, reportId)).data?.readings).toHaveLength(1);
+    expect((await extractLabReport(token, reportId)).data?.report.status).toBe("extracted");
+    expect(
+      (await updateLabReportConsent(token, reportId, { coachChat: true })).data
+        ?.coachContextConsentAt,
+    ).toBe(now);
+    expect((await deleteLabReport(token, reportId)).error).toBeUndefined();
+
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      title: "Spring panel",
+      consent: { storeAndParse: true, coachChat: false },
+      fileContentBase64,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body))).toEqual({
+      coachChat: true,
+    });
   });
 
-  it("rejects invalid document signal reviews before calling the API", async () => {
+  it("rejects lab report uploads without the required store-and-parse consent", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      reviewDocumentSignal(
-        token,
-        "3f98f3dd-806d-4386-8c5f-43499626c5d6",
-        "4a98f3dd-806d-4386-8c5f-43499626c5d7",
-        { reviewStatus: "pending_review" as "approved" },
-      ),
+      createLabReport(token, {
+        title: "Spring panel",
+        mimeType: "application/pdf",
+        fileContentBase64: "JVBERi0xLjQ=",
+        consent: { storeAndParse: false as true, coachChat: false },
+        consentVersion: "v2",
+      }),
     ).rejects.toThrow();
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed correlation preview responses", async () => {
+  it("calls biomarker dashboard, history, and reading API helpers", async () => {
+    const readingId = "14a08176-64a7-4a2d-8a44-581807368394";
+    const now = "2026-05-22T12:00:00.000Z";
+    const reading = {
+      id: readingId,
+      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      labReportId: null,
+      biomarkerKey: "vitamin_d",
+      value: 42,
+      valueText: null,
+      unit: "ng/mL",
+      referenceRangeText: null,
+      observedAt: "2026-05-01",
+      source: "manual",
+      confidence: null,
+      userEdited: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const marker = {
+      key: "vitamin_d",
+      displayLabel: "Vitamin D (25-OH)",
+      canonicalUnit: "ng/mL",
+      typicalRange: { low: 30, high: 100, unit: "ng/mL" },
+      latestReading: reading,
+      readingCount: 1,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "GET" && path.endsWith("/biomarkers")) {
+        return new Response(
+          JSON.stringify({
+            areas: [{ area: "nutrients", markers: [marker] }],
+            generatedAt: now,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (method === "GET" && path.endsWith("/biomarkers/vitamin_d")) {
+        return new Response(
+          JSON.stringify({
+            biomarkerKey: "vitamin_d",
+            area: "nutrients",
+            displayLabel: "Vitamin D (25-OH)",
+            canonicalUnit: "ng/mL",
+            typicalRange: { low: 30, high: 100, unit: "ng/mL" },
+            readings: [reading],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (method === "POST" && path.endsWith("/biomarkers/readings")) {
+        return new Response(JSON.stringify(reading), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (method === "PATCH" && path.endsWith(`/biomarkers/readings/${readingId}`)) {
+        return new Response(
+          JSON.stringify({ ...reading, value: 45, userEdited: true }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (method === "DELETE" && path.endsWith(`/biomarkers/readings/${readingId}`)) {
+        return new Response(JSON.stringify(reading), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect((await getBiomarkersDashboard(token)).data?.areas).toHaveLength(1);
+    expect((await getBiomarkerHistory(token, "vitamin_d")).data?.readings).toHaveLength(1);
+    expect(
+      (
+        await createBiomarkerReading(token, {
+          biomarkerKey: "vitamin_d",
+          value: 42,
+          unit: "ng/mL",
+          observedAt: "2026-05-01",
+        })
+      ).data?.id,
+    ).toBe(readingId);
+    expect(
+      (await updateBiomarkerReading(token, readingId, { value: 45 })).data?.userEdited,
+    ).toBe(true);
+    expect((await deleteBiomarkerReading(token, readingId)).error).toBeUndefined();
+  });
+
+  it("rejects invalid biomarker reading payloads before calling the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Both value and valueText provided.
+    await expect(
+      createBiomarkerReading(token, {
+        biomarkerKey: "vitamin_d",
+        value: 42,
+        valueText: "trace",
+        unit: "ng/mL",
+      }),
+    ).rejects.toThrow();
+
+    // Empty update payload.
+    await expect(
+      updateBiomarkerReading(token, "14a08176-64a7-4a2d-8a44-581807368394", {}),
+    ).rejects.toThrow();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces lab report extraction failures from API error bodies", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
         new Response(
-          JSON.stringify({
-            insights: [
-              {
-                id: "insight-missing-evidence",
-                headline: "Sleep and training completion may be linked",
-                summary: "Recent sleep summaries and lower training completion appeared together.",
-                coachingDomain: "recovery",
-                evidenceRefs: [],
-                confidence: "medium",
-              },
-            ],
-            generatedAt: "2026-05-22T12:00:00.000Z",
-            dataStatus: "sufficient",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
+          JSON.stringify({ statusCode: 409, message: "Extraction already in progress." }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
         ),
       ),
     );
 
-    const result = await previewCorrelationInsights(token);
+    const result = await extractLabReport(token, "3f98f3dd-806d-4386-8c5f-43499626c5d6");
 
     expect(result.data).toBeUndefined();
-    expect(result.error).toBe("/documents/correlations/preview could not be loaded");
+    expect(result.error).toBe("Extraction already in progress.");
+  });
+
+  it("returns biomarkers refresh query keys for reading-changing mutations", () => {
+    expect(getBiomarkersRefreshQueryKeys()).toEqual([
+      apiQueryKeys.labReports,
+      apiQueryKeys.biomarkersDashboard,
+      apiQueryKeys.biomarkerHistoryPrefix,
+    ]);
   });
 
   it("parses proposal evidence refs from API payloads", () => {
@@ -2538,9 +2450,9 @@ describe("web api helpers", () => {
       reason: "Training completion dipped alongside lower sleep summaries.",
       evidenceRefs: [
         {
-          type: "document_signal",
+          type: "biomarker_reading",
           id: "4a98f3dd-806d-4386-8c5f-43499626c5d7",
-          label: "Energy level from uploaded document",
+          label: "Energy level reading from your lab report",
         },
       ],
       proposedChanges: {},
@@ -2554,23 +2466,6 @@ describe("web api helpers", () => {
     });
 
     expect(parsed.evidenceRefs).toHaveLength(1);
-  });
-
-  it("surfaces document parse failures from API error bodies", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(JSON.stringify({ statusCode: 400, message: "Document processing failed." }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-
-    const result = await parseDocument(token, "3f98f3dd-806d-4386-8c5f-43499626c5d6");
-
-    expect(result.data).toBeUndefined();
-    expect(result.error).toBe("Document processing failed.");
   });
 
   it("starts today workouts and updates session exercises", async () => {
@@ -2704,14 +2599,6 @@ describe("web api helpers", () => {
         apiQueryKeys.longevityState,
       ]),
     );
-  });
-
-  it("returns documents refresh query keys with longevity state", () => {
-    expect(getDocumentsRefreshQueryKeys()).toEqual([
-      apiQueryKeys.documents,
-      apiQueryKeys.longevityState,
-      apiQueryKeys.correlationPreview,
-    ]);
   });
 
   it("returns progress summary refresh query keys with longevity state", () => {
@@ -3283,5 +3170,106 @@ describe("web api helpers", () => {
         apiQueryKeys.goals,
       ]),
     );
+  });
+});
+
+describe("tolerant list parsing — one bad entity never fails the response", () => {
+  const threadId = "24b19287-75b8-4a3e-9c10-691908479405";
+
+  const persistedProposal = {
+    ...acceptedProposalFixtureIds,
+    sourceMessageId: null,
+    intent: "summarize_progress",
+    targetDomain: "general",
+    title: "Review your week",
+    reason: "Weekly check-in.",
+    proposedChanges: {},
+    status: "pending",
+    validationStatus: "valid",
+    validationErrors: [],
+    userDecisionAt: null,
+    appliedReference: null,
+    createdAt: "2026-05-22T12:00:00.000Z",
+    updatedAt: "2026-05-22T12:00:00.000Z",
+  };
+
+  const invalidStatusProposal = {
+    ...persistedProposal,
+    id: "24b19287-75b8-4a3e-9c10-691908479406",
+    intent: "log_nutrition_incident",
+    targetDomain: "nutrition",
+    proposedChanges: { provenance: { source: "image_estimate" } },
+    validationStatus: "invalid",
+    validationErrors: ["proposedChanges: payload failed validation"],
+  };
+
+  it("listProposals keeps invalid-status proposals and drops only malformed rows", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify([
+            persistedProposal,
+            { totally: "malformed row" },
+            invalidStatusProposal,
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await listProposals(token, threadId);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data).toHaveLength(2);
+    expect(result.data?.[0]?.intent).toBe("summarize_progress");
+    expect(result.data?.[1]?.validationStatus).toBe("invalid");
+    expect(result.data?.[1]?.validationErrors).toEqual([
+      "proposedChanges: payload failed validation",
+    ]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain("proposals[1]");
+    warnSpy.mockRestore();
+  });
+
+  it("getChatThread drops a malformed message but keeps the rest of the thread", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const goodMessage = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      threadId,
+      role: "user",
+      content: "Hello coach",
+      metadata: {},
+      createdAt: "2026-05-22T12:00:00.000Z",
+      attachments: [],
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            thread: {
+              id: threadId,
+              userId: acceptedProposalFixtureIds.userId,
+              title: "Coaching",
+              createdAt: "2026-05-22T12:00:00.000Z",
+              updatedAt: "2026-05-22T12:00:00.000Z",
+            },
+            messages: [goodMessage, { broken: true }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await getChatThread(token, threadId);
+
+    expect(result.error).toBeUndefined();
+    expect(result.data?.messages).toHaveLength(1);
+    expect(result.data?.messages[0]?.content).toBe("Hello coach");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 });

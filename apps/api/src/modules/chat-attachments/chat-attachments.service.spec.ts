@@ -28,7 +28,6 @@ function createService(deps: {
       ...(input as Record<string, unknown>),
       threadId: null,
       messageId: null,
-      linkedDocumentId: null,
       recognition: null,
       failureReason: null,
       expiresAt: null,
@@ -47,7 +46,6 @@ function createService(deps: {
       mimeType: "image/jpeg",
       fileSizeBytes: 4,
       storageKey: "local://attachments/meal.jpg",
-      linkedDocumentId: null,
       linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
       consent: null,
       recognition: null,
@@ -143,28 +141,47 @@ describe("ChatAttachmentsService", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("rejects PDF MIME type (deferred; images only for now)", async () => {
-    const { service } = createService({});
+  it("accepts PDF upload as document_file category with mime_inferred categorySource", async () => {
+    vi.spyOn(LocalChatAttachmentStorageAdapter.prototype, "store");
+    const { service, chatAttachmentsRepository } = createService({});
 
-    await expect(
-      service.createAttachment(auth, {
-        filename: "labs.pdf",
-        mimeType: "application/pdf",
-        fileContentBase64: "dGVzdA==",
+    const record = await service.createAttachment(auth, {
+      filename: "training-program.pdf",
+      mimeType: "application/pdf",
+      fileContentBase64: "dGVzdA==",
+    });
+
+    expect(chatAttachmentsRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "document_file",
+        categorySource: "mime_inferred",
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    );
+    // Context-only: the attachment never links to persisted health data
+    // (no lab_reports / biomarker_readings rows are created from this path).
+    expect("linkedDocumentId" in record).toBe(false);
+    expect(record.category).toBe("document_file");
   });
 
-  it("rejects text/plain MIME type — images only, no document upload supported", async () => {
-    const { service } = createService({});
+  it("accepts text/plain upload as document_file category, never linked to persisted health data", async () => {
+    vi.spyOn(LocalChatAttachmentStorageAdapter.prototype, "store");
+    const { service, chatAttachmentsRepository } = createService({});
 
-    await expect(
-      service.createAttachment(auth, {
-        filename: "notes.txt",
-        mimeType: "text/plain",
-        fileContentBase64: "dGVzdA==",
+    const record = await service.createAttachment(auth, {
+      filename: "notes.txt",
+      mimeType: "text/plain",
+      fileContentBase64: "dGVzdA==",
+    });
+
+    expect(chatAttachmentsRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "document_file",
+        categorySource: "mime_inferred",
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    );
+    // The attachment path never creates lab_reports / biomarker_readings rows;
+    // the legacy linked-document field is gone from the contract entirely.
+    expect("linkedDocumentId" in record).toBe(false);
   });
 
   it("upload resolves to queued status — no upfront consent gate, no needs_consent on create", async () => {
@@ -185,10 +202,13 @@ describe("ChatAttachmentsService", () => {
     expect(record.consent).toBeNull();
   });
 
-  it("createAttachment does NOT insert a health_documents row — attachment stays as chat record only", async () => {
-    // The attachment pipeline must never auto-persist health_documents from an image upload.
-    // This guards against accidental reintroduction of the removed auto-persist path.
-    const healthDocumentsInsert = vi.fn();
+  it("createAttachment does NOT insert lab_reports or biomarker_readings rows — attachment stays as chat record only", async () => {
+    // The attachment pipeline must never auto-persist structured health data
+    // (lab_reports / biomarker_readings) from an upload. Persistence is the
+    // explicit Biomarkers lab-report upload only. This guards against
+    // reintroduction of the removed auto-persist path.
+    const labReportsInsert = vi.fn();
+    const biomarkerReadingsInsert = vi.fn();
     const { service, chatAttachmentsRepository } = createService({});
 
     await service.createAttachment(auth, {
@@ -199,8 +219,9 @@ describe("ChatAttachmentsService", () => {
 
     // chatAttachmentsRepository.create was called (attachment row created).
     expect(chatAttachmentsRepository.create).toHaveBeenCalledOnce();
-    // healthDocumentsInsert was never called (no health_documents auto-persist).
-    expect(healthDocumentsInsert).not.toHaveBeenCalled();
+    // No structured health rows were written (no lab-report / reading auto-persist).
+    expect(labReportsInsert).not.toHaveBeenCalled();
+    expect(biomarkerReadingsInsert).not.toHaveBeenCalled();
   });
 
   it("rejects oversized uploads", async () => {
@@ -253,7 +274,6 @@ describe("ChatAttachmentsService", () => {
             mimeType: "image/jpeg",
             fileSizeBytes: 4,
             storageKey: "local://attachments/meal.jpg",
-            linkedDocumentId: null,
             linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
             consent: null,
             recognition: null,
@@ -301,7 +321,6 @@ describe("ChatAttachmentsService", () => {
         mimeType: "image/jpeg",
         fileSizeBytes: 10000,
         storageKey: "local://attachments/food.jpg",
-        linkedDocumentId: null,
         linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
         consent: null,
         recognition: null,

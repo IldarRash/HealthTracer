@@ -14,7 +14,16 @@ export function createCoachAiProvider(
   promptTemplates?: CompiledPromptTemplates,
 ): CoachAiProvider {
   if (env.AI_COACH_PROVIDER === "openai") {
-    return createOpenAiCoachProvider(env.OPENAI_API_KEY, env.OPENAI_MODEL, promptTemplates);
+    return createOpenAiCoachProvider(
+      env.OPENAI_API_KEY,
+      env.OPENAI_MODEL,
+      {
+        router: env.OPENAI_MODEL_ROUTER,
+        domain: env.OPENAI_MODEL_DOMAIN,
+        decision: env.OPENAI_MODEL_DECISION,
+      },
+      promptTemplates,
+    );
   }
 
   throw new Error("AI_COACH_PROVIDER must be 'openai'; no stub provider exists.");

@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
+  CHAT_DOCUMENT_FILE_MIME_TYPES,
   CHAT_FOOD_PHOTO_MIME_TYPES,
   CHAT_MEDICAL_DOCUMENT_MIME_TYPES,
   CHAT_WORKOUT_ATTACHMENT_MIME_TYPES,
+  MAX_CHAT_DOCUMENT_FILE_BYTES,
   MAX_CHAT_FOOD_PHOTO_BYTES,
   MAX_CHAT_WORKOUT_ATTACHMENT_BYTES,
   chatAttachmentCategorySchema,
@@ -32,7 +34,6 @@ export const DEFAULT_ATTACHMENT_TURN_STAGE_ORDER: readonly AttachmentTurnStage[]
 ] as const;
 
 export const attachmentSafetyFloorsConfigSchema = z.object({
-  requireMedicalConsent: z.boolean().default(true),
   enforceProviderIsolation: z.boolean().default(true),
   requireOwnershipChecks: z.boolean().default(true),
   suppressMedicalPlanProposals: z.boolean().default(true),
@@ -41,7 +42,6 @@ export const attachmentSafetyFloorsConfigSchema = z.object({
 export type AttachmentSafetyFloorsConfig = z.infer<typeof attachmentSafetyFloorsConfigSchema>;
 
 export const DEFAULT_ATTACHMENT_SAFETY_FLOORS: AttachmentSafetyFloorsConfig = {
-  requireMedicalConsent: true,
   enforceProviderIsolation: true,
   requireOwnershipChecks: true,
   suppressMedicalPlanProposals: true,
@@ -69,6 +69,7 @@ export const attachmentRetentionConfigSchema = z.object({
     food_photo: chatAttachmentRetentionPolicySchema,
     medical_document: chatAttachmentRetentionPolicySchema,
     workout_attachment: chatAttachmentRetentionPolicySchema,
+    document_file: chatAttachmentRetentionPolicySchema,
   }),
 });
 
@@ -135,6 +136,12 @@ export function buildDefaultAttachmentBehaviorConfig(): AttachmentBehaviorConfig
           maxBytes: MAX_CHAT_WORKOUT_ATTACHMENT_BYTES,
           label: "Workout attachment",
         },
+        {
+          category: "document_file",
+          allowedMimeTypes: [...CHAT_DOCUMENT_FILE_MIME_TYPES],
+          maxBytes: MAX_CHAT_DOCUMENT_FILE_BYTES,
+          label: "Document file",
+        },
       ],
     },
     retention: {
@@ -143,6 +150,7 @@ export function buildDefaultAttachmentBehaviorConfig(): AttachmentBehaviorConfig
         food_photo: "ephemeral_recognition",
         medical_document: "document_consent_rules",
         workout_attachment: "ephemeral_recognition",
+        document_file: "ephemeral_recognition",
       },
     },
     turnStages: {

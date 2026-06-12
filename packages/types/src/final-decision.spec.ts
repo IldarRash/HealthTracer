@@ -29,7 +29,7 @@ const baseDomainAnswer = {
 const validOutput = {
   reply: "Here is your workout adjustment proposal. Nothing changes until you accept.",
   selectedAction: null,
-  proposals: [],
+  selectedProposalIds: [],
   consentRequired: false,
 };
 
@@ -110,6 +110,83 @@ describe("FinalDecisionRequest schema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("lowConfidenceRoute defaults to false when not provided", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "Hello",
+    });
+
+    expect(parsed.lowConfidenceRoute).toBe(false);
+  });
+
+  it("lowConfidenceRoute can be set to true for low-confidence fallback turns", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "uh, hmm, I dunno",
+      lowConfidenceRoute: true,
+    });
+
+    expect(parsed.lowConfidenceRoute).toBe(true);
+  });
+
+  it("lowConfidenceRoute=true does not affect the output schema shape", () => {
+    // The flag is input-only; it must not appear on FinalDecisionOutput.
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "ambiguous question",
+      lowConfidenceRoute: true,
+    });
+
+    expect(parsed.userMessage).toBe("ambiguous question");
+    expect(parsed.lowConfidenceRoute).toBe(true);
+  });
+
+  it("deepReview is absent by default (non-review turns)", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "Hello",
+    });
+
+    expect(parsed.deepReview).toBeUndefined();
+  });
+
+  it("round-trips the deepReview block (Phase 4 sufficiency framing)", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "проанализируй последние полгода",
+      deepReview: {
+        requestedPeriodDays: 180,
+        grantedPeriodDays: 180,
+        dataQuality: "partial",
+      },
+    });
+
+    expect(parsed.deepReview).toEqual({
+      requestedPeriodDays: 180,
+      grantedPeriodDays: 180,
+      dataQuality: "partial",
+    });
+  });
+
+  it("accepts deepReview with a null requestedPeriodDays and rejects free-text dataQuality", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "review my progress",
+      deepReview: {
+        requestedPeriodDays: null,
+        grantedPeriodDays: 90,
+        dataQuality: "insufficient",
+      },
+    });
+
+    expect(parsed.deepReview?.requestedPeriodDays).toBeNull();
+
+    expect(
+      finalDecisionRequestSchema.safeParse({
+        userMessage: "review my progress",
+        deepReview: {
+          requestedPeriodDays: null,
+          grantedPeriodDays: 90,
+          dataQuality: "great data",
+        },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -117,33 +194,26 @@ describe("FinalDecisionRequest schema", () => {
 // ---------------------------------------------------------------------------
 
 describe("FinalDecisionOutput schema", () => {
-  it("parses a valid output with reply and no proposals", () => {
+  it("parses a valid output with reply and no selected proposal ids", () => {
     const parsed = finalDecisionOutputSchema.parse(validOutput);
 
     expect(parsed.reply).toBe(validOutput.reply);
     expect(parsed.selectedAction).toBeNull();
-    expect(parsed.proposals).toEqual([]);
+    expect(parsed.selectedProposalIds).toEqual([]);
     expect(parsed.consentRequired).toBe(false);
   });
 
-  it("parses an output with proposals and a selected action", () => {
+  it("parses an output with selectedProposalIds and a selected action", () => {
     const parsed = finalDecisionOutputSchema.parse({
       reply: "I drafted a workout adjustment you can review.",
       selectedAction: "adapt_workout",
-      proposals: [
-        {
-          intent: "adapt_workout_plan",
-          targetDomain: "workout",
-          title: "Reduce load",
-          reason: "Recovery week.",
-          proposedChanges: {},
-        },
-      ],
+      selectedProposalIds: ["cand_workout_0", "cand_workout_1"],
       consentRequired: false,
     });
 
     expect(parsed.selectedAction).toBe("adapt_workout");
-    expect(parsed.proposals).toHaveLength(1);
+    expect(parsed.selectedProposalIds).toHaveLength(2);
+    expect(parsed.selectedProposalIds[0]).toBe("cand_workout_0");
   });
 
   it("consentRequired is present and defaults to false", () => {
@@ -179,10 +249,10 @@ describe("FinalDecisionOutput schema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects proposals exceeding 5 entries", () => {
+  it("rejects selectedProposalIds exceeding 5 entries", () => {
     const result = finalDecisionOutputSchema.safeParse({
-      reply: "Too many proposals",
-      proposals: Array.from({ length: 6 }, (_, i) => ({ id: `proposal-${i}` })),
+      reply: "Too many ids",
+      selectedProposalIds: Array.from({ length: 6 }, (_, i) => `cand_workout_${i}`),
     });
 
     expect(result.success).toBe(false);
@@ -289,6 +359,15 @@ describe("validateFinalDecisionOutputShape", () => {
     expect(errors.some((e) => e.includes('forbidden field "summary"'))).toBe(true);
   });
 
+  it("rejects output containing 'proposals' field (Slice 2: selection-by-ID)", () => {
+    const errors = validateFinalDecisionOutputShape({
+      ...validOutput,
+      proposals: [{ intent: "create_workout_plan", targetDomain: "workout" }],
+    });
+
+    expect(errors.some((e) => e.includes('forbidden field "proposals"'))).toBe(true);
+  });
+
   it("returns error for null input", () => {
     const errors = validateFinalDecisionOutputShape(null);
 
@@ -324,7 +403,7 @@ describe("createFallbackFinalDecision", () => {
 
     expect(fallback.reply.length).toBeGreaterThan(0);
     expect(fallback.selectedAction).toBeNull();
-    expect(fallback.proposals).toEqual([]);
+    expect(fallback.selectedProposalIds).toEqual([]);
     expect(fallback.consentRequired).toBe(false);
   });
 

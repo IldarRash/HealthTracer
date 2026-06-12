@@ -4,6 +4,9 @@ import { buildDefaultDirectPathKindMatchers } from "./direct-chat-path-default-p
 export const directChatPathKindSchema = z.enum([
   "today_summary_read",
   "mark_today_workout_done",
+  "nutrition_plan_read",
+  "weekly_progress_read",
+  "workout_plan_read",
 ]);
 
 export type DirectChatPathKind = z.infer<typeof directChatPathKindSchema>;

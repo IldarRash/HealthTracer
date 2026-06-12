@@ -5,7 +5,7 @@ import type {
   ComputeRecipeMacrosResponse,
   CreateRecipeInput,
   RecipeIngredient,
-  RecipeMacroEstimates,
+  RecipePerServingMacros,
   RecipeMealType,
   UpdateRecipeInput,
 } from "@health/types";
@@ -49,10 +49,10 @@ type RecipeFormState = {
   prepMinutes: string;
   cookMinutes: string;
   // macro override fields
-  estimatedCalories: string;
-  proteinGrams: string;
-  carbsGrams: string;
-  fatGrams: string;
+  caloriesPerServing: string;
+  proteinGramsPerServing: string;
+  carbsGramsPerServing: string;
+  fatGramsPerServing: string;
   computedMacros: ComputeRecipeMacrosResponse | null;
 };
 
@@ -70,10 +70,10 @@ function initFormState(recipe?: Recipe): RecipeFormState {
       allergenTags: recipe.allergenTags.join(", "),
       prepMinutes: recipe.prepMinutes != null ? String(recipe.prepMinutes) : "",
       cookMinutes: recipe.cookMinutes != null ? String(recipe.cookMinutes) : "",
-      estimatedCalories: String(recipe.macroEstimates.estimatedCalories),
-      proteinGrams: String(recipe.macroEstimates.proteinGrams),
-      carbsGrams: String(recipe.macroEstimates.carbsGrams),
-      fatGrams: String(recipe.macroEstimates.fatGrams),
+      caloriesPerServing: String(recipe.perServingMacros.caloriesPerServing),
+      proteinGramsPerServing: String(recipe.perServingMacros.proteinGramsPerServing),
+      carbsGramsPerServing: String(recipe.perServingMacros.carbsGramsPerServing),
+      fatGramsPerServing: String(recipe.perServingMacros.fatGramsPerServing),
       computedMacros: null,
     };
   }
@@ -90,10 +90,10 @@ function initFormState(recipe?: Recipe): RecipeFormState {
     allergenTags: "",
     prepMinutes: "",
     cookMinutes: "",
-    estimatedCalories: "",
-    proteinGrams: "",
-    carbsGrams: "",
-    fatGrams: "",
+    caloriesPerServing: "",
+    proteinGramsPerServing: "",
+    carbsGramsPerServing: "",
+    fatGramsPerServing: "",
     computedMacros: null,
   };
 }
@@ -115,17 +115,17 @@ function parseNonnegInt(raw: string): number | null {
   return !isNaN(n) && n >= 0 ? n : null;
 }
 
-function buildMacroEstimates(form: RecipeFormState): RecipeMacroEstimates | null {
-  const cal = parsePositiveInt(form.estimatedCalories);
-  const prot = parseNonnegInt(form.proteinGrams);
-  const carbs = parseNonnegInt(form.carbsGrams);
-  const fat = parseNonnegInt(form.fatGrams);
+function buildMacroEstimates(form: RecipeFormState): RecipePerServingMacros | null {
+  const cal = parsePositiveInt(form.caloriesPerServing);
+  const prot = parseNonnegInt(form.proteinGramsPerServing);
+  const carbs = parseNonnegInt(form.carbsGramsPerServing);
+  const fat = parseNonnegInt(form.fatGramsPerServing);
 
   if (cal == null || prot == null || carbs == null || fat == null) {
     return null;
   }
 
-  return { estimatedCalories: cal, proteinGrams: prot, carbsGrams: carbs, fatGrams: fat };
+  return { caloriesPerServing: cal, proteinGramsPerServing: prot, carbsGramsPerServing: carbs, fatGramsPerServing: fat };
 }
 
 function buildCreateInput(form: RecipeFormState): CreateRecipeInput | string {
@@ -265,10 +265,10 @@ export function RecipeForm({ recipe, onSuccess, onCancel }: RecipeFormProps) {
     onSuccess: (computed) => {
       setForm((prev) => ({
         ...prev,
-        estimatedCalories: String(computed.estimatedCalories),
-        proteinGrams: String(computed.proteinGrams),
-        carbsGrams: String(computed.carbsGrams),
-        fatGrams: String(computed.fatGrams),
+        caloriesPerServing: String(computed.caloriesPerServing),
+        proteinGramsPerServing: String(computed.proteinGramsPerServing),
+        carbsGramsPerServing: String(computed.carbsGramsPerServing),
+        fatGramsPerServing: String(computed.fatGramsPerServing),
         computedMacros: computed,
       }));
     },
@@ -661,8 +661,8 @@ export function RecipeForm({ recipe, onSuccess, onCancel }: RecipeFormProps) {
           <div className="notice notice-inline" role="status">
             <p className="proposal-meta">
               Computed estimate ({RECIPE_CONFIDENCE_LABELS[form.computedMacros.confidence]}):
-              {" "}{form.computedMacros.estimatedCalories} cal · {form.computedMacros.proteinGrams}g
-              protein · {form.computedMacros.carbsGrams}g carbs · {form.computedMacros.fatGrams}g fat.
+              {" "}{form.computedMacros.caloriesPerServing} cal · {form.computedMacros.proteinGramsPerServing}g
+              protein · {form.computedMacros.carbsGramsPerServing}g carbs · {form.computedMacros.fatGramsPerServing}g fat.
               Values pre-filled below — edit as needed.
             </p>
           </div>
@@ -677,9 +677,9 @@ export function RecipeForm({ recipe, onSuccess, onCancel }: RecipeFormProps) {
                 className="form-input"
                 inputMode="numeric"
                 placeholder="e.g. 500"
-                value={form.estimatedCalories}
+                value={form.caloriesPerServing}
                 disabled={isPending}
-                onChange={(e) => setForm((prev) => ({ ...prev, estimatedCalories: e.target.value }))}
+                onChange={(e) => setForm((prev) => ({ ...prev, caloriesPerServing: e.target.value }))}
               />
             </div>
             <div className="form-field">
@@ -689,9 +689,9 @@ export function RecipeForm({ recipe, onSuccess, onCancel }: RecipeFormProps) {
                 className="form-input"
                 inputMode="numeric"
                 placeholder="e.g. 30"
-                value={form.proteinGrams}
+                value={form.proteinGramsPerServing}
                 disabled={isPending}
-                onChange={(e) => setForm((prev) => ({ ...prev, proteinGrams: e.target.value }))}
+                onChange={(e) => setForm((prev) => ({ ...prev, proteinGramsPerServing: e.target.value }))}
               />
             </div>
             <div className="form-field">
@@ -701,9 +701,9 @@ export function RecipeForm({ recipe, onSuccess, onCancel }: RecipeFormProps) {
                 className="form-input"
                 inputMode="numeric"
                 placeholder="e.g. 60"
-                value={form.carbsGrams}
+                value={form.carbsGramsPerServing}
                 disabled={isPending}
-                onChange={(e) => setForm((prev) => ({ ...prev, carbsGrams: e.target.value }))}
+                onChange={(e) => setForm((prev) => ({ ...prev, carbsGramsPerServing: e.target.value }))}
               />
             </div>
             <div className="form-field">
@@ -713,9 +713,9 @@ export function RecipeForm({ recipe, onSuccess, onCancel }: RecipeFormProps) {
                 className="form-input"
                 inputMode="numeric"
                 placeholder="e.g. 15"
-                value={form.fatGrams}
+                value={form.fatGramsPerServing}
                 disabled={isPending}
-                onChange={(e) => setForm((prev) => ({ ...prev, fatGrams: e.target.value }))}
+                onChange={(e) => setForm((prev) => ({ ...prev, fatGramsPerServing: e.target.value }))}
               />
             </div>
           </div>

@@ -6,11 +6,15 @@ dist/
 coverage/
 *.tsbuildinfo
 *.log
+*.bak
 
 .env
 .env.*
 !.env.example
 !.env.*.example
+
+# MCP config contains local API keys — never commit the live file; use .cursor/mcp.json.example
+.cursor/mcp.json
 
 apps/api/.data/
 

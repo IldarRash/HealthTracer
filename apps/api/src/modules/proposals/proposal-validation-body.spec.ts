@@ -11,7 +11,6 @@ const stubService = new ProposalValidationService(
   {} as never,  // progressRepository
   {} as never,  // exercisesService
   {} as never,  // habitsService
-  {} as never,  // documentSignalsRepository
   {} as never,  // metricsAiContextService
   {} as never,  // goalsRepository
   {} as never,  // recoveryContextService
@@ -22,6 +21,7 @@ const stubService = new ProposalValidationService(
   {} as never,  // nutritionRepository
   {} as never,  // recipesRepository
   {} as never,  // chatAttachmentsRepository
+  {} as never,  // biomarkersRepository
 );
 
 const validPayload = {
@@ -205,9 +205,9 @@ describe("ProposalValidationService — validateRawProposal for save_body_analys
   });
 });
 
-// ─── Safety floor: no health_documents write ──────────────────────────────
+// ─── Safety floor: no structured-health-data write ────────────────────────
 
-describe("ProposalApplyService safety — save_body_analysis never writes health_documents", () => {
+describe("ProposalApplyService safety — save_body_analysis never writes lab_reports/biomarker_readings", () => {
   it("does not expose a documents service or createDocument call path on the service", async () => {
     // BodyService.applyBodyAnalysisProposal only receives numbers, never photos.
     // Verify the service method signature excludes document/image parameters.

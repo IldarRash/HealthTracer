@@ -13,6 +13,7 @@ import type {
   RecipeIngredient,
   RecipeListQuery,
   RecipeListResponse,
+  RecipePerServingMacros,
   UpdateRecipeInput,
   UpdateRecipeRecommendationStatusInput,
   UserRecipeRecommendation,
@@ -33,6 +34,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { computeRecipeMacros } from "@health/nutrition-macros";
@@ -56,11 +58,20 @@ import { RecipesRepository } from "./recipes.repository.js";
 import { GENERIC_RECIPE_CATALOG_CATEGORIES } from "./generic-recipe-catalog-categories.js";
 import type { RecipeCatalogProvider } from "./recipe-catalog-provider.js";
 import { RECIPE_CATALOG_PROVIDER } from "./recipe-catalog.tokens.js";
+import { dedupeRecipesByCanonicalName, normalizeRecipeNameKey } from "./recipe-dedup.js";
 
 const GENERATED_RECOMMENDATION_LIMIT = 5;
+/** After an empty or failed provider fetch, skip re-hydration on browse for this window. */
+const BROWSE_HYDRATION_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 @Injectable()
 export class RecipesService {
+  private readonly logger = new Logger(RecipesService.name);
+  /** In-flight provider hydration promise, used as a single-entry latch. */
+  private catalogHydrationPromise: Promise<void> | null = null;
+  /** Timestamp of the last hydration attempt that imported zero rows (or failed). */
+  private lastEmptyHydrationAt: number | null = null;
+
   constructor(
     private readonly recipesRepository: RecipesRepository,
     private readonly nutritionRepository: NutritionRepository,
@@ -74,8 +85,19 @@ export class RecipesService {
 
   async listRecipes(filters: RecipeListQuery, auth?: ClerkAuthContext): Promise<RecipeListResponse> {
     const userId = auth ? (await this.usersService.resolveFromAuth(auth)).id : null;
+
+    // Hydrate provider catalog on browse when the catalog appears empty (zero
+    // active provider recipes). This keeps the browse path consistent with the
+    // recommendations path. Lazy + idempotent: the in-flight latch prevents
+    // concurrent browse requests from issuing duplicate imports.
+    const providerRows = await this.recipesRepository.countActiveProviderRecipes();
+
+    if (providerRows === 0 && !this.isWithinBrowseHydrationCooldown()) {
+      await this.ensureProviderCatalogLoaded();
+    }
+
     const rows = await this.recipesRepository.listActiveRecipes(filters, userId);
-    let recipes = rows.map(toRecipe);
+    let recipes = dedupeRecipesByCanonicalName(rows.map(toRecipe));
 
     if (filters.compatibleWithRestrictions?.length) {
       const hardFilters = collectHardFilters(filters.compatibleWithRestrictions, [], []);
@@ -139,7 +161,9 @@ export class RecipesService {
     const needsMacroRecompute =
       !parsed.macroEstimates && (parsed.ingredients !== undefined || parsed.servings !== undefined);
 
-    let resolvedMacros: { estimatedCalories: number; proteinGrams: number; carbsGrams: number; fatGrams: number; fiberGrams?: number | null; confidence: "high" | "medium" | "low" } | undefined;
+    let resolvedMacros:
+      | (RecipePerServingMacros & { confidence: "high" | "medium" | "low" })
+      | undefined;
 
     if (parsed.macroEstimates) {
       resolvedMacros = { ...parsed.macroEstimates, confidence: "high" as const };
@@ -223,15 +247,29 @@ export class RecipesService {
     const hardFilters = await this.resolveHardFilters(user.id, activeContext.payload);
     await this.ensureProviderCatalogLoaded();
     const catalog = await this.recipesRepository.listActiveRecipes({}, user.id);
-    const compatible = catalog
+    const ranked = catalog
       .map((row) => ({ row, recipe: toRecipe(row) }))
       .filter(({ recipe }) => isRecipeCompatibleWithHardFilters(recipe, hardFilters))
       .sort(
         (left, right) =>
-          scoreRecipeMacroFit(right.recipe.macroEstimates, activeContext.targets) -
-          scoreRecipeMacroFit(left.recipe.macroEstimates, activeContext.targets),
-      )
-      .slice(0, GENERATED_RECOMMENDATION_LIMIT);
+          scoreRecipeMacroFit(right.recipe.perServingMacros, activeContext.targets) -
+          scoreRecipeMacroFit(left.recipe.perServingMacros, activeContext.targets),
+      );
+
+    // Dedup by canonical name after ranking; prefer curated over provider within each key.
+    const seen = new Map<string, typeof ranked[number]>();
+    for (const item of ranked) {
+      const key = normalizeRecipeNameKey(item.recipe.name);
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, item);
+      } else if (item.recipe.provider == null && existing.recipe.provider != null) {
+        // Prefer curated (no provider) over provider rows.
+        seen.set(key, item);
+      }
+    }
+
+    const compatible = [...seen.values()].slice(0, GENERATED_RECOMMENDATION_LIMIT);
 
     if (compatible.length === 0) {
       return {
@@ -249,8 +287,8 @@ export class RecipesService {
         reason: "Rule-based recommendation from your active nutrition plan.",
         fitSummary: buildRuleBasedFitSummary(
           {
-            estimatedCalories: recipe.macroEstimates.estimatedCalories,
-            proteinGrams: recipe.macroEstimates.proteinGrams,
+            caloriesPerServing: recipe.perServingMacros.caloriesPerServing,
+            proteinGramsPerServing: recipe.perServingMacros.proteinGramsPerServing,
             mealTypes: recipe.mealTypes,
           },
           activeContext.targets,
@@ -418,23 +456,24 @@ export class RecipesService {
     recipe: Recipe,
     recommendationId: string,
   ): LogNutritionIncidentProposalPayload {
+    // Log exactly 1 serving with per-serving macro values.
     return logNutritionIncidentProposalPayloadSchema.parse({
       incidentDateTime: new Date().toISOString(),
       items: [
         {
           name: recipe.name,
           quantity: "1 serving",
-          calories: recipe.macroEstimates.estimatedCalories,
-          proteinGrams: recipe.macroEstimates.proteinGrams,
-          carbsGrams: recipe.macroEstimates.carbsGrams,
-          fatGrams: recipe.macroEstimates.fatGrams,
+          calories: recipe.perServingMacros.caloriesPerServing,
+          proteinGrams: recipe.perServingMacros.proteinGramsPerServing,
+          carbsGrams: recipe.perServingMacros.carbsGramsPerServing,
+          fatGrams: recipe.perServingMacros.fatGramsPerServing,
         },
       ],
-      estimatedCalories: recipe.macroEstimates.estimatedCalories,
+      estimatedCalories: recipe.perServingMacros.caloriesPerServing,
       estimatedMacros: {
-        proteinGrams: recipe.macroEstimates.proteinGrams,
-        carbsGrams: recipe.macroEstimates.carbsGrams,
-        fatGrams: recipe.macroEstimates.fatGrams,
+        proteinGrams: recipe.perServingMacros.proteinGramsPerServing,
+        carbsGrams: recipe.perServingMacros.carbsGramsPerServing,
+        fatGrams: recipe.perServingMacros.fatGramsPerServing,
       },
       confidence: recipe.confidence,
       provenance: {
@@ -585,18 +624,59 @@ export class RecipesService {
     });
   }
 
-  private async ensureProviderCatalogLoaded(): Promise<void> {
+  private ensureProviderCatalogLoaded(): Promise<void> {
+    if (this.catalogHydrationPromise) {
+      return this.catalogHydrationPromise;
+    }
+
+    this.catalogHydrationPromise = this.runProviderCatalogHydration().finally(() => {
+      this.catalogHydrationPromise = null;
+    });
+
+    return this.catalogHydrationPromise;
+  }
+
+  private async runProviderCatalogHydration(): Promise<void> {
     try {
       const drafts = await this.recipeCatalogProvider.fetchByGenericCategories(
         GENERIC_RECIPE_CATALOG_CATEGORIES,
       );
 
       if (drafts.length > 0) {
-        await this.recipesRepository.upsertProviderRecipes(drafts);
+        // Skip provider drafts whose canonical name collides with an existing active curated recipe.
+        const curatedNames = await this.recipesRepository.listActiveCuratedRecipeNames();
+        const curatedKeys = new Set(curatedNames.map(normalizeRecipeNameKey));
+        const filteredDrafts = drafts.filter(
+          (draft) => !curatedKeys.has(normalizeRecipeNameKey(draft.name)),
+        );
+
+        if (filteredDrafts.length > 0) {
+          await this.recipesRepository.upsertProviderRecipes(filteredDrafts);
+        }
+
+        if (filteredDrafts.length === 0) {
+          this.lastEmptyHydrationAt = Date.now();
+        }
+      } else {
+        // Provider returned no rows — record cooldown so sequential browses skip re-fetch.
+        this.lastEmptyHydrationAt = Date.now();
       }
-    } catch {
-      // Fall back to the local seeded catalog when the external provider is unavailable.
+    } catch (error) {
+      // Degrade gracefully to the seeded-only catalog; log provider name + message only.
+      this.logger.warn(
+        `Recipe catalog provider "${this.recipeCatalogProvider.providerName}" hydration failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // Record cooldown so sequential browses skip re-fetch while the provider is down.
+      this.lastEmptyHydrationAt = Date.now();
     }
+  }
+
+  private isWithinBrowseHydrationCooldown(): boolean {
+    if (this.lastEmptyHydrationAt === null) {
+      return false;
+    }
+
+    return Date.now() - this.lastEmptyHydrationAt < BROWSE_HYDRATION_COOLDOWN_MS;
   }
 
   private async resolveActiveNutritionContext(userId: string) {

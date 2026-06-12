@@ -495,10 +495,29 @@ export function shouldRedirectFromOnboarding(
   return onboardingCompleted && isOnboardingPath(pathname);
 }
 
-export function shouldHidePrimaryNavDuringOnboarding(
-  onboardingCompleted: boolean | undefined,
-): boolean {
-  return onboardingCompleted !== true;
+export type PrimaryNavState = "ready" | "loading" | "locked";
+
+/**
+ * Resolves the sidebar's primary-nav display state from query status.
+ *
+ * - "loading" — data not yet available (isLoading); render skeleton, not a lock.
+ * - "ready"   — error path: fail open so the gate owns error UX, not the sidebar.
+ * - "locked"  — data arrived and definitively says onboarding is incomplete.
+ * - "ready"   — data arrived and onboarding is complete.
+ */
+export function resolvePrimaryNavState({
+  isLoading,
+  isError,
+  onboardingCompleted,
+}: {
+  isLoading: boolean;
+  isError: boolean;
+  onboardingCompleted: boolean | undefined;
+}): PrimaryNavState {
+  if (isLoading) return "loading";
+  if (isError) return "ready";
+  if (onboardingCompleted === false) return "locked";
+  return "ready";
 }
 
 export function readOnboardingDraftFromStorage(): OnboardingDraft | null {

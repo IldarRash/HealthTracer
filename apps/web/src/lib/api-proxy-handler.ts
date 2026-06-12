@@ -20,7 +20,7 @@ export type ApiProxyRequestInput = {
 export type ApiProxyResponse = {
   status: number;
   headers: Headers;
-  body: ArrayBuffer;
+  body: ReadableStream<Uint8Array> | ArrayBuffer;
   requestId: string;
   durationMs: number;
 };
@@ -92,12 +92,19 @@ export async function proxyApiRequest(
       responseHeaders.set("content-type", contentType);
     }
 
-    const responseBody =
+    // Respect upstream cache semantics (e.g. `private, no-store` on attachment
+    // content). The proxy never adds caching of its own.
+    const cacheControl = upstreamResponse.headers.get("cache-control");
+    if (cacheControl) {
+      responseHeaders.set("cache-control", cacheControl);
+    }
+
+    const responseBody: ReadableStream<Uint8Array> | ArrayBuffer =
       upstreamStatus === 502 && upstreamResponse.status === 0
         ? new TextEncoder().encode(
             JSON.stringify({ statusCode: 502, message: "Upstream API is unavailable." }),
           ).buffer
-        : await upstreamResponse.arrayBuffer();
+        : (upstreamResponse.body ?? new ReadableStream());
 
     return {
       status: upstreamStatus,

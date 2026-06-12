@@ -50,7 +50,6 @@ export class ChatTurnAttachmentStageService {
       userId: attachment.userId,
       category: attachment.category,
       status: attachment.status,
-      linkedDocumentId: attachment.linkedDocumentId,
       linkedImageRefId: attachment.linkedImageRefId,
       retentionPolicy: attachment.retentionPolicy,
       expiresAt: attachment.expiresAt,
@@ -148,7 +147,6 @@ export class ChatTurnAttachmentStageService {
       userId: attachment.userId,
       category: attachment.category,
       status: attachment.status,
-      linkedDocumentId: attachment.linkedDocumentId,
       linkedImageRefId: attachment.linkedImageRefId,
       retentionPolicy: attachment.retentionPolicy,
       expiresAt: attachment.expiresAt,
@@ -218,6 +216,7 @@ export class ChatTurnAttachmentStageService {
       mimeType: attachment.mimeType,
       consentState: resolveConsentState(attachment),
       storageRef: attachment.storageKey,
+      filename: attachment.filename,
     }));
   }
 

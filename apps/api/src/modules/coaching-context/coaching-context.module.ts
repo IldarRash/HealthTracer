@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { env } from "../../env.js";
 import { AiBehaviorModule } from "../ai/ai-behavior.module.js";
-import { DocumentsModule } from "../documents/documents.module.js";
+import { BiomarkersModule } from "../biomarkers/biomarkers.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
 import { HealthMetricsModule } from "../health-metrics/health-metrics.module.js";
 import { RecoveryModule } from "../recovery/recovery.module.js";
@@ -29,7 +29,7 @@ import { OpenAiContextCompressionProvider } from "./openai-context-compression.p
     NutritionModule,
     HabitsModule,
     ProgressModule,
-    DocumentsModule,
+    BiomarkersModule,
     HealthMetricsModule,
     WellbeingCheckInsModule,
     RecoveryModule,

@@ -17,8 +17,11 @@ import {
   CONTEXT_BUDGET_ABSOLUTE_LIMITS,
   applyContextBudgetSafetyFloor,
   clampContextBudgetPolicy,
+  contextBudgetDegradationNotesSchema,
   contextBudgetPolicySchema,
   contextBudgetProfileSchema,
+  DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+  DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
   DEFAULT_CONTEXT_BUDGET_POLICY,
   DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
   tryCompileContextBudgetMessagePattern,
@@ -69,6 +72,15 @@ export const proposalRevisionIntentSchema = z.enum([
 ]);
 
 export type ProposalRevisionIntent = z.infer<typeof proposalRevisionIntentSchema>;
+
+/**
+ * Default monthly/long-period review trigger pattern (EN + RU).
+ * Cyrillic alternatives sit OUTSIDE the \b(...)\b group because JS \b
+ * boundaries only work for ASCII word characters.
+ */
+export const DEFAULT_MONTHLY_REVIEW_MESSAGE_PATTERN =
+  "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day|half a year|six months|6 months|12 months|last year|past year|all[- ]?time|entire history|full history)\\b" +
+  "|месяц|квартал|полгода|пол года|шесть месяцев|12 месяцев|за вс[её] время|вс(?:я|ю) истори|за (?:последний )?год";
 
 export const AI_BEHAVIOR_CONFIG_VERSION = 1 as const;
 
@@ -128,15 +140,52 @@ export const directPathsBehaviorConfigSchema = z.object({
   replyTemplates: directPathReplyTemplatesSchema,
 });
 
+/**
+ * Bilingual deterministic system reply (EN/RU). Same shape pattern as the
+ * context-budget degradation notes: config can override copy, never remove it.
+ */
+export const localizedSystemReplySchema = z.object({
+  en: z.string().min(1).max(500),
+  ru: z.string().min(1).max(500),
+});
+
+export type LocalizedSystemReply = z.infer<typeof localizedSystemReplySchema>;
+
+/** Built-in fail-closed default for the free-tier daily AI quota gate reply. */
+export const DEFAULT_QUOTA_LIMIT_REPLY: LocalizedSystemReply = {
+  en: "You've reached today's free AI message limit — upgrade to Pro for unlimited coaching.",
+  ru: "Вы достигли дневного лимита бесплатных сообщений ИИ-коуча — перейдите на Pro для безлимитного коучинга.",
+};
+
 export const chatBehaviorConfigSchema = z.object({
   emptyAttachmentMessage: z.string().min(1).max(500),
+  /**
+   * Deterministic system reply persisted when the free-tier daily AI message
+   * quota is exhausted (no-stubs rule: deterministic product copy lives in
+   * repo config, not hardcoded in services). Selected by the turn's response
+   * language via resolveQuotaLimitReply.
+   */
+  quotaLimitReply: localizedSystemReplySchema.default(DEFAULT_QUOTA_LIMIT_REPLY),
 });
 
 export type ChatBehaviorConfig = z.infer<typeof chatBehaviorConfigSchema>;
 
 export const DEFAULT_CHAT_BEHAVIOR: ChatBehaviorConfig = {
   emptyAttachmentMessage: "Shared attachment(s) for coaching review.",
+  quotaLimitReply: DEFAULT_QUOTA_LIMIT_REPLY,
 };
+
+/**
+ * Resolve the quota-limit system reply for the turn's response language.
+ * Pure; falls back to English for unknown/null languages (same convention as
+ * buildLookbackClampNote in context-budget.ts).
+ */
+export function resolveQuotaLimitReply(
+  chat: ChatBehaviorConfig,
+  language: string | null | undefined,
+): string {
+  return language === "ru" ? chat.quotaLimitReply.ru : chat.quotaLimitReply.en;
+}
 
 export type DirectPathsBehaviorConfig = z.infer<typeof directPathsBehaviorConfigSchema>;
 
@@ -166,7 +215,14 @@ export type ResponseModesBehaviorConfig = z.infer<typeof responseModesBehaviorCo
 export const contextBudgetProfilesConfigSchema = z.object({
   default: contextBudgetPolicySchema,
   deep_review: contextBudgetPolicySchema,
+  deep_history: contextBudgetPolicySchema,
 });
+
+export const CONTEXT_BUDGET_PROFILE_IDS = [
+  "default",
+  "deep_review",
+  "deep_history",
+] as const satisfies readonly z.infer<typeof contextBudgetProfileSchema>[];
 
 export type ContextBudgetProfilesConfig = z.infer<typeof contextBudgetProfilesConfigSchema>;
 
@@ -192,6 +248,12 @@ export const contextBudgetTriggersConfigSchema = z.object({
   monthlyReviewAgentIntents: z.array(agentIntentSchema).min(1).max(10).default([
     "longevity_overview",
   ]),
+  /**
+   * Review-ish turns with a detected requestedLookbackDays above this value
+   * select the deep_history profile (monthly granularity, mandatory
+   * compression). Defaults to 91 so 90-day/quarter reviews stay deep_review.
+   */
+  deepHistoryMinLookbackDays: z.number().int().min(1).max(3650).default(91),
 });
 
 export type ContextBudgetTriggersConfig = z.infer<typeof contextBudgetTriggersConfigSchema>;
@@ -199,6 +261,10 @@ export type ContextBudgetTriggersConfig = z.infer<typeof contextBudgetTriggersCo
 export const contextBudgetsBehaviorConfigSchema = z.object({
   profiles: contextBudgetProfilesConfigSchema,
   triggers: contextBudgetTriggersConfigSchema,
+  /** EN/RU degradation note templates; fail-closed to built-in defaults. */
+  degradationNotes: contextBudgetDegradationNotesSchema.default(
+    DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
+  ),
 });
 
 export type ContextBudgetsBehaviorConfig = z.infer<typeof contextBudgetsBehaviorConfigSchema>;
@@ -288,6 +354,74 @@ export type DeterministicProposalTriggersConfig = z.infer<
   typeof deterministicProposalTriggersConfigSchema
 >;
 
+export const quickActionConfigSchema = z.object({
+  id: directChatPathKindSchema,
+  labelEn: z.string().min(1).max(120),
+  labelRu: z.string().min(1).max(120),
+  messageText: z.object({
+    en: z.string().min(1).max(240),
+    ru: z.string().min(1).max(240),
+  }),
+});
+
+export type QuickActionConfig = z.infer<typeof quickActionConfigSchema>;
+
+export const suggestedQuickActionsConfigSchema = z.object({
+  actions: z.array(quickActionConfigSchema).max(10).default([]),
+});
+
+export type SuggestedQuickActionsConfig = z.infer<typeof suggestedQuickActionsConfigSchema>;
+
+export const DEFAULT_SUGGESTED_QUICK_ACTIONS: SuggestedQuickActionsConfig = {
+  actions: [
+    {
+      id: "today_summary_read",
+      labelEn: "Today's summary",
+      labelRu: "Сводка на сегодня",
+      messageText: {
+        en: "What's today?",
+        ru: "Что у меня на сегодня?",
+      },
+    },
+    {
+      id: "mark_today_workout_done",
+      labelEn: "Mark workout done",
+      labelRu: "Отметить тренировку",
+      messageText: {
+        en: "Mark today's workout done",
+        ru: "Отметь тренировку как выполненную",
+      },
+    },
+    {
+      id: "nutrition_plan_read",
+      labelEn: "My nutrition plan",
+      labelRu: "Мой план питания",
+      messageText: {
+        en: "Show my nutrition plan",
+        ru: "Покажи мой план питания",
+      },
+    },
+    {
+      id: "weekly_progress_read",
+      labelEn: "Weekly progress",
+      labelRu: "Прогресс за неделю",
+      messageText: {
+        en: "Show my weekly progress",
+        ru: "Мой прогресс за неделю",
+      },
+    },
+    {
+      id: "workout_plan_read",
+      labelEn: "My workout plan",
+      labelRu: "Мой план тренировок",
+      messageText: {
+        en: "Show my workout plan",
+        ru: "Покажи мой план тренировок",
+      },
+    },
+  ],
+};
+
 export const aiBehaviorConfigSchema = z.object({
   version: aiBehaviorConfigVersionSchema,
   capabilities: z.array(capabilityConfigSchema).max(50).default([]),
@@ -300,15 +434,17 @@ export const aiBehaviorConfigSchema = z.object({
   attachmentRouting: attachmentRoutingConfigSchema,
   proposalExplainer: proposalExplainerBehaviorConfigSchema,
   deterministicProposalTriggers: deterministicProposalTriggersConfigSchema,
+  suggestedQuickActions: suggestedQuickActionsConfigSchema,
 });
 
 export type AiBehaviorConfig = z.infer<typeof aiBehaviorConfigSchema>;
 
 /** Runtime file shape: attachmentRouting moved to attachments.json and is optional here. */
 export const aiBehaviorConfigFileSchema = aiBehaviorConfigSchema
-  .omit({ attachmentRouting: true })
+  .omit({ attachmentRouting: true, suggestedQuickActions: true })
   .extend({
     attachmentRouting: attachmentRoutingConfigSchema.optional(),
+    suggestedQuickActions: suggestedQuickActionsConfigSchema.optional(),
   });
 
 export type AiBehaviorConfigFile = z.infer<typeof aiBehaviorConfigFileSchema>;
@@ -375,10 +511,10 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
       profiles: {
         default: DEFAULT_CONTEXT_BUDGET_POLICY,
         deep_review: DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
+        deep_history: DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
       },
       triggers: {
-        monthlyReviewMessagePattern:
-          "\\b(month|monthly|last month|past month|30[- ]?day|thirty[- ]?day|quarter|90[- ]?day)\\b",
+        monthlyReviewMessagePattern: DEFAULT_MONTHLY_REVIEW_MESSAGE_PATTERN,
         multiDomainMessagePattern:
           "\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b.*\\b(and|plus|also|versus|vs)\\b.*\\b(workout|training|nutrition|food|sleep|recovery|habit|wellbeing|longevity)\\b",
         extendedLookbackTimeRanges: ["30d", "90d", "1y"],
@@ -396,7 +532,9 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
         progressReviewSlicePurposes: ["weekly_review"],
         monthlyReviewCatalogIntentIds: ["longevity_overview"],
         monthlyReviewAgentIntents: ["longevity_overview"],
+        deepHistoryMinLookbackDays: 91,
       },
+      degradationNotes: DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
     },
     promptTemplates: {
       templates: buildDefaultPromptTemplateEntries(),
@@ -420,6 +558,7 @@ export function buildDefaultAiBehaviorConfig(): AiBehaviorConfig {
       },
     },
     deterministicProposalTriggers: DEFAULT_DETERMINISTIC_PROPOSAL_TRIGGERS,
+    suggestedQuickActions: DEFAULT_SUGGESTED_QUICK_ACTIONS,
   });
 }
 
@@ -438,6 +577,7 @@ export function safeParseAiBehaviorConfig(value: unknown): AiBehaviorConfigParse
     const data = aiBehaviorConfigSchema.parse({
       ...parsed.data,
       attachmentRouting: parsed.data.attachmentRouting ?? defaults.attachmentRouting,
+      suggestedQuickActions: parsed.data.suggestedQuickActions ?? defaults.suggestedQuickActions,
     });
 
     return { success: true, data };
@@ -457,6 +597,7 @@ export function sanitizeContextBudgetProfiles(
   return {
     default: applyContextBudgetSafetyFloor(clampContextBudgetPolicy(profiles.default)),
     deep_review: applyContextBudgetSafetyFloor(clampContextBudgetPolicy(profiles.deep_review)),
+    deep_history: applyContextBudgetSafetyFloor(clampContextBudgetPolicy(profiles.deep_history)),
   };
 }
 
@@ -498,6 +639,7 @@ export function sanitizeContextBudgetsBehaviorConfig(
     contextBudgets: {
       profiles,
       triggers,
+      degradationNotes: contextBudgets.degradationNotes,
     },
     warnings,
   };
@@ -513,6 +655,10 @@ export function normalizeAiBehaviorConfig(
     chat: {
       ...defaults.chat,
       ...partial?.chat,
+      quotaLimitReply: {
+        ...defaults.chat.quotaLimitReply,
+        ...partial?.chat?.quotaLimitReply,
+      },
     },
     directPaths: {
       ...defaults.directPaths,
@@ -536,6 +682,18 @@ export function normalizeAiBehaviorConfig(
           ...defaults.directPaths.replyTemplates.markWorkoutDone,
           ...partial?.directPaths?.replyTemplates?.markWorkoutDone,
         },
+        nutritionPlan: {
+          ...defaults.directPaths.replyTemplates.nutritionPlan,
+          ...partial?.directPaths?.replyTemplates?.nutritionPlan,
+        },
+        weeklyProgress: {
+          ...defaults.directPaths.replyTemplates.weeklyProgress,
+          ...partial?.directPaths?.replyTemplates?.weeklyProgress,
+        },
+        workoutPlan: {
+          ...defaults.directPaths.replyTemplates.workoutPlan,
+          ...partial?.directPaths?.replyTemplates?.workoutPlan,
+        },
       },
     },
     proposalRevisionRouting: {
@@ -557,10 +715,20 @@ export function normalizeAiBehaviorConfig(
           ...defaults.contextBudgets.profiles.deep_review,
           ...partial?.contextBudgets?.profiles?.deep_review,
         },
+        deep_history: {
+          ...defaults.contextBudgets.profiles.deep_history,
+          ...partial?.contextBudgets?.profiles?.deep_history,
+        },
       },
       triggers: {
         ...defaults.contextBudgets.triggers,
         ...partial?.contextBudgets?.triggers,
+      },
+      degradationNotes: {
+        lookbackClamped: {
+          ...defaults.contextBudgets.degradationNotes.lookbackClamped,
+          ...partial?.contextBudgets?.degradationNotes?.lookbackClamped,
+        },
       },
     },
     promptTemplates: {
@@ -604,6 +772,11 @@ export function normalizeAiBehaviorConfig(
       },
     },
     capabilities: partial?.capabilities ?? defaults.capabilities,
+    suggestedQuickActions: {
+      ...defaults.suggestedQuickActions,
+      ...partial?.suggestedQuickActions,
+      actions: partial?.suggestedQuickActions?.actions ?? defaults.suggestedQuickActions.actions,
+    },
   };
 
   const parsed = aiBehaviorConfigSchema.parse(merged);
@@ -654,7 +827,7 @@ export function resolveLoadedAiBehaviorConfig(input: {
       }
     }
 
-    for (const profile of ["default", "deep_review"] as const) {
+    for (const profile of CONTEXT_BUDGET_PROFILE_IDS) {
       const fileProfile = parsed.data.contextBudgets.profiles[profile];
 
       if (
@@ -713,10 +886,7 @@ export function resolveContextBudgetProfilePolicy(
   config: ContextBudgetsBehaviorConfig,
   profile: z.infer<typeof contextBudgetProfileSchema>,
 ): ContextBudgetPolicy {
-  const policy =
-    profile === "deep_review" ? config.profiles.deep_review : config.profiles.default;
-
-  return applyContextBudgetSafetyFloor(clampContextBudgetPolicy(policy));
+  return applyContextBudgetSafetyFloor(clampContextBudgetPolicy(config.profiles[profile]));
 }
 
 export function mergeCapabilityConfigOverrides(

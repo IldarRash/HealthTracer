@@ -19,7 +19,7 @@ Run in this order and STOP early only on a hard failure that blocks later steps:
 Modes:
 - `quick` — typecheck + lint only.
 - `full` — steps 1–4 (default).
-- `pre-pr` — steps 1–6, plus confirm new migrations under `packages/db/drizzle` are noted for the manual Railway migration step.
+- `pre-pr` — steps 1–6, plus note any new migrations under `packages/db/drizzle` (Railway applies them automatically via the `health-api` pre-deploy command; a failure halts the deploy).
 
 Output a concise report:
 

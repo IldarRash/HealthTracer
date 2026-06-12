@@ -4,9 +4,12 @@ const mockEnv = vi.hoisted(() => ({
   CLERK_JWKS_URL: undefined as string | undefined,
   AI_COACH_PROVIDER: "openai" as const,
   OPENAI_API_KEY: undefined as string | undefined,
+  OPENAI_MODEL: "gpt-4o-mini",
+  OPENAI_MODEL_ROUTER: undefined as string | undefined,
+  OPENAI_MODEL_DOMAIN: undefined as string | undefined,
+  OPENAI_MODEL_DECISION: undefined as string | undefined,
   CORS_ORIGINS: undefined as string | undefined,
   DATABASE_URL: "postgres://postgres:postgres@localhost:5432/health_tracer",
-  DOCUMENT_STORAGE_PATH: ".data/documents",
 }));
 
 vi.mock("../env.js", () => ({
@@ -36,6 +39,11 @@ describe("config diagnostics", () => {
       clerkJwks: "enabled",
       aiCoachProvider: "openai",
       openai: "enabled",
+      openaiModels: {
+        router: "gpt-4o-mini",
+        domain: "gpt-4o-mini",
+        decision: "gpt-4o-mini",
+      },
       corsOrigins: "configured",
       documentStorage: "configured",
       databaseUrl: "configured",
@@ -78,5 +86,39 @@ describe("config diagnostics", () => {
 
     expect(diagnostics.openai).toBe("misconfigured");
     expect(diagnostics.aiCoachProvider).toBe("openai");
+  });
+
+  it("reports per-stage model overrides in openaiModels (Slice 4)", async () => {
+    mockEnv.AI_COACH_PROVIDER = "openai";
+    mockEnv.OPENAI_API_KEY = "sk-test";
+    mockEnv.OPENAI_MODEL = "gpt-4o-mini";
+    mockEnv.OPENAI_MODEL_ROUTER = "gpt-4o";
+    mockEnv.OPENAI_MODEL_DOMAIN = undefined;
+    mockEnv.OPENAI_MODEL_DECISION = "gpt-4o";
+
+    const { getConfigDiagnostics } = await import("./config-diagnostics.js");
+    const diagnostics = getConfigDiagnostics();
+
+    expect(diagnostics.openaiModels).toEqual({
+      router: "gpt-4o",
+      domain: "gpt-4o-mini",
+      decision: "gpt-4o",
+    });
+  });
+
+  it("falls back all stages to OPENAI_MODEL when no per-stage overrides are set", async () => {
+    mockEnv.OPENAI_MODEL = "gpt-4o-mini";
+    mockEnv.OPENAI_MODEL_ROUTER = undefined;
+    mockEnv.OPENAI_MODEL_DOMAIN = undefined;
+    mockEnv.OPENAI_MODEL_DECISION = undefined;
+
+    const { getConfigDiagnostics } = await import("./config-diagnostics.js");
+    const diagnostics = getConfigDiagnostics();
+
+    expect(diagnostics.openaiModels).toEqual({
+      router: "gpt-4o-mini",
+      domain: "gpt-4o-mini",
+      decision: "gpt-4o-mini",
+    });
   });
 });

@@ -17,7 +17,6 @@ import {
   normalizeContextSlicePlan,
   resolveDefaultDepthForPurpose,
   resolveDefaultTimeRangeForPurpose,
-  shouldIncludeDocumentsForPurpose,
   userContextSliceSchema,
 } from "./agent-context.js";
 
@@ -28,7 +27,6 @@ describe("agent context contracts", () => {
     });
 
     expect(parsed.includeRawData).toBe(false);
-    expect(parsed.includeDocuments).toBe(false);
   });
 
   it("maps intents to slice purposes", () => {
@@ -40,8 +38,6 @@ describe("agent context contracts", () => {
     expect(resolveDefaultDepthForPurpose("general_chat")).toBe("small");
     expect(resolveDefaultDepthForPurpose("workout_adaptation")).toBe("medium");
     expect(resolveDefaultTimeRangeForPurpose("longevity_overview")).toBe("90d");
-    expect(shouldIncludeDocumentsForPurpose("health_context")).toBe(true);
-    expect(shouldIncludeDocumentsForPurpose("nutrition_adaptation")).toBe(false);
   });
 
   it("accepts a minimal user context slice packet", () => {
@@ -192,8 +188,9 @@ describe("agent context contracts", () => {
 
     it("rejects empty buildAgentContext requests", () => {
       expect(buildAgentContextRequestSchema.safeParse({ userMessage: "" }).success).toBe(false);
+      // Cap is now MAX_CHAT_USER_MESSAGE_CHARS (20 000); 20 001 must be rejected.
       expect(
-        buildAgentContextRequestSchema.safeParse({ userMessage: "a".repeat(4001) }).success,
+        buildAgentContextRequestSchema.safeParse({ userMessage: "a".repeat(20_001) }).success,
       ).toBe(false);
     });
 
@@ -225,27 +222,6 @@ describe("agent context contracts", () => {
 
       expect(result.result).toBeUndefined();
       expect(result.errors).toHaveLength(1);
-    });
-
-    it("rejects user context slices with invalid rag provenance", () => {
-      expect(
-        userContextSliceSchema.safeParse({
-          purpose: "health_context",
-          depth: "large",
-          timeRange: "30d",
-          generatedAt: new Date().toISOString(),
-          ragResults: [
-            {
-              documentId: "not-a-uuid",
-              summaryId: "a1000001-0000-4000-8000-000000000001",
-              title: "Blood panel",
-              snippet: "Approved summary only.",
-              provenance: "approved_document_summary",
-              consentScope: "semantic_indexing",
-            },
-          ],
-        }).success,
-      ).toBe(false);
     });
 
     it("rejects agent context packets with invalid intent values", () => {
@@ -334,7 +310,7 @@ describe("agentFanOutDiagnosticsSchema (W1 — optional fan-out block)", () => {
       decision: {
         degraded: false,
         selectedAction: "create_workout_plan",
-        proposalCount: 1,
+        selectedProposalIdCount: 1,
         consentRequired: false,
       },
       resolution: {
@@ -385,7 +361,7 @@ describe("agentFanOutDiagnosticsSchema (W1 — optional fan-out block)", () => {
         decision: {
           degraded: false,
           selectedAction: "create_workout_plan",
-          proposalCount: 1,
+          selectedProposalIdCount: 1,
           consentRequired: false,
         },
         resolution: {
@@ -431,7 +407,7 @@ describe("agentFanOutDiagnosticsSchema (W1 — optional fan-out block)", () => {
       decision: {
         degraded: true,
         selectedAction: null,
-        proposalCount: 0,
+        selectedProposalIdCount: 0,
         consentRequired: false,
       },
       resolution: {

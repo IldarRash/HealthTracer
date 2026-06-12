@@ -4,6 +4,25 @@ import { REQUEST_ID_HEADER } from "./request-correlation.js";
 
 const requestId = "11111111-1111-4111-8111-111111111111";
 
+async function readBody(body: ReadableStream<Uint8Array> | ArrayBuffer): Promise<ArrayBuffer> {
+  if (body instanceof ArrayBuffer) return body;
+  const chunks: Uint8Array[] = [];
+  const reader = body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((n, c) => n + c.byteLength, 0);
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result.buffer;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -168,7 +187,7 @@ describe("api proxy handler", () => {
 
     expect(result.status).toBe(502);
     expect(result.requestId).toBe(requestId);
-    expect(JSON.parse(new TextDecoder().decode(result.body))).toEqual({
+    expect(JSON.parse(new TextDecoder().decode(await readBody(result.body)))).toEqual({
       statusCode: 502,
       message: "Upstream API is unavailable.",
     });
@@ -203,7 +222,7 @@ describe("api proxy handler", () => {
 
     expect(result.status).toBe(401);
     expect(result.headers.get("content-type")).toBe("application/json; charset=utf-8");
-    expect(JSON.parse(new TextDecoder().decode(result.body))).toEqual({
+    expect(JSON.parse(new TextDecoder().decode(await readBody(result.body)))).toEqual({
       message: "Bearer token is required.",
       error: "Unauthorized",
       statusCode: 401,
@@ -235,7 +254,7 @@ describe("api proxy handler", () => {
 
     expect(result.status).toBe(500);
     expect(result.headers.get("content-type")).toBe("application/json");
-    expect(JSON.parse(new TextDecoder().decode(result.body))).toEqual({
+    expect(JSON.parse(new TextDecoder().decode(await readBody(result.body)))).toEqual({
       statusCode: 500,
       message: "Internal Server Error",
     });
@@ -251,7 +270,7 @@ describe("api proxy handler", () => {
       return {
         status: 0,
         headers: new Headers(),
-        arrayBuffer: async () => new ArrayBuffer(0),
+        body: null,
       } as unknown as Response;
     });
 
@@ -266,9 +285,140 @@ describe("api proxy handler", () => {
     });
 
     expect(result.status).toBe(502);
-    expect(JSON.parse(new TextDecoder().decode(result.body))).toEqual({
+    expect(JSON.parse(new TextDecoder().decode(await readBody(result.body)))).toEqual({
       statusCode: 502,
       message: "Upstream API is unavailable.",
+    });
+  });
+
+  it("passes an SSE upstream body through as a ReadableStream without buffering", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const frame1 = new TextEncoder().encode("data: {\"stage\":\"routing\"}\n\n");
+    const frame2 = new TextEncoder().encode("data: {\"stage\":\"done\"}\n\n");
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(frame1);
+        controller.enqueue(frame2);
+        controller.close();
+      },
+    });
+
+    const fetchMock = vi.fn(async () => {
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream",
+          [REQUEST_ID_HEADER]: requestId,
+        },
+      });
+    });
+
+    const result = await proxyApiRequest({
+      method: "POST",
+      pathSegments: ["chat", "threads", "abc", "messages", "stream"],
+      search: "",
+      headers: new Headers({ [REQUEST_ID_HEADER]: requestId }),
+      body: new TextEncoder().encode("{}").buffer,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.headers.get("content-type")).toBe("text/event-stream");
+    // body must be a ReadableStream, not a buffered ArrayBuffer
+    expect(result.body).toBeInstanceOf(ReadableStream);
+
+    // Read chunks individually to verify they arrive as separate enqueued chunks
+    const reader = (result.body as ReadableStream<Uint8Array>).getReader();
+    const chunk1 = await reader.read();
+    const chunk2 = await reader.read();
+    const end = await reader.read();
+
+    expect(chunk1.done).toBe(false);
+    expect(new TextDecoder().decode(chunk1.value)).toBe("data: {\"stage\":\"routing\"}\n\n");
+    expect(chunk2.done).toBe(false);
+    expect(new TextDecoder().decode(chunk2.value)).toBe("data: {\"stage\":\"done\"}\n\n");
+    expect(end.done).toBe(true);
+  });
+
+  it("passes the upstream cache-control header through and never invents one", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () => {
+      return new Response(new Uint8Array([0xff, 0xd8]), {
+        status: 200,
+        headers: {
+          "content-type": "image/jpeg",
+          "cache-control": "private, no-store",
+          [REQUEST_ID_HEADER]: requestId,
+        },
+      });
+    });
+
+    const result = await proxyApiRequest({
+      method: "GET",
+      pathSegments: ["chat", "attachments", "abc", "content"],
+      search: "",
+      headers: new Headers({ [REQUEST_ID_HEADER]: requestId }),
+      body: null,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("private, no-store");
+
+    // No upstream cache-control → none on the proxied response either.
+    const fetchMockNoCache = vi.fn(async () => {
+      return new Response("{}", {
+        status: 200,
+        headers: { "content-type": "application/json", [REQUEST_ID_HEADER]: requestId },
+      });
+    });
+
+    const resultNoCache = await proxyApiRequest({
+      method: "GET",
+      pathSegments: ["users", "me"],
+      search: "",
+      headers: new Headers({ [REQUEST_ID_HEADER]: requestId }),
+      body: null,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMockNoCache as typeof fetch,
+    });
+
+    expect(resultNoCache.headers.get("cache-control")).toBeNull();
+  });
+
+  it("passes a non-streaming JSON response through as a ReadableStream byte-identical", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const upstreamBody = JSON.stringify({ id: "abc", status: "ok" });
+
+    const fetchMock = vi.fn(async () => {
+      return new Response(upstreamBody, {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          [REQUEST_ID_HEADER]: requestId,
+        },
+      });
+    });
+
+    const result = await proxyApiRequest({
+      method: "GET",
+      pathSegments: ["chat", "threads", "abc"],
+      search: "",
+      headers: new Headers({ [REQUEST_ID_HEADER]: requestId }),
+      body: null,
+      apiBaseUrl: "http://localhost:3000",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(new TextDecoder().decode(await readBody(result.body)))).toEqual({
+      id: "abc",
+      status: "ok",
     });
   });
 });

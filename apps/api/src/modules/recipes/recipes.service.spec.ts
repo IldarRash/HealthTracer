@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GENERIC_RECIPE_CATALOG_CATEGORIES } from "./generic-recipe-catalog-categories.js";
 import type { ProviderRecipeDraft } from "./recipe-catalog-provider.js";
 import type { RecommendationLookupKey } from "./recipes.repository.js";
@@ -52,11 +52,11 @@ function createRecipeRow(overrides: Record<string, unknown> = {}) {
     ingredients: [{ name: "Lentils", quantity: 1, unit: "cup" }],
     preparationSteps: ["Combine ingredients in a bowl."],
     servings: 1,
-    estimatedCalories: 690,
-    proteinGrams: 48,
-    carbsGrams: 82,
-    fatGrams: 18,
-    fiberGrams: 14,
+    caloriesPerServing: 690,
+    proteinGramsPerServing: 48,
+    carbsGramsPerServing: 82,
+    fatGramsPerServing: 18,
+    fiberGramsPerServing: 14,
     mealTypes: ["lunch"],
     tags: ["high-protein"],
     restrictionTags: ["vegan"],
@@ -101,11 +101,11 @@ function createProviderDraft(overrides: Partial<ProviderRecipeDraft> = {}): Prov
     preparationSteps: ["Simmer vegetables with spices."],
     servings: 1,
     macroEstimates: {
-      estimatedCalories: 320,
-      proteinGrams: 12,
-      carbsGrams: 38,
-      fatGrams: 10,
-      fiberGrams: 6,
+      caloriesPerServing: 320,
+      proteinGramsPerServing: 12,
+      carbsGramsPerServing: 38,
+      fatGramsPerServing: 10,
+      fiberGramsPerServing: 6,
     },
     mealTypes: ["lunch", "dinner"],
     tags: ["vegetarian"],
@@ -149,6 +149,8 @@ function createService({
       listActiveRecipes: async () => [],
       findActiveRecipeById: async () => null,
       findActiveRecipesByIds: async () => [],
+      countActiveProviderRecipes: async () => 1,
+      listActiveCuratedRecipeNames: async () => [],
       listRecommendationsByUserId: async () => [],
       findRecommendationById: async () => null,
       createRecommendations: async () => [],
@@ -647,11 +649,11 @@ describe("RecipesService", () => {
       description: providerDraft.description,
       ingredients: providerDraft.ingredients,
       preparationSteps: providerDraft.preparationSteps,
-      estimatedCalories: providerDraft.macroEstimates.estimatedCalories,
-      proteinGrams: providerDraft.macroEstimates.proteinGrams,
-      carbsGrams: providerDraft.macroEstimates.carbsGrams,
-      fatGrams: providerDraft.macroEstimates.fatGrams,
-      fiberGrams: providerDraft.macroEstimates.fiberGrams,
+      caloriesPerServing: providerDraft.macroEstimates.caloriesPerServing,
+      proteinGramsPerServing: providerDraft.macroEstimates.proteinGramsPerServing,
+      carbsGramsPerServing: providerDraft.macroEstimates.carbsGramsPerServing,
+      fatGramsPerServing: providerDraft.macroEstimates.fatGramsPerServing,
+      fiberGramsPerServing: providerDraft.macroEstimates.fiberGramsPerServing,
       mealTypes: providerDraft.mealTypes,
       tags: providerDraft.tags,
       restrictionTags: providerDraft.restrictionTags,
@@ -1175,6 +1177,281 @@ describe("RecipesService", () => {
     expect(findUserId).toBe(user.id);
     expect(createCalled).toBe(false);
   });
+
+  describe("listRecipes browse hydration", () => {
+    it("triggers provider hydration when catalog has zero active provider recipes", async () => {
+      let providerFetchCalled = false;
+      let upsertCalled = false;
+      const providerDraft = createProviderDraft();
+      const service = createService({
+        recipesRepository: {
+          countActiveProviderRecipes: async () => 0,
+          listActiveRecipes: async () => [createRecipeRow()],
+          upsertProviderRecipes: async () => {
+            upsertCalled = true;
+            return [];
+          },
+        },
+        recipeCatalogProvider: {
+          fetchByGenericCategories: async () => {
+            providerFetchCalled = true;
+            return [providerDraft];
+          },
+        },
+      });
+
+      const result = await service.listRecipes({});
+
+      expect(providerFetchCalled).toBe(true);
+      expect(upsertCalled).toBe(true);
+      expect(result.recipes).toHaveLength(1);
+    });
+
+    it("skips provider hydration when catalog already has active provider recipes", async () => {
+      let providerFetchCalled = false;
+      const service = createService({
+        recipesRepository: {
+          countActiveProviderRecipes: async () => 5,
+          listActiveRecipes: async () => [createRecipeRow()],
+        },
+        recipeCatalogProvider: {
+          fetchByGenericCategories: async () => {
+            providerFetchCalled = true;
+            return [];
+          },
+        },
+      });
+
+      const result = await service.listRecipes({});
+
+      expect(providerFetchCalled).toBe(false);
+      expect(result.recipes).toHaveLength(1);
+    });
+
+    it("logs a warning and degrades to the seeded list when the provider fails during browse", async () => {
+      const warnMessages: string[] = [];
+      const service = createService({
+        recipesRepository: {
+          countActiveProviderRecipes: async () => 0,
+          listActiveRecipes: async () => [createRecipeRow()],
+          upsertProviderRecipes: async () => [],
+        },
+        recipeCatalogProvider: {
+          providerName: "themealdb",
+          fetchByGenericCategories: async () => {
+            throw new Error("provider network error");
+          },
+        },
+      });
+
+      // Capture the NestJS logger warn output
+      const originalWarn = (service as unknown as { logger: { warn: (msg: string) => void } }).logger.warn.bind(
+        (service as unknown as { logger: { warn: (msg: string) => void } }).logger,
+      );
+      (service as unknown as { logger: { warn: (msg: string) => void } }).logger.warn = (msg: string) => {
+        warnMessages.push(msg);
+        originalWarn(msg);
+      };
+
+      const result = await service.listRecipes({});
+
+      expect(result.recipes).toHaveLength(1);
+      expect(warnMessages.some((m) => m.includes("themealdb"))).toBe(true);
+      expect(warnMessages.some((m) => m.includes("provider network error"))).toBe(true);
+    });
+
+    it("deduplicates concurrent browse requests to a single provider import", async () => {
+      let fetchCallCount = 0;
+      const service = createService({
+        recipesRepository: {
+          countActiveProviderRecipes: async () => 0,
+          listActiveRecipes: async () => [createRecipeRow()],
+          upsertProviderRecipes: async () => [],
+        },
+        recipeCatalogProvider: {
+          fetchByGenericCategories: async () => {
+            fetchCallCount++;
+            return [];
+          },
+        },
+      });
+
+      // Fire two concurrent browse requests
+      await Promise.all([service.listRecipes({}), service.listRecipes({})]);
+
+      expect(fetchCallCount).toBe(1);
+    });
+
+    describe("empty-result cooldown", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("skips provider re-fetch on second sequential browse within the cooldown window after an empty hydration", async () => {
+        let fetchCallCount = 0;
+        const service = createService({
+          recipesRepository: {
+            countActiveProviderRecipes: async () => 0,
+            listActiveRecipes: async () => [createRecipeRow()],
+            upsertProviderRecipes: async () => [],
+          },
+          recipeCatalogProvider: {
+            fetchByGenericCategories: async () => {
+              fetchCallCount++;
+              // Returns empty — triggers cooldown recording
+              return [];
+            },
+          },
+        });
+
+        // First browse: provider called, returns empty, cooldown set
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+
+        // Advance time by 2 minutes — still within the 5-minute cooldown
+        vi.advanceTimersByTime(2 * 60 * 1000);
+
+        // Second sequential browse: count is still 0 but cooldown active, provider must NOT be called
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+      });
+
+      it("skips provider re-fetch on second sequential browse within the cooldown window after a failed hydration", async () => {
+        let fetchCallCount = 0;
+        const service = createService({
+          recipesRepository: {
+            countActiveProviderRecipes: async () => 0,
+            listActiveRecipes: async () => [createRecipeRow()],
+            upsertProviderRecipes: async () => [],
+          },
+          recipeCatalogProvider: {
+            providerName: "themealdb",
+            fetchByGenericCategories: async () => {
+              fetchCallCount++;
+              throw new Error("provider down");
+            },
+          },
+        });
+
+        // First browse: provider throws, cooldown set, browse still returns seeded recipes
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+
+        // Still within cooldown
+        vi.advanceTimersByTime(60 * 1000);
+
+        // Second browse: cooldown active — provider not called again
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+      });
+
+      it("retries provider fetch after the cooldown window expires", async () => {
+        let fetchCallCount = 0;
+        const service = createService({
+          recipesRepository: {
+            countActiveProviderRecipes: async () => 0,
+            listActiveRecipes: async () => [createRecipeRow()],
+            upsertProviderRecipes: async () => [],
+          },
+          recipeCatalogProvider: {
+            fetchByGenericCategories: async () => {
+              fetchCallCount++;
+              return [];
+            },
+          },
+        });
+
+        // First browse — empty fetch, cooldown set
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(1);
+
+        // Advance past the 5-minute cooldown
+        vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+
+        // Third browse after expiry — provider is called again
+        await service.listRecipes({});
+        expect(fetchCallCount).toBe(2);
+      });
+    });
+  });
+
+  it("generates recommendations with no duplicate canonical names", async () => {
+    // Two recipes that normalise to the same canonical key (repeated letter collapse)
+    const curatedRow = createRecipeRow({
+      id: compatibleRecipeId,
+      name: "Fettuccine Alfredo",
+      provider: null,
+    });
+    const providerRow = createRecipeRow({
+      id: incompatibleRecipeId,
+      name: "Fettucine alfredo",
+      provider: "themealdb",
+    });
+    let createInputs: unknown[] = [];
+    const service = createService({
+      recipesRepository: {
+        listActiveRecipes: async () => [providerRow, curatedRow],
+        createRecommendations: async (inputs: unknown[]) => {
+          createInputs = inputs;
+          return inputs.map((input, index) =>
+            createRecommendationRow({
+              ...(input as Record<string, unknown>),
+              id: `b200000${index + 1}-0000-4000-8000-000000000001`,
+            }),
+          );
+        },
+      },
+    });
+
+    const result = await service.generateCurrentRecommendations(auth);
+
+    // Only one of the two duplicate-canonical recipes should appear
+    expect(result.recommendations).toHaveLength(1);
+    // Curated (no provider) must win
+    expect(createInputs[0]).toMatchObject({ recipeId: compatibleRecipeId });
+  });
+
+  it("incident payload logs 1 serving with per-serving macro values", async () => {
+    const recipe = createRecipeRow({
+      caloriesPerServing: 690,
+      proteinGramsPerServing: 48,
+      carbsGramsPerServing: 82,
+      fatGramsPerServing: 18,
+      fiberGramsPerServing: 14,
+    });
+    const service = createService({
+      recipesRepository: {
+        findRecommendationById: async () => ({
+          recommendation: createRecommendationRow({ status: "accepted" }),
+          recipe,
+        }),
+      },
+    });
+
+    const proposal = await service.createNutritionIncidentProposalFromRecommendation(
+      auth,
+      recommendationId,
+    );
+
+    const changes = proposal.proposedChanges as {
+      estimatedCalories: number;
+      items: Array<{ quantity: string; calories: number }>;
+      estimatedMacros: { proteinGrams: number; carbsGrams: number; fatGrams: number };
+    };
+
+    // Calories match per-serving value (not total, not doubled)
+    expect(changes.estimatedCalories).toBe(690);
+    expect(changes.items).toHaveLength(1);
+    expect(changes.items[0]?.quantity).toBe("1 serving");
+    expect(changes.items[0]?.calories).toBe(690);
+    expect(changes.estimatedMacros.proteinGrams).toBe(48);
+    expect(changes.estimatedMacros.carbsGrams).toBe(82);
+    expect(changes.estimatedMacros.fatGrams).toBe(18);
+  });
 });
 
 describe("RecipesService — user-authored recipes", () => {
@@ -1198,11 +1475,11 @@ describe("RecipesService — user-authored recipes", () => {
       ingredients: [{ name: "Lentils", quantity: 1, unit: "cup" }],
       preparationSteps: ["Cook lentils.", "Add vegetables."],
       servings: 2,
-      estimatedCalories: 180,
-      proteinGrams: 13,
-      carbsGrams: 29,
-      fatGrams: 1,
-      fiberGrams: 7,
+      caloriesPerServing: 180,
+      proteinGramsPerServing: 13,
+      carbsGramsPerServing: 29,
+      fatGramsPerServing: 1,
+      fiberGramsPerServing: 7,
       mealTypes: ["lunch"],
       tags: ["high-protein"],
       restrictionTags: ["vegan"],
@@ -1239,7 +1516,7 @@ describe("RecipesService — user-authored recipes", () => {
     expect(result.name).toBe("Lentil power bowl");
     expect((createInput as { confidence: string }).confidence).toMatch(/^(high|medium|low)$/);
     // macros were computed, not provided
-    expect((createInput as { macroEstimates: { estimatedCalories: number } }).macroEstimates.estimatedCalories).toBeGreaterThan(0);
+    expect((createInput as { macroEstimates: { caloriesPerServing: number } }).macroEstimates.caloriesPerServing).toBeGreaterThan(0);
   });
 
   it("uses provided macroEstimates and marks confidence high", async () => {
@@ -1248,7 +1525,7 @@ describe("RecipesService — user-authored recipes", () => {
       recipesRepository: {
         createUserRecipe: async (input: unknown) => {
           createInput = input;
-          return createUserRecipeRow({ estimatedCalories: 500, confidence: "high" });
+          return createUserRecipeRow({ caloriesPerServing: 500, confidence: "high" });
         },
       },
     });
@@ -1256,15 +1533,15 @@ describe("RecipesService — user-authored recipes", () => {
     await service.createRecipe(auth, {
       ...newRecipeInput,
       macroEstimates: {
-        estimatedCalories: 500,
-        proteinGrams: 30,
-        carbsGrams: 60,
-        fatGrams: 10,
+        caloriesPerServing: 500,
+        proteinGramsPerServing: 30,
+        carbsGramsPerServing: 60,
+        fatGramsPerServing: 10,
       },
     });
 
     expect((createInput as { confidence: string }).confidence).toBe("high");
-    expect((createInput as { macroEstimates: { estimatedCalories: number } }).macroEstimates.estimatedCalories).toBe(500);
+    expect((createInput as { macroEstimates: { caloriesPerServing: number } }).macroEstimates.caloriesPerServing).toBe(500);
   });
 
   it("returns the existing recipe on dedupe collision without creating a duplicate", async () => {
@@ -1304,7 +1581,7 @@ describe("RecipesService — user-authored recipes", () => {
     });
 
     // Macros were recomputed because ingredients changed without macroEstimates provided
-    expect((updatedInput as { macroEstimates?: { estimatedCalories: number } }).macroEstimates?.estimatedCalories).toBeGreaterThan(0);
+    expect((updatedInput as { macroEstimates?: { caloriesPerServing: number } }).macroEstimates?.caloriesPerServing).toBeGreaterThan(0);
   });
 
   it("does not recompute macros on update when neither ingredients nor servings change", async () => {
@@ -1333,22 +1610,22 @@ describe("RecipesService — user-authored recipes", () => {
         findOwnedRecipeById: async () => existingRow,
         updateUserRecipe: async (_recipeId: string, _userId: string, input: unknown) => {
           updatedInput = input;
-          return createUserRecipeRow({ estimatedCalories: 700, confidence: "high" });
+          return createUserRecipeRow({ caloriesPerServing: 700, confidence: "high" });
         },
       },
     });
 
     await service.updateRecipe(auth, existingRow.id, {
       macroEstimates: {
-        estimatedCalories: 700,
-        proteinGrams: 50,
-        carbsGrams: 80,
-        fatGrams: 15,
+        caloriesPerServing: 700,
+        proteinGramsPerServing: 50,
+        carbsGramsPerServing: 80,
+        fatGramsPerServing: 15,
       },
     });
 
     expect((updatedInput as { confidence: string }).confidence).toBe("high");
-    expect((updatedInput as { macroEstimates: { estimatedCalories: number } }).macroEstimates.estimatedCalories).toBe(700);
+    expect((updatedInput as { macroEstimates: { caloriesPerServing: number } }).macroEstimates.caloriesPerServing).toBe(700);
   });
 
   it("throws NotFoundException on update when recipe does not belong to the user", async () => {
@@ -1436,10 +1713,10 @@ describe("RecipesService — user-authored recipes", () => {
         servings: 1,
       });
 
-      expect(result.estimatedCalories).toBeGreaterThan(0);
-      expect(result.proteinGrams).toBeGreaterThanOrEqual(0);
-      expect(result.carbsGrams).toBeGreaterThanOrEqual(0);
-      expect(result.fatGrams).toBeGreaterThanOrEqual(0);
+      expect(result.caloriesPerServing).toBeGreaterThan(0);
+      expect(result.proteinGramsPerServing).toBeGreaterThanOrEqual(0);
+      expect(result.carbsGramsPerServing).toBeGreaterThanOrEqual(0);
+      expect(result.fatGramsPerServing).toBeGreaterThanOrEqual(0);
       expect(["high", "medium", "low"]).toContain(result.confidence);
     });
 
@@ -1451,7 +1728,7 @@ describe("RecipesService — user-authored recipes", () => {
       });
 
       expect(result.confidence).toBe("low");
-      expect(result.estimatedCalories).toBeGreaterThan(0);
+      expect(result.caloriesPerServing).toBeGreaterThan(0);
     });
 
     it("scales results by servings count", () => {
@@ -1465,9 +1742,9 @@ describe("RecipesService — user-authored recipes", () => {
         servings: 2,
       });
 
-      expect(twoServings.estimatedCalories).toBeLessThan(oneServing.estimatedCalories + 5);
-      expect(twoServings.estimatedCalories).toBeGreaterThanOrEqual(
-        Math.floor(oneServing.estimatedCalories / 2) - 5,
+      expect(twoServings.caloriesPerServing).toBeLessThan(oneServing.caloriesPerServing + 5);
+      expect(twoServings.caloriesPerServing).toBeGreaterThanOrEqual(
+        Math.floor(oneServing.caloriesPerServing / 2) - 5,
       );
     });
 

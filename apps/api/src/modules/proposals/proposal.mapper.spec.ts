@@ -45,4 +45,37 @@ describe("toAiProposal", () => {
 
     expect(mapped.evidenceRefs).toBeUndefined();
   });
+
+  it("maps an invalid-status row with its raw payload and validationErrors intact", () => {
+    const rawLlmPayload = {
+      provenance: { source: "image_estimate" },
+      imageRefs: ["not-an-object-ref"],
+    };
+
+    const mapped = toAiProposal({
+      ...baseRow,
+      intent: "log_nutrition_incident",
+      targetDomain: "nutrition",
+      proposedChanges: rawLlmPayload,
+      validationStatus: "invalid",
+      validationErrors: ["proposedChanges: payload failed validation"],
+    });
+
+    expect(mapped.validationStatus).toBe("invalid");
+    expect(mapped.proposedChanges).toEqual(rawLlmPayload);
+    expect(mapped.validationErrors).toEqual([
+      "proposedChanges: payload failed validation",
+    ]);
+  });
+
+  it("falls back to the raw row only for out-of-contract enum values", () => {
+    const mapped = toAiProposal({
+      ...baseRow,
+      // Simulates a row persisted under an intent that was later removed.
+      intent: "legacy_removed_intent" as AiProposalRow["intent"],
+    });
+
+    expect(mapped.id).toBe(baseRow.id);
+    expect(mapped.intent).toBe("legacy_removed_intent");
+  });
 });

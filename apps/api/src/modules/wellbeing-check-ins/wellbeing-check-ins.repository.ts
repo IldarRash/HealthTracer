@@ -108,6 +108,29 @@ export class WellbeingCheckInsRepository {
       .limit(limit);
   }
 
+  /**
+   * Numeric-only score projection for progress-history aggregation.
+   * Deliberately selects NO free-text columns (no note, no tags) so private
+   * check-in text never leaves the database for review aggregates.
+   */
+  async listScoreRowsByUserAndDateRange(userId: string, startDate: string, endDate: string) {
+    return this.db
+      .select({
+        date: wellbeingCheckIns.date,
+        moodScore: wellbeingCheckIns.moodScore,
+        stressScore: wellbeingCheckIns.stressScore,
+      })
+      .from(wellbeingCheckIns)
+      .where(
+        and(
+          eq(wellbeingCheckIns.userId, userId),
+          gte(wellbeingCheckIns.date, startDate),
+          lte(wellbeingCheckIns.date, endDate),
+        ),
+      )
+      .orderBy(wellbeingCheckIns.date);
+  }
+
   async listByUserAndDateRange(userId: string, startDate: string, endDate: string) {
     return this.db
       .select()

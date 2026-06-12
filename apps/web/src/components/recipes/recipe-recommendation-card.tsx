@@ -2,15 +2,14 @@
 
 import type { UserRecipeRecommendation } from "@health/types";
 import {
+  buildRecipeTagChips,
   canAcceptRecommendation,
   canCompleteRecommendation,
   canDismissRecommendation,
   canLogRecommendation,
   formatMacroEstimateSummary,
   formatMealTypeLabel,
-  formatRecipeProvenanceMeta,
-  formatRecipeProviderLabel,
-  RECIPE_CONFIDENCE_LABELS,
+  formatRecipeProvenanceHuman,
   recommendationStatusBadgeClass,
   recommendationStatusLabel,
   recipeConfidenceNotice,
@@ -41,6 +40,7 @@ export function RecipeRecommendationCard({
   const recipe = recommendation.recipe;
   const isLogging = loggingRecommendationId === recommendation.id;
   const confidenceNotice = recipe ? recipeConfidenceNotice(recipe.confidence) : null;
+  const tagChips = recipe ? buildRecipeTagChips(recipe) : [];
 
   return (
     <li className="recipe-recommendation-card nested-card">
@@ -61,48 +61,25 @@ export function RecipeRecommendationCard({
           <p className="recipe-macro-copy">{formatMacroEstimateSummary(recipe)}</p>
 
           <dl className="training-meta recipe-meta">
-            <dt>Servings</dt>
-            <dd>{recipe.servings}</dd>
             <dt>Source</dt>
-            <dd>{formatRecipeProviderLabel(recipe)}</dd>
-            <dt>Confidence</dt>
-            <dd>{RECIPE_CONFIDENCE_LABELS[recipe.confidence]}</dd>
-            <dt>Provenance</dt>
-            <dd>{formatRecipeProvenanceMeta(recipe)}</dd>
+            <dd>{formatRecipeProvenanceHuman(recipe.provenance)}</dd>
           </dl>
 
-          {recipe.tags.length > 0 || recipe.restrictionTags.length > 0 || recipe.allergenTags.length > 0 ? (
-            <div className="recipe-tag-row">
-              {recipe.mealTypes.map((mealType) => (
-                <span key={mealType} className="badge badge-info">
-                  {formatMealTypeLabel(mealType)}
-                </span>
-              ))}
-              {recipe.tags.map((tag) => (
-                <span key={tag} className="badge badge-neutral">
-                  {tag}
-                </span>
-              ))}
-              {recipe.restrictionTags.map((tag) => (
-                <span key={`restriction-${tag}`} className="badge badge-pending">
-                  {tag}
-                </span>
-              ))}
-              {recipe.allergenTags.map((tag) => (
-                <span key={`allergen-${tag}`} className="badge badge-invalid">
-                  Contains {tag}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <div className="recipe-tag-row">
-              {recipe.mealTypes.map((mealType) => (
-                <span key={mealType} className="badge badge-info">
-                  {formatMealTypeLabel(mealType)}
-                </span>
-              ))}
-            </div>
-          )}
+          <div className="recipe-tag-row">
+            {recipe.mealTypes.map((mealType) => (
+              <span key={mealType} className="badge badge-info">
+                {formatMealTypeLabel(mealType)}
+              </span>
+            ))}
+            {tagChips.map((chip) => (
+              <span
+                key={chip.key}
+                className={`badge badge-${chip.tone === "red" ? "red" : chip.tone === "amber" ? "amber" : chip.tone === "green" ? "green" : "neutral"}`}
+              >
+                {chip.fallbackLabel}
+              </span>
+            ))}
+          </div>
 
           {confidenceNotice ? (
             <div className="notice notice-inline" role="status">
@@ -116,10 +93,10 @@ export function RecipeRecommendationCard({
         <RecipeNutritionLogDraft
           recommendationId={recommendation.id}
           recipeName={recipe?.name ?? "Recipe"}
-          recipeCalories={recipe?.macroEstimates.estimatedCalories}
-          recipeProtein={recipe?.macroEstimates.proteinGrams}
-          recipeCarbs={recipe?.macroEstimates.carbsGrams}
-          recipeFat={recipe?.macroEstimates.fatGrams}
+          recipeCalories={recipe?.perServingMacros.caloriesPerServing}
+          recipeProtein={recipe?.perServingMacros.proteinGramsPerServing}
+          recipeCarbs={recipe?.perServingMacros.carbsGramsPerServing}
+          recipeFat={recipe?.perServingMacros.fatGramsPerServing}
           onClose={onCloseLog}
           onAccepted={onCloseLog}
         />

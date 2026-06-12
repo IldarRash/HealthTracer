@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Recipe, UserRecipeRecommendation } from "@health/types";
 import {
+  buildRecipeTagChips,
   canAcceptRecommendation,
   canCompleteRecommendation,
   canDismissRecommendation,
@@ -10,8 +11,8 @@ import {
   formatMacroEstimateSummary,
   formatMealTypeLabel,
   formatPrepTime,
-  formatRecipeProvenanceMeta,
-  formatRecipeProviderLabel,
+  formatRecipeProvenanceHuman,
+  formatServingsNote,
   getLimitedReasonCopy,
   isRecommendationVisible,
   isUserOwnedRecipe,
@@ -29,12 +30,12 @@ const sampleRecipe: Recipe = {
   ingredients: [{ name: "Greek yogurt", quantity: 1, unit: "cup" }],
   preparationSteps: ["Combine ingredients in a bowl."],
   servings: 1,
-  macroEstimates: {
-    estimatedCalories: 320,
-    proteinGrams: 24,
-    carbsGrams: 30,
-    fatGrams: 10,
-    fiberGrams: 4,
+  perServingMacros: {
+    caloriesPerServing: 320,
+    proteinGramsPerServing: 24,
+    carbsGramsPerServing: 30,
+    fatGramsPerServing: 10,
+    fiberGramsPerServing: 4,
   },
   mealTypes: ["breakfast"],
   tags: ["high-protein"],
@@ -60,22 +61,92 @@ describe("recipes UI state", () => {
   it("formats meal labels, prep time, and macro estimate copy", () => {
     expect(formatMealTypeLabel("dinner")).toBe("Dinner");
     expect(formatPrepTime(sampleRecipe)).toBe("5 min prep");
-    expect(formatMacroEstimateSummary(sampleRecipe)).toContain("Estimated per serving");
+    // per-serving copy
+    expect(formatMacroEstimateSummary(sampleRecipe)).toContain("kcal");
+    expect(formatMacroEstimateSummary(sampleRecipe)).toContain("per serving");
     expect(formatMacroEstimateSummary(sampleRecipe)).toContain("approximate");
+    // single-serving: no "Makes N servings" suffix
+    expect(formatMacroEstimateSummary(sampleRecipe)).not.toContain("Makes");
+    // multi-serving recipe shows the servings note
+    expect(
+      formatMacroEstimateSummary({ ...sampleRecipe, servings: 4 }),
+    ).toContain("Makes 4 servings");
+    // no misleading "(N total)" phrasing
+    expect(formatMacroEstimateSummary(sampleRecipe)).not.toContain("total");
   });
 
-  it("formats provider, provenance, and confidence labels", () => {
-    expect(formatRecipeProviderLabel(sampleRecipe)).toContain("themealdb");
-    expect(formatRecipeProvenanceMeta(sampleRecipe)).toContain("External provider");
+  it("returns null servings note for single-serving recipes", () => {
+    expect(formatServingsNote(1)).toBeNull();
+    expect(formatServingsNote(2)).toBe("Makes 2 servings");
+  });
+
+  it("formats human provenance without ID leakage", () => {
+    expect(
+      formatRecipeProvenanceHuman({ source: "external_provider", providerId: "themealdb", externalId: "52772" }),
+    ).toBe("Community recipe (approximate nutrition)");
+    expect(
+      formatRecipeProvenanceHuman({ source: "seed_catalog" }),
+    ).toBe("Curated starter recipe");
+    expect(
+      formatRecipeProvenanceHuman({ source: "curated" }),
+    ).toBe("Curated starter recipe");
     expect(RECIPE_CONFIDENCE_LABELS.medium).toContain("Medium");
-    expect(formatRecipeProvenanceMeta({ provenance: { source: "seed_catalog" } })).toContain(
-      "Curated catalog",
-    );
   });
 
   it("shows low-confidence caution copy for recipe estimates", () => {
     expect(recipeConfidenceNotice("high")).toBeNull();
     expect(recipeConfidenceNotice("low")).toContain("low-confidence");
+  });
+
+  it("buildRecipeTagChips deduplicates restriction/allergen overlap and drops noise tags", () => {
+    const chips = buildRecipeTagChips({
+      tags: ["high_protein", "quick"],
+      restrictionTags: ["contains_dairy", "not_vegan"],
+      allergenTags: ["dairy"],
+    });
+
+    const keys = chips.map((c) => c.key);
+    // contains_dairy dropped (allergen "dairy" already present); not_vegan dropped (noise)
+    expect(keys).not.toContain("restriction-contains_dairy");
+    expect(keys).not.toContain("restriction-not_vegan");
+    // allergen chip present
+    expect(keys).toContain("allergen-dairy");
+    // content tags present
+    expect(keys).toContain("tag-high_protein");
+    expect(keys).toContain("tag-quick");
+  });
+
+  it("buildRecipeTagChips keeps contains_meat (no allergen counterpart)", () => {
+    const chips = buildRecipeTagChips({
+      tags: [],
+      restrictionTags: ["contains_meat", "not_vegan"],
+      allergenTags: [],
+    });
+
+    const keys = chips.map((c) => c.key);
+    expect(keys).toContain("restriction-contains_meat");
+    expect(keys).not.toContain("restriction-not_vegan");
+  });
+
+  it("buildRecipeTagChips assigns correct tones", () => {
+    const chips = buildRecipeTagChips({
+      tags: ["high_protein"],
+      restrictionTags: [],
+      allergenTags: ["peanuts"],
+    });
+
+    expect(chips.find((c) => c.key === "tag-high_protein")?.tone).toBe("green");
+    expect(chips.find((c) => c.key === "allergen-peanuts")?.tone).toBe("red");
+  });
+
+  it("buildRecipeTagChips title-cases unknown tags", () => {
+    const chips = buildRecipeTagChips({
+      tags: ["some_unknown_tag"],
+      restrictionTags: [],
+      allergenTags: [],
+    });
+
+    expect(chips[0]?.fallbackLabel).toBe("Some Unknown Tag");
   });
 
   it("formats ingredient lines with quantity and notes", () => {

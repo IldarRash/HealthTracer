@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BadRequestException } from "@nestjs/common";
+import { ProposalNormalizationService } from "../proposals/proposal-normalization.service.js";
 import { ProposalValidationService } from "../proposals/proposal-validation.service.js";
 import {
+  DEFAULT_QUOTA_LIMIT_REPLY,
   WELLBEING_CRISIS_SUPPORT_COPY,
   WEEKLY_REVIEW_CHAT_PROMPT,
   getTodayIsoDateInTimezone,
@@ -54,7 +56,7 @@ const noopChatAttachmentsService = {
 /** Entitlements stub: always allows AI messages (no quota enforcement in existing tests). */
 const noopEntitlementsService = {
   assertAiMessageAllowed: async () => undefined,
-  recordAiMessageUsage: async () => undefined,
+  recordAiMessageUsage: async () => 1,
   getEntitlement: async () => ({
     tier: "free" as const,
     aiMessagesPerDay: 10,
@@ -87,8 +89,24 @@ const noopDirectChatPathService = {
   tryExecute: async () => null,
 } as never;
 
+/** Normalization stub: passes every payload through unchanged. */
+const noopProposalNormalizationService = {
+  normalizeProposal: async (_intent: unknown, changes: unknown) => changes,
+} as never;
+
+/** Repair stub: no provider configured — repair is never attempted. */
+const noopProposalRepairService = {
+  isAvailable: false,
+  tryRepair: async () => null,
+} as never;
+
 const noopProposalExplainerService = {
   resolvePreAiTurn: async () => ({ kind: "not_explainer" as const }),
+} as never;
+
+/** Daily-usage telemetry stub: swallow recordTurn (asserted explicitly where relevant). */
+const noopAiDailyUsageTelemetryService = {
+  recordTurn: () => undefined,
 } as never;
 
 function createDirectChatPathServiceForChatTests(todayService: {
@@ -104,12 +122,24 @@ function createDirectChatPathServiceForChatTests(todayService: {
     {
       resolveFromAuth: async () => user,
     } as never,
+    {
+      getCurrentActivePlan: vi.fn().mockResolvedValue({ plan: null, activeRevision: null }),
+    } as never,
+    {
+      getLatestSummarySnapshot: vi.fn().mockResolvedValue(null),
+    } as never,
+    {
+      getCurrentActivePlan: vi
+        .fn()
+        .mockResolvedValue({ plan: null, activeRevision: null, sessions: [] }),
+    } as never,
   );
 }
 
 const noopAiBehaviorConfigService = {
   getChat: () => ({
     emptyAttachmentMessage: "Shared attachment(s) for coaching review.",
+    quotaLimitReply: DEFAULT_QUOTA_LIMIT_REPLY,
   }),
   getDeterministicProposalTriggers: () => ({
     maxMergedProposals: 5,
@@ -133,6 +163,7 @@ const noopAiBehaviorConfigService = {
       skipWhenCrisis: true,
     },
   }),
+  getSuggestedQuickActions: () => ({ actions: [] }),
 } as never;
 
 const noopChatTurnAttachmentStageService = {
@@ -196,11 +227,35 @@ function wrapAiServiceWithDefaultMetadata(aiService: unknown) {
   };
 }
 
+/**
+ * Pass-everything ProposalValidationService mock. Every validator returns "no
+ * errors"; pass `overrides` to make specific validators fail (or spy on them).
+ */
+function createProposalValidationServiceMock(overrides: Record<string, unknown> = {}) {
+  return {
+    validateRawProposal: () => ({ valid: true, errors: [] }),
+    validateCorrelationEvidenceOwnership: async () => [],
+    validateProvenanceOwnership: async () => [],
+    validateProgressLinkedProvenanceRequired: () => [],
+    validateGoalProposalHierarchy: async () => [],
+    validateTodayChecklistGoalSourceRefs: async () => [],
+    validateRecoveryAwareWorkoutAdaptation: async () => [],
+    validateHabitProposalContext: async () => [],
+    validateWellbeingCheckinProposalContext: async () => [],
+    validateNutritionIncidentImageRefOwnership: async () => [],
+    validateChatAttachmentProposalRefs: async () => [],
+    validateRecipeRecommendationProposalContext: async () => [],
+    ...overrides,
+  };
+}
+
 function createChatService(deps: {
   chatRepository: unknown;
   usersService: unknown;
   aiService: unknown;
   proposalValidationService: unknown;
+  proposalNormalizationService?: unknown;
+  proposalRepairService?: unknown;
   progressWeeklyReviewService?: unknown;
   wellbeingCheckInsService?: unknown;
   recipesService?: unknown;
@@ -210,12 +265,15 @@ function createChatService(deps: {
   proposalExplainerService?: unknown;
   aiBehaviorConfigService?: unknown;
   entitlementsService?: unknown;
+  aiDailyUsageTelemetryService?: unknown;
 }) {
   return new ChatService(
     deps.chatRepository as never,
     deps.usersService as never,
     wrapAiServiceWithDefaultMetadata(deps.aiService) as never,
     deps.proposalValidationService as never,
+    (deps.proposalNormalizationService ?? noopProposalNormalizationService) as never,
+    (deps.proposalRepairService ?? noopProposalRepairService) as never,
     (deps.progressWeeklyReviewService ?? noopWeeklyReviewService) as never,
     (deps.wellbeingCheckInsService ?? noopWellbeingCheckInsService) as never,
     (deps.recipesService ?? noopRecipesService) as never,
@@ -225,6 +283,7 @@ function createChatService(deps: {
     (deps.proposalExplainerService ?? noopProposalExplainerService) as never,
     (deps.aiBehaviorConfigService ?? noopAiBehaviorConfigService) as never,
     (deps.entitlementsService ?? noopEntitlementsService) as never,
+    (deps.aiDailyUsageTelemetryService ?? noopAiDailyUsageTelemetryService) as never,
   );
 }
 
@@ -289,20 +348,7 @@ describe("ChatService", () => {
           agentMetadata,
         }),
       },
-      proposalValidationService: {
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        validateCorrelationEvidenceOwnership: async () => [],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      proposalValidationService: createProposalValidationServiceMock(),
     });
 
     await service.sendMessage(auth, thread.id, {
@@ -385,20 +431,7 @@ describe("ChatService", () => {
           };
         },
       },
-      proposalValidationService: {
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        validateCorrelationEvidenceOwnership: async () => [],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      proposalValidationService: createProposalValidationServiceMock(),
     });
 
     await service.sendMessage(auth, thread.id, {
@@ -477,20 +510,7 @@ describe("ChatService", () => {
           agentMetadata,
         }),
       },
-      proposalValidationService: {
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        validateCorrelationEvidenceOwnership: async () => [],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      proposalValidationService: createProposalValidationServiceMock(),
     });
 
     await service.sendMessage(auth, thread.id, {
@@ -593,10 +613,6 @@ describe("ChatService", () => {
           getHabitTemplateReferenceErrors: async () => [],
         } as never,
         {
-          findApprovedSignalById: async () => null,
-          findCorrelationEligibleSignalById: async () => null,
-        } as never,
-        {
           buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }),
         } as never,
         {
@@ -623,6 +639,7 @@ describe("ChatService", () => {
         {} as never,
         {} as never,
         { listByIdsForUser: async () => [] } as never,
+        { findContextEligibleReadingById: async () => null } as never,
       ),
     });
 
@@ -716,20 +733,9 @@ describe("ChatService", () => {
           replySafetyErrors: [],
         }),
       },
-      proposalValidationService: {
-        validateRawProposal: () => ({ valid: true, errors: [] }),
+      proposalValidationService: createProposalValidationServiceMock({
         validateCorrelationEvidenceOwnership: async () => [evidenceError],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      }),
     });
 
     const result = await service.sendMessage(auth, thread.id, {
@@ -791,20 +797,7 @@ describe("ChatService", () => {
           };
         },
       },
-      proposalValidationService: {
-        validateRawProposal: () => ({ valid: true, errors: [] }),
-        validateCorrelationEvidenceOwnership: async () => [],
-        validateProvenanceOwnership: async () => [],
-        validateProgressLinkedProvenanceRequired: () => [],
-        validateGoalProposalHierarchy: async () => [],
-        validateTodayChecklistGoalSourceRefs: async () => [],
-        validateRecoveryAwareWorkoutAdaptation: async () => [],
-        validateHabitProposalContext: async () => [],
-        validateWellbeingCheckinProposalContext: async () => [],
-        validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-        validateRecipeRecommendationProposalContext: async () => [],
-      },
+      proposalValidationService: createProposalValidationServiceMock(),
     });
 
     const result = await service.sendMessage(auth, thread.id, {
@@ -933,20 +926,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         directChatPathService: createDirectChatPathServiceForChatTests(
           options?.todayService ?? {
             getOrGenerateDay: async () => buildDirectPathTodayDay(),
@@ -1239,10 +1219,6 @@ describe("ChatService", () => {
           ...habitsService,
         } as never,
         {
-          findApprovedSignalById: async () => null,
-          findCorrelationEligibleSignalById: async () => null,
-        } as never,
-        {
           buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }),
         } as never,
         {
@@ -1270,6 +1246,7 @@ describe("ChatService", () => {
         {} as never,
         {} as never,
         { listByIdsForUser: async () => [] } as never,
+        { findContextEligibleReadingById: async () => null } as never,
       );
     }
 
@@ -1518,20 +1495,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => ({
             summary: { summary: { id: summaryId }, trends: [] },
@@ -1635,20 +1599,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => {
             packingCalled = true;
@@ -1743,10 +1694,6 @@ describe("ChatService", () => {
           { findInaccessibleExerciseIds: async () => [] } as never,
           { getHabitTemplateReferenceErrors: async () => [] } as never,
           {
-            findApprovedSignalById: async () => null,
-            findCorrelationEligibleSignalById: async () => null,
-          } as never,
-          {
             buildSummaryForUser: async () => ({ items: [], generatedAt: new Date().toISOString() }),
           } as never,
           { listByUserId: async () => [] } as never,
@@ -1766,6 +1713,7 @@ describe("ChatService", () => {
           {} as never,
           {} as never,
           { listByIdsForUser: async () => [] } as never,
+          { findContextEligibleReadingById: async () => null } as never,
         ),
         progressWeeklyReviewService: {
           packChatWeeklyReviewProposals: async () => ({
@@ -1871,20 +1819,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         wellbeingCheckInsService: {
           getCheckInForDate: async () => ({
             checkIn: options.hasTodayCheckIn
@@ -2004,20 +1939,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-        validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
 
       const result = await service.sendMessage(auth, thread.id, {
@@ -2148,20 +2070,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () =>
@@ -2268,20 +2177,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
 
       await service.sendMessage(auth, thread.id, {
@@ -2387,20 +2283,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () => {
@@ -2504,9 +2387,7 @@ describe("ChatService", () => {
             },
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () =>
@@ -2546,20 +2427,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => {
             throw new BadRequestException({
@@ -2623,20 +2491,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend,
           runTurnStages,
@@ -2700,20 +2555,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async (input: {
@@ -2806,20 +2648,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () =>
@@ -2878,9 +2707,7 @@ describe("ChatService", () => {
         aiService: {
           generateCoachResponse,
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         proposalExplainerService: {
           resolvePreAiTurn: async () => ({
             kind: "no_proposal",
@@ -2973,9 +2800,7 @@ describe("ChatService", () => {
             };
           },
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         proposalExplainerService: {
           resolvePreAiTurn: async () => ({
             kind: "with_proposal",
@@ -3010,7 +2835,156 @@ describe("ChatService", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Phase 7: consentRequired surfacing + no health_documents auto-persist
+  // Gap 4 — document_file attachment turn + workout proposal + no persisted health data
+  // ---------------------------------------------------------------------------
+  //
+  // An attachment turn whose mocked AI output selects a create_workout_plan
+  // candidate must:
+  //   (a) produce a validated + persisted proposal in the result
+  //   (b) NEVER call any lab-report / biomarker-reading repository or service
+  //       method (no auto-persist path exists for document attachments)
+  //
+  // The chat-attachments path is images + document files, context-only; document text goes
+  // directly to the LLM as ephemeral context and must never be saved.
+  // ---------------------------------------------------------------------------
+
+  describe("document_file attachment turn with workout proposal (Gap 4)", () => {
+    it("document_file attachment turn → create_workout_plan proposal persisted, zero lab_reports/biomarker_readings calls", async () => {
+      const attachmentId = "d9000001-0000-4000-8000-000000000001";
+      const proposalRecord = {
+        intent: "create_workout_plan" as const,
+        targetDomain: "workout" as const,
+        title: "3-Day Strength Plan",
+        reason: "User uploaded their training preferences.",
+        proposedChanges: {
+          title: "3-Day Strength Plan",
+          summary: "Strength-focused plan based on uploaded document.",
+          days: [
+            { weekday: "monday" as const, focus: "Upper body", exercises: [{ name: "Bench Press", sets: 4, reps: "8" }] },
+          ],
+          notes: [],
+        },
+      };
+
+      const createProposal = vi.fn(async (
+        _userId: string,
+        _threadId: string,
+        _sourceMessageId: string | null,
+        proposal: unknown,
+        validationStatus: "valid" | "invalid" | "pending_validation",
+        validationErrors: string[],
+      ) => ({
+        id: "proposal-id",
+        userId: user.id,
+        threadId: thread.id,
+        sourceMessageId: "assistant-message-id",
+        ...(proposal as Record<string, unknown>),
+        status: "pending" as const,
+        validationStatus,
+        validationErrors,
+        userDecisionAt: null,
+        appliedReference: null,
+        createdAt: new Date("2026-06-10T00:00:00.000Z"),
+        updatedAt: new Date("2026-06-10T00:00:00.000Z"),
+      }));
+
+      // Structured-health (lab reports / biomarker readings) repository mock —
+      // all methods should be untouched by the attachment turn.
+      const biomarkersRepositoryMock = {
+        create: vi.fn(),
+        findById: vi.fn(),
+        findByUserId: vi.fn(),
+        delete: vi.fn(),
+        update: vi.fn(),
+      };
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-06-10T00:00:00.000Z"),
+          }),
+          createProposal,
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: {
+              reply: "Here is a workout plan based on your uploaded document.",
+              proposals: [proposalRecord],
+            },
+            parseErrors: [],
+            replySafetyErrors: [],
+            agentMetadata: {
+              provider: "openai" as const,
+              intent: "create_workout_plan" as const,
+              catalogIntentId: "create_workout_plan" as const,
+              purpose: "workout_adaptation" as const,
+              depth: "medium" as const,
+              timeRange: "14d" as const,
+              toolsInvoked: [],
+              safety: { status: "passed" as const, blockedReasons: [], constraintsApplied: [] },
+              citations: [],
+            },
+          }),
+        },
+        proposalValidationService: createProposalValidationServiceMock(),
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () =>
+            buildMockAttachmentTurnStageResult({
+              attachments: [
+                {
+                  id: attachmentId,
+                  userId: user.id,
+                  category: "document_file",
+                  mimeType: "application/pdf",
+                  status: "ready",
+                  filename: "training-plan.pdf",
+                  storageKey: "local://attachments/training-plan.pdf",
+                  consent: null,
+                },
+              ],
+            }),
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "Create a workout plan based on this document.",
+        attachmentRefIds: [attachmentId],
+      });
+
+      // (a) The create_workout_plan proposal must be validated and persisted.
+      expect(createProposal).toHaveBeenCalledOnce();
+      expect(result.proposals).toHaveLength(1);
+      expect(result.proposals[0]?.intent).toBe("create_workout_plan");
+      expect(result.proposals[0]?.targetDomain).toBe("workout");
+
+      // (b) The structured-health repository must never have been called.
+      // The document file is ephemeral context only — no auto-save to
+      // lab_reports or biomarker_readings.
+      for (const [methodName, mock] of Object.entries(biomarkersRepositoryMock)) {
+        expect(mock, `biomarkersRepositoryMock.${methodName} should not be called`).not.toHaveBeenCalled();
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 7: consentRequired surfacing + no structured-health auto-persist
   // ---------------------------------------------------------------------------
 
   describe("consentRequired surfacing (Phase 7)", () => {
@@ -3083,20 +3057,7 @@ describe("ChatService", () => {
             },
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
     }
 
@@ -3109,9 +3070,9 @@ describe("ChatService", () => {
 
       // consentRequired must be surfaced to the caller so the UI can prompt for consent.
       expect(result.consentRequired).toBe(true);
-      // No health_documents are auto-persisted — proposals flow through the normal
-      // proposal validation + accept path. The proposals array may be empty or contain
-      // a consent-gated proposal record; no auto-applied health_documents row exists.
+      // No lab_reports / biomarker_readings are auto-persisted — proposals flow through
+      // the normal proposal validation + accept path. The proposals array may be empty or
+      // contain a consent-gated proposal record; no auto-applied structured health row exists.
       // (The intent type union does not include an auto-persist variant by design.)
       expect(Array.isArray(result.proposals)).toBe(true);
     });
@@ -3244,20 +3205,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
         chatTurnAttachmentStageService: {
           validateRefsForSend: async () => undefined,
           runTurnStages: async () => ({
@@ -3317,20 +3265,7 @@ describe("ChatService", () => {
             replySafetyErrors: [],
           }),
         },
-        proposalValidationService: {
-          validateRawProposal: () => ({ valid: true, errors: [] }),
-          validateCorrelationEvidenceOwnership: async () => [],
-          validateProvenanceOwnership: async () => [],
-          validateProgressLinkedProvenanceRequired: () => [],
-          validateGoalProposalHierarchy: async () => [],
-          validateTodayChecklistGoalSourceRefs: async () => [],
-          validateRecoveryAwareWorkoutAdaptation: async () => [],
-          validateHabitProposalContext: async () => [],
-          validateWellbeingCheckinProposalContext: async () => [],
-          validateNutritionIncidentImageRefOwnership: async () => [],
-          validateChatAttachmentProposalRefs: async () => [],
-          validateRecipeRecommendationProposalContext: async () => [],
-        },
+        proposalValidationService: createProposalValidationServiceMock(),
       });
 
       const result = await service.sendMessage(auth, thread.id, {
@@ -3361,6 +3296,7 @@ describe("ChatService", () => {
       assertAiMessageAllowed?: () => Promise<void>;
       recordAiMessageUsage?: () => Promise<void>;
       generateCoachResponse?: (...args: unknown[]) => Promise<unknown>;
+      userOverride?: Record<string, unknown>;
     } = {}) {
       const generateCoachResponse = deps.generateCoachResponse ?? vi.fn(async () => ({
         output: { reply: "Here is a coaching reply.", proposals: [] },
@@ -3413,7 +3349,7 @@ describe("ChatService", () => {
           touchThread: async () => undefined,
         },
         usersService: {
-          resolveFromAuth: async () => user,
+          resolveFromAuth: async () => deps.userOverride ?? user,
         },
         aiService: { generateCoachResponse },
         proposalValidationService: minimalProposalValidationService,
@@ -3443,6 +3379,60 @@ describe("ChatService", () => {
       expect(capturedAssistant[0]?.metadata).toMatchObject({
         quota: { limitReached: true, tier: "free" },
       });
+    });
+
+    it("quota reply uses the EN config copy for an English message (config-sourced, not hardcoded)", async () => {
+      const { AiMessageQuotaExceededError } = await import("../billing/entitlements.service.js");
+
+      const { service, capturedAssistant } = createQuotaChatService({
+        assertAiMessageAllowed: vi.fn(async () => {
+          throw new AiMessageQuotaExceededError();
+        }),
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "How can I improve my workout?",
+      });
+
+      expect(capturedAssistant[0]?.content).toBe(DEFAULT_QUOTA_LIMIT_REPLY.en);
+    });
+
+    it("quota reply uses the RU config copy for a Russian message (detected language)", async () => {
+      const { AiMessageQuotaExceededError } = await import("../billing/entitlements.service.js");
+
+      const { service, capturedAssistant } = createQuotaChatService({
+        assertAiMessageAllowed: vi.fn(async () => {
+          throw new AiMessageQuotaExceededError();
+        }),
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "Как мне улучшить мою тренировку на этой неделе?",
+      });
+
+      expect(capturedAssistant[0]?.content).toBe(DEFAULT_QUOTA_LIMIT_REPLY.ru);
+      expect(capturedAssistant[0]?.metadata).toMatchObject({
+        quota: { limitReached: true, tier: "free" },
+      });
+    });
+
+    it("persisted user locale takes precedence over detected language for the quota reply", async () => {
+      const { AiMessageQuotaExceededError } = await import("../billing/entitlements.service.js");
+
+      const { service, capturedAssistant } = createQuotaChatService({
+        assertAiMessageAllowed: vi.fn(async () => {
+          throw new AiMessageQuotaExceededError();
+        }),
+        // English message text, but the persisted locale hint is ru — hint wins,
+        // mirroring the MessagePreprocessor resolution used by the LLM pipeline.
+        userOverride: { ...user, locale: "ru" },
+      });
+
+      await service.sendMessage(auth, thread.id, {
+        content: "How can I improve my workout?",
+      });
+
+      expect(capturedAssistant[0]?.content).toBe(DEFAULT_QUOTA_LIMIT_REPLY.ru);
     });
 
     it("allowed turn calls generateCoachResponse and then recordAiMessageUsage", async () => {
@@ -3506,6 +3496,17 @@ describe("ChatService", () => {
           }),
         } as never,
         { resolveFromAuth: async () => user } as never,
+        {
+          getCurrentActivePlan: vi.fn().mockResolvedValue({ plan: null, activeRevision: null }),
+        } as never,
+        {
+          getLatestSummarySnapshot: vi.fn().mockResolvedValue(null),
+        } as never,
+        {
+          getCurrentActivePlan: vi
+            .fn()
+            .mockResolvedValue({ plan: null, activeRevision: null, sessions: [] }),
+        } as never,
       );
 
       const entitlementsService = {
@@ -3562,6 +3563,998 @@ describe("ChatService", () => {
       expect(result.assistantMessage.metadata.directPath).toBeDefined();
       expect(assertAiMessageAllowed).not.toHaveBeenCalled();
       expect(recordAiMessageUsage).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // F2 / F6b — turnError: assistant content is " " + no suggestedQuickActions
+  // -------------------------------------------------------------------------
+
+  describe("turnError honest degradation", () => {
+    function buildTurnErrorChatService(turnError: { reason: "decision_failed" | "reply_blocked" }) {
+      let assistantMessageContent = "";
+      let assistantMessageMetadata: Record<string, unknown> = {};
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "assistant") {
+              assistantMessageContent = content;
+              assistantMessageMetadata = metadata;
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            };
+          },
+          createProposal: async () => {
+            throw new Error("createProposal should not be called for turnError turns");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: {
+              reply: "[degraded]",
+              proposals: [],
+            },
+            parseErrors: [],
+            replySafetyErrors: [],
+            turnError,
+            agentMetadata: {
+              ...createDefaultAgentMetadataForTests(),
+              fanOut: {
+                domains: [
+                  {
+                    domain: "workout",
+                    status: "degraded",
+                    degradedReasons: [],
+                    tokenUsage: null,
+                  },
+                ],
+                router: null,
+                decision: null,
+                resolution: null,
+              },
+            },
+          }),
+        },
+        proposalValidationService: createProposalValidationServiceMock(),
+      });
+
+      return { service, getAssistantContent: () => assistantMessageContent, getAssistantMetadata: () => assistantMessageMetadata };
+    }
+
+    it("persists assistant content as ' ' (space) when turnError is set — not the fallback reply", async () => {
+      const { service, getAssistantContent } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      // Must be the space placeholder, not "[degraded]" or any real coaching text
+      expect(getAssistantContent()).toBe(" ");
+    });
+
+    it("persists turnError in assistant message metadata when turnError is set", async () => {
+      const { service, getAssistantMetadata } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      expect(getAssistantMetadata().turnError).toEqual({ reason: "decision_failed" });
+    });
+
+    it("does NOT persist turnDegraded when turnError is set (mutually exclusive)", async () => {
+      const { service, getAssistantMetadata } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      // turnDegraded must be absent — only turnError is written
+      expect(getAssistantMetadata().turnDegraded).toBeUndefined();
+    });
+
+    it("does not attach suggestedQuickActions on turnError turns", async () => {
+      const { service } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      const result = await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      // Quick actions are derived for LLM-backed turns only — absent when turnError is set
+      expect(result.suggestedQuickActions).toBeUndefined();
+    });
+
+    it("surfaces turnError.reason=reply_blocked in the response and persists ' ' content", async () => {
+      const { service, getAssistantContent } = buildTurnErrorChatService({ reason: "reply_blocked" });
+
+      const result = await service.sendMessage(auth, thread.id, { content: "diagnose me" });
+
+      expect(result.turnError).toEqual({ reason: "reply_blocked" });
+      expect(getAssistantContent()).toBe(" ");
+    });
+
+    it("does not persist suggestedQuickActions in assistant metadata on turnError turns", async () => {
+      const { service, getAssistantMetadata } = buildTurnErrorChatService({ reason: "decision_failed" });
+
+      await service.sendMessage(auth, thread.id, { content: "adjust my workout" });
+
+      expect(getAssistantMetadata().suggestedQuickActions).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // suggestedQuickActions persistence — chips ride assistant message metadata
+  // so they survive a thread reload (live turn-response field unchanged).
+  // -------------------------------------------------------------------------
+
+  describe("suggestedQuickActions persistence", () => {
+    const quickActionsConfig = {
+      actions: [
+        {
+          id: "today_summary_read",
+          labelEn: "Today's summary",
+          labelRu: "Сводка на сегодня",
+          messageText: { en: "What's today?", ru: "Что у меня на сегодня?" },
+        },
+        {
+          id: "workout_plan_read",
+          labelEn: "My workout plan",
+          labelRu: "Мой план тренировок",
+          messageText: { en: "Show my workout plan", ru: "Покажи мой план тренировок" },
+        },
+      ],
+    };
+
+    function buildQuickActionsChatService(options: {
+      actions: typeof quickActionsConfig | { actions: [] };
+      fanOutDomains: readonly string[];
+    }) {
+      let assistantMessageMetadata: Record<string, unknown> = {};
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => {
+            if (role === "assistant") {
+              assistantMessageMetadata = metadata;
+            }
+
+            return {
+              id: role === "user" ? "user-message-id" : "assistant-message-id",
+              threadId: thread.id,
+              role,
+              content,
+              metadata,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            };
+          },
+          createProposal: async () => {
+            throw new Error("createProposal should not be called");
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: { reply: "Here is a coaching reply.", proposals: [] },
+            parseErrors: [],
+            replySafetyErrors: [],
+            agentMetadata: {
+              ...createDefaultAgentMetadataForTests(),
+              fanOut: {
+                domains: options.fanOutDomains.map((domain) => ({
+                  domain,
+                  status: "ok",
+                  degradedReasons: [],
+                  tokenUsage: null,
+                })),
+                router: null,
+                decision: null,
+                resolution: null,
+              },
+            },
+          }),
+        },
+        proposalValidationService: createProposalValidationServiceMock(),
+        aiBehaviorConfigService: {
+          ...(noopAiBehaviorConfigService as Record<string, unknown>),
+          getSuggestedQuickActions: () => options.actions,
+        } as never,
+      });
+
+      return { service, getAssistantMetadata: () => assistantMessageMetadata };
+    }
+
+    it("persists the derived chips in assistant message metadata and mirrors them on the response", async () => {
+      const { service, getAssistantMetadata } = buildQuickActionsChatService({
+        actions: quickActionsConfig,
+        fanOutDomains: ["workout"],
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "How should I train this week?",
+      });
+
+      const persisted = getAssistantMetadata().suggestedQuickActions;
+      expect(persisted).toBeDefined();
+      expect((persisted as Array<{ id: string }>).map((a) => a.id)).toEqual([
+        "today_summary_read",
+        "workout_plan_read",
+      ]);
+      // Live turn-response field unchanged and identical to the persisted chips.
+      expect(result.suggestedQuickActions).toEqual(persisted);
+    });
+
+    it("omits the metadata key entirely when no chips are derived", async () => {
+      const { service, getAssistantMetadata } = buildQuickActionsChatService({
+        actions: { actions: [] },
+        fanOutDomains: ["workout"],
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "How should I train this week?",
+      });
+
+      expect(getAssistantMetadata()).not.toHaveProperty("suggestedQuickActions");
+      expect(result.suggestedQuickActions).toBeUndefined();
+    });
+  });
+
+  describe("log_nutrition_incident normalization integration (live scenario regression)", () => {
+    it("persists the exact live-failure raw proposal as VALID after normalization + the full validation stack", async () => {
+      // Live failure shape: provenance.source "image_estimate" (not in enum),
+      // imageRefs as UUID strings (schema wants objects), hallucinated 2023 date.
+      const attachmentId = "ab345678-90ab-4cde-8f01-234567890abc";
+      const llmHallucinatedImageRef = "cd345678-90ab-4cde-8f01-234567890abc";
+
+      const attachmentRecord = {
+        id: attachmentId,
+        category: "food_photo",
+        mimeType: "image/jpeg",
+        status: "ready",
+        storageKey: "chat/food-photo.jpg",
+      };
+
+      // Real normalization + real validation services — only repository access
+      // is stubbed, so schema, domain, and image-ref ownership checks all run.
+      const noop = {} as never;
+      const proposalNormalizationService = new ProposalNormalizationService(noop);
+      const proposalValidationService = new (ProposalValidationService as new (
+        ...args: unknown[]
+      ) => ProposalValidationService)(
+        noop, noop, noop, noop, noop, noop, noop, noop, noop, noop, noop, noop,
+        // chatAttachmentsRepository: the upload-ownership perimeter knows only
+        // the turn's real attachment id.
+        {
+          listByIdsForUser: async (_userId: string, ids: readonly string[]) =>
+            ids.filter((id) => id === attachmentId).map((id) => ({ id })),
+        } as never,
+        // biomarkersRepository — unused in this scenario.
+        noop,
+      );
+
+      let persistedValidationStatus: string | undefined;
+      let persistedValidationErrors: string[] | undefined;
+      let persistedProposal: { proposedChanges?: Record<string, unknown> } | undefined;
+
+      const service = createChatService({
+        chatRepository: {
+          findThreadById: async () => thread,
+          listMessagesByThreadId: async () => [],
+          createMessage: async (
+            _threadId: string,
+            role: "user" | "assistant" | "system",
+            content: string,
+            metadata: Record<string, unknown> = {},
+          ) => ({
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          }),
+          createProposal: async (
+            userId: string,
+            threadId: string,
+            messageId: string,
+            proposal: { proposedChanges?: Record<string, unknown> } & Record<string, unknown>,
+            validationStatus: string,
+            validationErrors: string[],
+          ) => {
+            persistedValidationStatus = validationStatus;
+            persistedValidationErrors = validationErrors;
+            persistedProposal = proposal;
+
+            return {
+              id: "ef345678-90ab-4cde-8f01-234567890abc",
+              userId,
+              threadId,
+              sourceMessageId: messageId,
+              intent: proposal.intent,
+              targetDomain: proposal.targetDomain,
+              title: proposal.title,
+              reason: proposal.reason,
+              evidenceRefs: null,
+              proposedChanges: proposal.proposedChanges,
+              status: "pending",
+              validationStatus,
+              validationErrors,
+              userDecisionAt: null,
+              appliedReference: null,
+              createdAt: new Date("2026-01-01T00:00:00.000Z"),
+              updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+            };
+          },
+          touchThread: async () => undefined,
+        },
+        usersService: {
+          resolveFromAuth: async () => user,
+        },
+        aiService: {
+          generateCoachResponse: async () => ({
+            output: {
+              reply: "Logged an estimate of your breakfast for review.",
+              proposals: [
+                {
+                  intent: "log_nutrition_incident",
+                  targetDomain: "nutrition",
+                  title: "Log breakfast",
+                  reason: "You shared a photo of your breakfast.",
+                  proposedChanges: {
+                    provenance: { source: "image_estimate" },
+                    imageRefs: [llmHallucinatedImageRef],
+                    incidentDateTime: "2023-10-05T08:00:00.000Z",
+                    items: [{ name: "Oatmeal with berries", calories: 320 }],
+                    estimatedCalories: 320,
+                    estimatedMacros: { proteinGrams: 12, carbsGrams: 55, fatGrams: 6 },
+                    confidence: "medium",
+                  },
+                },
+              ],
+            },
+            parseErrors: [],
+            replySafetyErrors: [],
+          }),
+        },
+        proposalValidationService,
+        proposalNormalizationService,
+        chatTurnAttachmentStageService: {
+          validateRefsForSend: async () => undefined,
+          runTurnStages: async () =>
+            buildMockAttachmentTurnStageResult({ attachments: [attachmentRecord] }),
+        },
+      });
+
+      const result = await service.sendMessage(auth, thread.id, {
+        content: "запиши в мой завтрак",
+        attachmentRefIds: [attachmentId],
+      });
+
+      expect(persistedValidationStatus).toBe("valid");
+      expect(persistedValidationErrors).toEqual([]);
+      expect(result.proposals).toHaveLength(1);
+
+      const changes = persistedProposal?.proposedChanges as {
+        imageRefs: Array<{ id: string }>;
+        provenance: { source: string };
+        incidentDateTime: string;
+        estimatedCalories: number;
+      };
+
+      // Trusted stamping: image refs come from the turn's real attachment, not
+      // the LLM-hallucinated uuid; provenance and date come from server state.
+      expect(changes.imageRefs).toEqual([{ id: attachmentId }]);
+      expect(changes.provenance.source).toBe("vision_llm_estimate");
+      expect(changes.incidentDateTime).not.toBe("2023-10-05T08:00:00.000Z");
+      expect(Math.abs(Date.now() - Date.parse(changes.incidentDateTime))).toBeLessThan(60_000);
+      // Nutritional content is untouched.
+      expect(changes.estimatedCalories).toBe(320);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice 3 — proposal self-repair retry
+// ---------------------------------------------------------------------------
+
+describe("ChatService proposal self-repair", () => {
+  const GENERATED_REPLY = "Here is your updated plan.";
+  const ORIGINAL_SCHEMA_ERROR = "proposedChanges.days: Expected array, received string";
+  const REPAIRED_SCHEMA_ERROR = "proposedChanges.days: Array must contain at least 1 element(s)";
+
+  const repairableProposal = {
+    intent: "adapt_workout_plan" as const,
+    targetDomain: "workout" as const,
+    title: "Adapt your workout plan",
+    reason: "Recent sessions looked heavy.",
+    proposedChanges: { marker: "bad" },
+  };
+
+  /**
+   * validateRawProposal driven by a payload marker so each test controls the
+   * schema-class outcome of the first and second (post-repair) validation pass:
+   *   marker "bad"       → ORIGINAL_SCHEMA_ERROR
+   *   marker "still-bad" → REPAIRED_SCHEMA_ERROR
+   *   anything else      → valid
+   */
+  function markerValidateRawProposal(proposal: { proposedChanges: unknown }) {
+    const marker = (proposal.proposedChanges as { marker?: string }).marker;
+
+    if (marker === "bad") {
+      return { valid: false, errors: [ORIGINAL_SCHEMA_ERROR] };
+    }
+
+    if (marker === "still-bad") {
+      return { valid: false, errors: [REPAIRED_SCHEMA_ERROR] };
+    }
+
+    return { valid: true, errors: [] };
+  }
+
+  function createRepairChatService(options: {
+    proposals: unknown[];
+    proposalRepairService: unknown;
+    proposalValidationServiceOverrides?: Record<string, unknown>;
+    /** Optional agent metadata returned by the mocked AI service (e.g. with fanOut usage). */
+    agentMetadata?: Record<string, unknown>;
+    aiDailyUsageTelemetryService?: unknown;
+    entitlementsService?: unknown;
+  }) {
+    const capturedProposals: Array<{
+      proposal: { intent: string; title: string; reason: string; proposedChanges: unknown };
+      validationStatus: string;
+      validationErrors: string[];
+    }> = [];
+    const assistantMessages: Array<{ content: string; metadata: Record<string, unknown> }> = [];
+
+    const service = createChatService({
+      chatRepository: {
+        findThreadById: async () => thread,
+        listMessagesByThreadId: async () => [],
+        createMessage: async (
+          _threadId: string,
+          role: "user" | "assistant" | "system",
+          content: string,
+          metadata: Record<string, unknown> = {},
+        ) => {
+          if (role === "assistant") {
+            assistantMessages.push({ content, metadata });
+          }
+
+          return {
+            id: role === "user" ? "user-message-id" : "assistant-message-id",
+            threadId: thread.id,
+            role,
+            content,
+            metadata,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          };
+        },
+        createProposal: async (
+          _userId: string,
+          _threadId: string,
+          sourceMessageId: string | null,
+          proposal: {
+            intent: string;
+            title: string;
+            reason: string;
+            proposedChanges: unknown;
+          },
+          validationStatus: "valid" | "invalid" | "pending_validation",
+          validationErrors: string[],
+        ) => {
+          capturedProposals.push({ proposal, validationStatus, validationErrors });
+
+          return {
+            id: "8b3f0c54-9a51-4dc7-92f4-2a31f0a55c01",
+            userId: user.id,
+            threadId: thread.id,
+            sourceMessageId,
+            ...proposal,
+            status: "pending" as const,
+            validationStatus,
+            validationErrors,
+            userDecisionAt: null,
+            appliedReference: null,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+          };
+        },
+        touchThread: async () => undefined,
+      },
+      usersService: {
+        resolveFromAuth: async () => user,
+      },
+      aiService: {
+        generateCoachResponse: async () => ({
+          output: {
+            reply: GENERATED_REPLY,
+            proposals: options.proposals,
+          },
+          parseErrors: [],
+          replySafetyErrors: [],
+          ...(options.agentMetadata ? { agentMetadata: options.agentMetadata } : {}),
+        }),
+      },
+      proposalValidationService: {
+        validateRawProposal: markerValidateRawProposal,
+        validateCorrelationEvidenceOwnership: async () => [],
+        validateProvenanceOwnership: async () => [],
+        validateProgressLinkedProvenanceRequired: () => [],
+        validateGoalProposalHierarchy: async () => [],
+        validateTodayChecklistGoalSourceRefs: async () => [],
+        validateRecoveryAwareWorkoutAdaptation: async () => [],
+        validateHabitProposalContext: async () => [],
+        validateWellbeingCheckinProposalContext: async () => [],
+        validateNutritionIncidentImageRefOwnership: async () => [],
+        validateRecipeRecommendationProposalContext: async () => [],
+        validateChatAttachmentProposalRefs: async () => [],
+        ...(options.proposalValidationServiceOverrides ?? {}),
+      },
+      proposalRepairService: options.proposalRepairService,
+      ...(options.aiDailyUsageTelemetryService
+        ? { aiDailyUsageTelemetryService: options.aiDailyUsageTelemetryService }
+        : {}),
+      ...(options.entitlementsService ? { entitlementsService: options.entitlementsService } : {}),
+    });
+
+    return { service, capturedProposals, assistantMessages };
+  }
+
+  /** Capture every proposal.validation outcome event the service logs (log + warn levels). */
+  function captureProposalValidationEvents(service: unknown): Array<Record<string, unknown>> {
+    const events: Array<Record<string, unknown>> = [];
+    const logger = (service as Record<string, unknown>)["logger"] as {
+      log: (value: unknown, ...rest: unknown[]) => void;
+      warn: (value: unknown, ...rest: unknown[]) => void;
+    };
+    const record = (value: unknown) => {
+      if (
+        value != null &&
+        typeof value === "object" &&
+        (value as Record<string, unknown>)["event"] === "proposal.validation"
+      ) {
+        events.push(value as Record<string, unknown>);
+      }
+    };
+
+    vi.spyOn(logger, "log").mockImplementation(record);
+    vi.spyOn(logger, "warn").mockImplementation(record);
+
+    return events;
+  }
+
+  it("repairs an eligible schema-invalid proposal and persists it as valid with repair telemetry", async () => {
+    const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+      proposal: { ...proposal, proposedChanges: { marker: "fixed" } },
+    }));
+    const { service, capturedProposals, assistantMessages } = createRepairChatService({
+      proposals: [repairableProposal],
+      proposalRepairService: { isAvailable: true, tryRepair },
+    });
+
+    const result = await service.sendMessage(auth, thread.id, {
+      content: "Adapt my workout plan",
+    });
+
+    // Repair invoked exactly once with the original payload + exact errors.
+    expect(tryRepair).toHaveBeenCalledTimes(1);
+    expect(tryRepair).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intent: "adapt_workout_plan",
+        proposedChanges: { marker: "bad" },
+      }),
+      [ORIGINAL_SCHEMA_ERROR],
+    );
+
+    // Persisted proposal: valid, repaired payload, original envelope.
+    expect(capturedProposals).toHaveLength(1);
+    expect(capturedProposals[0]?.validationStatus).toBe("valid");
+    expect(capturedProposals[0]?.validationErrors).toEqual([]);
+    expect(capturedProposals[0]?.proposal).toMatchObject({
+      intent: "adapt_workout_plan",
+      targetDomain: "workout",
+      title: "Adapt your workout plan",
+      reason: "Recent sessions looked heavy.",
+      proposedChanges: { marker: "fixed" },
+    });
+
+    // Exactly one assistant message; reply text identical (never regenerated).
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]?.content).toBe(GENERATED_REPLY);
+    expect((assistantMessages[0]?.metadata.agent as Record<string, unknown>).repair).toEqual({
+      attempted: 1,
+      succeeded: 1,
+    });
+
+    expect(result.proposals).toHaveLength(1);
+    expect(result.proposals[0]?.validationStatus).toBe("valid");
+  });
+
+  it("persists the FINAL validation errors when the repaired proposal is still invalid", async () => {
+    const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+      proposal: { ...proposal, proposedChanges: { marker: "still-bad" } },
+    }));
+    const { service, capturedProposals, assistantMessages } = createRepairChatService({
+      proposals: [repairableProposal],
+      proposalRepairService: { isAvailable: true, tryRepair },
+    });
+
+    await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+    expect(tryRepair).toHaveBeenCalledTimes(1);
+    expect(capturedProposals).toHaveLength(1);
+    expect(capturedProposals[0]?.validationStatus).toBe("invalid");
+    // FINAL errors from the re-run stack on the repaired payload — not the original errors.
+    expect(capturedProposals[0]?.validationErrors).toEqual([REPAIRED_SCHEMA_ERROR]);
+    expect(capturedProposals[0]?.proposal.proposedChanges).toEqual({ marker: "still-bad" });
+
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]?.content).toBe(GENERATED_REPLY);
+    expect((assistantMessages[0]?.metadata.agent as Record<string, unknown>).repair).toEqual({
+      attempted: 1,
+      succeeded: 0,
+    });
+  });
+
+  it("never invokes repair for a safety-class failure", async () => {
+    const tryRepair = vi.fn();
+    // Real validateProposalSafety flags the unsafe wording in the title → safety class,
+    // even though the payload also carries a schema error.
+    const unsafeProposal = {
+      ...repairableProposal,
+      title: "Diagnose your fatigue and adapt the plan",
+    };
+    const { service, capturedProposals, assistantMessages } = createRepairChatService({
+      proposals: [unsafeProposal],
+      proposalRepairService: { isAvailable: true, tryRepair },
+    });
+
+    await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+    expect(tryRepair).not.toHaveBeenCalled();
+    expect(capturedProposals).toHaveLength(1);
+    expect(capturedProposals[0]?.validationStatus).toBe("invalid");
+    expect(capturedProposals[0]?.validationErrors).toContain(
+      "Proposal contains wording that may imply diagnosis, treatment, or therapy guidance.",
+    );
+    // No repair attempted → no repair key on the agent metadata.
+    expect(assistantMessages[0]?.metadata.agent).not.toHaveProperty("repair");
+  });
+
+  it("does not invoke repair or emit repair telemetry when the proposal is valid first pass", async () => {
+    const tryRepair = vi.fn();
+    const validProposal = {
+      ...repairableProposal,
+      proposedChanges: { marker: "ok" },
+    };
+    const { service, capturedProposals, assistantMessages } = createRepairChatService({
+      proposals: [validProposal],
+      proposalRepairService: { isAvailable: true, tryRepair },
+    });
+
+    await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+    expect(tryRepair).not.toHaveBeenCalled();
+    expect(capturedProposals).toHaveLength(1);
+    expect(capturedProposals[0]?.validationStatus).toBe("valid");
+    expect(assistantMessages[0]?.metadata.agent).not.toHaveProperty("repair");
+  });
+
+  it("skips the repair attempt entirely when no repair provider is configured", async () => {
+    const tryRepair = vi.fn();
+    const { service, capturedProposals, assistantMessages } = createRepairChatService({
+      proposals: [repairableProposal],
+      proposalRepairService: { isAvailable: false, tryRepair },
+    });
+
+    await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+    expect(tryRepair).not.toHaveBeenCalled();
+    expect(capturedProposals[0]?.validationStatus).toBe("invalid");
+    expect(capturedProposals[0]?.validationErrors).toEqual([ORIGINAL_SCHEMA_ERROR]);
+    expect(assistantMessages[0]?.metadata.agent).not.toHaveProperty("repair");
+  });
+
+  it("caps repair at 2 attempts per turn — proposals beyond the budget skip repair and persist invalid", async () => {
+    // Repaired payloads stay schema-invalid so every proposal would want a repair.
+    const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+      proposal: { ...proposal, proposedChanges: { marker: "still-bad" } },
+    }));
+    const { service, capturedProposals, assistantMessages } = createRepairChatService({
+      proposals: [repairableProposal, repairableProposal, repairableProposal],
+      proposalRepairService: { isAvailable: true, tryRepair },
+    });
+
+    await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+    // Exactly 2 repair attempts despite 3 schema-invalid proposals.
+    expect(tryRepair).toHaveBeenCalledTimes(2);
+    expect(capturedProposals).toHaveLength(3);
+    // First two went through repair (FINAL errors from the repaired payload).
+    expect(capturedProposals[0]?.validationErrors).toEqual([REPAIRED_SCHEMA_ERROR]);
+    expect(capturedProposals[1]?.validationErrors).toEqual([REPAIRED_SCHEMA_ERROR]);
+    // Third skipped repair (budget exhausted) and persisted with its original errors.
+    expect(capturedProposals[2]?.validationStatus).toBe("invalid");
+    expect(capturedProposals[2]?.validationErrors).toEqual([ORIGINAL_SCHEMA_ERROR]);
+    expect((assistantMessages[0]?.metadata.agent as Record<string, unknown>).repair).toEqual({
+      attempted: 2,
+      succeeded: 0,
+    });
+  });
+
+  // Fault isolation — a throwing validation stack degrades the proposal, not the turn.
+  it("persists the assistant reply and degrades the proposal to invalid when a validator throws", async () => {
+    const tryRepair = vi.fn();
+    const { service, capturedProposals, assistantMessages } = createRepairChatService({
+      proposals: [repairableProposal],
+      proposalRepairService: { isAvailable: true, tryRepair },
+      proposalValidationServiceOverrides: {
+        // Async domain validator hitting a transient DB error mid-stack.
+        validateProvenanceOwnership: async () => {
+          throw new Error("connection terminated unexpectedly");
+        },
+      },
+    });
+
+    const result = await service.sendMessage(auth, thread.id, {
+      content: "Adapt my workout plan",
+    });
+
+    // The paid turn survives: assistant message persisted with the generated reply.
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]?.content).toBe(GENERATED_REPLY);
+
+    // The proposal is persisted invalid with the stable marker error only —
+    // no payload contents and no raw error message in the stored errors.
+    expect(capturedProposals).toHaveLength(1);
+    expect(capturedProposals[0]?.validationStatus).toBe("invalid");
+    expect(capturedProposals[0]?.validationErrors).toEqual(["proposal_validation_unavailable"]);
+
+    expect(result.proposals).toHaveLength(1);
+    expect(result.proposals[0]?.validationStatus).toBe("invalid");
+
+    // Repair is never attempted on a degraded proposal (the throw happens first).
+    expect(tryRepair).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // proposal.validation outcome events (pipeline observability)
+  // ---------------------------------------------------------------------------
+
+  describe("proposal.validation outcome events", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("emits one valid outcome event for a first-pass valid proposal", async () => {
+      const validProposal = { ...repairableProposal, proposedChanges: { marker: "ok" } };
+      const { service } = createRepairChatService({
+        proposals: [validProposal],
+        proposalRepairService: { isAvailable: true, tryRepair: vi.fn() },
+      });
+      const events = captureProposalValidationEvents(service);
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toEqual({
+        event: "proposal.validation",
+        intent: "adapt_workout_plan",
+        targetDomain: "workout",
+        validationStatus: "valid",
+        errorCount: 0,
+        repairAttempted: false,
+        repairSucceeded: false,
+        normalized: false,
+      });
+    });
+
+    it("emits a repaired valid outcome event with no error strings or payload contents", async () => {
+      const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+        proposal: { ...proposal, proposedChanges: { marker: "fixed" } },
+      }));
+      const { service } = createRepairChatService({
+        proposals: [repairableProposal],
+        proposalRepairService: { isAvailable: true, tryRepair },
+      });
+      const events = captureProposalValidationEvents(service);
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        validationStatus: "valid",
+        errorCount: 0,
+        repairAttempted: true,
+        repairSucceeded: true,
+      });
+      // Privacy floor: enums/counts/booleans only — never error strings or payloads.
+      const serialized = JSON.stringify(events[0]);
+      expect(serialized).not.toContain(ORIGINAL_SCHEMA_ERROR);
+      expect(serialized).not.toContain("proposedChanges");
+      expect(serialized).not.toContain("marker");
+    });
+
+    it("emits an invalid outcome event with the FINAL failure class when repair leaves the proposal invalid", async () => {
+      const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+        proposal: { ...proposal, proposedChanges: { marker: "still-bad" } },
+      }));
+      const { service } = createRepairChatService({
+        proposals: [repairableProposal],
+        proposalRepairService: { isAvailable: true, tryRepair },
+      });
+      const events = captureProposalValidationEvents(service);
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        validationStatus: "invalid",
+        errorCount: 1,
+        failureClass: "schema",
+        repairAttempted: true,
+        repairSucceeded: false,
+      });
+      expect(JSON.stringify(events[0])).not.toContain(REPAIRED_SCHEMA_ERROR);
+    });
+
+    it("emits an invalid outcome event with failureClass safety and repair never attempted", async () => {
+      const tryRepair = vi.fn();
+      const unsafeProposal = {
+        ...repairableProposal,
+        title: "Diagnose your fatigue and adapt the plan",
+      };
+      const { service } = createRepairChatService({
+        proposals: [unsafeProposal],
+        proposalRepairService: { isAvailable: true, tryRepair },
+      });
+      const events = captureProposalValidationEvents(service);
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(tryRepair).not.toHaveBeenCalled();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        validationStatus: "invalid",
+        failureClass: "safety",
+        repairAttempted: false,
+        repairSucceeded: false,
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ai.daily_usage wiring (pipeline observability)
+  // ---------------------------------------------------------------------------
+
+  describe("daily usage telemetry wiring", () => {
+    const ROUTER_USAGE = {
+      promptTokens: 100,
+      completionTokens: 20,
+      totalTokens: 120,
+      latencyMs: 200,
+      retries: 0,
+      model: "gpt-4o-mini",
+    };
+    const DOMAIN_USAGE = {
+      promptTokens: 800,
+      completionTokens: 150,
+      totalTokens: 950,
+      latencyMs: 1500,
+      retries: 0,
+      model: "gpt-4o-mini",
+    };
+    const DECISION_USAGE = {
+      promptTokens: 400,
+      completionTokens: 90,
+      totalTokens: 490,
+      latencyMs: 900,
+      retries: 0,
+      model: "gpt-4o",
+    };
+    const REPAIR_USAGE = {
+      promptTokens: 60,
+      completionTokens: 30,
+      totalTokens: 90,
+      latencyMs: 700,
+      retries: 0,
+      model: "gpt-4o",
+    };
+
+    it("records the turn with the upserted day count and all stage usages including repair", async () => {
+      const recordTurn = vi.fn();
+      const tryRepair = vi.fn(async (proposal: Record<string, unknown>) => ({
+        proposal: { ...proposal, proposedChanges: { marker: "fixed" } },
+        usage: REPAIR_USAGE,
+      }));
+      const { service } = createRepairChatService({
+        proposals: [repairableProposal],
+        proposalRepairService: { isAvailable: true, tryRepair },
+        agentMetadata: createDefaultAgentMetadataForTests({
+          fanOut: {
+            router: { ran: true, selectedDomains: [], usage: ROUTER_USAGE },
+            domains: [
+              {
+                domain: "workout",
+                degraded: false,
+                degradedReasons: [],
+                candidateProposalCount: 1,
+                loopIterations: 1,
+                toolsInvoked: [],
+                toolsDeniedCount: 0,
+                hasWorkoutCalorieEstimate: false,
+                usage: DOMAIN_USAGE,
+              },
+            ],
+            decision: {
+              degraded: false,
+              selectedAction: "adapt_workout_plan",
+              selectedProposalIdCount: 1,
+              consentRequired: false,
+              usage: DECISION_USAGE,
+            },
+          },
+        }),
+        aiDailyUsageTelemetryService: { recordTurn },
+        entitlementsService: {
+          assertAiMessageAllowed: async () => undefined,
+          recordAiMessageUsage: async () => 7,
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(recordTurn).toHaveBeenCalledTimes(1);
+      expect(recordTurn).toHaveBeenCalledWith({
+        userId: user.id,
+        usageDate: getTodayIsoDateInTimezone(user.timezone),
+        messageCount: 7,
+        usages: [ROUTER_USAGE, DOMAIN_USAGE, DECISION_USAGE, REPAIR_USAGE],
+      });
+    });
+
+    it("records the turn with messageCount null when the usage increment fails", async () => {
+      const recordTurn = vi.fn();
+      const { service } = createRepairChatService({
+        proposals: [],
+        proposalRepairService: { isAvailable: false, tryRepair: vi.fn() },
+        aiDailyUsageTelemetryService: { recordTurn },
+        entitlementsService: {
+          assertAiMessageAllowed: async () => undefined,
+          recordAiMessageUsage: async () => {
+            throw new Error("db down");
+          },
+        },
+      });
+
+      await service.sendMessage(auth, thread.id, { content: "Adapt my workout plan" });
+
+      expect(recordTurn).toHaveBeenCalledTimes(1);
+      expect(recordTurn.mock.calls[0]?.[0]).toMatchObject({
+        userId: user.id,
+        messageCount: null,
+      });
     });
   });
 });

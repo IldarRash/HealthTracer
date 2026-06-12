@@ -17,7 +17,11 @@ import {
   parseChatMessageAttachmentRefIds,
   sendChatMessageSchema,
   CHAT_PROVISIONAL_UPLOAD_MIME_TYPES,
+  CHAT_DOCUMENT_FILE_MIME_TYPES,
   getProvisionalAttachmentMimeTypeError,
+  inferProvisionalAttachmentCategory,
+  MAX_CHAT_DOCUMENT_FILE_BYTES,
+  isChatAttachmentDocumentMimeType,
 } from "./index.js";
 
 const ownedAttachmentDefaults = {
@@ -26,8 +30,8 @@ const ownedAttachmentDefaults = {
 };
 
 describe("chat attachment contracts", () => {
-  describe("image-only MIME (plan item 5)", () => {
-    it("accepts image MIME types for all categories", () => {
+  describe("MIME allowlists (images + document files)", () => {
+    it("accepts image MIME types for image categories", () => {
       expect(getChatAttachmentMimeTypeError("food_photo", "image/jpeg")).toBeNull();
       expect(getChatAttachmentMimeTypeError("food_photo", "image/png")).toBeNull();
       expect(getChatAttachmentMimeTypeError("food_photo", "image/webp")).toBeNull();
@@ -37,7 +41,12 @@ describe("chat attachment contracts", () => {
       expect(getChatAttachmentMimeTypeError("unclassified", "image/jpeg")).toBeNull();
     });
 
-    it("rejects PDF for all categories — images only", () => {
+    it("PDF is accepted for document_file and unclassified, rejected for image categories", () => {
+      // document_file category explicitly allows PDF
+      expect(getChatAttachmentMimeTypeError("document_file", "application/pdf")).toBeNull();
+      // unclassified routes through provisional gate, which now accepts documents
+      expect(getChatAttachmentMimeTypeError("unclassified", "application/pdf")).toBeNull();
+      // image categories still reject PDF
       expect(getChatAttachmentMimeTypeError("food_photo", "application/pdf")).toMatch(
         /Unsupported MIME type/,
       );
@@ -47,31 +56,73 @@ describe("chat attachment contracts", () => {
       expect(getChatAttachmentMimeTypeError("workout_attachment", "application/pdf")).toMatch(
         /Unsupported MIME type/,
       );
-      expect(getChatAttachmentMimeTypeError("unclassified", "application/pdf")).toMatch(
-        /Unsupported MIME type/,
-      );
     });
 
-    it("rejects text/plain for all categories — images only", () => {
+    it("text/plain and text/markdown are accepted for document_file and unclassified, rejected for image categories", () => {
+      expect(getChatAttachmentMimeTypeError("document_file", "text/plain")).toBeNull();
+      expect(getChatAttachmentMimeTypeError("document_file", "text/markdown")).toBeNull();
+      // unclassified routes through provisional gate
+      expect(getChatAttachmentMimeTypeError("unclassified", "text/plain")).toBeNull();
+      // image categories reject text MIMEs
       expect(getChatAttachmentMimeTypeError("workout_attachment", "text/plain")).toMatch(
         /Unsupported MIME type/,
       );
-      expect(getChatAttachmentMimeTypeError("unclassified", "text/plain")).toMatch(
+      expect(getChatAttachmentMimeTypeError("food_photo", "text/plain")).toMatch(
         /Unsupported MIME type/,
       );
     });
 
-    it("CHAT_PROVISIONAL_UPLOAD_MIME_TYPES contains only the three image types", () => {
-      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toEqual(["image/jpeg", "image/png", "image/webp"]);
+    it("CHAT_PROVISIONAL_UPLOAD_MIME_TYPES includes three image types and four document types", () => {
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toContain("image/jpeg");
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toContain("image/png");
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toContain("image/webp");
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toContain("application/pdf");
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toContain("text/plain");
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toContain("text/markdown");
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toContain("text/x-markdown");
+      expect(CHAT_PROVISIONAL_UPLOAD_MIME_TYPES).toHaveLength(7);
+      // Verify the document file constants are separate and accessible
+      expect(CHAT_DOCUMENT_FILE_MIME_TYPES).toEqual([
+        "application/pdf",
+        "text/plain",
+        "text/markdown",
+        "text/x-markdown",
+      ]);
     });
 
-    it("getProvisionalAttachmentMimeTypeError accepts images and rejects non-images", () => {
+    it("getProvisionalAttachmentMimeTypeError accepts images and document files, rejects others", () => {
       expect(getProvisionalAttachmentMimeTypeError("image/jpeg")).toBeNull();
       expect(getProvisionalAttachmentMimeTypeError("image/png")).toBeNull();
       expect(getProvisionalAttachmentMimeTypeError("image/webp")).toBeNull();
-      expect(getProvisionalAttachmentMimeTypeError("application/pdf")).toMatch(/Unsupported/);
-      expect(getProvisionalAttachmentMimeTypeError("text/plain")).toMatch(/Unsupported/);
+      expect(getProvisionalAttachmentMimeTypeError("application/pdf")).toBeNull();
+      expect(getProvisionalAttachmentMimeTypeError("text/plain")).toBeNull();
+      expect(getProvisionalAttachmentMimeTypeError("text/markdown")).toBeNull();
+      expect(getProvisionalAttachmentMimeTypeError("text/x-markdown")).toBeNull();
       expect(getProvisionalAttachmentMimeTypeError("application/octet-stream")).toMatch(/Unsupported/);
+      expect(getProvisionalAttachmentMimeTypeError("application/zip")).toMatch(/Unsupported/);
+    });
+
+    it("inferProvisionalAttachmentCategory maps document MIMEs to document_file and others to unclassified", () => {
+      expect(inferProvisionalAttachmentCategory("application/pdf")).toBe("document_file");
+      expect(inferProvisionalAttachmentCategory("text/plain")).toBe("document_file");
+      expect(inferProvisionalAttachmentCategory("text/markdown")).toBe("document_file");
+      expect(inferProvisionalAttachmentCategory("text/x-markdown")).toBe("document_file");
+      expect(inferProvisionalAttachmentCategory("image/jpeg")).toBe("unclassified");
+      expect(inferProvisionalAttachmentCategory("image/png")).toBe("unclassified");
+      expect(inferProvisionalAttachmentCategory("application/zip")).toBe("unclassified");
+    });
+
+    it("isChatAttachmentDocumentMimeType is a correct type guard", () => {
+      expect(isChatAttachmentDocumentMimeType("application/pdf")).toBe(true);
+      expect(isChatAttachmentDocumentMimeType("text/plain")).toBe(true);
+      expect(isChatAttachmentDocumentMimeType("text/markdown")).toBe(true);
+      expect(isChatAttachmentDocumentMimeType("text/x-markdown")).toBe(true);
+      expect(isChatAttachmentDocumentMimeType("image/jpeg")).toBe(false);
+      expect(isChatAttachmentDocumentMimeType("application/zip")).toBe(false);
+    });
+
+    it("MAX_CHAT_DOCUMENT_FILE_BYTES is 5MB", () => {
+      expect(MAX_CHAT_DOCUMENT_FILE_BYTES).toBe(5_000_000);
     });
   });
 
@@ -89,10 +140,20 @@ describe("chat attachment contracts", () => {
       }
     });
 
-    it("rejects non-image uploads at the provisional gate", () => {
+    it("accepts PDF uploads at the provisional gate", () => {
       const parsed = createChatAttachmentSchema.safeParse({
-        filename: "labs.pdf",
+        filename: "training-program.pdf",
         mimeType: "application/pdf",
+        fileContentBase64: "dGVzdA==",
+      });
+
+      expect(parsed.success).toBe(true);
+    });
+
+    it("rejects truly unsupported MIME types at the provisional gate", () => {
+      const parsed = createChatAttachmentSchema.safeParse({
+        filename: "archive.zip",
+        mimeType: "application/zip",
         fileContentBase64: "dGVzdA==",
       });
 
@@ -139,7 +200,6 @@ describe("chat attachment contracts", () => {
           userId: "user-id",
           category: "food_photo",
           status: "failed",
-          linkedDocumentId: null,
           linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
           ...ownedAttachmentDefaults,
         },
@@ -205,7 +265,6 @@ describe("chat attachment contracts", () => {
           userId: "user-id",
           category: "workout_attachment",
           status: "ready",
-          linkedDocumentId: null,
           linkedImageRefId: null,
           ...ownedAttachmentDefaults,
         },
@@ -226,7 +285,6 @@ describe("chat attachment contracts", () => {
           userId: "user-id",
           category: "food_photo",
           status: "failed",
-          linkedDocumentId: null,
           linkedImageRefId: null,
           ...ownedAttachmentDefaults,
         },
@@ -245,7 +303,6 @@ describe("chat attachment contracts", () => {
           userId: "user-id",
           category: "unclassified",
           status: "queued",
-          linkedDocumentId: null,
           linkedImageRefId: null,
           ...ownedAttachmentDefaults,
         },
@@ -265,7 +322,6 @@ describe("chat attachment contracts", () => {
             userId: "user-id",
             category: "food_photo",
             status,
-            linkedDocumentId: null,
             linkedImageRefId: null,
             ...ownedAttachmentDefaults,
           },
@@ -283,7 +339,6 @@ describe("chat attachment contracts", () => {
           userId: "user-id",
           category: "food_photo",
           status: "queued",
-          linkedDocumentId: null,
           linkedImageRefId: null,
           ...ownedAttachmentDefaults,
         },
@@ -305,7 +360,6 @@ describe("chat attachment contracts", () => {
             userId: "user-id",
             category: status === "needs_review" ? "medical_document" : "food_photo",
             status,
-            linkedDocumentId: null,
             linkedImageRefId: null,
             ...ownedAttachmentDefaults,
           },
@@ -322,7 +376,6 @@ describe("chat attachment contracts", () => {
       userId: "user-id",
       category: "food_photo" as const,
       status: "ready" as const,
-      linkedDocumentId: null,
       linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
       retentionPolicy: "ephemeral_recognition" as const,
       expiresAt: "2026-05-25T12:00:00.000Z",
@@ -385,7 +438,6 @@ describe("chat attachment contracts", () => {
         mimeType: "image/jpeg",
         fileSizeBytes: 5000,
         storageKey: "local://attachments/meal.jpg",
-        linkedDocumentId: null,
         linkedImageRefId: "a1000001-0000-4000-8000-000000000001",
         consent: null,
         failureReason: null,

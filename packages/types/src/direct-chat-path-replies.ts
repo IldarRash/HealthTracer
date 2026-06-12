@@ -31,9 +31,44 @@ export const directPathMarkWorkoutDoneRepliesSchema = z.object({
 
 export type DirectPathMarkWorkoutDoneReplies = z.infer<typeof directPathMarkWorkoutDoneRepliesSchema>;
 
+export const directPathNutritionPlanRepliesSchema = z.object({
+  introTemplate: z.string().min(1).max(500),
+  mealLineTemplate: z.string().min(1).max(500),
+  macrosLineTemplate: z.string().min(1).max(500),
+  noActivePlanLine: z.string().min(1).max(500),
+});
+
+export type DirectPathNutritionPlanReplies = z.infer<typeof directPathNutritionPlanRepliesSchema>;
+
+export const directPathWeeklyProgressRepliesSchema = z.object({
+  introTemplate: z.string().min(1).max(500),
+  workoutLineTemplate: z.string().min(1).max(500),
+  habitLineTemplate: z.string().min(1).max(500),
+  trendsHeaderLine: z.string().min(1).max(200),
+  trendLineTemplate: z.string().min(1).max(500),
+  noSummaryLine: z.string().min(1).max(500),
+});
+
+export type DirectPathWeeklyProgressReplies = z.infer<
+  typeof directPathWeeklyProgressRepliesSchema
+>;
+
+export const directPathWorkoutPlanRepliesSchema = z.object({
+  introTemplate: z.string().min(1).max(500),
+  weeklyCadenceLineTemplate: z.string().min(1).max(500),
+  sessionLineTemplate: z.string().min(1).max(500),
+  moreSessionsLineTemplate: z.string().min(1).max(500),
+  noActivePlanLine: z.string().min(1).max(500),
+});
+
+export type DirectPathWorkoutPlanReplies = z.infer<typeof directPathWorkoutPlanRepliesSchema>;
+
 export const directPathReplyTemplatesSchema = z.object({
   todaySummary: directPathTodaySummaryRepliesSchema,
   markWorkoutDone: directPathMarkWorkoutDoneRepliesSchema,
+  nutritionPlan: directPathNutritionPlanRepliesSchema,
+  weeklyProgress: directPathWeeklyProgressRepliesSchema,
+  workoutPlan: directPathWorkoutPlanRepliesSchema,
 });
 
 export type DirectPathReplyTemplates = z.infer<typeof directPathReplyTemplatesSchema>;
@@ -62,6 +97,32 @@ export const DEFAULT_DIRECT_PATH_REPLY_TEMPLATES: DirectPathReplyTemplates = {
     multiplePendingWorkoutsMessage:
       "You have multiple pending workout items today. Open Today and mark the specific workout you completed.",
     markedDoneTemplate: 'Marked "{{label}}" as done on your Today checklist.',
+  },
+  nutritionPlan: {
+    introTemplate: "Your active nutrition plan — {{title}}:",
+    mealLineTemplate: "- {{label}}{{timingHint}}{{dish}}",
+    macrosLineTemplate:
+      "Daily targets: {{caloriesPerDay}} kcal, {{proteinGrams}}g protein, {{carbsGrams}}g carbs, {{fatGrams}}g fat",
+    noActivePlanLine:
+      "You don't have an active nutrition plan yet. Ask me to create one for you!",
+  },
+  weeklyProgress: {
+    introTemplate: "Your weekly progress for {{weekStart}} – {{weekEnd}}:",
+    workoutLineTemplate:
+      "Workouts: {{completed}} of {{planned}} planned session(s) completed{{adherenceNote}}",
+    habitLineTemplate: "Habits: {{completed}} completed, {{missed}} missed{{adherenceNote}}",
+    trendsHeaderLine: "Trends:",
+    trendLineTemplate: "- {{message}}",
+    noSummaryLine:
+      "You don't have a weekly progress summary yet. It will appear after your first tracked week.",
+  },
+  workoutPlan: {
+    introTemplate: "Your active workout plan — {{title}}:",
+    weeklyCadenceLineTemplate: "{{dayCount}} training day(s) per week",
+    sessionLineTemplate: "- {{weekday}}: {{focus}}",
+    moreSessionsLineTemplate: "…and {{count}} more session(s)",
+    noActivePlanLine:
+      "You don't have an active workout plan yet. Ask me to create one for you!",
   },
 };
 

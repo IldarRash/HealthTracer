@@ -25,7 +25,7 @@ describe("LongevityDashboard read-only behavior", () => {
       "listDeviceConnections(",
       "listHealthMetricAggregates(",
       "listHealthMetricSnapshots(",
-      "listDocuments(",
+      "getBiomarkersDashboard(",
       "getWellbeingAggregates(",
     ];
 
@@ -40,8 +40,9 @@ describe("LongevityDashboard read-only behavior", () => {
       "updateGoal(",
       "completeWorkoutSession(",
       "updateTodayItemStatus(",
-      "uploadDocument(",
-      "revokeDocument(",
+      "createLabReport(",
+      "deleteLabReport(",
+      "extractLabReport(",
       "generateWeeklyProgressSummary(",
     ];
 
@@ -58,7 +59,7 @@ describe("LongevityDashboard read-only behavior", () => {
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.training}`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.nutrition}`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.profileGoals}`);
-    expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.profileDocuments}`);
+    expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.biomarkers}`);
     expect(componentSource).toContain(`href={LONGEVITY_CTA_ROUTES.profileConsent}`);
     expect(componentSource).not.toMatch(/method:\s*["'](POST|PUT|PATCH|DELETE)["']/);
     expect(componentSource).not.toContain("proposal-actions");

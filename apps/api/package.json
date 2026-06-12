@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "node --watch --import @swc-node/register/esm-register src/main.ts",
+    "dev": "node --watch-path=src --import @swc-node/register/esm-register src/main.ts",
     "lint": "eslint . --max-warnings=0",
     "start": "node --import @swc-node/register/esm-register src/main.ts",
     "test": "vitest run",
@@ -18,23 +18,23 @@
     "@health/db": "workspace:^",
     "@health/nutrition-macros": "workspace:*",
     "@health/types": "workspace:*",
-    "@nestjs/common": "latest",
-    "@nestjs/core": "latest",
-    "@nestjs/platform-express": "latest",
+    "@nestjs/common": "^11.1.25",
+    "@nestjs/core": "^11.1.25",
+    "@nestjs/platform-express": "^11.1.25",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.3",
     "pdf-parse": "^2.4.5",
     "postgres": "^3.4.9",
-    "reflect-metadata": "latest",
-    "rxjs": "latest",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
     "stripe": "^22.2.0",
-    "zod": "latest"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@swc-node/register": "^1.10.10",
     "@swc/core": "^1.11.29",
     "@types/pdf-parse": "^1.1.5",
-    "tsx": "latest"
+    "tsx": "^4.22.4"
   }
 }

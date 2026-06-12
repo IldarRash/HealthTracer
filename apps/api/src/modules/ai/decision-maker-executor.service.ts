@@ -36,9 +36,11 @@
  *     It is a pure synthesis step: domain outputs in, final decision out.
  */
 
-import type { CoachAiProvider } from "@health/ai";
+import type { CoachAiProvider, ProviderUsage } from "@health/ai";
 import type {
   AgentSafetyFlag,
+  CandidateProposalSummary,
+  DeepReviewPromptContext,
   DomainAnswer,
   FinalDecisionOutput,
   FinalDecisionRequest,
@@ -76,6 +78,13 @@ export interface DecisionMakerInput {
   actionVariantCatalog: readonly ActionVariant[];
 
   /**
+   * Candidate proposal summaries (id + intent + title + reason) for the
+   * decision-maker to select from. Built by the orchestrator from domain results.
+   * The decision-maker picks IDs from this list — it never fabricates payloads.
+   */
+  candidateProposalSummaries: readonly CandidateProposalSummary[];
+
+  /**
    * Safety flags from the router and domain steps, forwarded to the LLM as
    * safety context. The decision-maker must not emit diagnosis or treatment.
    */
@@ -95,6 +104,28 @@ export interface DecisionMakerInput {
    * Threaded into the final decision request so the decision-maker writes in the correct language.
    */
   responseLanguage?: string | null;
+  /**
+   * Recent messages from the conversation, capped at 6 / 4000 chars each (Change 2).
+   * Gives the decision-maker conversation history context.
+   */
+  recentMessages?: ReadonlyArray<{
+    role: "user" | "assistant" | "system";
+    content: string;
+  }>;
+  /**
+   * True when the system planner took the low-confidence/general fallback route
+   * for an LLM-routed turn. Threaded into FinalDecisionRequest so the template
+   * can instruct the model to ask a clarifying question rather than guessing.
+   * Defaults to false; must not be set for deterministic/revision/explainer routes.
+   */
+  lowConfidenceRoute?: boolean;
+  /**
+   * Deep-review sufficiency block (Phase 4). Present only on review-profile
+   * turns whose context packet carries the progress_history_review slice.
+   * Threaded into FinalDecisionRequest so the decision template's
+   * {{deepReviewSuffix}} frames observed vs uncertain and the analyzed range.
+   */
+  deepReview?: DeepReviewPromptContext;
 }
 
 export interface DecisionMakerResult {
@@ -114,6 +145,19 @@ export interface DecisionMakerResult {
    * Reason(s) for degradation when degraded=true.
    */
   degradedReasons: string[];
+
+  /**
+   * When set, the decision-maker failed after one retry and no honest reply is
+   * available. The orchestrator threads this into the turn result so ChatService
+   * can persist an error marker instead of fake coach text.
+   */
+  turnError?: { reason: "decision_failed" };
+
+  /**
+   * Token + latency usage for the decision-maker LLM call.
+   * Absent on fallback paths where the provider was never called successfully.
+   */
+  usage?: ProviderUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,25 +171,69 @@ export class DecisionMakerExecutorService {
   /**
    * Run the decision-maker LLM for this turn.
    *
-   * Always resolves — never rejects. Any provider error, validation failure,
-   * or shape guard violation degrades to createFallbackFinalDecision().
+   * Always resolves — never rejects. On first failure (provider error,
+   * shape guard, or Zod parse failure), retries once with the same inputs.
+   * If the retry also fails, returns a typed degraded outcome with
+   * turnError.reason="decision_failed" so the caller can persist an error
+   * marker instead of fake coach text.
    */
   async execute(input: DecisionMakerInput): Promise<DecisionMakerResult> {
+    // First attempt
+    const firstResult = await this.tryExecuteInternal(input);
+
+    if (!firstResult.degraded) {
+      return firstResult;
+    }
+
+    // First attempt failed — retry once
+    this.logger.warn({
+      event: "decision_maker.retry",
+      firstDegradedReasons: firstResult.degradedReasons,
+    });
+
+    const retryResult = await this.tryExecuteInternal(input);
+
+    if (!retryResult.degraded) {
+      return retryResult;
+    }
+
+    // Both attempts failed — produce typed degraded result with decision_failed marker
+    this.logger.warn({
+      event: "decision_maker.failed_after_retry",
+      firstDegradedReasons: firstResult.degradedReasons,
+      retryDegradedReasons: retryResult.degradedReasons,
+    });
+
+    return {
+      ...this.buildFallbackResult([
+        ...firstResult.degradedReasons.map((r) => `attempt1: ${r}`),
+        ...retryResult.degradedReasons.map((r) => `attempt2: ${r}`),
+      ]),
+      turnError: { reason: "decision_failed" },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Single attempt at running the decision-maker.
+   * Always resolves — catches provider errors and validation failures internally.
+   * Returns a degraded result (never throws) so the caller can decide whether to retry.
+   */
+  private async tryExecuteInternal(input: DecisionMakerInput): Promise<DecisionMakerResult> {
     try {
       return await this.executeInternal(input);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown decision-maker error.";
 
-      this.logger.warn(`DecisionMakerExecutorService: degraded to fallback — ${message}`);
+      this.logger.warn(`DecisionMakerExecutorService: attempt degraded — ${message}`);
 
       return this.buildFallbackResult([`Decision-maker threw unexpectedly: ${message}`]);
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Private
-  // ---------------------------------------------------------------------------
 
   private async executeInternal(input: DecisionMakerInput): Promise<DecisionMakerResult> {
     // Build the typed request object (Zod-validated by finalDecisionRequestSchema in the
@@ -154,18 +242,26 @@ export class DecisionMakerExecutorService {
     const request: FinalDecisionRequest = {
       userMessage: input.userMessage,
       domainOutputs: [...input.domainOutputs],
+      candidateProposalSummaries: [...input.candidateProposalSummaries],
       // ActionVariant satisfies the finalDecisionRequestSchema.actionVariantCatalog
       // element shape; the cast resolves the readonly-array type mismatch.
       actionVariantCatalog: input.actionVariantCatalog as ActionVariant[],
       safetyFlags: [...input.safetyFlags],
       safetyConstraints: [...input.safetyConstraints],
+      recentMessages: input.recentMessages != null ? [...input.recentMessages] : [],
       ...(input.responseLanguage != null ? { responseLanguage: input.responseLanguage } : {}),
+      lowConfidenceRoute: input.lowConfidenceRoute === true,
+      ...(input.deepReview !== undefined ? { deepReview: input.deepReview } : {}),
     };
 
     let rawOutput: unknown;
+    let providerUsage: ProviderUsage | undefined;
 
     try {
-      rawOutput = await input.provider.generateFinalDecision(request);
+      // Provider returns ProviderCallResult; unwrap the output for validation.
+      const result = await input.provider.generateFinalDecision(request);
+      rawOutput = result.output;
+      providerUsage = result.usage;
     } catch (providerError) {
       const message =
         providerError instanceof Error
@@ -205,6 +301,7 @@ export class DecisionMakerExecutorService {
       output: parsed.data,
       degraded: false,
       degradedReasons: [],
+      ...(providerUsage !== undefined ? { usage: providerUsage } : {}),
     };
   }
 

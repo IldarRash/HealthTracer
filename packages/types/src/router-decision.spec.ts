@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clampRouterDecisionOutput,
   createFallbackRouterDecision,
+  MAX_ROUTER_HINTS_PER_DOMAIN,
   MAX_ROUTER_SELECTED_DOMAINS,
   routerDecisionOutputSchema,
   routerDecisionRequestSchema,
@@ -28,8 +29,11 @@ const basePreprocessor = {
     pain: false,
     document: false,
     attachment: false,
+    plan_request: false,
+    review_request: false,
   },
   directPathCandidate: null,
+  requestedLookbackDays: null,
 };
 
 const validOutputBase = {
@@ -42,7 +46,6 @@ const validOutputBase = {
       signalHints: ["request_change"],
     },
   ],
-  contextNeeds: ["recent_conversation"],
   safetyFlags: [],
   confidence: 0.8,
 };
@@ -130,17 +133,61 @@ describe("RouterDecisionOutput schema", () => {
     expect(parsed.directCommand?.kind).toBe("mark_today_workout_done");
   });
 
+  it("degrades an unknown directCommand.kind to null instead of failing the parse (live regression 2026-06)", () => {
+    // Exact payload captured from a live golden-eval failure: the router LLM
+    // emitted the literal string "null" for directCommand.kind on plan-creation
+    // turns, and the enum rejection silently dumped a valid 0.95-confidence
+    // workout selection onto the empty fallback route.
+    const capturedLivePayload = {
+      selectedDomains: [
+        {
+          domain: "workout",
+          confidence: 0.95,
+          intentHints: ["create_workout_plan"],
+          toolHints: [],
+          signalHints: ["explicit_plan_request"],
+        },
+      ],
+      directCommand: { detected: true, kind: "null", confidence: 0.0 },
+      safetyFlags: [],
+      confidence: 0.95,
+    };
+
+    expect(validateRouterDecisionOutputShape(capturedLivePayload)).toEqual([]);
+
+    const parsed = routerDecisionOutputSchema.parse(capturedLivePayload);
+
+    expect(parsed.selectedDomains).toHaveLength(1);
+    expect(parsed.selectedDomains[0]?.domain).toBe("workout");
+    expect(parsed.confidence).toBe(0.95);
+    expect(parsed.directCommand?.detected).toBe(true);
+    expect(parsed.directCommand?.kind).toBeNull();
+  });
+
+  it("still parses known directCommand kinds and JSON-null kind unchanged", () => {
+    const withKnownKind = routerDecisionOutputSchema.parse({
+      ...validOutputBase,
+      directCommand: { detected: true, kind: "today_summary_read", confidence: 0.9 },
+    });
+    const withNullKind = routerDecisionOutputSchema.parse({
+      ...validOutputBase,
+      directCommand: { detected: false, kind: null },
+    });
+
+    expect(withKnownKind.directCommand?.kind).toBe("today_summary_read");
+    expect(withNullKind.directCommand?.kind).toBeNull();
+  });
+
   it("defaults selectedDomains to [] when omitted", () => {
     const parsed = routerDecisionOutputSchema.parse({
       confidence: 0.4,
     });
 
     expect(parsed.selectedDomains).toEqual([]);
-    expect(parsed.contextNeeds).toEqual([]);
     expect(parsed.safetyFlags).toEqual([]);
   });
 
-  it("rejects selectedDomains exceeding MAX_ROUTER_SELECTED_DOMAINS via schema", () => {
+  it("slices selectedDomains exceeding MAX_ROUTER_SELECTED_DOMAINS instead of rejecting", () => {
     const tooManyDomains = [
       { domain: "workout", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
       { domain: "nutrition", confidence: 0.7, intentHints: [], toolHints: [], signalHints: [] },
@@ -148,12 +195,78 @@ describe("RouterDecisionOutput schema", () => {
       { domain: "workout", confidence: 0.5, intentHints: [], toolHints: [], signalHints: [] },
     ];
 
-    const result = routerDecisionOutputSchema.safeParse({
+    const parsed = routerDecisionOutputSchema.parse({
       selectedDomains: tooManyDomains,
       confidence: 0.5,
     });
 
-    expect(result.success).toBe(false);
+    expect(parsed.selectedDomains).toHaveLength(MAX_ROUTER_SELECTED_DOMAINS);
+    expect(parsed.selectedDomains.map((d) => d.domain)).toEqual([
+      "workout",
+      "nutrition",
+      "health",
+    ]);
+  });
+
+  it("slices over-long hint lists to MAX_ROUTER_HINTS_PER_DOMAIN instead of failing the parse", () => {
+    // 7 valid tool names exist in the catalog — one more than the hint cap. A
+    // router emitting all of them must NOT degrade the route to the fallback.
+    const sevenToolHints = [
+      "getUserContextSlice",
+      "getWeeklyProgressContext",
+      "searchExerciseCatalog",
+      "searchRecipeCatalog",
+      "getActivePlanDetail",
+      "getRecentAdherence",
+      "getProgressHistory",
+    ];
+    const sixStringHints = ["one", "two", "three", "four", "five", "six"];
+
+    const parsed = routerDecisionOutputSchema.parse({
+      selectedDomains: [
+        {
+          domain: "workout",
+          confidence: 0.9,
+          intentHints: sixStringHints,
+          toolHints: sevenToolHints,
+          signalHints: sixStringHints,
+        },
+      ],
+      confidence: 0.9,
+    });
+
+    const entry = parsed.selectedDomains[0];
+
+    expect(entry?.toolHints).toEqual(sevenToolHints.slice(0, MAX_ROUTER_HINTS_PER_DOMAIN));
+    expect(entry?.intentHints).toEqual(sixStringHints.slice(0, MAX_ROUTER_HINTS_PER_DOMAIN));
+    expect(entry?.signalHints).toEqual(sixStringHints.slice(0, MAX_ROUTER_HINTS_PER_DOMAIN));
+  });
+
+  it("clampRouterDecisionOutput keeps a sliced 7-tool hint list within the cap and allowlist", () => {
+    const parsed = routerDecisionOutputSchema.parse({
+      selectedDomains: [
+        {
+          domain: "workout",
+          confidence: 0.9,
+          intentHints: [],
+          toolHints: [
+            "getUserContextSlice",
+            "getWeeklyProgressContext",
+            "searchExerciseCatalog",
+            "searchRecipeCatalog",
+            "getActivePlanDetail",
+            "getRecentAdherence",
+            "getProgressHistory",
+          ],
+          signalHints: [],
+        },
+      ],
+      confidence: 0.9,
+    });
+
+    const clamped = clampRouterDecisionOutput(parsed);
+
+    expect(clamped.selectedDomains[0]?.toolHints).toHaveLength(MAX_ROUTER_HINTS_PER_DOMAIN);
   });
 
   it("rejects unknown extra fields (.strict())", () => {
@@ -422,7 +535,6 @@ describe("createFallbackRouterDecision", () => {
     expect(fallback.selectedDomains).toEqual([]);
     expect(fallback.confidence).toBe(0);
     expect(fallback.safetyFlags).toEqual([]);
-    expect(fallback.contextNeeds).toEqual([]);
   });
 
   it("passes schema validation", () => {

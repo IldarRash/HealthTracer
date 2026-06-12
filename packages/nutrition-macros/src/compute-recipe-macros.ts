@@ -1,4 +1,4 @@
-import type { RecipeIngredient, RecipeMacroEstimates } from "@health/types";
+import type { RecipeIngredient, RecipePerServingMacros } from "@health/types";
 import usdaFoodsRaw from "../data/usda-foods.json" with { type: "json" };
 
 // ---------------------------------------------------------------------------
@@ -436,7 +436,7 @@ export function lookupNutrients(rawName: string): UsdaNutrients | null {
 // Result type
 // ---------------------------------------------------------------------------
 
-export interface RecipeMacroResult extends RecipeMacroEstimates {
+export interface RecipeMacroResult extends RecipePerServingMacros {
   confidence: "high" | "medium" | "low";
 }
 
@@ -530,11 +530,11 @@ export function computeRecipeMacros(
   }
 
   return {
-    estimatedCalories: kcalPerServing,
-    proteinGrams: proteinPerServing,
-    carbsGrams: carbsPerServing,
-    fatGrams: fatPerServing,
-    fiberGrams: fiberPerServing,
+    caloriesPerServing: kcalPerServing,
+    proteinGramsPerServing: proteinPerServing,
+    carbsGramsPerServing: carbsPerServing,
+    fatGramsPerServing: fatPerServing,
+    fiberGramsPerServing: fiberPerServing,
     confidence,
   };
 }

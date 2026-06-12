@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   getCapabilityConfig,
+  preprocessMessage,
   routerDecisionOutputSchema,
   normalizeAiBehaviorConfig,
   RULE_ROUTE_CONFIDENCE_THRESHOLD,
@@ -28,7 +29,6 @@ function createRouterResultForPlanner(
     return {
       output: routerDecisionOutputSchema.parse({
         selectedDomains: [],
-        contextNeeds: [],
         safetyFlags: [],
         confidence,
       }),
@@ -50,12 +50,6 @@ function createRouterResultForPlanner(
           signalHints: [],
         },
       ],
-      contextNeeds:
-        domain === "workout"
-          ? ["active_workout_plan"]
-          : domain === "nutrition"
-            ? ["active_nutrition_plan"]
-            : [],
       safetyFlags: domainSafetyFlags,
       confidence,
     }),
@@ -222,8 +216,47 @@ describe("SystemPlannerService", () => {
       recentMessages: [],
     });
 
-    expect(plan.executorMode).toBe("deterministic_read");
+    // planTurn coerces deterministic_read → single_llm (pre_ai_gate.miss guard).
+    // The pre-AI gate (DirectChatPathService) handles the actual today-summary read
+    // in ChatService before AiService is ever called; the planner must never emit
+    // a deterministic executor mode so the orchestrator deterministic branch is unreachable.
+    expect(plan.executorMode).toBe("single_llm");
     expect(plan.catalogIntentId).toBe("general");
+  });
+
+  it("emits pre_ai_gate.miss warn log when direct path candidate coerces executor mode", async () => {
+    const { planner } = createPlannerHarness();
+
+    // Spy on the Logger.warn output by intercepting console.warn; the NestJS Logger
+    // writes structured objects via process.stdout in test, so we capture logger.warn
+    // via vi.spyOn on the Logger prototype.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const loggerWarnSpy = vi.spyOn((planner as any).logger, "warn");
+
+    const plan = await planner.planTurn({
+      userMessage: "What is today?",
+      recentMessages: [],
+    });
+
+    // Executor mode is coerced, not deterministic
+    expect(plan.executorMode).toBe("single_llm");
+
+    // The structured warn event must have been emitted
+    const warnCalls = loggerWarnSpy.mock.calls;
+    const missEvent = warnCalls.find(
+      (call) =>
+        typeof call[0] === "object" &&
+        call[0] !== null &&
+        (call[0] as Record<string, unknown>)["event"] === "pre_ai_gate.miss",
+    );
+    expect(missEvent).toBeDefined();
+    if (missEvent) {
+      const payload = missEvent[0] as Record<string, unknown>;
+      expect(payload["rawExecutorMode"]).toBe("deterministic_read");
+      expect(payload["coercedExecutorMode"]).toBe("single_llm");
+    }
+
+    loggerWarnSpy.mockRestore();
   });
 
   it("blocks direct path classification for attachment and proposal revision turns", () => {
@@ -367,7 +400,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: ["weekly_progress"],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -401,7 +433,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -433,7 +464,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -465,7 +495,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -497,7 +526,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: RULE_ROUTE_CONFIDENCE_THRESHOLD - 0.01,
       }),
@@ -609,7 +637,10 @@ describe("SystemPlannerService", () => {
       expect(plan.executorMode).toBe("proposal_flow");
     });
 
-    it("maps direct read candidates to deterministic_read on the plan", async () => {
+    it("coerces direct read candidates from deterministic_read to single_llm on the plan", async () => {
+      // planTurn must never emit a deterministic executor mode — the pre_ai_gate.miss
+      // guard coerces it so the orchestrator deterministic branch stays unreachable.
+      // The pre-AI gate (DirectChatPathService in ChatService) handles the actual read.
       const { planner } = createPlannerHarness();
 
       const plan = await planner.planTurn({
@@ -617,7 +648,7 @@ describe("SystemPlannerService", () => {
         recentMessages: [],
       });
 
-      expect(plan.executorMode).toBe("deterministic_read");
+      expect(plan.executorMode).toBe("single_llm");
     });
 
     it("maps proposal explainer plans to single_llm", async () => {
@@ -727,7 +758,6 @@ describe("SystemPlannerService", () => {
             { domain: "workout", confidence: 0.88, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "nutrition", confidence: 0.72, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.88,
         }),
@@ -771,7 +801,6 @@ describe("SystemPlannerService", () => {
             { domain: "nutrition", confidence: 0.78, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "health", confidence: 0.76, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.9,
         }),
@@ -851,7 +880,6 @@ describe("SystemPlannerService", () => {
             { domain: "workout", confidence: 0.88, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "nutrition", confidence: 0.72, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.88,
         }),
@@ -875,5 +903,287 @@ describe("SystemPlannerService", () => {
         );
       }
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Change 2 / Slice 5 — lowConfidenceRoute flag
+  // ---------------------------------------------------------------------------
+
+  describe("lowConfidenceRoute flag", () => {
+    it("sets lowConfidenceRoute=false for a confident LLM router route", async () => {
+      const { planner } = createPlannerHarness();
+      const plan = await planner.planTurn({
+        userMessage: "Adapt my workout plan",
+        recentMessages: [],
+        routerResult: createRouterResultForPlanner("workout", 0.9),
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(false);
+    });
+
+    it("sets lowConfidenceRoute=true when router confidence is below threshold (llm source)", async () => {
+      const { planner } = createPlannerHarness();
+      // Use an llm-source result with confidence 0.3 (below RULE_ROUTE_CONFIDENCE_THRESHOLD of 0.6)
+      const lowConfidenceLlmResult: RouterLlmResult = {
+        output: routerDecisionOutputSchema.parse({
+          selectedDomains: [
+            { domain: "workout", confidence: 0.3, intentHints: [], toolHints: [], signalHints: [] },
+          ],
+          safetyFlags: [],
+          confidence: 0.3,
+        }),
+        source: "llm",
+        validationErrors: [],
+      };
+
+      const plan = await planner.planTurn({
+        userMessage: "uh, I dunno, maybe workout?",
+        recentMessages: [],
+        routerResult: lowConfidenceLlmResult,
+      });
+
+      // Below threshold → falls back to general; flag is set.
+      expect(plan.catalogIntentId).toBe("general");
+      expect(plan.fanout.lowConfidenceRoute).toBe(true);
+    });
+
+    it("sets lowConfidenceRoute=true when router returned no selected domains (llm source)", async () => {
+      const { planner } = createPlannerHarness();
+      const noDomainsLlmResult: RouterLlmResult = {
+        output: routerDecisionOutputSchema.parse({
+          selectedDomains: [],
+          safetyFlags: [],
+          confidence: 0.55,
+        }),
+        source: "llm",
+        validationErrors: [],
+      };
+
+      const plan = await planner.planTurn({
+        userMessage: "hmm, not sure what I need",
+        recentMessages: [],
+        routerResult: noDomainsLlmResult,
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(true);
+    });
+
+    it("sets lowConfidenceRoute=false for a fallback-source router result (not an LLM low-confidence turn)", async () => {
+      const { planner } = createPlannerHarness();
+      // fallback source = rule_based, not an LLM low-confidence turn
+      const plan = await planner.planTurn({
+        userMessage: "I feel off today",
+        recentMessages: [],
+        routerResult: createRouterResultForPlanner("workout", 0.35, "fallback"),
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(false);
+    });
+
+    it("sets lowConfidenceRoute=false for a proposal-revision turn (router skipped)", async () => {
+      const { planner } = createPlannerHarness();
+      const plan = await planner.planTurn({
+        userMessage: "Make it 4 days instead",
+        recentMessages: [],
+        proposalRevision: {
+          supersededProposalId: "p1",
+          originalProposal: {
+            intent: "create_workout_plan",
+            targetDomain: "workout",
+            title: "3-day plan",
+          },
+          modificationFeedback: "Change to 4 days",
+        },
+        // Low-confidence LLM result provided, but proposalRevision takes priority
+        routerResult: createRouterResultForPlanner("workout", 0.2),
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(false);
+    });
+
+    it("sets lowConfidenceRoute=false when no routerResult is provided (no-router path)", async () => {
+      const { planner } = createPlannerHarness();
+      const plan = await planner.planTurn({
+        userMessage: "How are you?",
+        recentMessages: [],
+        // No routerResult: deterministic/safe fallback path
+      });
+
+      expect(plan.fanout.lowConfidenceRoute).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — preprocessor threading into budget-profile selection
+// ---------------------------------------------------------------------------
+
+describe("SystemPlannerService — preprocessor budget threading (Phase 2)", () => {
+  it("selects deep_history with compression for «проанализируй последние полгода»", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(plan.requiresCompression).toBe(true);
+    expect(plan.requestedLookbackDays).toBe(180);
+    expect(plan.grantedLookbackDays).toBe(180);
+    // Per-domain fan-out budgets must see the same deterministic hints.
+    expect(plan.fanout.selectedDomains[0]?.contextBudget.profile).toBe("deep_history");
+    // Floors stay denied on the review budget.
+    expect(plan.contextBudget.allowDocuments).toBe(false);
+    expect(plan.contextBudget.allowSensitiveHealthContext).toBe(false);
+  });
+
+  it("keeps a plan-creation turn on the default budget even with preprocessorResult", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "составь план тренировок";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("default");
+    expect(plan.requestedLookbackDays).toBeNull();
+    expect(plan.grantedLookbackDays).toBeNull();
+  });
+
+  it("behaves as no-lookback when preprocessorResult is omitted (focused-test compat)", async () => {
+    const { planner } = createPlannerHarness();
+
+    const plan = await planner.planTurn({
+      userMessage: "проанализируй последние полгода",
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+    });
+
+    // Review phrasing alone (trigger regex) may still select deep_review, but
+    // without the preprocessor lookback hint deep_history must not engage.
+    expect(plan.contextBudget.profile).not.toBe("deep_history");
+    expect(plan.requestedLookbackDays).toBeNull();
+    expect(plan.grantedLookbackDays).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — planner injection of the progress_history_review slice
+// ---------------------------------------------------------------------------
+
+function createMultiDomainRouterResult(
+  domains: ReadonlyArray<"workout" | "nutrition" | "health">,
+  confidence = 0.84,
+): RouterLlmResult {
+  return {
+    output: routerDecisionOutputSchema.parse({
+      selectedDomains: domains.map((domain) => ({
+        domain,
+        confidence,
+        intentHints: [],
+        toolHints: [],
+        signalHints: [],
+      })),
+      safetyFlags: [],
+      confidence,
+    }),
+    source: "llm",
+    validationErrors: [],
+  };
+}
+
+describe("SystemPlannerService — progress_history_review injection (Phase 3)", () => {
+  it("appends the slice to the route and to EVERY selected fan-out domain on a deep_history turn", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода — тренировки, питание и состояние";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createMultiDomainRouterResult(["workout", "nutrition", "health"]),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(true);
+    expect(plan.fanout.selectedDomains.length).toBeGreaterThan(1);
+
+    for (const entry of plan.fanout.selectedDomains) {
+      expect(
+        entry.supplementaryContextSlices?.some(
+          (slice) => slice.type === "progress_history_review",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("threads the slice into the single-entry fanout for a deep_history turn without a confident router", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.35, "fallback"),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(true);
+    expect(plan.fanout.selectedDomains).toHaveLength(1);
+    expect(
+      plan.fanout.selectedDomains[0]?.supplementaryContextSlices?.some(
+        (slice) => slice.type === "progress_history_review",
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT inject the slice on a default-budget turn", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "составь план тренировок";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("default");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(false);
+
+    for (const entry of plan.fanout.selectedDomains) {
+      expect(entry.supplementaryContextSlices ?? []).toHaveLength(0);
+    }
+  });
+
+  it("keeps the primary slice first so the packet purpose is unchanged by injection", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.route.requiredContextSlices[0]?.type).not.toBe("progress_history_review");
+    expect(plan.route.requiredContextSlices[1]?.type).toBe("progress_history_review");
+    // deep_history grants up to 24 months, so the display timeRange is "1y".
+    expect(plan.route.requiredContextSlices[1]?.timeRange).toBe("1y");
   });
 });

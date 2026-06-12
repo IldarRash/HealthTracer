@@ -22,6 +22,7 @@ import {
   isHabitPlanProposalIntent,
   mergeProposalsById,
   shouldShowInlineProposalIntentLabel,
+  shouldShowInvalidValidationNotice,
 } from "./proposal-ui-state.js";
 
 describe("proposal UI state", () => {
@@ -272,7 +273,7 @@ describe("proposal UI state", () => {
 
   it("labels wellbeing and nutrition incident intents", () => {
     expect(getProposalIntentLabel("capture_wellbeing_checkin")).toBe("Wellbeing check-in");
-    expect(getProposalIntentLabel("log_nutrition_incident")).toBe("Nutrition incident log");
+    expect(getProposalIntentLabel("log_nutrition_incident")).toBe("Nutrition note");
     // C10: log_workout_activity returns user-facing "Log activity" label
     expect(getProposalIntentLabel("log_workout_activity")).toBe("Log activity");
     expect(
@@ -335,5 +336,45 @@ describe("proposal UI state", () => {
     expect(shouldShowInlineProposalIntentLabel("adapt_workout_plan_from_progress")).toBe(
       true,
     );
+  });
+
+  it("shows the human invalid notice for non-habit invalid proposals, not for habit or valid ones", () => {
+    // Non-habit proposal with invalid status → show human notice (suppress raw Zod paths)
+    expect(
+      shouldShowInvalidValidationNotice({
+        validationStatus: "invalid",
+        intent: "adapt_workout_plan",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldShowInvalidValidationNotice({
+        validationStatus: "invalid",
+        intent: "adjust_nutrition_plan",
+      }),
+    ).toBe(true);
+
+    // Valid proposal → no notice
+    expect(
+      shouldShowInvalidValidationNotice({
+        validationStatus: "valid",
+        intent: "adapt_workout_plan",
+      }),
+    ).toBe(false);
+
+    // Habit proposals with invalid status → keep formatted error list, not the blanket notice
+    expect(
+      shouldShowInvalidValidationNotice({
+        validationStatus: "invalid",
+        intent: "create_habit_plan",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldShowInvalidValidationNotice({
+        validationStatus: "invalid",
+        intent: "adapt_habit_plan",
+      }),
+    ).toBe(false);
   });
 });

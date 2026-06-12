@@ -1,5 +1,6 @@
 import { type HTMLAttributes } from "react";
 import { Badge, type BadgeProps } from "./badge";
+import { Icon } from "./icon";
 
 type AttachmentPreviewThumbProps = {
   previewUrl: string | null;
@@ -26,7 +27,7 @@ export function AttachmentPreviewThumb({
 
   return (
     <span className={iconClassName} role="img" aria-label={`${fileName} file`}>
-      <span aria-hidden="true">📄</span>
+      <Icon name="doc" size={20} aria-hidden />
     </span>
   );
 }

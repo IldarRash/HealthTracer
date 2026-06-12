@@ -83,7 +83,6 @@ const validationService = new ProposalValidationService(
   {} as never, // progressRepository
   {} as never, // exercisesService
   {} as never, // habitsService
-  {} as never, // documentSignalsRepository
   {} as never, // metricsAiContextService
   {} as never, // goalsRepository
   {} as never, // recoveryContextService
@@ -94,6 +93,7 @@ const validationService = new ProposalValidationService(
   {} as never, // nutritionRepository
   {} as never, // recipesRepository
   {} as never, // chatAttachmentsRepository
+  {} as never, // biomarkersRepository
 );
 
 // ---------------------------------------------------------------------------
@@ -107,13 +107,17 @@ describe("Body analysis pipeline — valid proposal through ActionResolverServic
     const finalDecision: FinalDecisionOutput = {
       reply: "Вот анализ вашего телосложения по фото.",
       selectedAction: "save_body_analysis",
-      proposals: [VALID_BODY_ANALYSIS_PROPOSAL],
+      selectedProposalIds: ["cand_health_0"],
       consentRequired: false,
     };
+    const candidateMap = new Map<string, Record<string, unknown>>([
+      ["cand_health_0", VALID_BODY_ANALYSIS_PROPOSAL as unknown as Record<string, unknown>],
+    ]);
 
     const result = resolver.resolveFinalDecisionOutput({
       finalDecision,
       selectedDomains: [makeHealthDomainEntry(["save_body_analysis"])],
+      candidateMap,
     });
 
     expect(result.proposals).toHaveLength(1);
@@ -242,14 +246,18 @@ describe("Body analysis pipeline — filtered out when not in domain allowlist",
     const finalDecision: FinalDecisionOutput = {
       reply: "Here is the analysis.",
       selectedAction: "save_body_analysis",
-      proposals: [VALID_BODY_ANALYSIS_PROPOSAL],
+      selectedProposalIds: ["cand_health_0"],
       consentRequired: false,
     };
+    const candidateMap = new Map<string, Record<string, unknown>>([
+      ["cand_health_0", VALID_BODY_ANALYSIS_PROPOSAL as unknown as Record<string, unknown>],
+    ]);
 
     // Health domain here does NOT include save_body_analysis in its allowedProposalIntents
     const result = resolver.resolveFinalDecisionOutput({
       finalDecision,
       selectedDomains: [makeHealthDomainEntry(["update_profile"])],
+      candidateMap,
     });
 
     // Filtered out because save_body_analysis is not in the allowlist
@@ -260,13 +268,14 @@ describe("Body analysis pipeline — filtered out when not in domain allowlist",
     const finalDecision: FinalDecisionOutput = {
       reply: "Пришлите три фото для анализа.",
       selectedAction: PLAIN_REPLY_ACTION_VARIANT_ID,
-      proposals: [],
+      selectedProposalIds: [],
       consentRequired: false,
     };
 
     const result = resolver.resolveFinalDecisionOutput({
       finalDecision,
       selectedDomains: [makeHealthDomainEntry(["save_body_analysis"])],
+      candidateMap: new Map(),
     });
 
     expect(result.proposals).toHaveLength(0);

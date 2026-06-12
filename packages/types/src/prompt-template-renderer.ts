@@ -5,7 +5,6 @@ import {
   DOMAIN_NUTRITION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,
   FINAL_DECISION_TEMPLATE_KEY,
-  OPENAI_COACH_LOOP_TEMPLATE_KEY,
   PROMPT_TEMPLATE_KEYS,
   PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS,
   ROUTER_DECISION_TEMPLATE_KEY,
@@ -25,8 +24,7 @@ export type CompiledPromptTemplate = {
 
 export type CompiledPromptTemplates = {
   readonly templates: Readonly<Record<PromptTemplateKey, CompiledPromptTemplate>>;
-  renderCoachLoop(values: PromptTemplateRenderValues): string;
-  // Parallel-domain pipeline render helpers
+  // Parallel-domain pipeline render helpers (the live pipeline; openai_coach_loop removed)
   renderRouterDecision(values: {
     normalizedText: string;
     originalText: string;
@@ -59,16 +57,41 @@ export type CompiledPromptTemplates = {
       attachmentContextJson: string;
       /** Resolved response language (e.g. "en", "ru"). Empty string = fall back to message detection. */
       responseLanguage: string;
+      /**
+       * Appended to the dynamic suffix only on deep-review turns (Phase 4).
+       * Empty string otherwise — must never modify the static prefix.
+       */
+      deepReviewSuffix: string;
     },
   ): string;
   renderFinalDecision(values: {
     userMessage: string;
     domainOutputsJson: string;
     actionVariantCatalogJson: string;
+    /**
+     * JSON array of CandidateProposalSummary objects (id + intent + title + reason)
+     * that the decision-maker can pick IDs from. "[]" when no candidates are available.
+     */
+    candidateProposalSummariesJson: string;
+    /**
+     * JSON array of recent messages (role + content) for conversation context.
+     * Capped at 6 messages / 4000 chars each by the orchestrator. "[]" when absent.
+     */
+    recentMessagesJson: string;
     safetyFlags: string;
     safetyConstraints: string;
     /** Resolved response language (e.g. "en", "ru"). Empty string = fall back to message detection. */
     responseLanguage: string;
+    /**
+     * Appended to the dynamic suffix only when routing confidence was low.
+     * Empty string for confident routes — must never modify the static prefix.
+     */
+    lowConfidenceRouteSuffix: string;
+    /**
+     * Appended to the dynamic suffix only on deep-review turns (Phase 4).
+     * Empty string otherwise — must never modify the static prefix.
+     */
+    deepReviewSuffix: string;
   }): string;
 };
 
@@ -163,18 +186,6 @@ export function compilePromptTemplates(
 
   return {
     templates,
-    renderCoachLoop(values) {
-      const rendered = templates[OPENAI_COACH_LOOP_TEMPLATE_KEY].render(values);
-
-      if (rendered != null) {
-        return rendered;
-      }
-
-      return renderPromptTemplateBody(
-        DEFAULT_PROMPT_TEMPLATE_BODIES[OPENAI_COACH_LOOP_TEMPLATE_KEY],
-        values,
-      )!;
-    },
     renderRouterDecision(values) {
       const rendered = templates[ROUTER_DECISION_TEMPLATE_KEY].render(values);
 

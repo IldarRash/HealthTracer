@@ -1,8 +1,8 @@
 import type {
   AiProposal,
   ChatProposalRevision,
+  ChatProposalRevisionOriginal,
   ProposalModifyResponse,
-  RawAiProposal,
 } from "@health/types";
 
 /** Chat send payload after a proposal Modify decision. */
@@ -14,7 +14,7 @@ export type ProposalRevisionChatSend = {
 export const PROPOSAL_REVISION_CHAT_SEND_FAILED_MESSAGE =
   "Your revision was saved, but the coach message could not be sent.";
 
-export function toChatProposalOriginal(proposal: AiProposal): RawAiProposal {
+export function toChatProposalOriginal(proposal: AiProposal): ChatProposalRevisionOriginal {
   const { intent, targetDomain, title, reason, proposedChanges, evidenceRefs } = proposal;
 
   if (evidenceRefs && evidenceRefs.length > 0) {
@@ -25,7 +25,7 @@ export function toChatProposalOriginal(proposal: AiProposal): RawAiProposal {
       reason,
       proposedChanges,
       evidenceRefs,
-    } as RawAiProposal;
+    };
   }
 
   return {
@@ -34,7 +34,7 @@ export function toChatProposalOriginal(proposal: AiProposal): RawAiProposal {
     title,
     reason,
     proposedChanges,
-  } as RawAiProposal;
+  };
 }
 
 export function buildProposalRevisionChatSend(

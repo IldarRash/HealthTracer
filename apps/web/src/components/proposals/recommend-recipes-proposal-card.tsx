@@ -25,11 +25,10 @@ import {
 } from "../../lib/proposal-ui-state";
 import { useInlineProposalActions } from "../../lib/use-inline-proposal-actions";
 import {
+  buildRecipeTagChips,
   formatMacroEstimateSummary,
   formatMealTypeLabel,
-  formatRecipeProvenanceMeta,
-  formatRecipeProviderLabel,
-  RECIPE_CONFIDENCE_LABELS,
+  formatRecipeProvenanceHuman,
   recipeConfidenceNotice,
 } from "../../lib/recipes-ui-state";
 import { ProposalConfirmation } from "../ui";
@@ -62,6 +61,7 @@ function ProposalRecipePreview({
   isError,
 }: ProposalRecipePreviewProps) {
   const confidenceNotice = recipe ? recipeConfidenceNotice(recipe.confidence) : null;
+  const tagChips = recipe ? buildRecipeTagChips(recipe) : [];
 
   return (
     <li className="recipe-recommendation-card nested-card">
@@ -88,25 +88,25 @@ function ProposalRecipePreview({
           <p className="recipe-macro-copy">{formatMacroEstimateSummary(recipe)}</p>
 
           <dl className="training-meta recipe-meta">
-            <dt>Servings</dt>
-            <dd>{recipe.servings}</dd>
             <dt>Source</dt>
-            <dd>{formatRecipeProviderLabel(recipe)}</dd>
-            <dt>Confidence</dt>
-            <dd>{RECIPE_CONFIDENCE_LABELS[recipe.confidence]}</dd>
-            <dt>Provenance</dt>
-            <dd>{formatRecipeProvenanceMeta(recipe)}</dd>
+            <dd>{formatRecipeProvenanceHuman(recipe.provenance)}</dd>
           </dl>
 
-          {recipe.mealTypes.length > 0 ? (
-            <div className="recipe-tag-row">
-              {recipe.mealTypes.map((mealType) => (
-                <span key={mealType} className="badge badge-info">
-                  {formatMealTypeLabel(mealType)}
-                </span>
-              ))}
-            </div>
-          ) : null}
+          <div className="recipe-tag-row">
+            {recipe.mealTypes.map((mealType) => (
+              <span key={mealType} className="badge badge-info">
+                {formatMealTypeLabel(mealType)}
+              </span>
+            ))}
+            {tagChips.map((chip) => (
+              <span
+                key={chip.key}
+                className={`badge badge-${chip.tone === "red" ? "red" : chip.tone === "amber" ? "amber" : chip.tone === "green" ? "green" : "neutral"}`}
+              >
+                {chip.fallbackLabel}
+              </span>
+            ))}
+          </div>
 
           {confidenceNotice ? (
             <div className="notice notice-inline" role="status">

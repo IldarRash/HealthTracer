@@ -1,19 +1,31 @@
 import { z } from "zod";
 import { isoDateTimeSchema } from "./dates.js";
 import {
-  documentConsentScopeSchema,
-  documentTypeSchema,
-  type DocumentConsentScope,
-} from "./documents.js";
-import {
   nutritionConfidenceBandSchema,
 } from "./nutrition-incidents.js";
+
+/**
+ * Per-operation consent scopes recordable on a chat attachment.
+ * Defined locally since the health-documents module (the original owner of the
+ * five-scope model) was deleted with the biomarkers feature; the explicit
+ * lab-report flow has its own two-level consent in lab-reports.ts.
+ */
+export const chatAttachmentConsentScopeSchema = z.enum([
+  "upload_storage",
+  "parse_ocr",
+  "ai_summarization",
+  "semantic_indexing",
+  "coach_chat_context",
+]);
+
+export type ChatAttachmentConsentScope = z.infer<typeof chatAttachmentConsentScopeSchema>;
 
 export const chatAttachmentCategorySchema = z.enum([
   "unclassified",
   "food_photo",
   "medical_document",
   "workout_attachment",
+  "document_file",
 ]);
 
 export const classifiedChatAttachmentCategorySchema = chatAttachmentCategorySchema.exclude([
@@ -62,6 +74,42 @@ export const CHAT_MEDICAL_DOCUMENT_MIME_TYPES = [
   "image/webp",
 ] as const;
 
+/**
+ * MIME types accepted for document_file chat attachments (PDF, plain text, Markdown).
+ * These files are extracted as text and passed as context to ALL selected domain LLMs.
+ * Extracted text is NEVER persisted or logged — it is ephemeral, context-only.
+ */
+export const CHAT_DOCUMENT_FILE_MIME_TYPES = [
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/x-markdown",
+] as const satisfies readonly string[];
+
+export type ChatDocumentFileMimeType = (typeof CHAT_DOCUMENT_FILE_MIME_TYPES)[number];
+
+/** Maximum file size for document_file chat attachments (5 MiB). */
+export const MAX_CHAT_DOCUMENT_FILE_BYTES = 5_000_000;
+
+export function isChatAttachmentDocumentMimeType(mimeType: string): mimeType is ChatDocumentFileMimeType {
+  return (CHAT_DOCUMENT_FILE_MIME_TYPES as readonly string[]).includes(mimeType);
+}
+
+/**
+ * Infer the provisional attachment category from a MIME type.
+ * Returns "document_file" for PDF/text/markdown MIMEs; "unclassified" otherwise.
+ * Used by ChatAttachmentsService to route uploads without upfront user declaration.
+ */
+export function inferProvisionalAttachmentCategory(
+  mimeType: string,
+): "document_file" | "unclassified" {
+  if (isChatAttachmentDocumentMimeType(mimeType)) {
+    return "document_file";
+  }
+
+  return "unclassified";
+}
+
 export const CHAT_WORKOUT_ATTACHMENT_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -101,11 +149,9 @@ export type ChatAttachmentRef = z.infer<typeof chatAttachmentRefSchema>;
 
 export const chatAttachmentConsentSchema = z
   .object({
-    consentScopes: z.array(documentConsentScopeSchema).min(1).max(5),
+    consentScopes: z.array(chatAttachmentConsentScopeSchema).min(1).max(5),
     consentVersion: z.string().min(1).max(40),
     consentGrantedAt: isoDateTimeSchema,
-    documentType: documentTypeSchema.optional(),
-    documentTitle: z.string().min(1).max(160).optional(),
   })
   .strict();
 
@@ -143,7 +189,6 @@ export const chatAttachmentRecordSchema = z.object({
   mimeType: z.string().min(1).max(120),
   fileSizeBytes: z.number().int().nonnegative(),
   storageKey: z.string().min(1).max(500).nullable(),
-  linkedDocumentId: z.string().uuid().nullable(),
   linkedImageRefId: z.string().uuid().nullable(),
   consent: chatAttachmentConsentSchema.nullable(),
   // recognition DB column stays readable (disposable-DB; to be dropped in a later schema pass)
@@ -241,6 +286,7 @@ const CATEGORY_MIME_ALLOWLIST: Record<
   food_photo: CHAT_FOOD_PHOTO_MIME_TYPES,
   medical_document: CHAT_MEDICAL_DOCUMENT_MIME_TYPES,
   workout_attachment: CHAT_WORKOUT_ATTACHMENT_MIME_TYPES,
+  document_file: CHAT_DOCUMENT_FILE_MIME_TYPES,
 };
 
 const CATEGORY_SIZE_LIMIT: Record<
@@ -250,6 +296,7 @@ const CATEGORY_SIZE_LIMIT: Record<
   food_photo: MAX_CHAT_FOOD_PHOTO_BYTES,
   medical_document: 5_000_000,
   workout_attachment: MAX_CHAT_WORKOUT_ATTACHMENT_BYTES,
+  document_file: MAX_CHAT_DOCUMENT_FILE_BYTES,
 };
 
 const CATEGORY_RETENTION: Record<
@@ -259,16 +306,20 @@ const CATEGORY_RETENTION: Record<
   food_photo: "ephemeral_recognition",
   medical_document: "document_consent_rules",
   workout_attachment: "ephemeral_recognition",
+  document_file: "ephemeral_recognition",
 };
 
 /**
- * Image MIME types accepted for all provisional chat attachment uploads.
- * Images only for now — PDF/text document flow is deferred.
+ * MIME types accepted for provisional chat attachment uploads.
+ * Includes image types (jpeg/png/webp) and document_file types (PDF/plain/markdown).
+ * Document files are text-extracted at turn time and passed as context to domain LLMs.
+ * Extracted text is NEVER persisted or logged — ephemeral, context-only.
  */
 export const CHAT_PROVISIONAL_UPLOAD_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
+  ...CHAT_DOCUMENT_FILE_MIME_TYPES,
 ] as const satisfies readonly string[];
 
 export const MAX_CHAT_PROVISIONAL_ATTACHMENT_BYTES = 10_000_000;
@@ -355,14 +406,14 @@ export function getChatAttachmentSizeError(
 }
 
 export function hasRequiredMedicalAttachmentConsent(
-  scopes: readonly DocumentConsentScope[],
+  scopes: readonly ChatAttachmentConsentScope[],
 ): boolean {
   return scopes.includes("upload_storage");
 }
 
 export function getMedicalAttachmentConsentErrors(
   category: ChatAttachmentCategory,
-  consentScopes: readonly DocumentConsentScope[] | undefined,
+  consentScopes: readonly ChatAttachmentConsentScope[] | undefined,
 ): string[] {
   if (category !== "medical_document") {
     return [];
@@ -384,7 +435,6 @@ export type OwnedChatAttachmentRef = {
   userId: string;
   category: ChatAttachmentCategory;
   status: ChatAttachmentStatus;
-  linkedDocumentId: string | null;
   linkedImageRefId: string | null;
   retentionPolicy: ChatAttachmentRetentionPolicy;
   expiresAt: string | null;

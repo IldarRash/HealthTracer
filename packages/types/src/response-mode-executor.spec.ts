@@ -138,8 +138,11 @@ describe("response mode executor helpers", () => {
       handlerPath: "context_expansion_bounded_loop",
       useContextExpansionMetadata: true,
     });
+    // Deterministic modes are coerced to fan-out by SystemPlanner before reaching the
+    // orchestrator, so the handler path "pre_ai_gate_delegation" no longer applies.
+    // The fallback is "single_final_answer" with maxLoopIterations=0 as a safe no-op.
     expect(resolveResponseModeExecutorLoopPolicy("deterministic_read")).toMatchObject({
-      handlerPath: "pre_ai_gate_delegation",
+      handlerPath: "single_final_answer",
       maxLoopIterations: 0,
     });
   });

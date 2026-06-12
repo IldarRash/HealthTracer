@@ -1,7 +1,7 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { DatabaseModule } from "../../database/database.module.js";
+import { BiomarkersModule } from "../biomarkers/biomarkers.module.js";
 import { BodyModule } from "../body/body.module.js";
-import { DocumentsModule } from "../documents/documents.module.js";
 import { ExercisesModule } from "../exercises/exercises.module.js";
 import { GoalsModule } from "../goals/goals.module.js";
 import { HabitsModule } from "../habits/habits.module.js";
@@ -17,6 +17,7 @@ import { WellbeingCheckInsModule } from "../wellbeing-check-ins/wellbeing-check-
 import { WorkoutsModule } from "../workouts/workouts.module.js";
 import { ChatAttachmentsModule } from "../chat-attachments/chat-attachments.module.js";
 import { ProposalApplyService } from "./proposal-apply.service.js";
+import { ProposalNormalizationService } from "./proposal-normalization.service.js";
 import { ProposalValidationService } from "./proposal-validation.service.js";
 import { ProposalsController } from "./proposals.controller.js";
 import { ProposalsRepository } from "./proposals.repository.js";
@@ -25,8 +26,8 @@ import { ProposalsService } from "./proposals.service.js";
 @Module({
   imports: [
     DatabaseModule,
+    BiomarkersModule,
     BodyModule,
-    DocumentsModule,
     HealthMetricsModule,
     UsersModule,
     ExercisesModule,
@@ -46,9 +47,15 @@ import { ProposalsService } from "./proposals.service.js";
   providers: [
     ProposalsRepository,
     ProposalsService,
+    ProposalNormalizationService,
     ProposalValidationService,
     ProposalApplyService,
   ],
-  exports: [ProposalsService, ProposalValidationService, ProposalsRepository],
+  exports: [
+    ProposalsService,
+    ProposalNormalizationService,
+    ProposalValidationService,
+    ProposalsRepository,
+  ],
 })
 export class ProposalsModule {}

@@ -9,13 +9,19 @@ decision-maker LLM synthesizes their output into one reply plus typed proposals.
 > codebase locked and must not deviate from. The phased migration is complete: every
 > component described below exists in code. The multi-domain fan-out path
 > (RouterLlm → SystemPlanner `DomainFanoutPlan` → parallel `DomainLlmExecutorService`
-> → `DecisionMakerExecutorService` → `ActionResolverService`) owns **all** turn types
-> — proposal-revision, proposal-explainer (with proposal), low-confidence fallback,
-> and the deterministic gate-miss (handled inline in
-> `AgentOrchestratorService.buildDeterministicGateMissResult` — no additional LLM calls,
-> though the router may already have run for eligible turns).
-> `ResponseModeExecutorService`, `resolveProposalOnlyOutput`, and the provider methods
-> `generateAgentLoopStep`/`generateCoachResponse` no longer exist.
+> → `DecisionMakerExecutorService` → `ActionResolverService`) owns **all** orchestrated
+> turn types — proposal-revision, proposal-explainer (with proposal), and low-confidence
+> fallback. **Every turn that reaches the orchestrator fans out**: there is no
+> orchestrator-level deterministic branch. `SystemPlannerService` coerces any would-be
+> deterministic executor mode to the fan-out default (logging `pre_ai_gate.miss`), and the
+> router's `directCommand` output is **telemetry-only**.
+> `ResponseModeExecutorService`, `resolveProposalOnlyOutput`,
+> `buildDeterministicGateMissResult`, the `DETERMINISTIC_PRE_AI_GATE_REPLY` canned reply,
+> and the provider methods `generateAgentLoopStep`/`generateCoachResponse` no longer exist.
+
+> **Related:** for a chronological message-journey / decision-tree (one user message,
+> every branch point and the condition that selects it), see
+> [`chat-message-flow.md`](./chat-message-flow.md).
 
 Attachments are **context** for this same pipeline — there is no separate attachment
 recognition/classification pipeline and no attachment proposal side channel. The old
@@ -33,7 +39,10 @@ persist, and apply them only after the user accepts. End to end:
 flowchart TD
   chat["Chat turn"] --> llm["LLM pipeline (router → domains → decision-maker)"]
   llm --> actionResolver["ActionResolverService"]
-  actionResolver --> validation["ProposalValidationService"]
+  actionResolver --> normalization["ProposalNormalizationService (per-intent bridge + trusted stamping)"]
+  normalization --> validation["ProposalValidationService"]
+  validation -- "schema-class invalid" --> repair["ProposalRepairService (one payload-only LLM repair) → re-normalize + full re-validate"]
+  repair --> validation
   validation --> pending["Pending proposal (review card)"]
   pending --> userDecision["User accept or reject"]
   userDecision --> apply["ProposalApplyService"]
@@ -45,7 +54,9 @@ response had `proposals: []` for the assistant message (diagnose upstream — se
 [Diagnosis & Troubleshooting](#diagnosis--troubleshooting)). Beyond fan-out LLM output,
 proposals can also come from deterministic code-owned injectors (wellbeing check-in,
 recipe recommendations, weekly-review packing); all sources pass the same
-`ProposalValidationService` stack. On accept, workout/nutrition changes create new
+per-intent normalization stage + `ProposalValidationService` stack (with one bounded
+self-repair LLM call for schema-class failures — see Stage 11). On accept,
+workout/nutrition changes create new
 revisions — `log_workout_activity` is a LOG intent that creates an `ad_hoc`
 `workout_sessions` row, never a plan revision (see Stage 11).
 
@@ -63,27 +74,29 @@ flowchart TD
   aiService --> orchestrator["AgentOrchestratorService"]
   orchestrator --> preprocessor["MessagePreprocessorService (message normalization)"]
   preprocessor --> router["RouterLlmService (first LLM): select domains\n(skipped for revision/explainer turns)"]
-  router --> planner["SystemPlannerService (fan-out planner)\nproduces executorMode"]
-  planner --> deterministicMode{"executorMode == deterministic?\n(safety-net: router may already have run)"}
-  deterministicMode -- yes --> gateMiss["buildDeterministicGateMissResult\n(canned reply, no additional LLM calls)"]
-  deterministicMode -- no --> context["CoachingContextService (one bounded packet per selected domain)"]
+  router --> planner["SystemPlannerService (fan-out planner)\ncoerces any deterministic mode → fan-out default"]
+  planner --> context["CoachingContextService (one bounded packet per selected domain)"]
   context --> domainLlms["Parallel domain LLMs (only-selected): workout / nutrition / health"]
-  domainLlms --> decision["DecisionMakerExecutorService (final synthesis LLM)"]
+  domainLlms --> decision["DecisionMakerExecutorService (final synthesis LLM)\nretries once; double failure → turnError"]
   decision --> actionResolver["ActionResolverService"]
-  actionResolver --> validation["Proposal safety and domain validation"]
+  actionResolver --> normalization["Proposal normalization (per-intent bridge + trusted stamping)"]
+  normalization --> validation["Proposal safety and domain validation\n(schema-class failure → one payload-only self-repair → full re-run)"]
   validation --> persistence["ChatRepository message and proposal persistence"]
 ```
 
 LLM call budget per eligible turn: **1 router (skipped for revision/explainer) + N
-selected domain LLMs (N ≤ 3, run in parallel) + 1 decision-maker**. Crisis, direct-path,
-and quota-exceeded turns make **zero LLM calls** — they return in ChatService before
-AiService is reached. The orchestrator-level deterministic gate-miss is a rare safety-net: the check is on the
-top-level `plan.executorMode` (derived from the primary capability policy,
-`classifyDirectPathCandidate`, and the router's `directCommand.detected` signal —
-`turnDecisionDirectCommand → resolveResponseModeExecutorMode` returns `deterministic_write`),
-which is distinct from each `DomainFanoutEntry.executorMode` (per-domain). By the time `buildDeterministicGateMissResult` runs, the router **may
-already have made one LLM call** (for eligible turns); no additional LLM calls are made
-from that point.
+selected domain LLMs (N ≤ 3, run in parallel) + 1 decision-maker (which retries once on
+failure, so up to 2 decision calls) + up to 2 payload-only proposal-repair calls**
+(`MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN`, only for schema-invalid proposals — see
+Stage 11). Crisis, direct-path, and quota-exceeded turns make
+**zero LLM calls** — they return in ChatService before AiService is reached. **Every turn
+that reaches the orchestrator fans out**: there is no orchestrator-level deterministic
+branch. If `resolveResponseModeExecutorMode` ever returns a deterministic executor mode
+(e.g. `classifyDirectPathCandidate` matched a candidate the pre-AI gate should already
+have handled, or the router emitted a `directCommand`), `SystemPlannerService` coerces it
+to the fan-out default via `mapExpectedResponseModeToDefaultExecutorMode` and logs
+`pre_ai_gate.miss` (warn). The router's `directCommand` output is **telemetry-only** — it
+never short-circuits the LLM path.
 
 ## Stage 0: Chat Entry
 
@@ -105,9 +118,16 @@ Responsibilities:
 - Apply hard pre-AI gates: crisis support, proposal explainer no-proposal, and
   direct chat paths.
 - Call `AiService.generateCoachResponse` for the unified LLM pipeline.
-- Persist the assistant message with parse, safety, agent, and weekly-review
-  metadata.
-- Run the proposal validation stack and persist reviewable proposals.
+- Normalize, validate, and (when eligible) self-repair every proposal **before**
+  the assistant message is created, so repair telemetry rides the message metadata
+  (`ChatService.validateAndRepairProposal` — see Stage 11).
+- Persist the assistant message with parse, safety, agent (incl.
+  `agent.repair { attempted, succeeded }` when repair was attempted), and
+  weekly-review metadata, then persist the processed proposals.
+- Accept an **optional `onProgress` (`ProgressReporter`)** and emit coarse stage events
+  for the SSE streaming endpoint (see "Streaming (SSE) variant of the chat turn" below).
+  The argument is absent on the synchronous endpoint, so streaming is opt-in and never
+  changes turn logic.
 
 `ChatService` does not create proposal cards from attachment recognition. Proposals
 shown to a user come from one of two sources:
@@ -118,8 +138,9 @@ shown to a user come from one of two sources:
   `packChatRecipeRecommendationProposal` (recipe recommendations), and
   `packChatWeeklyReviewProposals` (weekly-review packing).
 
-All proposals — LLM-sourced and code-injected — pass the same
-`ProposalValidationService` safety stack before persistence.
+All proposals — LLM-sourced and code-injected — pass the same per-intent
+normalization stage and `ProposalValidationService` safety stack before persistence
+(see Stage 11).
 
 When the UI shows assistant text but no proposal card, the API almost always returned
 `proposals: []`. Invalid proposals still persist and render as cards with disabled
@@ -141,19 +162,100 @@ File: `apps/api/src/modules/chat/chat.mapper.ts`
 
 Maps database rows to API chat DTOs.
 
-## Stage 1: Attachment Context (context-only, images only)
+### Streaming (SSE) variant of the chat turn
+
+The same `ChatService.sendMessage` turn can be **streamed** to the client over
+Server-Sent Events without changing the pipeline or its safety guarantees. The
+synchronous `POST /chat/threads/:threadId/messages` endpoint is unchanged; streaming
+is a parallel endpoint that reuses the identical guard, DTO, and turn logic.
+
+Files:
+
+- `apps/api/src/modules/chat/chat.controller.ts` — `POST
+  /chat/threads/:threadId/messages/stream` (same `ClerkAuthGuard` + `sendChatMessageSchema`
+  body). The body is validated with `parseBody` **before** the SSE stream is opened, so an
+  invalid body propagates as a normal HTTP 400 — never a half-opened `200` stream. It opens
+  a `ChatTurnStreamWriter`, emits `turn_accepted`, then calls
+  `chatService.sendMessage(auth, threadId, input, onProgress)` and emits the `final` (or
+  `error`) frame.
+- `apps/api/src/modules/chat/chat-turn-stream-writer.ts` — writes SSE frames
+  (`event: <kind>\ndata: <json>\n\n`) and sets the SSE headers (incl.
+  `X-Accel-Buffering: no` to disable proxy buffering). On client disconnect (`close`
+  event) it sets `isClientConnected = false` and **stops writing**, but the underlying
+  `sendMessage` promise still runs to completion — the user message and any proposals are
+  always persisted regardless of stream state.
+- `packages/types/src/chat-turn-stream.ts` — the event contract.
+  `chatTurnStreamEventSchema` is a discriminated union on `kind`:
+  - `turn_accepted` — `{ threadId, userMessageId? }`, emitted immediately after the body is
+    accepted.
+  - `stage` — `{ stage, selectedDomains? }` where `stage` is one of `preprocessing` |
+    `routing` | `domains_running` | `synthesis` | `validating`; `selectedDomains` (domain
+    names only) is present only for `domains_running`.
+  - `final` — `{ response: ChatTurnResponse }`, the exact payload the sync endpoint returns.
+  - `error` — `{ message }`, a generic safe copy only (no internals/stack/health data).
+  - `ProgressReporter = (event: ChatTurnStreamStageEvent) => void` is the narrow callback
+    threaded through the pipeline; only `stage` events flow through it (`turn_accepted` and
+    `final` are emitted by the controller/ChatService, which hold the response).
+
+**Optional `onProgress` threading.** `ProgressReporter` is an optional last argument on
+`ChatService.sendMessage` → `AiService.generateCoachResponse` → `AgentOrchestratorService`.
+The sync endpoint passes nothing, so all reporting is a no-op there. Emission points:
+
+- `ChatService` emits `preprocessing` (just before `AiService` is called) and `validating`
+  (just before the proposal safety + validation stack) via `emitStageProgress`.
+- `AgentOrchestratorService` emits `routing` (before the router LLM), `domains_running`
+  (with selected domain names, before the parallel domain LLMs), and `synthesis` (before
+  the decision-maker LLM) via `emitProgress`.
+- Both helpers **swallow callback errors in try/catch** — a throwing reporter must never
+  break or alter the turn.
+
+**Pre-AI gate turns** (crisis, direct-path, quota, no-proposal explainer) return early in
+`ChatService` before any stage emission, so over the stream they produce only
+`turn_accepted → final` (no `stage` events) — by design.
+
+**Safety design (no token streaming).** There is **no token-level / partial-reply
+streaming.** The `final` event is emitted only **after** `validateReplySafety` and the full
+`ProposalValidationService` stack have completed — the same safety floor as the sync
+endpoint. `stage` events carry **structural information only** (stage names and selected
+domain names); they never carry user content, reply text, proposal payloads, or health
+data. This is enforced by the `chatTurnStreamEventSchema` shape: only the single `final`
+event (and only after validation) ever carries the assistant text and validated proposals.
+
+## Stage 1: Attachment Context (context-only, images + document files)
 
 Attachments are **bounded context** for the same pipeline used by text-only
 messages. There is **no recognition or classification machinery** — the multimodal
-router and domain LLMs read the image content directly. The chat-attachments
-module keeps only the ownership/storage/retention perimeter.
+router and domain LLMs read the image content directly, and document files are
+extracted to plain text per-turn. The chat-attachments module keeps only the
+ownership/storage/retention perimeter.
 
-Attachments are **images only** (`image/jpeg`, `image/png`, `image/webp`); the
-PDF/text document upload flow is **deferred** (not implemented). There is **no
-upfront classification** (no food/workout/medical category picker, no
-`categorySource` "declare before upload" machinery) and **no upfront consent gate**
-— an image uploads freely and is sent to the LLM as context, and the multimodal LLM
-recognizes what it is.
+Attachments are **images + document files**, context-only. Images are
+`image/jpeg`, `image/png`, `image/webp`. Document files are the new `document_file`
+category: PDF (`application/pdf`), plain text (`text/plain`), and Markdown
+(`text/markdown`, `text/x-markdown`), capped at **5 MB**, retention
+`ephemeral_recognition` (DB enum value added in migration
+`0036_careless_pandemic.sql`). There is **no upfront classification** (no
+food/workout/medical category picker, no `categorySource` "declare before upload"
+machinery) and **no upfront consent gate** — an attachment uploads freely and is
+sent to the LLM as context, and the multimodal/text LLM reads what it is.
+
+**Category inference (`mime_inferred`).** Document-file uploads are not declared by
+the user; the category is inferred deterministically from the MIME type via a fixed
+MIME→category map (`isChatAttachmentDocumentMimeType` in `@health/types`), so a PDF
+or text/Markdown file resolves to `document_file` without a category picker.
+
+**Lazy per-turn text extraction.** `AttachmentTextExtractionService`
+(`apps/api/src/modules/chat-attachments/attachment-text-extraction.service.ts`)
+extracts plain text from `document_file` attachments **once per turn**, before the
+fan-out, using `extractPdfPlainText`
+(`apps/api/src/modules/chat-attachments/pdf-text-extraction.ts`) for PDFs and a
+UTF-8 read for text/Markdown. Extraction is capped at
+`MAX_ATTACHMENT_TEXT_CONTENT_CHARS` (**12 000 chars**, truncated beyond), wrapped in
+a ~5 s timeout, and degrades independently to a status of `ok` / `empty` / `failed`
+(it **never throws** and never blocks the turn). The extracted text is **never
+persisted to the database and never logged** (only the refId + status are logged) —
+this is a code-level safety floor. The original `filename` rides on the bounded
+attachment metadata (used as the label in the prompt; see Stage 8).
 
 > **Temporary, intentional safety relaxation (recorded so code↔doc don't drift):**
 > image content — including a photo of a medical document — now reaches the LLM
@@ -161,12 +263,15 @@ recognizes what it is.
 > "medical content only when `consentState === 'granted'`" code floor, **for now**.
 > The pre-upload medical/MIME consent gate and the `needs_consent` upload disposition
 > are gone (see "Removed Legacy Paths"). Floors that still hold: the context-budget
-> `allowDocuments=false` floor (about DB `health_documents` slices, **not** the
-> uploaded image) stays, there is **no** auto-persist or parsing of `health_documents`
-> from an attachment, and the legacy `recognition`/`categorySource` DB columns remain
-> readable but are not used for runtime branching. (`category` is still read to resolve
-> a retention policy — effectively constant since uploads are always `unclassified` —
-> and `status` is read for send eligibility; see "Removed Legacy Paths".)
+> `allowDocuments=false` floor (now meaning **raw document-derived text** slices, **not**
+> the uploaded attachment; the consent-gated `biomarkerContext` slice is exempt by design)
+> stays, there is **no** auto-persist or parsing of `lab_reports` / `biomarker_readings`
+> from an attachment, and the legacy `recognition`/`categorySource`
+> DB columns remain readable but are not used for runtime branching. (`category` is
+> still read to resolve a retention policy — `mime_inferred` resolves image uploads to
+> `unclassified` and document uploads to `document_file`, both with
+> `ephemeral_recognition` retention — and `status` is read for send eligibility; see
+> "Removed Legacy Paths".)
 
 ### `ChatTurnAttachmentStageService`
 
@@ -177,11 +282,11 @@ Runs the **plumbing stages only**:
 - `validate_refs`: checks ownership and send eligibility.
 - `link_to_message`: links attachments to the chat message and thread.
 - `apply_upload_disposition`: applies a **trivial generic retention disposition** —
-  it resolves the configured retention policy for the attachment's category and
-  passes the image through unchanged otherwise. In practice this lookup is
-  effectively constant: uploads are always created with category `unclassified`
-  (no per-category runtime branching occurs today). There is **no consent gate,
-  no medical purge, and no category reclassification** at this stage.
+  it resolves the configured retention policy for the attachment's MIME-inferred
+  category and passes the attachment through unchanged otherwise. Both image
+  (`unclassified`) and `document_file` uploads resolve to `ephemeral_recognition`
+  retention, so no per-category runtime branching occurs today. There is **no consent
+  gate, no medical purge, and no category reclassification** at this stage.
 
 The `classify`, `recognize`, and `prepare_attachment_context` stages, the removed
 `prepare_proposal_candidates` stage, and the removed pre-upload classification /
@@ -214,29 +319,74 @@ the orchestrator. `consentState` is a passive back-compat field carried on the
 only** — `RouterAttachmentHint` carries `category` and nothing else.
 An attachment goes to **all** router-selected domains — there is no per-domain
 category-relevance filter. The selected domain LLMs receive the bounded image
-content as context and produce typed proposals (nutrition calories, workout
-adjustments, etc.). No `contextSummaries` / recognition envelope is produced, and
+content and/or extracted document text as context and produce typed proposals
+(nutrition calories, workout adjustments, etc.). No `contextSummaries` / recognition
+envelope is produced, and
 there is no consent-gated medical-save proposal variant (that is deferred — see
 below).
 
-### Document upload (LIVE) vs attachment-driven save (deferred)
+### Lab-report upload (LIVE Biomarkers feature) vs attachment-driven save (deferred)
 
-**PDF/text document upload + parse is implemented** — but as a separate, explicit
-**Profile Documents** feature (`apps/api/src/modules/documents/*`,
-`apps/web/src/components/documents/*`), **not** part of the chat-attachment pipeline.
-The user explicitly uploads a PDF/plain-text file under a five-scope, per-operation
-consent model (`upload_storage`, `parse_ocr`, `ai_summarization`,
-`semantic_indexing`, `coach_chat_context`) with revoke + delete; raw bytes live on
-the storage adapter (local filesystem in dev, encrypted access-controlled store in
-prod), extracted text is never persisted or logged, summaries are governed and
-non-diagnostic, and access is ownership-scoped.
+`document_file` chat attachments are **context-only**: their text is extracted
+per-turn and fed to the domain LLMs, but **no attachment path may create or parse a
+`lab_report` / `biomarker_reading` row** — the chat-attachments path stays
+context-only and this boundary is enforced and regression-tested. Durable, parsed
+lab-report **storage** is a separate concern.
+
+**Durable PDF/text lab-report upload + parse is implemented** — but as a separate,
+explicit **Biomarkers** feature (`apps/api/src/modules/biomarkers/*`,
+`apps/web/src/components/biomarkers/*`, web route `apps/web/app/biomarkers`),
+**not** part of the chat-attachment pipeline, and **not** part of the chat fan-out.
+The user explicitly uploads a PDF/plain-text lab report under a **two-level consent
+model** — a structurally-required upload-time `storeAndParse` (`z.literal(true)` in
+`createLabReportSchema`) plus an optional per-report `coachChat` toggle persisted as
+`coachContextConsentAt` (revoke-able via `PATCH /lab-reports/:id/consent`) — with
+delete. Raw bytes live on the storage adapter (local filesystem in dev, encrypted
+access-controlled store in prod), **extracted document text is never persisted or
+logged**, and access is ownership-scoped. This replaces the deleted five-scope
+health-documents feature (see "Removed Legacy Paths").
+
+#### Lab extraction pipeline (out-of-band)
+
+Extraction is a **dedicated pipeline that is NOT part of the chat fan-out**. It is a
+separate provider interface (`LabExtractionProvider` in `packages/ai`, live impl
+`OpenAiLabExtractionProvider` in `apps/api/src/modules/biomarkers`) so the
+`CoachAiProvider` three-method fan-out surface stays untouched. `LabReportsService.extract`
+(triggered by `POST /lab-reports/:id/extract`) runs: storage read → parse
+(`LabDocumentParser`) → dedicated lab-extraction LLM → Zod parse
+(`labExtractionOutputSchema`) → per-reading catalog/plausibility/unsafe-language
+validation → transactional reading replacement. Properties:
+
+- **Strict structured output:** OpenAI `response_format: json_schema` with `strict: true`
+  over a closed **47-key catalog enum** (`BIOMARKER_KEYS`); `temperature: 0`; system
+  prompt is static/cacheable (built from `BIOMARKER_CATALOG`) and the document text goes
+  **only** into the user message, never the system prompt, a log line, or a persisted field.
+- **Retry/timeout:** up to **2 retries** on network/429/5xx (same policy as the coach
+  provider), wrapped in a **60s `AbortSignal.timeout`** budget.
+- **Typed failure codes (never fake-success):** `file_unreadable`, `pdf_no_text`,
+  `content_too_large`, `not_a_lab_report`, `llm_unavailable`, `llm_invalid_output`,
+  `no_readings_extracted` — persisted as `lab_reports.failure_code` (fixed enum strings so
+  no document fragment leaks).
+- **Per-reading safety:** values must sit in the catalog plausibility band
+  (`BIOMARKER_PLAUSIBILITY_FACTOR`); unit/`valueText`/`referenceRangeText` pass an EN/RU
+  `containsUnsafeMedicalLanguage` screen; an individual failing reading is **dropped** (and
+  counted into `unmappedMarkerCount`), never failing the whole batch. Markers the LLM cannot
+  map to a catalog key are counted only — their free-text labels are never returned or stored.
+- `OPENAI_MODEL_LAB_EXTRACTION` env overrides the model (falls back to `OPENAI_MODEL`);
+  with no `OPENAI_API_KEY`, extract honestly returns `llm_unavailable` rather than crashing.
+
+Coach context never sees raw lab text: the only biomarker shape that may enter chat is the
+bounded `biomarkerContext` slice (≤30 items, **no reference ranges**), assembled by
+`BiomarkersService.buildBiomarkerContextSummary` from consent-eligible readings (manual
+readings are always eligible; extracted readings require the owning report's
+`coachContextConsentAt`). Proposal evidence may reference a `biomarker_reading`.
 
 Still **not** built (deferred), and still a hard boundary:
 
-- The LLM-recognized medical **special save**: a domain recognition signal → a
-  consent-gated save **proposal** → on accept, with consent, persist a
-  `health_document`. Document persistence is **explicit-upload only**; **no
-  attachment path may create or parse a `health_document`** (image-only/context-only,
+- The LLM-recognized **special save**: a domain recognition signal → a
+  consent-gated save **proposal** → on accept, with consent, persist a reading. Reading
+  persistence is **explicit-upload / manual-entry only**; **no
+  attachment path may create or parse a `lab_report` / `biomarker_reading`** (context-only,
   enforced and regression-tested).
 
 ## Stage 2: Code-Owned Pre-AI Gates
@@ -254,7 +404,15 @@ Functions:
 Location: `@health/types`, used by `ChatService`.
 
 When crisis support should be shown, the system creates a deterministic support
-reply and no proposals — before any LLM runs.
+reply and no proposals — before any LLM runs. The gate receives the **raw user
+text** and matching is **bilingual**: `containsWellbeingCrisisKeyword` checks the
+English `WELLBEING_CRISIS_KEYWORDS` substrings **and** the Russian
+`WELLBEING_CRISIS_KEYWORDS_RU` regexps (Cyrillic lookaround word boundaries,
+lowercase-normalized input, deliberate safe-side over-triggering — a false positive
+is preferred to a missed crisis signal), all in
+`packages/types/src/wellbeing-check-ins.ts`. Russian crisis phrases (e.g. "не хочу
+жить", "покончить с собой") therefore trip the gate, so crisis coverage is no longer
+EN-only.
 
 ### Proposal Explainer
 
@@ -275,10 +433,37 @@ Files:
 - `apps/api/src/modules/chat/direct-chat-path-formatters.ts`
 - `apps/api/src/modules/ai/direct-chat-path-matcher.service.ts`
 
-Handles explicit deterministic actions such as reading today's summary or
-marking today's workout done. Direct paths resolve only when the message is
-clearly understood **and there is no attachment**; otherwise the turn falls
-through to the router. Plan changes remain proposal-only.
+Handles explicit deterministic actions. There are **five** direct-path kinds
+(`directChatPathKindSchema` in `packages/types/src/direct-chat-path.ts`), detected in
+the config order `mark_today_workout_done` → `today_summary_read` →
+`nutrition_plan_read` → `weekly_progress_read` → `workout_plan_read`
+(`directPaths.detectionOrder` in `ai-behavior.json`,
+`DEFAULT_DIRECT_PATH_DETECTION_ORDER` in
+`packages/types/src/direct-chat-path-default-patterns.ts`):
+
+- `today_summary_read` — read-only Today summary (formatter
+  `formatTodaySummaryReadMessage`).
+- `mark_today_workout_done` — the one narrow **write** (marks today's workout done).
+- `nutrition_plan_read` — read-only active-nutrition-plan readback (formatter
+  `formatNutritionPlanReadMessage` in `direct-chat-path-formatters.ts`, RU/EN match
+  patterns + `replyTemplates.nutritionPlan` in `ai-behavior.json`).
+- `weekly_progress_read` — read-only readback of the latest weekly progress summary
+  snapshot (`ProgressService.getLatestSummarySnapshot` — the same snapshot the
+  `weekly_review` context slice reads, never re-aggregated; formatter
+  `formatWeeklyProgressReadMessage`, `replyTemplates.weeklyProgress`). Its negative
+  patterns deliberately exclude **analytic phrasing** (`analy[sz]e`/`review`/`why`,
+  `проанализ`/`анализ`/`разбор`…) and **longer-than-week lookbacks**
+  (`month`/`quarter`/`year`/`all-time`, `месяц`/`полгода`/`за год`/`за всё время`…) so
+  those turns fall through to the fan-out / Tier-2 review path.
+- `workout_plan_read` — read-only active-workout-plan readback, symmetric with
+  `nutrition_plan_read` (`WorkoutsService.getCurrentActivePlan`, formatter
+  `formatWorkoutPlanReadMessage`, `replyTemplates.workoutPlan`). Its negative patterns
+  exclude create/change/adapt phrasing (EN + RU) so plan mutations stay proposal-only
+  through the fan-out.
+
+Direct paths resolve only when the message is clearly understood **and there is no
+attachment**; otherwise the turn falls through to the router. Four are read-only; only
+`mark_today_workout_done` writes. Plan changes remain proposal-only.
 
 ### Free-Tier AI Message Quota Gate
 
@@ -311,23 +496,21 @@ Responsibilities (`orchestrateCoachTurn`):
 - Run `RouterLlmService` for eligible turns to select relevant domains (proposal-revision
   and proposal-explainer turns skip the router).
 - Ask `SystemPlannerService` for the deterministic `DomainFanoutPlan`.
-- **All LLM turns** route through `runFanOutTurn`: build one bounded coaching-context
-  packet per selected domain through `CoachingContextService`, run the **selected domain
-  LLMs in parallel** through `DomainLlmExecutorService`, synthesize via
+- **Every orchestrated turn** routes through `runFanOutTurn`: build one bounded
+  coaching-context packet per selected domain through `CoachingContextService`, run the
+  **selected domain LLMs in parallel** through `DomainLlmExecutorService`, synthesize via
   `DecisionMakerExecutorService`, and resolve through `ActionResolverService`.
   Proposal-revision and proposal-explainer turns skip the router but still execute the
-  full fan-out path (router is not a prerequisite for `runFanOutTurn`).
-- **Deterministic gate-miss** turns (executorMode deterministic) are handled inline by
-  `buildDeterministicGateMissResult` — a rare safety-net for deterministic modes that
-  somehow reach the orchestrator. The top-level `executorMode` is derived from the primary
-  capability policy, `classifyDirectPathCandidate`, and the router's `directCommand.detected`
-  signal (`turnDecisionDirectCommand → resolveResponseModeExecutorMode` returns
-  `deterministic_write`). No additional LLM calls are made at this point; however, for
-  eligible turns the router will have already run before `SystemPlannerService` determined
-  the executor mode. The genuine zero-LLM path is the pre-AI gate in
-  `ChatService` (crisis, direct-path, quota), which returns before `AiService` is called.
-- Return structured AI output, parse errors, reply safety errors, the
-  `consentRequired` flag, and agent metadata.
+  full fan-out path (router is not a prerequisite for `runFanOutTurn`). There is **no
+  orchestrator-level deterministic branch** — `SystemPlannerService` guarantees
+  `plan.executorMode` is never deterministic by coercing any deterministic mode to the
+  fan-out default (logged `pre_ai_gate.miss`). The genuine zero-LLM path is the pre-AI gate
+  in `ChatService` (crisis, direct-path, quota), which returns before `AiService` is called.
+- Return structured AI output, parse errors, reply safety errors, the `consentRequired`
+  flag, an optional typed `turnError` (`decision_failed` | `reply_blocked`), and agent
+  metadata. On a `turnError`, `finalOutput` is an empty reply marker with no proposals;
+  ChatService persists the empty assistant message + `turnError` metadata instead of fake
+  coach prose.
 
 `RouterLlmService` is the only first-LLM routing stage for eligible turns. Proposal
 revision and proposal explainer turns are the explicit non-router exceptions.
@@ -343,10 +526,47 @@ problem:
   `Fan-out: domains degraded to fallback: [workout]`.
 - `parseErrors` includes `Decision-maker degraded: ...` when final synthesis fell back.
 - `replySafetyErrors` and `agent.safety.status === "reply_blocked"` mean the
-  orchestrator replaced the reply and dropped proposals.
+  orchestrator **dropped proposals and emitted an empty reply marker** with
+  `turnError: { reason: "reply_blocked" }` — there is no canned safety prose.
 - An otherwise clean turn with text but no cards usually means the decision-maker chose
   `plain_reply` or `null`, and `ActionResolverService` correctly returned
   `proposals: []`.
+
+#### Honest degradation: typed `turnError`, no fake coach prose
+
+When the pipeline cannot produce an honest reply, it surfaces a **typed turn error**
+instead of canned coach text (the old canned fallback strings are gone):
+
+- **Decision-maker retry.** `DecisionMakerExecutorService.execute` runs once; on any
+  failure (provider error, shape guard, or Zod parse failure) it **retries once** with the
+  same inputs (logs `decision_maker.retry`). If the retry also fails it logs
+  `decision_maker.failed_after_retry` and returns a degraded result carrying
+  `turnError: { reason: "decision_failed" }`.
+- **`decision_failed`.** The orchestrator skips reply-safety validation (there is no reply
+  to validate), sets `finalOutput = { reply: " ", proposals: [] }`, and threads
+  `turnError: { reason: "decision_failed" }` to ChatService. `agent.safety.status` is
+  `provider_error`.
+- **`reply_blocked`.** When `validateReplySafety(resolved.reply)` fails on a synthesized
+  reply, the orchestrator drops all proposals, sets the same empty reply marker, and emits
+  `turnError: { reason: "reply_blocked" }`. Reply-safety still drops proposals; it no
+  longer substitutes a safe canned reply.
+- **Contract + persistence.** `chatTurnErrorSchema` (`packages/types/src/chat-turn.ts`,
+  `reason: "decision_failed" | "reply_blocked"`) rides on `ChatTurnResponse.turnError` and
+  the SSE `final` event, and is stored in assistant-message
+  `metadata.turnError` (parsed back via `parseChatMessageTurnError`). The assistant message
+  is persisted with empty content. The web renders an **error card with Retry**
+  (`apps/web/src/components/chat/chat-turn-error-card.tsx`) instead of coach prose. Crisis,
+  quota, direct-path, and proposal-explainer replies are product features and **never** set
+  `turnError`.
+
+Per-stage token/latency **usage** is now recorded in the optional fan-out diagnostics
+block (`agent.fanOut`, schema in `packages/types/src/agent-context.ts`): the
+`AgentProviderUsage` shape (`promptTokens`, `completionTokens`, `totalTokens`,
+`latencyMs`, `retries`, and the optional per-stage `model` id) is attached as an
+optional `usage` field on `fanOut.router`,
+each `fanOut.domains[]` entry (accumulated across that domain's loop iterations), and
+`fanOut.decision`. It is absent on fallback paths where no provider call was made. These
+are structural numbers only — never prompts, replies, or health content.
 
 ## Stage 4: Message Normalization
 
@@ -358,9 +578,19 @@ Builds the deterministic **message-context** object from the raw user message:
 
 - original text
 - normalized text
-- detected language and basic signals
+- detected language and basic signals (incl. the `review_request` boolean — RU/EN
+  retrospective-review phrasing such as `анализ`/`разбор`/`итог`/`review`/`analy[sz]`/
+  `retrospect`)
 - attachment presence
 - direct-path candidate hints
+- `requestedLookbackDays: number | null` — deterministically detected lookback period
+  (`detectRequestedLookbackDays`): fixed RU/EN phrase rules (`сегодня`→1, `неделю`/`last
+  week`→7, `месяц`→30, `квартал`/`quarter`→90, `полгода`/`six months`→180, `год`/`year`→365)
+  plus numeric forms (`за 3 месяца`, `last 2 months`, `6 weeks`); the **longest** mentioned
+  period wins, and full-history asks (`за всё время`, `all time`, `entire history`) resolve
+  to `PROGRESS_HISTORY_FULL_LOOKBACK_DAYS` (= 731, the monthly-ladder grant). These two
+  signals drive the deterministic budget-profile selection in Stage 6 — the LLM never
+  decides the budget tier.
 
 Pure helpers and schemas live in `packages/types`
 (`packages/types/src/message-preprocessor.ts`).
@@ -384,8 +614,20 @@ the **merged domain YAML config + capability catalog** (`buildAvailableDomains`)
 selects which domain LLMs should run. It calls `provider.generateRouterDecision`.
 
 The router's available-domain list is exactly the **3 `RouterDomain` values**:
-`workout`, `nutrition`, and `health`. `medical.yml` folds into the `health` domain —
-it is not a fourth router-selectable domain.
+`workout`, `nutrition`, and `health`. `medical.yml` has been deleted — the `health`
+domain owns all wellness/health-context intents and is not a fourth router-selectable domain.
+
+**Message-length caps (`packages/types/src/message-limits.ts`).** The API accepts a
+user message up to `MAX_CHAT_USER_MESSAGE_CHARS` (**20 000 chars**) — enough for a
+full pasted workout routine or meal plan — enforced by `sendChatMessageSchema` and
+carried at full length through the domain-step, final-decision, and agent-context
+schemas, so the **domain LLMs and the decision-maker see the full message**. The
+**router does not**: `buildRequest` applies `truncateForRouter` (cap
+`ROUTER_TEXT_MAX_CHARS = 4 000`) to the **top-level** router fields (`originalText`,
+`normalizedText`) **and** to each recent-message item **and** to the router-scoped
+copy of the serialized `preprocessorJson`, so no long paste can bloat the router
+prompt or trip its schema parse. The router only needs the head of the message to
+choose domains.
 
 Inputs:
 
@@ -401,7 +643,6 @@ Output: `RouterDecisionOutput` (`packages/types/src/router-decision.ts`):
 
 - `selectedDomains[]` (max 3) — each with `domain`, `confidence`, and per-domain
   `intentHints[]` / `toolHints[]` / `signalHints[]`
-- `contextNeeds[]`
 - `directCommand` signal
 - `safetyFlags[]`
 - `confidence`
@@ -411,10 +652,16 @@ Safety behavior (three-step validation pipeline):
 1. `validateRouterDecisionOutputShape` — shape guard: rejects forbidden user-facing
    fields such as direct replies or proposals.
 2. `routerDecisionOutputSchema.parse` — Zod parse applying schema defaults (e.g.
-   empty `selectedDomains` when absent).
+   empty `selectedDomains` when absent). **Count caps are enforced by slicing
+   in-schema, never by rejection**: `selectedDomains` is `.transform`-sliced to
+   `MAX_ROUTER_SELECTED_DOMAINS` (3) and each domain's
+   `intentHints`/`toolHints`/`signalHints` to `MAX_ROUTER_HINTS_PER_DOMAIN` (5), so a
+   router LLM emitting 4 valid domains or 6 valid hints degrades to the cap instead of
+   failing the whole parse onto the fallback route. Element validations (known
+   domain/tool names, hint length) still reject as before.
 3. `clampRouterDecisionOutput` — clamps `selectedDomains` to known `RouterDomain`
    values, `toolHints` to `AgentToolName` values, and `safetyFlags` to
-   `AgentSafetyFlag` values; caps `selectedDomains` at `MAX_ROUTER_SELECTED_DOMAINS`.
+   `AgentSafetyFlag` values; re-applies the same domain/hint count caps.
    `intentHints` pass through unclamped. Capability-catalog narrowing of
    tool/proposal allowlists happens downstream in `SystemPlannerService`, not here.
 
@@ -425,7 +672,11 @@ text plus `detectedLanguage`, so Russian requests such as "сгенерируй 
 план" can route to `workout`. Deterministic signal coverage is not equivalent across
 languages: some preprocessor signals cover Cyrillic workout terms, while domain YAML
 signal examples remain mostly English. Short typo-heavy requests therefore depend more
-on router LLM confidence.
+on router LLM confidence. The **safety floors are bilingual**, though: the crisis gate
+(`WELLBEING_CRISIS_KEYWORDS_RU`) and the unsafe-medical reply/proposal screen
+(`UNSAFE_MEDICAL_PATTERNS_RU`) both cover Russian, so a weak/low-confidence route on a
+Russian turn still falls back safely and is now handled by the decision-template
+clarifying-question path (see Stage 6 `lowConfidenceRoute`).
 
 ## Stage 6: SystemPlanner — Fan-out Planner
 
@@ -459,20 +710,56 @@ independent step that runs after `resolveRoute`:
 Planner output (`DomainFanoutPlan`):
 
 - `selectedDomains[]` — each with `{ domain, capabilityId, allowedTools,
-  allowedProposalIntents, contextBudget, executorMode }`, clamped to the capability
+  allowedProposalIntents, contextBudget, executorMode,
+  supplementaryContextSlices? }`, clamped to the capability
   catalog (the catalog is the floor; YAML/router can only narrow it).
 - decision-maker plan (action-variant catalog + budget)
 - per-domain context slice plans and compression requirements
+- turn-level lookback metadata: `requestedLookbackDays` (from the preprocessor) and
+  `grantedLookbackDays` (the ladder/profile clamp — see `ContextBudgetPolicyService`
+  below)
 
 Selected domains are capped at **3** (code constant). The planner never widens
 tool/proposal allowlists beyond the catalog.
 
+**Deep-review slice injection (deterministic).** `planTurn` receives the
+preprocessor result and threads only `requestedLookbackDays` +
+`simpleSignals.review_request` into the budget-profile selection
+(`resolvePreprocessorBudgetHints`). When `shouldInjectProgressHistoryReview`
+(`context-budget-policy.service.ts`) approves — a review budget profile
+(`deep_review` / `deep_history`) **and** a review-ish turn (monthly review, progress
+review, or the `review_request` signal) — the planner builds one
+`progress_history_review` slice request
+(`buildProgressHistoryReviewSliceRequest`: depth `large`, timeRange clamped to the
+budget's `maxLookbackDays` as display metadata) and appends it right after the
+primary slice on the route's `requiredContextSlices` **and** as
+`supplementaryContextSlices` on every fan-out domain entry
+(`appendSupplementarySliceRequests`, dedup + `MAX_CONTEXT_SLICES` cap). A purely
+multi-domain `deep_review` turn (e.g. "help with training and nutrition") is
+deliberately excluded — it is not a retrospective and never triggers the history
+aggregation. Default turns never carry the slice.
+
 Router confidence directly affects proposal availability. If the router result is not
-from the LLM, has confidence below `RULE_ROUTE_CONFIDENCE_THRESHOLD`, has no selected
-domains, or cannot map the selected domain to a capability, `SystemPlannerService`
-falls back to the configured fallback capability (currently `general`). The `general`
-capability does not allow workout proposal intents, so workout cards cannot be created
-from that route even if a later LLM writes workout-like text.
+from the LLM, has confidence below `RULE_ROUTE_CONFIDENCE_THRESHOLD` (`0.75`), has no
+selected domains, or cannot map the selected domain to a capability,
+`SystemPlannerService` falls back to the configured fallback capability (currently
+`general`). The `general` capability does not allow workout proposal intents, so workout
+cards cannot be created from that route even if a later LLM writes workout-like text.
+
+**The fallback is no longer silent: `lowConfidenceRoute`.** When `buildFanoutMetadata`
+takes the single-domain fallback specifically because an **LLM-routed** turn was below
+the confidence threshold or selected zero domains, it sets
+`DomainFanoutMetadata.lowConfidenceRoute = true`. The flag is **never** set for
+proposal-revision, proposal-explainer, deterministic/rule-based routes, or capability-map
+failures (those stay `false`). The orchestrator threads
+`plan.fanout.lowConfidenceRoute` into the `FinalDecisionRequest`
+(`packages/types/src/final-decision.ts`), and the decision template renders the
+`{{lowConfidenceRouteSuffix}}` placeholder (a `LOW_CONFIDENCE_ROUTE_INSTRUCTION` in
+`openai-coach-provider.ts`, injected into the decision template's DYNAMIC suffix so the
+cacheable static prefix is unchanged) instructing the decision-maker to ask **one short
+clarifying question** in the response language rather than guess the domain. The flag is
+also surfaced in `agent.fanOut.decision` diagnostics and the `decision_done` structured
+log (boolean only).
 
 ### `CapabilityRegistryService`
 
@@ -505,6 +792,37 @@ Builds context budget and slice policy **per selected domain**. Code floors deny
 documents and sensitive health context by default, even if config tries to relax
 them, and the floor is re-applied to each per-domain packet.
 
+**Three budget profiles** (`contextBudgetProfileSchema` in
+`packages/types/src/context-budget.ts`, overridable via
+`contextBudgets.profiles` in `ai-behavior.json`, always re-floored):
+
+| profile | maxSlices | maxRawItems | maxLookbackDays | compression |
+| --- | --- | --- | --- | --- |
+| `default` | 3 (`MAX_CONTEXT_SLICES`) | 20 | 30 | no |
+| `deep_review` | 5 | 50 | 90 | mandatory |
+| `deep_history` | 6 | 60 | 731 (`PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS`) | mandatory |
+
+**Deterministic profile selection** (`resolveBudgetForTurn`) — the LLM never decides
+the tier:
+
+1. A review-ish turn (any deep-review trigger, the `isProgressReview` signal, or the
+   preprocessor `review_request`) with `requestedLookbackDays >
+   deepHistoryMinLookbackDays` (config, default **91** — so 90-day/quarter reviews
+   stay `deep_review`) → `deep_history`.
+2. Otherwise the existing `deep_review` triggers (monthly-review pattern/intents,
+   multi-domain review, progress review + extended lookback) → `deep_review`.
+3. Everything else → `default`.
+
+**Granted lookback** (`resolveGrantedLookbackDays`): the **granularity ladder** clamp
+(`clampProgressHistoryLookback` in `packages/types/src/progress-history.ts` — ≤14d →
+daily buckets (cap 31), ≤182d → weekly (cap 26), longer → monthly (cap 24, granted at
+most 731 days)) further capped by the selected profile's `maxLookbackDays`. A long ask
+is **clamped, never refused**. When `requestedLookbackDays > grantedLookbackDays`,
+`CoachingContextService` appends an honest clamp note rendered from the config-sourced
+EN/RU templates (`contextBudgets.degradationNotes.lookbackClamped`, schema
+`contextBudgetDegradationNotesSchema`, rendered via `renderLookbackClampNote` /
+`buildLookbackClampNote`) — never hardcoded prose.
+
 ## Stage 7: Coaching Context
 
 ### `CoachingContextService`
@@ -518,10 +836,45 @@ domain prompts.
 Responsibilities:
 
 - load user snapshot
-- assemble requested context slices for each selected domain
+- assemble requested context slices for each selected domain (route-derived plan +
+  planner-injected `supplementarySliceRequests`, deduped and capped by
+  `normalizeContextSlicePlan`)
 - apply safety constraints (per-packet budget floor re-applied)
-- record source refs and missing context notes
+- record source refs and missing context notes (incl. the config-sourced lookback
+  clamp note when `requestedLookbackDays > grantedLookbackDays` on a review turn)
 - expose read-only context tools used by the domain agent loops
+
+**`progress_history_review` slice (deep reviews).** A new slice purpose
+(`contextSlicePurposeSchema` in `packages/types/src/agent-context.ts`) carrying the
+numeric-only `ProgressHistoryReviewSummary` on `UserContextSlice.progressHistory`. Its
+builder case (`user-context-slice.builder.ts`) adds the summary plus a small
+recent-baseline contrast (`activeWorkoutPlan`, `recentWorkoutExecution`, small
+`weeklyProgress`) and deliberately includes **no** `wellbeingSummary` /
+`recoveryContext` / `documentContext` / `ragResults`.
+
+- **Lazy + once per turn.** The aggregation
+  (`ProgressHistoryAggregateService.buildReviewSummary`,
+  `apps/api/src/modules/progress/progress-history-aggregate.service.ts` — 6 parallel
+  numeric-projection queries over workout sessions, habit completions,
+  recovery/wellbeing check-ins, and plan-revision dates) runs **only** when the
+  resolved slice plan contains `progress_history_review` — default turns never trigger
+  it. On review turns the orchestrator **precomputes the summary once**
+  (`precomputeProgressHistorySummary`) and threads it via
+  `ProgressHistoryLookbackOptions.precomputedSummary` into every packet build (primary
+  + ≤3 domains), so the aggregation never re-runs per packet; the lazy compute path
+  remains for callers outside the fan-out turn.
+- **The sensitive floor stays untouched — STRUCTURALLY.**
+  `progressHistoryReviewSummarySchema` (`packages/types/src/progress-history.ts`) is
+  numbers, `z.enum` values, and regex-validated ISO dates **only** — there is no
+  unconstrained `z.string()` anywhere in the schema, and the aggregate service never
+  selects note/free-text columns. That structural guarantee is why
+  `slice.progressHistory` may pass `applyBudgetToBuiltSlice` while `wellbeingSummary`
+  and `recoveryContext` remain stripped under the unchanged
+  `allowSensitiveHealthContext=false` floor: wellbeing/recovery **trends** reach a deep
+  review as numbers, never as private text.
+- **Raw-item budgeting:** `progressHistory.buckets` count toward `maxRawItems`;
+  truncation keeps buckets first and trims from the **oldest** end (buckets are
+  ascending by `bucketStart`, so the most recent periods survive).
 
 ### `agent-prompt-context`
 
@@ -557,6 +910,12 @@ before any data reaches OpenAI:
   health context — are only read when `budget.allowSensitiveHealthContext` is `true`
   (mirroring the `applyBudgetToBuiltSlice` guard). `documentContext` and `ragResults`
   are intentionally never read.
+- `slice.progressHistory` (the deep-review numeric aggregates) is read **ungated** —
+  it is structurally safe (numbers/enums/ISO dates only by schema construction) and
+  already bounded by the per-granularity bucket caps. All slices in a turn share the
+  same turn-level summary, so the provider takes the first one found. The
+  wellbeing/recovery free-text gates above are unchanged. The compression summary's
+  `dataQuality` feeds the deep-review sufficiency block (worst-of; see Stage 9).
 
 `ContextCompressionProvider` is a **distinct interface** from `CoachAiProvider` — it
 has a single `compress` method and is never part of the three-method fan-out surface.
@@ -581,7 +940,7 @@ selected domain executors concurrently (`Promise.all`, in
 
 - **workout** (`workoutCoach`)
 - **nutrition**
-- **health** (fed by `medical.yml` + `health.yml`)
+- **health** (fed by `health.yml`; `medical.yml` was removed — the health domain owns all wellness/health-context intents)
 
 Per domain executor:
 
@@ -594,13 +953,61 @@ Per domain executor:
 - emit a typed `domain_answer`
 
 The `domain_answer.candidateProposals[]` array is advisory. It is not persisted directly
-and does not render a card by itself. The decision-maker must copy the selected candidate
-into its final `proposals[]` output and select the matching action variant before
-`ActionResolverService` will keep it.
+and does not render a card by itself. After a domain answer is accepted, `buildCandidateMap`
+assigns each candidate a **deterministic, code-owned id** (`cand_<domain>_<index>`, e.g.
+`cand_workout_0`) and returns it on `DomainLlmExecutorResult.candidateMap` — the LLM never
+invents these ids. The orchestrator merges every domain's `candidateMap` into one union map
+(`buildMergedCandidateMap`) and derives lightweight `CandidateProposalSummary` entries
+(`buildCandidateProposalSummaries`: `id + intent + title + reason`) for the decision-maker.
+The decision-maker then **selects candidate ids** (it never copies or re-emits payloads);
+`ActionResolverService` resolves the selected ids back to canonical payloads from the merged
+candidate map and keeps them only when a matching non-`plain_reply` action was also selected
+(see Stage 9 / Stage 10).
 
 Failure behavior: a domain that errors, exhausts its loop, or times out degrades
-to a **safe empty output** and never blocks the other domains or the turn. Per-domain
-timeouts bound latency.
+to a **safe empty output** and never blocks the other domains or the turn. The
+per-domain timeout (`DOMAIN_LLM_TIMEOUT_MS = 30_000`) is enforced via `Promise.race`
+against a rejection-free timer, and is now tied to an `AbortController`: when the
+timeout fires it aborts the controller, so any in-flight provider `fetch` (including
+its pending retries) receives an `AbortError` and stops immediately rather than running
+out the clock. The abort signal is threaded into `provider.generateDomainStep(..., {
+signal })`.
+
+**Attachment context per domain (`buildAttachmentContext`).** Before running the
+loop, each domain executor enriches the turn's attachment items for that domain:
+
+- **`textContent` + `filename` reach ALL selected domains, including workout.** The
+  text is sourced from the orchestrator's pre-extracted per-turn map (extracted once
+  by `AttachmentTextExtractionService` before the fan-out — never re-read from
+  storage here, never logged). When extraction was `empty`/`failed`, the item still
+  carries `filename` as metadata with no `textContent`.
+- **`imageDataUri` is unchanged: populated only for image-MIME attachments on the
+  multimodal (nutrition / health) domains.** The workout domain never receives image
+  bytes; non-image MIMEs never get an `imageDataUri`.
+
+**How the provider injects attachments** (`openai-coach-provider.ts`):
+
+- Extracted document text becomes labeled blocks in the **USER message content
+  only** — `ATTACHED FILE "<filename>" (user-provided context, may be truncated):`
+  followed by the text (`buildAttachmentTextBlocks`, label falls back to
+  `attachmentRefId`). Image attachments with an `imageDataUri` are appended as vision
+  content. Attachment text is **never** placed in the system prompt.
+- The **system prompt** carries only a bounded metadata **summary** per attachment
+  (`hasImage`, `hasText`, optional `filename`) — it omits both `imageDataUri` and
+  `textContent` (a code-level safety floor; raw content never enters the system
+  prompt).
+
+`domain_workout` and `domain_nutrition` static prefixes each carry one added
+instruction line telling the domain LLM how to use an attached document's text.
+
+Each `generateDomainStep` returns `ProviderCallResult` with optional `usage`; the
+executor **accumulates** that usage across loop iterations (summing `promptTokens`,
+`completionTokens`, `totalTokens`, `latencyMs`, and `retries`) and threads the running
+total onto the result — including degraded/fallback results, so usage from completed
+iterations before a mid-run degradation is still metered. `usage` is absent only when no
+provider call completed (e.g. immediate timeout fallback). The accumulated usage surfaces
+as `DomainLlmExecutorResult.usage` and is published into per-domain fan-out diagnostics
+(see Stage 3 / `agent-context.ts`).
 
 Output shape (`packages/types/src/domain-llm-step.ts`) — union of
 `tool_request` or `domain_answer`, where
@@ -626,13 +1033,34 @@ File: `apps/api/src/modules/ai/agent-tool-registry.service.ts`
 
 Executes tool requests from a domain loop after executor allowlist checks.
 
-Tools (read-only context only):
+Tools (read-only context only, **7**):
 
 - `getUserContextSlice`
-- `getDocumentContext`
 - `getWeeklyProgressContext`
+- `searchExerciseCatalog` — exercise catalog lookup; wired to workout-domain capabilities only
+- `searchRecipeCatalog` — recipe catalog lookup; wired to nutrition-domain capabilities only
+- `getActivePlanDetail` — current active plan summary; wired to workout, nutrition, and review_progress
+- `getRecentAdherence` — 7-day workout/habit adherence counts; wired to workout, nutrition, and review_progress
+- `getProgressHistory` — adaptive-lookback numeric progress aggregates for deep
+  reviews (`{ periodDays }`, clamped server-side: min
+  `MIN_PROGRESS_HISTORY_PERIOD_DAYS = 7`, granularity-ladder cap inside
+  `ProgressHistoryAggregateService`). Returns a `ProgressHistoryReviewSummary`
+  (numeric-only by schema construction); allowlisted **only** on `review_progress`
+  and `longevity_overview` (`packages/types/src/intent-catalog.ts`).
+
+`getDocumentContext` has been removed: raw document-derived context in chat is intentionally unavailable under the `allowDocuments=false` context-budget floor (now meaning raw document-derived text slices). Structured biomarker context reaches chat **only** through the separate consent-gated `biomarkerContext` slice (≤30 items, no reference ranges) assembled by `BiomarkersService.buildBiomarkerContextSummary` — it is exempt from the `allowDocuments` floor by design (it is user-visible, user-editable, consent-gated structured state, not raw document text). There is no document-context tool.
 
 A tool request not allowed by the active domain capability is rejected.
+
+**Tool allowlist caps are 6** (`capabilityConfigSchema.allowedTools` and
+`domainLlmStepRequestSchema.allowedTools` both `.max(6)`): `review_progress` carries
+6 tools since `getProgressHistory` was added, and the previous cap of 5 would have
+made every review_progress domain step degrade on schema parse. The per-domain YAML
+`tools` cap equals the full catalog size (`agentToolNameSchema.options.length`) since
+YAML narrows the catalog. The OpenAI wire schema's tool-name enum is **derived from
+the authoritative Zod enum** (`openai-wire-schemas.ts` spreads
+`agentToolNameSchema.options`), so the wire contract can never drift from the live
+tool set.
 
 ## Stage 9: Decision-Maker LLM
 
@@ -646,24 +1074,78 @@ Receives the selected domains' outputs plus the **action-variant catalog**
 decision in a single LLM call (`execute` → `provider.generateFinalDecision`). It
 always resolves, degrading to a safe fallback on any provider error.
 
-Request (`packages/types/src/final-decision.ts`):
-`{ userMessage, domainOutputs[], actionVariantCatalog, safetyFlags[], safetyConstraints[] }`.
+Request (`finalDecisionRequestSchema`, `packages/types/src/final-decision.ts`):
+`{ userMessage, domainOutputs[] (≤3), candidateProposalSummaries[] (≤15),
+actionVariantCatalog, safetyFlags[], safetyConstraints[], responseLanguage?,
+recentMessages[], lowConfidenceRoute, deepReview? }`.
+`candidateProposalSummaries[]` are the `id + intent + title + reason` descriptors built by
+the orchestrator (Stage 8); the decision-maker selects from these ids and never sees the
+full candidate payloads. `recentMessages[]` is capped at **6 messages / 4000 chars each**
+(assembled in `AgentOrchestratorService.runFanOutTurn`). `responseLanguage` is input-only —
+all four fan-out templates require the reply in `{{responseLanguage}}`.
 
-Output: `{ reply, selectedAction, proposals[], consentRequired }`.
+Output (`finalDecisionOutputSchema`, **selection-only**):
+`{ reply, selectedAction, selectedProposalIds[] (≤5), consentRequired }`.
 
-The decision-maker emits **typed proposals only**; it never writes domain state and
-never fabricates a workout calorie estimate or the trusted `workoutCaloriePerHourRate`
-(those may only come from the workout domain LLM).
+This is a **selection-by-id** contract — the decision-maker picks `selectedProposalIds`
+from `candidateProposalSummaries` and **never writes proposal payload objects**. The legacy
+`proposals[]` payload channel was **deleted in slice 2** and `"proposals"` is now a
+**forbidden key** in `FINAL_DECISION_FORBIDDEN_KEYS` (`validateFinalDecisionOutputShape`
+rejects any output containing it). `ActionResolverService` resolves the selected ids back to
+canonical payloads from the merged candidate map (Stage 10). This structurally prevents the
+decision-maker from fabricating a workout calorie estimate, the trusted
+`workoutCaloriePerHourRate`, or any other domain-owned payload field — those may only come
+from the workout domain LLM.
 
 `selectedAction` is part of the proposal contract, not only presentation metadata. For
 a proposal to survive, `selectedAction` must be a non-`plain_reply` action id from the
-catalog and must correspond to the proposal intent being persisted. If the decision-maker
-chooses `null` or `plain_reply`, the action resolver returns a text-only response even
-when the reply describes a full plan.
+catalog, and the matching candidate id(s) must appear in `selectedProposalIds`. If the
+decision-maker chooses `null` or `plain_reply`, the action resolver returns a text-only
+response even when the reply describes a full plan.
 
 Decision-maker degradation is observable through orchestrator `parseErrors` entries that
-start with `Decision-maker degraded:`. The fallback final decision always has
-`selectedAction: null` and `proposals: []`.
+start with `Decision-maker degraded:`. The fallback final decision
+(`createFallbackFinalDecision`) always has `selectedAction: null`,
+`selectedProposalIds: []`, and `consentRequired: false`.
+
+### Deep-review sufficiency framing (`deepReview` + `{{deepReviewSuffix}}`)
+
+On deep-review turns, an optional typed `deepReview` block
+(`deepReviewPromptContextSchema` in `packages/types/src/progress-history.ts` —
+`{ requestedPeriodDays, grantedPeriodDays, dataQuality }`, numbers + enum only) rides
+on **both** the `DomainLlmStepRequest` of every selected domain and the
+`FinalDecisionRequest`:
+
+- **Built only when** the plan selected a review budget profile (`deep_review` /
+  `deep_history`) **and** the primary context packet carries the
+  `progress_history_review` slice (`buildDeepReviewPromptContext` in
+  `agent-orchestrator.service.ts`). Undefined on every non-review turn.
+- `dataQuality` is the **worst-of** reduction (`deriveDeepReviewDataQuality` /
+  `resolveWorstDataSufficiency`) over the review summary's four per-domain
+  `dataSufficiency` values **plus** the compression summary's `dataQuality` when
+  compression produced one (`insufficient > partial > sufficient`).
+- The provider injects a `{{deepReviewSuffix}}` placeholder — the same
+  request-field → dynamic-suffix channel as `lowConfidenceRoute` →
+  `{{lowConfidenceRouteSuffix}}` — present in **all four** fan-out templates (three
+  domain templates + decision template), rendered as the empty string on normal turns
+  so the static prefixes stay byte-stable. `buildDeepReviewSuffix`
+  (`openai-coach-provider.ts`) composes the stage instruction
+  (`DEEP_REVIEW_DECISION_INSTRUCTION` for the decision template,
+  `DEEP_REVIEW_DOMAIN_INSTRUCTION` for domain templates: separate OBSERVED from
+  UNCERTAIN, cite concrete bucket dates/numbers, name the analyzed range, never
+  diagnostic wording), an analyzed-range sentence (naming the clamp honestly when
+  `requestedPeriodDays > grantedPeriodDays`), and — when `dataQuality` is not
+  `sufficient` — exactly **one** narrowing follow-up (shorter period or single
+  domain, never both, never more than one question).
+- A static **EN metric legend** (`PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK`, built
+  from `PROGRESS_HISTORY_METRIC_LEGEND.en` in `progress-history.ts`) sits in the
+  **static prefix** of the three domain templates and the decision template — one
+  line per `progressHistory` bucket metric, code-owned text, placeholder-free and
+  byte-stable, so the prompt-cache prefix/suffix split is preserved (the LLM still
+  answers in `{{responseLanguage}}`).
+- Diagnostics surface a **boolean-only** `deepReview: true` marker on
+  `agent.fanOut.decision` and the `decision_done` log — never period numbers or
+  health data.
 
 ### `ActionVariantCatalogService`
 
@@ -687,9 +1169,20 @@ catalog.
 
 File: `apps/api/src/modules/ai/action-resolver.service.ts`
 
-Filters the decision-maker's proposals to the **union allowlist** of the selected
-domains' `allowedProposalIntents`, then forwards the result. The proposal intents
-that may pass through are:
+Resolves the decision-maker's `selectedProposalIds` into canonical payloads from the
+merged candidate map (`buildMergedCandidateMap`, keyed `cand_<domain>_<index>`), then
+filters those resolved proposals to the **union allowlist** of the selected domains'
+`allowedProposalIntents`. The decision-maker no longer supplies payloads — it selects ids,
+and `resolveFinalDecisionOutput` looks each id up in `candidateMap`. **Unknown or duplicate
+ids degrade safely**: each is recorded as a diagnostic string in `result.parseErrors` and
+skipped (never thrown, never blocking the turn), and their count is surfaced as
+`result.idResolutionDropCount` (equal to `parseErrors.length`). The orchestrator appends
+these diagnostics to the turn's `parseErrors` with a `Resolver: ` prefix and logs
+`idResolutionDropCount` on the `resolution_done` structured log; `droppedByAllowlist` now
+counts **only** proposals that resolved successfully but were then dropped by the union
+allowlist (the two drop categories are no longer conflated).
+
+The proposal intents that may pass through the allowlist are:
 
 - workout-plan intents (`create_workout_plan`, `adapt_workout_plan`,
   `adapt_workout_plan_from_progress`)
@@ -716,9 +1209,11 @@ returned proposals under an allowed intent.
 
 **Trusted calorie-rate stamping (`scrubAndStampWorkoutCalorieEstimate`).** For every
 workout-plan and `log_workout_activity` proposal, ActionResolver **always scrubs** the
-calorie fields from the decision-maker output and re-stamps only from values passed by the
-orchestrator (`AgentOrchestratorService`, sourced exclusively from the workout
-`domain_answer`):
+calorie fields from the **resolved candidate payload** and re-stamps only from values passed
+by the orchestrator (`AgentOrchestratorService`, sourced exclusively from the workout
+`domain_answer`). Since slice 2 removed the decision-maker `proposals[]` channel, the
+decision-maker can no longer inject calorie data at all; the scrub step now stands as
+**defense-in-depth** against any future code path that re-introduces a payload channel:
 
 - `workoutCalorieEstimate` → `estimatedSessionCalorieBurn` (plan) /
   `estimatedCalories` (log activity), with provenance `workout_llm`.
@@ -732,7 +1227,105 @@ nested `.plan` (`adapt_workout_plan_from_progress`), and the top-level
 proposal downstream (fail-closed). The `displayContract` itself is carried through as a
 non-authoritative render hint; the decision-maker can never fabricate the trusted rate.
 
-## Stage 11: Proposal Validation And Persistence
+## Suggested Quick Actions
+
+After an **LLM-backed (fan-out) turn**, `ChatService` attaches config-driven
+`suggestedQuickActions` chips to the turn response. They are derived **deterministically**
+from the fan-out's selected domains by the pure helper
+`deriveQuickActionsForTurn` (`packages/types/src/suggested-quick-actions.ts`):
+
+- `today_summary_read` and `weekly_progress_read` are always eligible.
+- `mark_today_workout_done` and `workout_plan_read` are added when `workout` is among
+  the selected domains.
+- `nutrition_plan_read` is added when `nutrition` is among the selected domains.
+
+(Up to **5** chips; the configured `suggestedQuickActions.actions[]` defines one entry
+per direct-path kind.)
+
+The chip labels and localized `messageText` (`{ en, ru }`) come from the
+`suggestedQuickActions.actions[]` block in
+`packages/ai-behavior/config/ai-behavior.json` (loaded via
+`AiBehaviorConfigService.getSuggestedQuickActions`). Each chip's `id` is a
+`DirectChatPathKind`, so tapping a chip **sends the localized `messageText`** as a new user
+message — which then matches the corresponding deterministic direct path (see Stage 2).
+
+Quick actions are **not** attached on `turnError` turns (honest degradation — no coach text
+to follow up) or on pre-AI gate turns (crisis, quota, direct-path, explainer-no-proposal,
+which return before the orchestrator). The contract field is `ChatTurnResponse.suggestedQuickActions`
+(`packages/types/src/chat-turn.ts`); the web renders chips in
+`apps/web/src/components/chat/chat-quick-action-chips.tsx`.
+
+## Per-Turn Telemetry (`ai.turn_summary`)
+
+After each fan-out turn completes, `AgentOrchestratorService.runFanOutTurn` emits one structured
+log entry with event `"ai.turn_summary"` (`AgentTurnTelemetry`,
+`packages/types/src/agent-context.ts`). The payload contains only counts, enums, and durations —
+**no user message text, no reply text, no health data** (safety floor enforced by the Zod schema).
+The schema is runtime-validated (`agentTurnTelemetrySchema.safeParse`) before logging; a
+mismatch emits a warn and falls back to raw object logging without failing the turn.
+
+Fields: `totalLatencyMs`, `routerLatencyMs`, `contextLatencyMs`, `decisionLatencyMs`,
+`domainLatencies[]` (each with `totalTokens`), `selectedDomains[]`, `routerConfidence`,
+`routerSource`, `toolsRequestedPerDomain[]`, `degradedDomains[]`, `finalActionType`,
+`proposalCount`, `validationFailureClasses[]`, plus turn-level token/cost totals:
+`totalPromptTokens`, `totalCompletionTokens`, `totalTokens`, `estimatedCostUsd`.
+
+The per-stage stdout logs (`router_done` / `domain_done` / `decision_done`) carry the same
+usage fields per stage (`promptTokens`, `completionTokens`, `totalTokens`, `model`,
+`estimatedCostUsd`; explicit nulls when a stage degraded or the model has no price entry).
+Cost figures come from the code-owned, estimates-only price map in
+`apps/api/src/modules/ai/llm-cost-estimator.ts` — unknown models log tokens with
+`estimatedCostUsd: null`, never a guess. `AiDailyUsageTelemetryService`
+(`apps/api/src/modules/ai/ai-daily-usage-telemetry.service.ts`) additionally emits one
+`ai.daily_usage` line per LLM-backed turn with the user-day's running token/cost totals
+(in-process rollup — resets on API restart; `messageCount` is DB-backed via the
+`chat_ai_usage_daily` upsert return value).
+
+## Stage 11: Proposal Normalization, Validation And Persistence
+
+For every raw proposal (LLM-sourced and code-injected alike), `ChatService.validateAndRepairProposal`
+runs: **normalize → full validation stack → (schema-class failures only) one payload-only
+self-repair → re-normalize + full re-validate → final status**. This all happens **before**
+the assistant message is persisted, so repair telemetry can ride
+`metadata.agent.repair { attempted, succeeded }`. A transient failure inside the validation
+stack itself (e.g. a DB error in an async ownership check) degrades only THAT proposal to
+`validationStatus: "invalid"` with `validationErrors: ["proposal_validation_unavailable"]` —
+it never kills the whole paid turn.
+
+Each processed proposal emits one structured `proposal.validation` outcome line on stdout
+(`{ intent, targetDomain, validationStatus, errorCount, failureClass?, repairAttempted,
+repairSucceeded, normalized }` — counts/enums/booleans only, never error strings or payload
+contents). In-flight repair signals remain separate (`proposal_repair.attempted`,
+`proposal_repair.budget_exhausted`); the former `proposal_repair.succeeded` /
+`proposal_repair.still_invalid` lines were folded into this outcome event.
+
+### `ProposalNormalizationService` (runs BEFORE the validation stack)
+
+File: `apps/api/src/modules/proposals/proposal-normalization.service.ts`
+
+Per-intent normalization registry. Normalizers **bridge known LLM shape variance to the
+canonical payload form — they never relax validation** (the full stack still runs on the
+normalized payload afterwards):
+
+- `create_workout_plan` / `adapt_workout_plan` — bridges legacy `{name, reps, sets}`
+  exercise entries to the catalog-backed form via `normalizeLegacyWorkoutPlanExercises`
+  (`apps/api/src/modules/workouts/workout-exercise-normalizer.ts`).
+- `adapt_workout_plan_from_progress` — the same bridge applied to the wrapper's nested
+  `.plan`.
+- `log_nutrition_incident` — pure normalizer `normalizeLogNutritionIncidentChanges`
+  (`packages/types/src/nutrition-incident-normalization.ts`) with **trusted server-side
+  stamping** from a per-turn `ProposalNormalizationContext` built once by `ChatService`
+  (`userId`, server `nowIso`, bounded turn-attachment metadata — never sourced from LLM
+  output): string `imageRefs` are coerced to objects and stamped from the turn's real
+  image-attachment ids, unknown `provenance.source` values are coerced to a known enum
+  value, and an out-of-window `incidentDateTime` is clamped to the server's now.
+
+Fault isolation: a throwing normalizer logs a warning (intent + error name only — never
+payload contents) and returns the ORIGINAL changes; validation may then mark the proposal
+invalid, but the turn survives.
+
+The old `ProposalValidationService.normalizeWorkoutProposalExercises` is **deleted** —
+this registry is its replacement (see "Removed Legacy Paths").
 
 ### Reply And Proposal Safety
 
@@ -743,6 +1336,18 @@ Functions:
 - `validateReplySafety`
 - `validateProposalSafety`
 
+`containsUnsafeMedicalLanguage` (the shared check behind both) is **bilingual**: it
+tests the English `UNSAFE_MEDICAL_PATTERNS` and, on the lowercased text, the Russian
+`UNSAFE_MEDICAL_PATTERNS_RU`. The RU patterns hold the same **prescriptive-medical
+altitude** as the EN set — they block diagnosis (`диагноз` with a `не `-disclaimer
+negative-lookbehind guard, `диагностиру…`), prescribing a drug (`назначаю` only with
+a pharmaceutical word co-occurring within ~60 chars), `рецепт на` + a drug noun,
+pharmaceutical dosing (`дозировка препарата`, `принимайте по … таблетк`), treatment of
+disease (`лечени… заболеван`), and `психотерапи…`/`психотерапевт` — while deliberately
+**not** firing on wellness/nutrition phrasing (e.g. "дозировка белка", "лучшая
+терапия", "не диагноз"). Russian coach replies and proposals are no longer EN-only for
+unsafe-medical screening.
+
 ### `ProposalValidationService`
 
 File: `apps/api/src/modules/proposals/proposal-validation.service.ts`
@@ -750,17 +1355,88 @@ File: `apps/api/src/modules/proposals/proposal-validation.service.ts`
 Validates proposal schema, ownership, provenance, attachment refs, recovery-aware
 workout changes (incl. calorie-estimate bounds), habits, wellbeing check-ins,
 recipe recommendations, nutrition incident image refs, and Today checklist
-references.
+references. `ChatService.runProposalValidationStack` runs the full stack and returns
+the three classification buckets (safety / schema / ownership-context) consumed by
+`classifyProposalValidationFailure` (`packages/types/src/ai-proposal.ts`) to decide
+repair eligibility.
+
+### Proposal Self-Repair (`ProposalRepairService`)
+
+Files:
+
+- `apps/api/src/modules/ai/proposal-repair.service.ts`
+- `apps/api/src/modules/ai/openai-proposal-repair-provider.ts`
+- `apps/api/src/modules/ai/proposal-repair.tokens.ts` (`PROPOSAL_REPAIR_PROVIDER` DI token)
+- `packages/ai/src/proposal-repair-provider.ts` (`ProposalRepairProvider` interface)
+
+When a proposal fails validation with a **schema-class** failure,
+`ChatService.validateAndRepairProposal` makes **one bounded, payload-only repair LLM
+call**: the provider re-emits a corrected `proposedChanges` JSON given the exact
+validation error strings plus the original payload. It is never a decision-maker re-run
+(the decision-maker selects candidates by id and does not write payloads). Hard bounds
+and floors:
+
+- **Eligibility:** schema-class failures only — **never safety-class** (the LLM must not
+  be asked to write around safety floors) and **never ownership-class** (server-side
+  facts the LLM cannot fix).
+- **Budget:** `MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN = 2` per turn (`chat.service.ts`);
+  proposals beyond the budget skip repair and persist invalid as normal.
+- **Timeout:** 10 s wall clock (`PROPOSAL_REPAIR_TIMEOUT_MS`) via `AbortController`,
+  covering the provider's HTTP retries.
+- **Envelope preserved:** only `proposedChanges` is replaced; intent, targetDomain,
+  title, reason, and evidenceRefs always stay from the original proposal. The assistant
+  reply text is never regenerated.
+- **No bypass:** the repaired payload re-enters the SAME normalize step and the FULL
+  validation stack; a still-invalid repair persists the honest invalid card with its
+  final errors.
+- **Optional provider:** `PROPOSAL_REPAIR_PROVIDER` is wired in `ai.module.ts` only when
+  the OpenAI provider is configured; the model resolves as
+  `OPENAI_REPAIR_MODEL ?? OPENAI_MODEL_DECISION ?? OPENAI_MODEL` (`apps/api/src/env.ts`).
+  With no provider, `tryRepair` degrades to `null` without any call.
+- **Telemetry / privacy:** repair counts ride the assistant message as
+  `metadata.agent.repair { attempted, succeeded }` (counts only — this is why proposals
+  are processed BEFORE `createMessage`). Logs carry intent + failure class + error
+  counts only, never payload contents.
 
 ### `ChatRepository.createProposal`
 
 File: `apps/api/src/modules/chat/chat.repository.ts`
 
-Persists raw proposals with validation status and validation errors. Nothing is
-applied to structured state until the user accepts a valid proposal through the
-proposal apply flow. Accepted workout/nutrition changes create new revisions; the
-`log_workout_activity` LOG intent instead creates an `ad_hoc` `workout_sessions` row and
-**never** a revision (`ProposalApplyService` → `WorkoutsService.applyLogWorkoutActivityProposal`).
+Persists the processed (normalized, possibly repaired) proposals with their final
+validation status and validation errors. Nothing is applied to structured state until
+the user accepts a valid proposal through the proposal apply flow. Accepted
+workout/nutrition changes create new revisions; the `log_workout_activity` LOG intent
+instead creates an `ad_hoc` `workout_sessions` row and **never** a revision
+(`ProposalApplyService` → `WorkoutsService.applyLogWorkoutActivityProposal`).
+
+### Tolerant Client Proposal Contract
+
+Because the server intentionally persists invalid proposals, the client contract is
+**tolerant by design** (`packages/types/src/ai-proposal.ts`):
+
+- `aiProposalSchema` runs the per-intent `proposedChanges` check **only when
+  `validationStatus === "valid"`**; invalid / pending-validation proposals keep
+  `proposedChanges` as raw `unknown`. A proposal that CLAIMS to be valid with a
+  non-conforming payload still fails parse (honesty floor).
+- `AiProposal` is the discriminated union `ValidatedAiProposal | UnvalidatedAiProposal`
+  with the `isValidatedProposal()` guard. The web routes every non-validated proposal to
+  the generic card (`apps/web/src/components/proposals/inline-proposal-card.tsx`) — an
+  honest invalid notice with disabled Apply and working Reject/Modify — before any
+  intent-specific card dispatch.
+- `tolerantArraySchema` (`packages/types/src/zod-tolerant.ts`) wraps
+  `chatTurnResponseSchema.proposals` (`packages/types/src/chat-turn.ts`) and the web
+  read paths (`listProposals`, thread-detail messages in `apps/web/src/lib/api.ts`): a
+  malformed element is dropped (warn with label/index/issue paths only — never element
+  contents) instead of failing the whole response parse.
+- `chatProposalRevisionSchema.originalProposal.proposedChanges` is relaxed to
+  `z.unknown()` with a 64 KB serialized cap (`MAX_REVISION_ORIGINAL_CHANGES_JSON_CHARS`),
+  so **Modify works for invalid proposals** too.
+- The web SSE path treats a present-but-unparseable `final` frame as a distinct
+  `final_unparseable` failure (`apps/web/src/lib/chat-stream.ts`) and
+  `shouldFallbackToSync` returns **false** for it — the backend turn succeeded and was
+  persisted, so re-sending through the sync endpoint would buy a duplicate paid LLM
+  turn. The client refetches the thread instead (the tolerant contract reveals the
+  persisted turn).
 
 ### Accept-time display-contract recompute seam
 
@@ -794,7 +1470,13 @@ before a plan revision is written; they never persist on revisions.
 
 File: `apps/api/src/modules/ai/coach-provider.factory.ts`
 
-Selects provider mode from config/env.
+Selects provider mode from config/env and resolves **per-stage models**. The factory
+reads `OPENAI_MODEL` (default `gpt-4o-mini`) as the baseline and three optional
+overrides from `apps/api/src/env.ts` — `OPENAI_MODEL_ROUTER`, `OPENAI_MODEL_DOMAIN`,
+`OPENAI_MODEL_DECISION` — passing them to `createOpenAiCoachProvider`, which resolves
+each stage as `override ?? OPENAI_MODEL`. This lets the cheap router/domain stages run
+on a smaller model while the decision-maker uses a stronger one (cost tiering). When no
+override is set, all three stages fall back to `OPENAI_MODEL`.
 
 ### `OpenAiCoachProvider`
 
@@ -804,10 +1486,17 @@ OpenAI-backed provider implementation. The `CoachAiProvider` surface
 (`packages/ai/src/coach-ai-provider.ts` defines the interface). The three fan-out
 methods drive the live multi-domain path:
 
-- `generateRouterDecision` — the first-LLM domain selection
+- `generateRouterDecision` — the first-LLM domain selection (uses `stageModels.router`)
 - `generateDomainStep` — one domain loop step (`domain: 'workout' | 'nutrition' |
-  'health'`); resolves image attachments to multimodal content when present
-- `generateFinalDecision` — the decision-maker synthesis
+  'health'`); resolves image attachments to multimodal content when present (uses
+  `stageModels.domain`)
+- `generateFinalDecision` — the decision-maker synthesis (uses `stageModels.decision`)
+
+The provider holds a resolved `stageModels` map (`{ router, domain, decision }`) built
+by the factory from the per-stage env overrides; each fan-out method passes its stage's
+model into the OpenAI request and **stamps that model id into `usage.model`** (see
+`AgentProviderUsage`/`ProviderUsage` below), so diagnostics record which model served
+each stage.
 
 The `CoachAiProvider` surface is exactly these three fan-out methods — there are no
 other provider methods. Proposal-revision, proposal-explainer, and low-confidence
@@ -815,6 +1504,50 @@ turns all route through `runFanOutTurn` in `AgentOrchestratorService`; the route
 is simply skipped for revision/explainer turns, but the same
 `generateRouterDecision` / `generateDomainStep` / `generateFinalDecision` surface
 drives every LLM turn.
+
+**Return shape and transport reliability.** Each of the three methods now returns a
+`ProviderCallResult<T> = { output, usage? }` (`packages/ai/src/coach-ai-provider.ts`)
+and accepts an optional `{ signal?: AbortSignal }` second argument. `usage` is a
+`ProviderUsage` (`promptTokens`, `completionTokens`, `totalTokens`, `latencyMs`,
+`retries`, plus the optional `model` id stamped per call) — numbers/ids only, never
+prompt/health content. The three-method surface
+itself is unchanged; only the wrapped return type and the optional abort signal are
+new.
+
+Structured output is **OpenAI `json_schema` structured outputs** (not legacy JSON
+mode). Each call sends `response_format: { type: "json_schema", json_schema:
+{ name, strict, schema } }` using wire schemas from
+`apps/api/src/modules/ai/openai-wire-schemas.ts`. The router and final-decision
+stages always use `strict: true` hand-authored schemas (`routerDecisionWireSchema`,
+`finalDecisionWireSchema`). The **domain step is per-turn**:
+`buildDomainStepWireSchema(allowedProposalIntents)` returns `strict: true` with typed
+per-intent candidate envelopes when **every** allowed proposal intent of the turn has
+an **LLM emission schema** (`packages/types/src/llm-emission/` — 9 covered intents:
+the workout-plan intents, `log_workout_activity`, the nutrition-plan intents,
+`recommend_recipes`, `log_nutrition_incident`, `capture_wellbeing_checkin`;
+server-stamped fields are omitted from emission and `.optional()` fields are
+`.nullable()` by construction); otherwise it gracefully falls back to the permissive
+`domainLlmStepWireSchema` with `strict: false` — no behavior cliff, and the
+post-receive Zod parse still validates either way. Emission Zod schemas are converted
+via `toOpenAiStrictJsonSchema`
+(`apps/api/src/modules/ai/openai-json-schema.ts`, `z.toJSONSchema` + a strict-mode
+post-pass that asserts the construction rules).
+Because strict mode forces every field into `required` (optional fields are declared
+nullable-required, `type: ["T","null"]`), the provider runs a generic
+`stripExplicitNulls` normalization over the parsed payload before the Zod
+shape-validation + parse, so `.optional()` Zod fields that arrive as explicit `null`
+are dropped (and `.nullable().default(null)` fields such as `selectedAction` re-apply
+their null default). `stripExplicitNulls` must not log payload content.
+
+Transport goes through the shared OpenAI HTTP helper
+`fetchOpenAiJsonCompletionWithRetry` (`apps/api/src/modules/ai/openai-http.ts`, which
+also owns `stripExplicitNulls`; extracted from the provider so the coach fan-out stages
+and the proposal-repair provider share one implementation): up to **`MAX_RETRIES = 2`**
+retries (1 initial attempt + 2 retries) with exponential backoff (~300ms then ~1200ms),
+retrying **only** on network/transport failures (fetch rejection), HTTP 429, or HTTP
+5xx. Other 4xx and JSON-parse failures throw immediately (no retry). The optional
+`AbortSignal` is forwarded to `fetch` and to the backoff `sleep`, so an aborted call
+(e.g. the domain timeout firing) cancels in-flight requests and pending retries.
 
 Note: context compression uses a **distinct provider/interface** (`ContextCompressionProvider`,
 injected via `CONTEXT_COMPRESSION_PROVIDER`) that is separate from this `CoachAiProvider`
@@ -824,25 +1557,44 @@ for details.
 
 OpenAI prompt templates are keyed `router`, `domain_workout`, `domain_nutrition`,
 `domain_health`, and `decision`, rendered through `CompiledPromptTemplates` and the
-shared JSON-completion + shape-validation helpers.
+shared strict-`json_schema` completion + `stripExplicitNulls` normalization +
+shape-validation helpers (see "Return shape and transport reliability" above).
 
-These prompt templates come from `packages/types/src/prompt-template-defaults.ts` unless
-`packages/ai-behavior/config/ai-behavior.json` supplies valid `promptTemplates`
-overrides for the same keys. Per-domain YAML `prompts[]` are loaded with domain config,
-but they are not directly injected into `OpenAiCoachProvider.generateDomainStep` today.
-Live fan-out prompt changes therefore belong in the prompt-template config/defaults, not
-only in `domains/*.yml`.
+These prompt templates come from `packages/types/src/prompt-template-defaults.ts`. The
+`promptTemplates.templates` override in `packages/ai-behavior/config/ai-behavior.json`
+is now empty (`{}`) — defaults are the live source. A non-empty override for one of the
+five keys would still replace that key's body. Per-domain YAML `prompts[]` are loaded
+with domain config, but they are not directly injected into
+`OpenAiCoachProvider.generateDomainStep` today. Live fan-out prompt changes therefore
+belong in `prompt-template-defaults.ts`, not only in `domains/*.yml`.
+
+**Cache-friendly template structure (automatic prompt caching).** All four fan-out
+templates (`domain_workout`, `domain_nutrition`, `domain_health`, `decision`) are
+authored as a **placeholder-free static instruction prefix first**, followed by a
+**suffix carrying every per-turn dynamic placeholder** (`{{userMessage}}`,
+`{{coachingContextJson}}`, `{{responseLanguage}}`, etc.). Keeping the long stable
+instructions ahead of the volatile per-turn values maximizes OpenAI automatic
+prompt-cache hits on the shared prefix. The `router` template was already structured
+this way. Preserve this prefix/suffix split when editing these templates — moving a
+placeholder into the prefix breaks the cacheable prefix.
 
 ### Coach AI Provider Interface
 
 File: `packages/ai/src/coach-ai-provider.ts`
 
 Defines the `CoachAiProvider` interface. The three fan-out methods are the complete
-provider surface:
+provider surface; each returns `Promise<ProviderCallResult<T>>` and accepts an optional
+`{ signal?: AbortSignal }`:
 
 - `generateRouterDecision` — the first-LLM domain selection
 - `generateDomainStep` — one domain loop step
 - `generateFinalDecision` — the decision-maker synthesis
+
+`ProviderCallResult<T> = { output: T; usage?: ProviderUsage }` and
+`ProviderUsage = { promptTokens, completionTokens, totalTokens, latencyMs, retries,
+model? }` are exported alongside the interface. Callers unwrap `.output` for domain logic and may
+forward `.usage` to per-stage diagnostics; `usage` is absent on paths where no provider
+call was made.
 
 `generateAgentLoopStep` and `generateCoachResponse` no longer exist (removed with
 `ResponseModeExecutorService` in C6). The stub provider has been deleted (C2 removal
@@ -857,8 +1609,9 @@ intents, tools, signals, and prompts live in **per-domain YAML files**:
 
 - `packages/ai-behavior/config/domains/workout.yml`
 - `packages/ai-behavior/config/domains/nutrition.yml`
-- `packages/ai-behavior/config/domains/medical.yml`
 - `packages/ai-behavior/config/domains/health.yml`
+
+(`medical.yml` was deleted; health.yml owns the health/wellness domain.)
 
 ### Domain config schema
 
@@ -907,8 +1660,10 @@ Config files:
 
 - `packages/ai-behavior/config/ai-behavior.json` — chat/LLM behavior (direct-path
   patterns, prompts, proposal-revision routing, context budgets).
-- `packages/ai-behavior/config/attachments.json` — attachment consent, categories,
-  retention, and plumbing stage order. (Recognition/classification config removed.)
+- `packages/ai-behavior/config/attachments.json` — attachment consent, categories
+  (incl. the `document_file` category with PDF/text/Markdown MIME types, 5 MB cap, and
+  `ephemeral_recognition` retention), retention map, and plumbing stage order.
+  (Recognition/classification config removed.)
 - `packages/ai-behavior/config/domains/*.yml` — per-domain intents/tools/signals/prompts.
 
 Loaders:
@@ -926,16 +1681,26 @@ Schemas and defaults:
 ## Safety Boundaries
 
 - Crisis support is code-owned and bypasses all LLMs.
-- Attachments are **images only and context-only**: no upfront classification and
-  **no upfront consent gate**. **Temporary, intentional relaxation (for now):** image
-  content — including a photo of a medical document — reaches the LLM (OpenAI)
-  **before any consent**, consciously removing the previous "medical content only
-  when consent is granted" code floor. Floors that still hold: there is **no**
-  auto-persist or parsing of a `health_document` from an attachment, and the
-  context-budget `allowDocuments=false` floor (DB `health_documents` slices, not the
-  uploaded image) is unchanged.
-- Context budgets deny document and sensitive health context by default, re-applied
-  to every per-domain packet; config cannot relax these floors.
+- Attachments are **images + document files (PDF/TXT/Markdown), context-only**: no
+  upfront classification and **no upfront consent gate**. Document text is extracted
+  per-turn (12 000-char cap) and is **never persisted or logged**. **Temporary,
+  intentional relaxation (for now):** image content — including a photo of a medical
+  document — reaches the LLM (OpenAI) **before any consent**, consciously removing the
+  previous "medical content only when consent is granted" code floor. Floors that
+  still hold: there is **no** auto-persist or parsing of a `lab_report` /
+  `biomarker_reading` from an attachment, and the context-budget `allowDocuments=false`
+  floor (now meaning raw document-derived text slices, not the uploaded attachment; the
+  consent-gated `biomarkerContext` slice is exempt by design) is unchanged.
+- Context budgets deny raw document-derived text and sensitive health context by default,
+  re-applied to every per-domain packet; config cannot relax these floors. The deep-review
+  `progressHistory` slice field passes those floors **by structure, not by exemption**:
+  its schema is numbers/enums/ISO dates only (no unconstrained string anywhere), so
+  wellbeing/recovery trends reach reviews as aggregates while `wellbeingSummary` /
+  `recoveryContext` free text stays stripped.
+- **Lab extraction is an out-of-band pipeline**, separate from the chat fan-out
+  (`LabExtractionProvider` / `OpenAiLabExtractionProvider`). The document text it parses
+  never enters chat context, a log line, or a persisted field; every degradation is a typed
+  `failure_code`, never a fake success.
 - The router output is clamped to known domains, capabilities, and tools, and may
   not emit replies or proposals.
 - SystemPlanner owns final route, budget, executor modes, and allowlists, and caps
@@ -951,7 +1716,12 @@ Schemas and defaults:
 - `ActionResolver` filters proposal intents to the active capability allowlist, scrubs
   any decision-maker / non-workout calorie fields, and re-stamps the estimate and trusted
   rate only from the workout `domain_answer` (fail-closed when absent).
-- `ChatService` validates every proposal before persistence.
+- `ChatService` normalizes and validates every proposal before persistence.
+  Normalization stamps trusted values only from server turn state (attachment ids,
+  server now, provenance) — never from LLM authority. Proposal self-repair is
+  payload-only, budgeted (2/turn), eligible for schema-class failures only (never
+  safety- or ownership-class), and the repaired payload always re-enters the full
+  normalize + validation stack — repair can never bypass a check.
 - The AI layer never writes directly to domain tables; accepted workout/nutrition
   changes create new revisions.
 
@@ -967,20 +1737,22 @@ confidence/selected domains), `metadata.parseErrors`, `metadata.replySafetyError
 proposal rows with `source_message_id = assistantMessage.id`.
 
 A workout-plan proposal passes through **two LLM handoffs** before persistence; a card
-appears only when the decision-maker copies a candidate into `proposals[]`, selects a
-matching non-`plain_reply` action, and the action resolver keeps it under the active
-allowlist:
+appears only when the decision-maker **selects a candidate id** (`selectedProposalIds`)
+plus a matching non-`plain_reply` action, and the action resolver resolves that id to a
+canonical payload and keeps it under the active allowlist:
 
 ```mermaid
 flowchart TD
   userTurn["User asks for plan"] --> router["RouterLlmService"]
   router --> planner["SystemPlannerService"]
   planner --> domain["DomainLlmExecutorService"]
-  domain --> candidates["domain_answer.candidateProposals (advisory)"]
-  candidates --> decision["DecisionMakerExecutorService"]
-  decision --> selected["selectedAction + proposals[]"]
-  selected --> resolver["ActionResolverService"]
-  resolver --> validation["ProposalValidationService"]
+  domain --> candidates["domain_answer.candidateProposals → buildCandidateMap (cand_<domain>_<index>)"]
+  candidates --> summaries["candidateProposalSummaries (id+intent+title+reason)"]
+  summaries --> decision["DecisionMakerExecutorService"]
+  decision --> selected["selectedAction + selectedProposalIds[]"]
+  selected --> resolver["ActionResolverService (resolve ids → payloads from candidateMap)"]
+  resolver --> normalization["ProposalNormalizationService"]
+  normalization --> validation["ProposalValidationService (+ bounded self-repair)"]
   validation --> cards["Chat proposal cards"]
 ```
 
@@ -993,17 +1765,30 @@ flowchart TD
   `proposals.length === 0`.
 - **Router fallback blocked workout intents.** SystemPlanner only trusts router output
   that came from the LLM, has ≥1 selected domain, and meets
-  `RULE_ROUTE_CONFIDENCE_THRESHOLD`; otherwise it falls back to `general`, which does not
-  allow workout proposal intents — so `create_workout_plan` / `adapt_workout_plan` never
-  reach the catalog. Signs: `catalogIntentId` is `general`, router confidence below
-  threshold or empty selected domains.
+  `RULE_ROUTE_CONFIDENCE_THRESHOLD` (`0.75`); otherwise it falls back to `general`, which
+  does not allow workout proposal intents — so `create_workout_plan` /
+  `adapt_workout_plan` never reach the catalog. The fallback is no longer silent: for an
+  **LLM-routed** low-confidence / zero-domain turn the planner sets
+  `lowConfidenceRoute = true`, and the decision-maker is told (via the
+  `{{lowConfidenceRouteSuffix}}` instruction) to ask one short clarifying question instead
+  of guessing — so the expected outcome is a clarifying reply with `proposals: []`, not a
+  fabricated card. Signs: `catalogIntentId` is `general`, router confidence below
+  threshold or empty selected domains, and `agent.fanOut.decision.lowConfidenceRoute ===
+  true` (also on the `decision_done` log).
 - **Workout domain degraded.** A failed/timed-out/invalid domain degrades to a safe empty
   `domain_answer` with no candidates. Sign: `parseErrors` contains
   `Fan-out: domains degraded to fallback: [workout]`.
-- **Decision-maker degraded.** If the final-decision provider throws or fails Zod,
-  `createFallbackFinalDecision()` returns `selectedAction: null` and no proposals. Sign:
-  `parseErrors` contains `Decision-maker degraded: ...` and the reply is the generic safe
-  fallback.
+- **Decision-maker degraded.** If the final-decision provider throws or fails Zod (including
+  the shape guard rejecting a forbidden `"proposals"` key), `createFallbackFinalDecision()`
+  returns `selectedAction: null`, `selectedProposalIds: []`, and `consentRequired: false`.
+  Sign: `parseErrors` contains `Decision-maker degraded: ...` and the reply is the generic
+  safe fallback.
+- **Selected id did not resolve.** The decision-maker selected an action and ids, but a
+  `selectedProposalId` was unknown or duplicate in the merged candidate map (e.g. it
+  referenced a degraded domain's candidate, or hallucinated an id). ActionResolver drops it
+  with a diagnostic. Signs: `parseErrors` contains a `Resolver: Unknown selectedProposalId
+  "..."` or `Resolver: Duplicate selectedProposalId "..."` entry, and
+  `agent.fanOut.resolution.idResolutionDropCount > 0`.
 - **Reply safety blocked everything.** If final reply safety fails, the orchestrator
   swaps in a safe fallback and drops all proposals. Signs: `replySafetyErrors` non-empty,
   `agent.safety.status === "reply_blocked"`.
@@ -1022,8 +1807,29 @@ outcome valid where the product may expect a card:
   the prompt-template config/defaults (see "Coach AI Provider Surface").
 - Multilingual turns add risk: short/typo-heavy non-English requests
   (e.g. `впиши мне сего сразу в план`) may be understood semantically while deterministic
-  signals stay weak and prompts do not require the reply to match `detectedLanguage`
-  (see Stage 5).
+  signals stay weak (see Stage 5). The fan-out domain and decision templates now **do**
+  require the reply in `{{responseLanguage}}` (resolved `hint ?? detected`), so reply
+  language is contract-enforced; the residual risk is routing/recognition, not reply
+  language. The crisis gate and unsafe-medical screen are now **bilingual** (EN + RU
+  patterns), so a non-English turn no longer slips past those safety floors. When the
+  router is genuinely unsure on such a turn, `lowConfidenceRoute` steers the
+  decision-maker to a clarifying question rather than a wrong-domain guess.
+
+### Golden evals (router + decision)
+
+An **env-gated live golden eval suite** exercises the real router and decision-maker
+stages against fixed cases:
+`apps/api/src/modules/ai/evals/router-golden.eval.spec.ts`. It runs only when
+`LLM_EVALS=1` **and** `OPENAI_API_KEY` is set (otherwise unconditionally skipped, so
+normal `pnpm test` / CI never incurs API cost). It covers **41 router cases + 9 decision
+cases** spanning RU and EN (single-domain, multi-domain, ambiguous, smalltalk,
+proposal-intent-vs-plain-reply, and a long-paste pair `R-RU-LONG-01` / `D-RU-LONG-01`
+exercising the 20 000-char message cap with router head-truncation), and asserts a
+**≥80% pass rate over non-errored cases**.
+A provider fallback (`source === "fallback"`, e.g. auth/network failure) is marked
+`ERROR`, excluded from the pass-rate denominator, and **fails the run explicitly** so an
+unavailable provider can't masquerade as a pass. Run command (in the spec header):
+`LLM_EVALS=1 corepack pnpm --dir apps/api exec vitest run src/modules/ai/evals`.
 
 ## Removed Legacy Paths
 
@@ -1031,16 +1837,33 @@ The following files/exports were deleted and are no longer active runtime paths:
 
 - `ResponseModeExecutorService` (+ spec) and `ActionResolverService.resolveProposalOnlyOutput`
   — the single bounded-loop executor path. All turn types (proposal-revision,
-  proposal-explainer, low-confidence fallback, deterministic gate-miss) now route
-  exclusively through `runFanOutTurn`. The deterministic gate-miss is handled inline
-  in `AgentOrchestratorService.buildDeterministicGateMissResult` (no additional LLM
-  calls after that point, though the router may have already run for eligible turns).
+  proposal-explainer, low-confidence fallback) now route exclusively through
+  `runFanOutTurn`.
+- **The deterministic gate-miss branch + canned gate-miss reply.**
+  `AgentOrchestratorService.buildDeterministicGateMissResult` and the
+  `DETERMINISTIC_PRE_AI_GATE_REPLY` canned string are **deleted**, and the
+  `turnDecisionDirectCommand → deterministic_write` mapping in
+  `packages/types/src/response-mode-executor.ts` is removed (the router's `directCommand`
+  output is now telemetry-only). There is no longer an orchestrator branch that returns a
+  canned reply for a deterministic executor mode — `SystemPlannerService` instead coerces
+  any would-be deterministic mode to the fan-out default and logs `pre_ai_gate.miss`, so
+  **every orchestrated turn fans out**. Do **not** reintroduce a deterministic
+  orchestrator branch or any canned gate-miss / safety-fallback coach string: degradations
+  must surface a typed `turnError` (`decision_failed` | `reply_blocked`), never fabricated
+  coach prose.
 - `provider.generateAgentLoopStep` and `provider.generateCoachResponse` — the
   provider methods that backed the single-executor path. The `CoachAiProvider` surface
   is now `generateRouterDecision` / `generateDomainStep` / `generateFinalDecision` only.
 - `packages/ai/src/agent-loop-output.ts` (`parseAgentLoopOutput`,
   `coerceAgentLoopFinalAnswer`, `ParsedAgentLoopOutput`) — loop output parsing helpers
   used exclusively by the deleted single-executor path.
+- The `openai_coach_loop` prompt template — its key, default body, and
+  required-placeholders entry in `packages/types/src/prompt-template-defaults.ts`, the
+  `renderCoachLoop` renderer on `CompiledPromptTemplates`, and its
+  `promptTemplates.templates` override in `packages/ai-behavior/config/ai-behavior.json`
+  (now `{}`). It backed the deleted single-executor coach loop; the live surface is the
+  five fan-out template keys only (`router`, `domain_workout`, `domain_nutrition`,
+  `domain_health`, `decision`).
 - `UNIFIED_TURN_DECISION_ENABLED` feature flag.
 - `intent-router.ts`, `provider.generateIntentRoute`, the `llm_router` route fallback.
 - `TurnDecisionService` (+ spec), `provider.generateTurnDecision`, the
@@ -1072,12 +1895,48 @@ The following files/exports were deleted and are no longer active runtime paths:
   (`isTrustedUserSelectedChatAttachmentUpload`, `resolveProvisionalUploadCategorySource`,
   `resolveCreateAttachmentCategorySource`), the upload-time medical consent gate
   (`isMedicalAttachmentByDeclarationOrMime`), and the `needs_consent` upload
-  disposition. Uploads are now image-only; an image is sent to the LLM as context with
-  no upfront classification or consent.
+  disposition. Uploads are now images + MIME-inferred `document_file`; an attachment is
+  sent to the LLM as context with no upfront classification or consent.
 - The per-domain attachment **category-relevance filter** (an attachment now reaches
   all router-selected domains) and the consent-gated `medical_document_save`
   action-variant (dropped from `ActionVariantCatalogService`). The
   LLM-recognized medical special save is **deferred**, not removed permanently.
+- **The entire health-documents module** (`apps/api/src/modules/documents/*` and the
+  `apps/web/src/components/documents/*` Profile UI) — replaced by the Biomarkers feature
+  (`apps/api/src/modules/biomarkers/*`). Migration `0038_biomarkers_replace_documents.sql`
+  **drops** the `health_documents`, `health_document_summaries`, and `document_signals`
+  tables (and their six `document_*` enums), and drops `chat_attachments.linked_document_id`.
+  Do not reintroduce:
+  - the `health_documents` / `health_document_summaries` / `document_signals` tables, the
+    `packages/types` `documents.ts` + `document-signals.ts` contracts, or the
+    `packages/db` documents schema file;
+  - the **five-scope per-document consent model** (`upload_storage`, `parse_ocr`,
+    `ai_summarization`, `semantic_indexing`, `coach_chat_context`) — superseded by the
+    biomarkers **two-level** consent (`storeAndParse` literal-`true` + per-report
+    `coachContextConsentAt`);
+  - the deterministic governed summaries, document-signal pattern extraction, document
+    correlations preview, semantic document search, and the `documentContext` /
+    `documentSignalContext` / `correlationInsights` chat-context slices (replaced by the
+    single `biomarkerContext` slice);
+  - the `document_signal` **proposal evidence** type (replaced by `biomarker_reading`);
+  - the `DOCUMENT_STORAGE_PATH` env var (replaced by `LAB_REPORT_STORAGE_PATH`).
+- `ProposalValidationService.normalizeWorkoutProposalExercises` — the ad-hoc workout
+  normalization inside the validation service. Replaced by the per-intent
+  `ProposalNormalizationService` registry
+  (`apps/api/src/modules/proposals/proposal-normalization.service.ts`), which runs as
+  an explicit pre-validation stage in `ChatService` (see Stage 11).
+- The workout **`pendingExerciseRef` uniqueness rule**
+  (`packages/types/src/workouts.ts`) — repeated refs across days are legal: they share
+  one `pendingExercises` definition, and the apply path
+  (`apps/api/src/modules/workouts/workout-plan-resolver.ts`) resolves each ref exactly
+  once via a per-ref **promise cache** (one `findOrCreateExercise` call per ref even
+  under concurrent day resolution, every entry sharing the same catalog `exerciseId`).
+  The kept rules: every ref has a `pendingExercises` definition, and no orphan
+  definitions.
+- The inline `fetchWithRetry` / `stripExplicitNulls` copies in
+  `openai-coach-provider.ts` — extracted to the shared `openai-http.ts` so the coach
+  provider and `OpenAiProposalRepairProvider` use one retry/normalization
+  implementation.
 
 Some historical enum values and parse compatibility remain only so old stored
 metadata can still be read safely:

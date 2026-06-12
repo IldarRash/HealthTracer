@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { sha256Hex } from "./sha256.js";
+import { llmInt } from "./llm-coerce.js";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
 import {
   createExerciseInputSchema,
@@ -54,12 +55,27 @@ const UNSAFE_WORKOUT_MEDICAL_PATTERNS = [
   /\brehabilitation protocol\b/i,
 ];
 
+/**
+ * Reps is canonically a string ("8-12", "20", "to failure"), but LLM domain
+ * outputs routinely emit plain numbers — accept and normalize them instead of
+ * invalidating the whole proposal.
+ */
+const workoutRepsSchema = z.union([
+  z.string().min(1).max(80),
+  z
+    .number()
+    .int()
+    .positive()
+    .max(10_000)
+    .transform((value) => String(value)),
+]);
+
 /** Session-level and legacy plan exercise object shape. */
 export const workoutExerciseSchema = z.object({
   name: z.string().min(1).max(160),
   target: z.string().min(1).max(240).nullable().optional(),
   sets: z.number().int().positive().max(20).nullable().optional(),
-  reps: z.string().min(1).max(80).nullable().optional(),
+  reps: workoutRepsSchema.nullable().optional(),
   notes: z.string().min(1).max(500).nullable().optional(),
 });
 
@@ -88,23 +104,18 @@ export const workoutPlanExerciseSchema = z.object({
   /** Hook for AI proposal apply to resolve newly created catalog exercises (next slice). */
   pendingExerciseRef: z.string().min(1).max(80).optional(),
   snapshot: workoutExerciseDisplaySnapshotSchema,
-  sets: z.number().int().positive().max(20).nullable().optional(),
-  reps: z.string().min(1).max(80).nullable().optional(),
-  durationSeconds: z.number().int().positive().max(7200).nullable().optional(),
+  // LLMs may emit decimal values for integer fields; round instead of failing.
+  sets: llmInt(z.number().positive().max(20)).nullable().optional(),
+  reps: workoutRepsSchema.nullable().optional(),
+  durationSeconds: llmInt(z.number().positive().max(7200)).nullable().optional(),
   recommendedLoadGuidance: z.string().min(1).max(240).nullable().optional(),
   weightKgGuidance: z.number().positive().max(500).nullable().optional(),
-  restBetweenSetsSeconds: z.number().int().nonnegative().max(600).nullable().optional(),
-  restBetweenRepsSeconds: z.number().int().nonnegative().max(120).nullable().optional(),
+  restBetweenSetsSeconds: llmInt(z.number().nonnegative().max(600)).nullable().optional(),
+  restBetweenRepsSeconds: llmInt(z.number().nonnegative().max(120)).nullable().optional(),
   circuitGroupId: z.string().min(1).max(40).nullable().optional(),
   circuitGroupLabel: z.string().min(1).max(80).nullable().optional(),
-  restInsideCircuitSeconds: z.number().int().nonnegative().max(600).nullable().optional(),
-  restBetweenCircuitRoundsSeconds: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(900)
-    .nullable()
-    .optional(),
+  restInsideCircuitSeconds: llmInt(z.number().nonnegative().max(600)).nullable().optional(),
+  restBetweenCircuitRoundsSeconds: llmInt(z.number().nonnegative().max(900)).nullable().optional(),
   notes: z.string().min(1).max(500).nullable().optional(),
   /**
    * LLM-sourced approximate calorie burn for this exercise (kcal).
@@ -112,7 +123,7 @@ export const workoutPlanExerciseSchema = z.object({
    * carried into plan revisions. Max 5 000 kcal per exercise is a sane ceiling.
    * Never set by the decision-maker, nutrition domain, or any user-facing form.
    */
-  estimatedCalorieBurn: z.number().int().nonnegative().max(5000).optional(),
+  estimatedCalorieBurn: llmInt(z.number().nonnegative().max(5000)).optional(),
   /** Populated at read/materialization time; not persisted on revisions. */
   catalog: exerciseCatalogMetadataSchema.optional(),
 });
@@ -200,8 +211,9 @@ export const workoutPlanPayloadSchema = z.object({
    * endurance sessions; domain validation enforces a saner practical max.
    * Revisions carry this field so accepted proposals preserve the estimate.
    * If present, calorieEstimateProvenance MUST also be set.
+   * LLMs may emit decimals; round to int instead of failing.
    */
-  estimatedSessionCalorieBurn: z.number().int().nonnegative().max(WORKOUT_CALORIE_MAX).optional(),
+  estimatedSessionCalorieBurn: llmInt(z.number().nonnegative().max(WORKOUT_CALORIE_MAX)).optional(),
   /**
    * Who provided estimatedSessionCalorieBurn. Required whenever
    * estimatedSessionCalorieBurn is present (enforced in
@@ -215,8 +227,9 @@ export const workoutPlanPayloadSchema = z.object({
    * Sourced from workoutCaloriePerHourRate in domain_answer (ActionResolver stamps it).
    * Max 5000 kcal/hour is a generous ceiling for any activity.
    * Never set by the decision-maker, non-workout domains, or client override.
+   * LLMs may emit decimals; round to int instead of failing.
    */
-  caloriePerHourRate: z.number().int().nonnegative().max(5000).optional(),
+  caloriePerHourRate: llmInt(z.number().nonnegative().max(5000)).optional(),
   /**
    * Declarative display contract for the frontend editable card.
    * Render metadata only — DROPPED by stripWorkoutPlanProposalExtras before
@@ -287,7 +300,7 @@ export type WorkoutSessionExerciseExecution = z.infer<
 export const workoutSessionExercisePrescriptionSchema = z.object({
   snapshot: workoutExerciseDisplaySnapshotSchema,
   sets: z.number().int().positive().max(20).nullable().optional(),
-  reps: z.string().min(1).max(80).nullable().optional(),
+  reps: workoutRepsSchema.nullable().optional(),
   durationSeconds: z.number().int().positive().max(7200).nullable().optional(),
   recommendedLoadGuidance: z.string().min(1).max(240).nullable().optional(),
   weightKgGuidance: z.number().positive().max(500).nullable().optional(),
@@ -473,7 +486,8 @@ export const logWorkoutActivityProposalPayloadSchema = z
   .object({
     activityType: z.string().min(1).max(120),
     title: z.string().min(1).max(160),
-    durationMinutes: z.number().int().positive().max(600),
+    // LLMs may emit decimal durations (e.g. 45.5 min); round to int.
+    durationMinutes: llmInt(z.number().positive().max(600)),
     intensity: z.enum(["light", "moderate", "vigorous"]).optional(),
     /**
      * ISO datetime of when the activity was performed.
@@ -485,15 +499,17 @@ export const logWorkoutActivityProposalPayloadSchema = z
      * ratePerHour * durationMinutes when ratePerHour is present.
      * Never trusted as-is from the client; the backend always recomputes
      * from the stored ratePerHour or falls back to this value.
+     * LLMs may emit decimals; round to int instead of failing.
      */
-    estimatedCalories: z.number().int().nonnegative().max(WORKOUT_CALORIE_MAX).optional(),
+    estimatedCalories: llmInt(z.number().nonnegative().max(WORKOUT_CALORIE_MAX)).optional(),
     /**
      * Trusted kcal/hour rate from the workout domain LLM.
      * Backend uses this to compute final calories: round(ratePerHour * durationMinutes / 60).
      * Max 3000 kcal/hr is a generous ceiling for any typical activity.
      * Never set by the decision-maker, non-workout domains, or client override.
+     * LLMs may emit decimals; round to int instead of failing.
      */
-    ratePerHour: z.number().int().positive().max(3000).optional(),
+    ratePerHour: llmInt(z.number().positive().max(3000)).optional(),
     /**
      * Optional display contract for a client-side editable activity card.
      * Stripped before the workout_session row is written.
@@ -1231,11 +1247,10 @@ export function getWorkoutProposalDomainErrors(
   const pendingDefinitions = changes.pendingExercises ?? {};
 
   if (pendingRefs.length > 0) {
+    // The same ref may legitimately repeat across days (the same exercise yields
+    // the same name slug); the apply path caches per-ref resolution, so repeated
+    // refs intentionally share one pendingExercises definition.
     const uniqueRefs = new Set(pendingRefs);
-
-    if (uniqueRefs.size !== pendingRefs.length) {
-      errors.push("workout: pendingExerciseRef values must be unique within the plan.");
-    }
 
     for (const ref of uniqueRefs) {
       if (!pendingDefinitions[ref]) {

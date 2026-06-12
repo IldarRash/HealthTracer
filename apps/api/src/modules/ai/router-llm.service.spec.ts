@@ -1,12 +1,14 @@
 import {
   createFallbackRouterDecision,
   DEFAULT_DOMAIN_CONFIGS,
+  ROUTER_TEXT_MAX_CHARS,
   routerDecisionOutputSchema,
   routerDecisionRequestSchema,
   routerDomainSchema,
   type RouterDecisionOutput,
 } from "@health/types";
 import { createCoachAiProviderMock } from "@health/ai/testing";
+import type { ProviderCallResult } from "@health/ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import type { CapabilityRegistryService } from "./capability-registry.service.js";
@@ -47,9 +49,12 @@ function makePreprocessorResult(overrides: Partial<{
       pain: overrides.simpleSignals?.["pain"] ?? false,
       document: overrides.simpleSignals?.["document"] ?? false,
       attachment: overrides.simpleSignals?.["attachment"] ?? false,
+      plan_request: overrides.simpleSignals?.["plan_request"] ?? false,
+      review_request: overrides.simpleSignals?.["review_request"] ?? false,
       ...overrides.simpleSignals,
     },
     directPathCandidate: null,
+    requestedLookbackDays: null,
   };
 }
 
@@ -68,7 +73,7 @@ function makeCapabilityRegistryService(): Pick<CapabilityRegistryService, "getCo
 }
 
 function buildService(providerOverrides: Partial<{
-  generateRouterDecision: (req: unknown) => Promise<RouterDecisionOutput>;
+  generateRouterDecision: (req: unknown) => Promise<ProviderCallResult<RouterDecisionOutput>>;
 }> = {}): RouterLlmService {
   // Spy on createCoachAiProvider so the RouterLlmService constructor does not
   // attempt to instantiate the real OpenAI provider (which requires a live key).
@@ -86,16 +91,15 @@ function buildService(providerOverrides: Partial<{
   const provider = {
     generateRouterDecision:
       providerOverrides.generateRouterDecision ??
-      vi.fn().mockResolvedValue(
-        routerDecisionOutputSchema.parse({
+      vi.fn().mockResolvedValue({
+        output: routerDecisionOutputSchema.parse({
           selectedDomains: [
             { domain: "workout", confidence: 0.8, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.8,
         }),
-      ),
+      }),
     generateDomainStep: vi.fn(),
     generateFinalDecision: vi.fn(),
   };
@@ -291,11 +295,12 @@ describe("RouterLlmService", () => {
     it("returns a fallback when the provider output contains forbidden keys (reply)", async () => {
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          reply: "Here is my coaching advice",
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            reply: "Here is my coaching advice",
+            selectedDomains: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -308,11 +313,12 @@ describe("RouterLlmService", () => {
     it("returns a fallback when the provider output contains forbidden keys (proposals)", async () => {
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          proposals: [{ intent: "create_workout_plan" }],
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            proposals: [{ intent: "create_workout_plan" }],
+            selectedDomains: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -333,13 +339,12 @@ describe("RouterLlmService", () => {
           // Pretend the provider snuck in a fourth entry:
           { domain: "health", confidence: 0.6, intentHints: [], toolHints: [], signalHints: [] },
         ] as RouterDecisionOutput["selectedDomains"],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.9,
       };
 
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue(tooManyDomainsOutput),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: tooManyDomainsOutput }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -350,13 +355,12 @@ describe("RouterLlmService", () => {
     it("clamps unknown safetyFlags from the provider output", async () => {
       const outputWithUnknownFlag = {
         selectedDomains: [],
-        contextNeeds: [],
         safetyFlags: ["fatigue", "unknown_flag_xyz"],
         confidence: 0.5,
       };
 
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue(outputWithUnknownFlag),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: outputWithUnknownFlag }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -378,7 +382,7 @@ describe("RouterLlmService", () => {
 
     it("falls back gracefully when provider returns a non-object", async () => {
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue(null),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: null }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -389,7 +393,7 @@ describe("RouterLlmService", () => {
 
     it("falls back gracefully when provider returns a string", async () => {
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue("not an object"),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: "not an object" }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -402,11 +406,12 @@ describe("RouterLlmService", () => {
       // tool call in the router output — explicitly forbidden by the safety contract.
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          tool: "getDocumentContext",
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            tool: "getDocumentContext",
+            selectedDomains: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -421,11 +426,12 @@ describe("RouterLlmService", () => {
       // into the router output the output is treated as unsafe and rejected.
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          kind: "final_answer",
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            kind: "final_answer",
+            selectedDomains: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -438,11 +444,12 @@ describe("RouterLlmService", () => {
     it("returns a fallback when the provider output contains forbidden key 'advice' (unsafe coaching text)", async () => {
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          advice: "You should eat more protein.",
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.5,
+          output: {
+            advice: "You should eat more protein.",
+            selectedDomains: [],
+            safetyFlags: [],
+            confidence: 0.5,
+          },
         }),
       });
 
@@ -467,13 +474,12 @@ describe("RouterLlmService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.8,
       };
 
       const service = buildService({
-        generateRouterDecision: vi.fn().mockResolvedValue(outputWithUnknownTool),
+        generateRouterDecision: vi.fn().mockResolvedValue({ output: outputWithUnknownTool }),
       });
 
       const result = await service.route({ preprocessorResult: makePreprocessorResult() });
@@ -489,10 +495,11 @@ describe("RouterLlmService", () => {
       // clamped output has empty selectedDomains and the orchestrator handles it.
       const service = buildService({
         generateRouterDecision: vi.fn().mockResolvedValue({
-          selectedDomains: [],
-          contextNeeds: [],
-          safetyFlags: [],
-          confidence: 0.9,
+          output: {
+            selectedDomains: [],
+            safetyFlags: [],
+            confidence: 0.9,
+          },
         }),
       });
 
@@ -502,5 +509,87 @@ describe("RouterLlmService", () => {
       expect(result.output.selectedDomains).toHaveLength(0);
       expect(result.output.confidence).toBe(0.9);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Long-message truncation — Slice 2 regression guard
+// A 12 000-char message must not throw; normalizedText on the built request
+// must be ≤ ROUTER_TEXT_MAX_CHARS (4000) and must preserve the head.
+// ---------------------------------------------------------------------------
+
+describe("RouterLlmService — long-message truncation (Slice 2)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("buildRequest with a 12 000-char message does not throw and normalizedText.length <= 4000", () => {
+    const service = buildService();
+    const longMessage = "Сохрани мне эту программу тренировок: " + "x".repeat(12_000);
+
+    const preprocessorResult = makePreprocessorResult({
+      originalText: longMessage,
+      normalizedText: longMessage,
+    });
+
+    // Must not throw — previously threw because schema max(4000) was exceeded
+    const request = service.buildRequest({ preprocessorResult });
+
+    expect(request.normalizedText.length).toBeLessThanOrEqual(ROUTER_TEXT_MAX_CHARS);
+    expect(request.originalText.length).toBeLessThanOrEqual(ROUTER_TEXT_MAX_CHARS);
+  });
+
+  it("request.preprocessor.normalizedText and originalText are also truncated to <= ROUTER_TEXT_MAX_CHARS (M1 — no full message leaked via preprocessorJson)", () => {
+    // Regression guard: the preprocessor object serialised into {{preprocessorJson}} must
+    // carry truncated text, not the full 12 000-char message.
+    const service = buildService();
+    const prefix = "Сохрани мне эту программу тренировок: ";
+    const longMessage = prefix + "x".repeat(12_000);
+
+    const preprocessorResult = makePreprocessorResult({
+      originalText: longMessage,
+      normalizedText: longMessage,
+    });
+
+    const request = service.buildRequest({ preprocessorResult });
+
+    expect(request.preprocessor.normalizedText.length).toBeLessThanOrEqual(ROUTER_TEXT_MAX_CHARS);
+    expect(request.preprocessor.originalText.length).toBeLessThanOrEqual(ROUTER_TEXT_MAX_CHARS);
+    // Head preserved in the preprocessor copy.
+    expect(request.preprocessor.normalizedText.startsWith(prefix)).toBe(true);
+    expect(request.preprocessor.originalText.startsWith(prefix)).toBe(true);
+  });
+
+  it("buildRequest preserves the head of the long message in normalizedText", () => {
+    const service = buildService();
+    const prefix = "Сохрани мне эту программу тренировок: ";
+    const longMessage = prefix + "y".repeat(12_000);
+
+    const preprocessorResult = makePreprocessorResult({
+      originalText: longMessage,
+      normalizedText: longMessage,
+    });
+
+    const request = service.buildRequest({ preprocessorResult });
+
+    expect(request.normalizedText.startsWith(prefix)).toBe(true);
+  });
+
+  it("route with a 12 000-char message does not throw and returns a valid result", async () => {
+    const service = buildService();
+    const longMessage = "Сохрани мне эту программу тренировок: " + "x".repeat(12_000);
+
+    const preprocessorResult = makePreprocessorResult({
+      originalText: longMessage,
+      normalizedText: longMessage,
+    });
+
+    // Must not throw or degrade from a parse error
+    const result = await service.route({ preprocessorResult });
+
+    // Provider stub returns a workout domain selection — long message must not cause fallback
+    expect(result.source).toBe("llm");
+    expect(result.output.selectedDomains).toHaveLength(1);
+    expect(result.output.selectedDomains[0]?.domain).toBe("workout");
   });
 });

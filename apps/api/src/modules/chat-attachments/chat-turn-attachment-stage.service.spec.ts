@@ -27,7 +27,6 @@ function createQueuedAttachment(overrides: Partial<Record<string, unknown>> = {}
     mimeType: "image/jpeg",
     fileSizeBytes: 4,
     storageKey: "local://attachments/meal.jpg",
-    linkedDocumentId: null,
     linkedImageRefId: null,
     consent: null,
     recognition: null,
@@ -75,7 +74,6 @@ function createStageService(deps: {
       mimeType: "image/jpeg",
       fileSizeBytes: 4,
       storageKey: "local://attachments/meal.jpg",
-      linkedDocumentId: null,
       linkedImageRefId: null,
       consent: null,
       recognition: null,
@@ -321,6 +319,143 @@ describe("ChatTurnAttachmentStageService (plumbing-only, context-first)", () => 
       expect(patch).not.toHaveProperty("status", "needs_consent");
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Gap 3 — document_file category flows all three stages correctly
+  // -------------------------------------------------------------------------
+
+  it("document_file attachment flows all three stages and has ephemeral_recognition retention", async () => {
+    // The apply_upload_disposition stage resolves the correct policy for document_file
+    // (ephemeral_recognition per attachments.json config) and only calls update when
+    // the policy differs from the stored value. We verify the end-to-end result here:
+    // the attachment passes through all stages without error, category is preserved,
+    // and the stage result is non-null.
+    //
+    // To confirm apply_upload_disposition runs and would set the policy on a mismatch,
+    // we start with session_linked (a different policy) so the update call fires.
+    const attachmentId = "d1000001-0000-4000-8000-000000000001";
+    const repo = createRepositoryWithStatefulAttachment(
+      createQueuedAttachment({
+        id: attachmentId,
+        category: "document_file",
+        categorySource: "default_unclassified",
+        mimeType: "application/pdf",
+        filename: "training-plan.pdf",
+        storageKey: "local://attachments/training-plan.pdf",
+        // Intentionally start with a different policy so apply_upload_disposition
+        // calls update (the service only updates when policy != stored policy).
+        retentionPolicy: "session_linked",
+        status: "queued",
+      }),
+    );
+
+    const updateSpy = vi.spyOn(repo, "update");
+
+    const { stageService } = createStageService({
+      chatAttachmentsRepository: repo,
+    });
+
+    const result = await stageService.runTurnStages({
+      userId: user.id,
+      threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+      messageId: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      attachmentRefIds: [attachmentId],
+    });
+
+    // All three stages must complete without error.
+    expect(result).not.toBeNull();
+    expect(result?.attachmentMetadata[0]?.refId).toBe(attachmentId);
+
+    // (a) category is document_file.
+    expect(result?.attachmentMetadata[0]?.category).toBe("document_file");
+
+    // (b) apply_upload_disposition must write ephemeral_recognition retention
+    // (because the stored policy was session_linked but config says ephemeral_recognition).
+    const retentionCalls = updateSpy.mock.calls.filter(
+      (call) => (call[2] as Record<string, unknown>)["retentionPolicy"] !== undefined,
+    );
+    expect(retentionCalls.length).toBeGreaterThan(0);
+    const retentionPolicySet = retentionCalls[0]?.[2] as Record<string, unknown>;
+    expect(retentionPolicySet["retentionPolicy"]).toBe("ephemeral_recognition");
+  });
+
+  it("document_file BoundedAttachmentMetadata carries filename from the stored record", async () => {
+    const attachmentId = "d2000001-0000-4000-8000-000000000002";
+    const repo = createRepositoryWithStatefulAttachment(
+      createQueuedAttachment({
+        id: attachmentId,
+        category: "document_file",
+        mimeType: "text/plain",
+        filename: "weekly-plan.txt",
+        storageKey: "local://attachments/weekly-plan.txt",
+        status: "queued",
+      }),
+    );
+
+    const { stageService } = createStageService({
+      chatAttachmentsRepository: repo,
+    });
+
+    const result = await stageService.runTurnStages({
+      userId: user.id,
+      threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+      messageId: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      attachmentRefIds: [attachmentId],
+    });
+
+    expect(result).not.toBeNull();
+    // filename must be present on BoundedAttachmentMetadata so text extraction
+    // can use it to label the content block in the domain step request.
+    const meta = result?.attachmentMetadata[0] as Record<string, unknown> | undefined;
+    expect(meta?.["filename"]).toBe("weekly-plan.txt");
+  });
+
+  it("document_file run produces no classify/recognize stages (plumbing-only invariant)", async () => {
+    const attachmentId = "d3000001-0000-4000-8000-000000000003";
+    const repo = createRepositoryWithStatefulAttachment(
+      createQueuedAttachment({
+        id: attachmentId,
+        category: "document_file",
+        mimeType: "application/pdf",
+        filename: "nutrition-log.pdf",
+        storageKey: "local://attachments/nutrition-log.pdf",
+        status: "queued",
+      }),
+    );
+
+    const updateSpy = vi.spyOn(repo, "update");
+
+    const { stageService } = createStageService({
+      chatAttachmentsRepository: repo,
+    });
+
+    const result = await stageService.runTurnStages({
+      userId: user.id,
+      threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+      messageId: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      attachmentRefIds: [attachmentId],
+    });
+
+    expect(result).not.toBeNull();
+
+    // No classification/recognition fields must appear in any update call.
+    for (const call of updateSpy.mock.calls) {
+      const patch = call[2] as Record<string, unknown>;
+      expect(patch).not.toHaveProperty("recognition");
+      expect(patch).not.toHaveProperty("status", "recognizing");
+      expect(patch).not.toHaveProperty("status", "needs_consent");
+    }
+
+    // The outcome must not carry any recognition-derived status.
+    const finalStatus = result?.outcomes[0]?.status;
+    expect(finalStatus).not.toBe("recognizing");
+    expect(finalStatus).not.toBe("needs_consent");
+    expect(finalStatus).not.toBe("failed");
+  });
+
+  // -------------------------------------------------------------------------
+  // End Gap 3
+  // -------------------------------------------------------------------------
 
   it("outcome consentState is never 'needs_consent' for a standard image attachment turn", async () => {
     // The medical consent-gate purge branch has been removed. No image attachment
