@@ -1,6 +1,7 @@
 "use client";
 
 import type { AiProposal, ProposalModifyResponse } from "@health/types";
+import { isValidatedProposal } from "@health/types";
 import { parseDisplayContract } from "../../lib/display-contract-ui-state";
 import { tryRenderAdjustNutritionPlanProposalCard } from "./adjust-nutrition-plan-proposal-card";
 import { BodyAnalysisProposalCard } from "./body-analysis-proposal-card";
@@ -17,6 +18,14 @@ type InlineProposalCardProps = {
 };
 
 export function InlineProposalCard(props: InlineProposalCardProps) {
+  // Unvalidated proposals ("invalid" and "pending_validation") route to the
+  // generic card regardless of intent: it owns the honest notice with disabled
+  // Apply plus working Reject/Modify. Specialized cards assume a payload that
+  // passed per-intent validation, which only the validated variant guarantees.
+  if (!isValidatedProposal(props.proposal)) {
+    return <GenericInlineProposalCard {...props} />;
+  }
+
   if (props.proposal.intent === "capture_wellbeing_checkin") {
     return <WellbeingCheckinProposalCard {...props} />;
   }

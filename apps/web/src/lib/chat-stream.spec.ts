@@ -9,14 +9,17 @@
  * intentional and must be kept.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatTurnStreamEventSchema } from "@health/types";
 import {
+  isUnparseableFinalFrame,
   parseSseFrames,
   parseChatStreamEvent,
   resolveStageCopy,
   shouldFallbackToSync,
+  streamChatMessage,
   StreamError,
+  type ChatTurnStreamEvent,
   type StreamFailureReason,
 } from "./chat-stream";
 
@@ -267,17 +270,21 @@ describe("resolveStageCopy", () => {
 // ---------------------------------------------------------------------------
 
 describe("shouldFallbackToSync", () => {
-  const reasons: StreamFailureReason[] = [
+  const fallbackReasons: StreamFailureReason[] = [
     "http_error",
     "stream_error_event",
     "no_final_event",
     "read_error",
   ];
-  for (const reason of reasons) {
+  for (const reason of fallbackReasons) {
     it("returns true for reason " + JSON.stringify(reason), () => {
       expect(shouldFallbackToSync(reason)).toBe(true);
     });
   }
+
+  it("returns false for final_unparseable — the backend turn succeeded, a re-send buys a duplicate paid turn", () => {
+    expect(shouldFallbackToSync("final_unparseable")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -345,5 +352,133 @@ describe("Fix 2 — shouldFallbackToSync known limitation", () => {
     // ensures it is never reached when finalTurn is set.
     const wouldFallBack = shouldFallbackToSync("read_error");
     expect(wouldFallBack).toBe(true); // confirms the danger — guard is essential
+  });
+});
+
+// ---------------------------------------------------------------------------
+// final_unparseable — a final frame ARRIVED but failed schema validation.
+// The backend turn succeeded and was persisted; falling back to the sync
+// endpoint would re-run the turn and bill a duplicate LLM call.
+// ---------------------------------------------------------------------------
+
+describe("isUnparseableFinalFrame", () => {
+  it("returns true for a kind=final frame that fails schema validation", () => {
+    expect(isUnparseableFinalFrame(JSON.stringify({ kind: "final" }))).toBe(true);
+    expect(
+      isUnparseableFinalFrame(
+        JSON.stringify({ kind: "final", response: { not: "a turn" } }),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false for non-final frames and invalid JSON", () => {
+    expect(isUnparseableFinalFrame(JSON.stringify({ kind: "stage", stage: "bogus" }))).toBe(false);
+    expect(isUnparseableFinalFrame("not-json")).toBe(false);
+    expect(isUnparseableFinalFrame(JSON.stringify(null))).toBe(false);
+  });
+});
+
+describe("streamChatMessage — final frame handling", () => {
+  function sseFetchResponse(frames: string[]) {
+    const encoder = new TextEncoder();
+    const chunks = frames.map((frame) => encoder.encode(frame));
+    let index = 0;
+
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () =>
+            index < chunks.length
+              ? { done: false, value: chunks[index++] }
+              : { done: true, value: undefined },
+          cancel: async () => undefined,
+        }),
+      },
+    };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects with final_unparseable when the final frame arrives but fails validation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseFetchResponse([
+          `data: ${JSON.stringify({ kind: "stage", stage: "routing" })}\n\n`,
+          `data: ${JSON.stringify({ kind: "final", response: { broken: true } })}\n\n`,
+        ]),
+      ),
+    );
+
+    const events: ChatTurnStreamEvent[] = [];
+
+    const failure = await streamChatMessage({
+      token: "t",
+      threadId: "thread-1",
+      body: { content: "hi" },
+      onEvent: (event) => events.push(event),
+    }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(failure).toBeInstanceOf(StreamError);
+    expect((failure as StreamError).reason).toBe("final_unparseable");
+    // The duplicate-turn guard: this reason must NOT fall back to sync.
+    expect(shouldFallbackToSync((failure as StreamError).reason)).toBe(false);
+    // Stage events before the broken final frame were still delivered.
+    expect(events.map((event) => event.kind)).toEqual(["stage"]);
+  });
+
+  it("resolves and delivers the final event when the final frame is valid", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseFetchResponse([
+          `data: ${JSON.stringify({ kind: "final", response: validResp })}\n\n`,
+        ]),
+      ),
+    );
+
+    const events: ChatTurnStreamEvent[] = [];
+
+    await streamChatMessage({
+      token: "t",
+      threadId: "thread-1",
+      body: { content: "hi" },
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.kind).toBe("final");
+  });
+
+  it("still rejects with no_final_event when the stream ends without any final frame", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseFetchResponse([
+          `data: ${JSON.stringify({ kind: "stage", stage: "routing" })}\n\n`,
+        ]),
+      ),
+    );
+
+    const failure = await streamChatMessage({
+      token: "t",
+      threadId: "thread-1",
+      body: { content: "hi" },
+      onEvent: () => undefined,
+    }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(failure).toBeInstanceOf(StreamError);
+    expect((failure as StreamError).reason).toBe("no_final_event");
+    expect(shouldFallbackToSync((failure as StreamError).reason)).toBe(true);
   });
 });

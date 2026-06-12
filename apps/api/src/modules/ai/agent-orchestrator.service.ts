@@ -12,6 +12,7 @@ import type {
   BuildAgentContextRequest,
   CandidateProposalSummary,
   ChatAttachmentCategory,
+  ChatProposalRevisionOriginal,
   ContextCompressionQuality,
   ContextDepth,
   ContextTimeRange,
@@ -19,7 +20,6 @@ import type {
   ProposalExplainerTurnContext,
   ProgressHistoryReviewSummary,
   ProgressReporter,
-  RawAiProposal,
   ResolvedCapabilityPresentationMetadata,
   UserLocale,
 } from "@health/types";
@@ -76,7 +76,12 @@ export interface AttachmentTurnContext {
 
 export interface ProposalRevisionContext {
   supersededProposalId: string;
-  originalProposal: RawAiProposal;
+  /**
+   * Loose snapshot of the proposal being revised (proposedChanges is untyped).
+   * Modify must also work for proposals persisted as invalid; the payload is
+   * read-only LLM context here and is never applied without full validation.
+   */
+  originalProposal: ChatProposalRevisionOriginal;
   modificationFeedback: string;
 }
 

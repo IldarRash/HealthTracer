@@ -1127,10 +1127,12 @@ export type TodayDayResponse = z.infer<typeof todayDayResponseSchema>;
 export {
   aiProposalSchema,
   aiStructuredOutputSchema,
+  chatProposalRevisionOriginalSchema,
   chatProposalRevisionSchema,
   createGoalProposalChangesSchema,
   emptyProposalChangesSchema,
   getProposedChangesSchemaForIntent,
+  isValidatedProposal,
   profileProposalChangesSchema,
   proposalDecisionSchema,
   proposalModifyResponseSchema,
@@ -1142,10 +1144,15 @@ export type {
   AiStructuredOutput,
   AiStructuredOutputInput,
   ChatProposalRevision,
+  ChatProposalRevisionOriginal,
   ProposalDecisionInput,
   ProposalModifyResponse,
   RawAiProposal,
+  UnvalidatedAiProposal,
+  ValidatedAiProposal,
 } from "./ai-proposal.js";
+
+export { tolerantArraySchema } from "./zod-tolerant.js";
 
 /** Union for untyped contexts; domain-specific intents use getProposedChangesSchemaForIntent. */
 export const proposalChangesSchema = z.union([
@@ -1269,12 +1276,14 @@ export * from "./documents.js";
 export * from "./exercises.js";
 export * from "./wellbeing-check-ins.js";
 export * from "./nutrition-incidents.js";
+export * from "./nutrition-incident-normalization.js";
 export * from "./recipes.js";
 export * from "./chat-action-proposals.js";
 export * from "./chat-attachments.js";
 export * from "./chat-attachment-category-source.js";
 export * from "./recovery.js";
 export * from "./llm-coerce.js";
+export * from "./llm-emission/index.js";
 export {
   buildCoachingHierarchySummary,
   coachingNoteCategorySchema,

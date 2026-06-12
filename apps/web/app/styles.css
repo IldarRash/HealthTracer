@@ -2239,6 +2239,49 @@ span.confirmation-card__meta {
   text-decoration: underline;
 }
 
+/* WorkoutPlanDayDetails — expandable day rows in workout proposal cards */
+.workout-plan-day-list {
+  display: grid;
+  gap: var(--space-1);
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+}
+
+.workout-plan-day__toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  text-align: left;
+  width: 100%;
+}
+
+.workout-plan-day__toggle:hover .workout-plan-day__label {
+  text-decoration: underline;
+}
+
+.workout-plan-day__label {
+  flex: 1;
+}
+
+.workout-plan-day__chevron {
+  color: var(--color-text-muted);
+}
+
+.workout-plan-day__exercises {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-4);
+}
+
 /* ProposalDiffRow */
 .proposal-diff-row {
   align-items: baseline;

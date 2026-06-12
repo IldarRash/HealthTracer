@@ -118,6 +118,28 @@ export function parseChatStreamEvent(data: string): ChatTurnStreamEvent | null {
   return result.data;
 }
 
+/**
+ * isUnparseableFinalFrame — true when an SSE data string IS a `final` frame
+ * (kind === "final") but failed full schema validation.
+ *
+ * This case is fundamentally different from a missing final event: the backend
+ * turn SUCCEEDED and was persisted — only the client-side contract parse of the
+ * payload failed. Re-sending through the sync endpoint would run a second paid
+ * LLM turn for the same message, so this must never trigger the sync fallback.
+ */
+export function isUnparseableFinalFrame(data: string): boolean {
+  try {
+    const json: unknown = JSON.parse(data);
+    return (
+      typeof json === "object" &&
+      json !== null &&
+      (json as { kind?: unknown }).kind === "final"
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Stage → coaching-toned copy
 // ---------------------------------------------------------------------------
@@ -170,13 +192,19 @@ export type StreamFailureReason =
   | "http_error"
   | "stream_error_event"
   | "no_final_event"
+  | "final_unparseable"
   | "read_error";
 
 /**
  * shouldFallbackToSync — return true when the given failure reason warrants
  * an automatic retry through the sync endpoint.
  *
- * All current failure reasons fall back, keeping the chat unbreakable.
+ * Every transport-level failure falls back, keeping the chat unbreakable.
+ *
+ * The one exception is `final_unparseable`: the final frame ARRIVED, so the
+ * backend turn succeeded and was persisted — only the client-side schema parse
+ * failed. Re-sending would buy a duplicate paid LLM turn; the caller should
+ * instead refetch the thread (the tolerant contract reveals the persisted turn).
  *
  * Known limitation: this function returns true even for `read_error`, which
  * can fire as a late stream-close race AFTER the `final` event has already
@@ -186,8 +214,8 @@ export type StreamFailureReason =
  * falling back after a successful final event produces duplicate messages.
  * See the `sendMessageStreaming` implementation in `chat-workspace.tsx`.
  */
-export function shouldFallbackToSync(_reason: StreamFailureReason): boolean {
-  return true;
+export function shouldFallbackToSync(reason: StreamFailureReason): boolean {
+  return reason !== "final_unparseable";
 }
 
 // ---------------------------------------------------------------------------
@@ -210,9 +238,12 @@ export type ChatStreamOptions = {
  * - HTTP response is not OK → `StreamError` with reason `http_error`
  * - stream produces an `error` event → `StreamError` with reason `stream_error_event`
  * - stream ends without a `final` event → `StreamError` with reason `no_final_event`
+ * - a `final` frame arrives but fails schema validation → `StreamError` with
+ *   reason `final_unparseable` (backend turn succeeded — must NOT re-send)
  * - ReadableStream read throws → `StreamError` with reason `read_error`
  *
- * The consumer (ChatWorkspace) catches these and falls back to the sync path.
+ * The consumer (ChatWorkspace) catches these and consults shouldFallbackToSync
+ * before retrying through the sync path.
  */
 export class StreamError extends Error {
   constructor(
@@ -282,6 +313,14 @@ export async function streamChatMessage(options: ChatStreamOptions): Promise<voi
       for (const frame of frames) {
         const event = parseChatStreamEvent(frame.data);
         if (!event) {
+          // A final frame that arrived but failed validation means the backend
+          // turn succeeded — surface it as its own non-fallback failure reason.
+          if (isUnparseableFinalFrame(frame.data)) {
+            throw new StreamError(
+              "Final event failed schema validation",
+              "final_unparseable",
+            );
+          }
           continue;
         }
 

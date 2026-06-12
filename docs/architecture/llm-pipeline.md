@@ -39,7 +39,10 @@ persist, and apply them only after the user accepts. End to end:
 flowchart TD
   chat["Chat turn"] --> llm["LLM pipeline (router → domains → decision-maker)"]
   llm --> actionResolver["ActionResolverService"]
-  actionResolver --> validation["ProposalValidationService"]
+  actionResolver --> normalization["ProposalNormalizationService (per-intent bridge + trusted stamping)"]
+  normalization --> validation["ProposalValidationService"]
+  validation -- "schema-class invalid" --> repair["ProposalRepairService (one payload-only LLM repair) → re-normalize + full re-validate"]
+  repair --> validation
   validation --> pending["Pending proposal (review card)"]
   pending --> userDecision["User accept or reject"]
   userDecision --> apply["ProposalApplyService"]
@@ -51,7 +54,9 @@ response had `proposals: []` for the assistant message (diagnose upstream — se
 [Diagnosis & Troubleshooting](#diagnosis--troubleshooting)). Beyond fan-out LLM output,
 proposals can also come from deterministic code-owned injectors (wellbeing check-in,
 recipe recommendations, weekly-review packing); all sources pass the same
-`ProposalValidationService` stack. On accept, workout/nutrition changes create new
+per-intent normalization stage + `ProposalValidationService` stack (with one bounded
+self-repair LLM call for schema-class failures — see Stage 11). On accept,
+workout/nutrition changes create new
 revisions — `log_workout_activity` is a LOG intent that creates an `ad_hoc`
 `workout_sessions` row, never a plan revision (see Stage 11).
 
@@ -74,13 +79,16 @@ flowchart TD
   context --> domainLlms["Parallel domain LLMs (only-selected): workout / nutrition / health"]
   domainLlms --> decision["DecisionMakerExecutorService (final synthesis LLM)\nretries once; double failure → turnError"]
   decision --> actionResolver["ActionResolverService"]
-  actionResolver --> validation["Proposal safety and domain validation"]
+  actionResolver --> normalization["Proposal normalization (per-intent bridge + trusted stamping)"]
+  normalization --> validation["Proposal safety and domain validation\n(schema-class failure → one payload-only self-repair → full re-run)"]
   validation --> persistence["ChatRepository message and proposal persistence"]
 ```
 
 LLM call budget per eligible turn: **1 router (skipped for revision/explainer) + N
 selected domain LLMs (N ≤ 3, run in parallel) + 1 decision-maker (which retries once on
-failure, so up to 2 decision calls)**. Crisis, direct-path, and quota-exceeded turns make
+failure, so up to 2 decision calls) + up to 2 payload-only proposal-repair calls**
+(`MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN`, only for schema-invalid proposals — see
+Stage 11). Crisis, direct-path, and quota-exceeded turns make
 **zero LLM calls** — they return in ChatService before AiService is reached. **Every turn
 that reaches the orchestrator fans out**: there is no orchestrator-level deterministic
 branch. If `resolveResponseModeExecutorMode` ever returns a deterministic executor mode
@@ -110,9 +118,12 @@ Responsibilities:
 - Apply hard pre-AI gates: crisis support, proposal explainer no-proposal, and
   direct chat paths.
 - Call `AiService.generateCoachResponse` for the unified LLM pipeline.
-- Persist the assistant message with parse, safety, agent, and weekly-review
-  metadata.
-- Run the proposal validation stack and persist reviewable proposals.
+- Normalize, validate, and (when eligible) self-repair every proposal **before**
+  the assistant message is created, so repair telemetry rides the message metadata
+  (`ChatService.validateAndRepairProposal` — see Stage 11).
+- Persist the assistant message with parse, safety, agent (incl.
+  `agent.repair { attempted, succeeded }` when repair was attempted), and
+  weekly-review metadata, then persist the processed proposals.
 - Accept an **optional `onProgress` (`ProgressReporter`)** and emit coarse stage events
   for the SSE streaming endpoint (see "Streaming (SSE) variant of the chat turn" below).
   The argument is absent on the synchronous endpoint, so streaming is opt-in and never
@@ -127,8 +138,9 @@ shown to a user come from one of two sources:
   `packChatRecipeRecommendationProposal` (recipe recommendations), and
   `packChatWeeklyReviewProposals` (weekly-review packing).
 
-All proposals — LLM-sourced and code-injected — pass the same
-`ProposalValidationService` safety stack before persistence.
+All proposals — LLM-sourced and code-injected — pass the same per-intent
+normalization stage and `ProposalValidationService` safety stack before persistence
+(see Stage 11).
 
 When the UI shows assistant text but no proposal card, the API almost always returned
 `proposals: []`. Invalid proposals still persist and render as cards with disabled
@@ -1217,7 +1229,44 @@ Fields: `totalLatencyMs`, `routerLatencyMs`, `contextLatencyMs`, `decisionLatenc
 `toolsRequestedPerDomain[]`, `degradedDomains[]`, `finalActionType`, `proposalCount`,
 `validationFailureClasses[]`.
 
-## Stage 11: Proposal Validation And Persistence
+## Stage 11: Proposal Normalization, Validation And Persistence
+
+For every raw proposal (LLM-sourced and code-injected alike), `ChatService.validateAndRepairProposal`
+runs: **normalize → full validation stack → (schema-class failures only) one payload-only
+self-repair → re-normalize + full re-validate → final status**. This all happens **before**
+the assistant message is persisted, so repair telemetry can ride
+`metadata.agent.repair { attempted, succeeded }`. A transient failure inside the validation
+stack itself (e.g. a DB error in an async ownership check) degrades only THAT proposal to
+`validationStatus: "invalid"` with `validationErrors: ["proposal_validation_unavailable"]` —
+it never kills the whole paid turn.
+
+### `ProposalNormalizationService` (runs BEFORE the validation stack)
+
+File: `apps/api/src/modules/proposals/proposal-normalization.service.ts`
+
+Per-intent normalization registry. Normalizers **bridge known LLM shape variance to the
+canonical payload form — they never relax validation** (the full stack still runs on the
+normalized payload afterwards):
+
+- `create_workout_plan` / `adapt_workout_plan` — bridges legacy `{name, reps, sets}`
+  exercise entries to the catalog-backed form via `normalizeLegacyWorkoutPlanExercises`
+  (`apps/api/src/modules/workouts/workout-exercise-normalizer.ts`).
+- `adapt_workout_plan_from_progress` — the same bridge applied to the wrapper's nested
+  `.plan`.
+- `log_nutrition_incident` — pure normalizer `normalizeLogNutritionIncidentChanges`
+  (`packages/types/src/nutrition-incident-normalization.ts`) with **trusted server-side
+  stamping** from a per-turn `ProposalNormalizationContext` built once by `ChatService`
+  (`userId`, server `nowIso`, bounded turn-attachment metadata — never sourced from LLM
+  output): string `imageRefs` are coerced to objects and stamped from the turn's real
+  image-attachment ids, unknown `provenance.source` values are coerced to a known enum
+  value, and an out-of-window `incidentDateTime` is clamped to the server's now.
+
+Fault isolation: a throwing normalizer logs a warning (intent + error name only — never
+payload contents) and returns the ORIGINAL changes; validation may then mark the proposal
+invalid, but the turn survives.
+
+The old `ProposalValidationService.normalizeWorkoutProposalExercises` is **deleted** —
+this registry is its replacement (see "Removed Legacy Paths").
 
 ### Reply And Proposal Safety
 
@@ -1247,17 +1296,88 @@ File: `apps/api/src/modules/proposals/proposal-validation.service.ts`
 Validates proposal schema, ownership, provenance, attachment refs, recovery-aware
 workout changes (incl. calorie-estimate bounds), habits, wellbeing check-ins,
 recipe recommendations, nutrition incident image refs, and Today checklist
-references.
+references. `ChatService.runProposalValidationStack` runs the full stack and returns
+the three classification buckets (safety / schema / ownership-context) consumed by
+`classifyProposalValidationFailure` (`packages/types/src/ai-proposal.ts`) to decide
+repair eligibility.
+
+### Proposal Self-Repair (`ProposalRepairService`)
+
+Files:
+
+- `apps/api/src/modules/ai/proposal-repair.service.ts`
+- `apps/api/src/modules/ai/openai-proposal-repair-provider.ts`
+- `apps/api/src/modules/ai/proposal-repair.tokens.ts` (`PROPOSAL_REPAIR_PROVIDER` DI token)
+- `packages/ai/src/proposal-repair-provider.ts` (`ProposalRepairProvider` interface)
+
+When a proposal fails validation with a **schema-class** failure,
+`ChatService.validateAndRepairProposal` makes **one bounded, payload-only repair LLM
+call**: the provider re-emits a corrected `proposedChanges` JSON given the exact
+validation error strings plus the original payload. It is never a decision-maker re-run
+(the decision-maker selects candidates by id and does not write payloads). Hard bounds
+and floors:
+
+- **Eligibility:** schema-class failures only — **never safety-class** (the LLM must not
+  be asked to write around safety floors) and **never ownership-class** (server-side
+  facts the LLM cannot fix).
+- **Budget:** `MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN = 2` per turn (`chat.service.ts`);
+  proposals beyond the budget skip repair and persist invalid as normal.
+- **Timeout:** 10 s wall clock (`PROPOSAL_REPAIR_TIMEOUT_MS`) via `AbortController`,
+  covering the provider's HTTP retries.
+- **Envelope preserved:** only `proposedChanges` is replaced; intent, targetDomain,
+  title, reason, and evidenceRefs always stay from the original proposal. The assistant
+  reply text is never regenerated.
+- **No bypass:** the repaired payload re-enters the SAME normalize step and the FULL
+  validation stack; a still-invalid repair persists the honest invalid card with its
+  final errors.
+- **Optional provider:** `PROPOSAL_REPAIR_PROVIDER` is wired in `ai.module.ts` only when
+  the OpenAI provider is configured; the model resolves as
+  `OPENAI_REPAIR_MODEL ?? OPENAI_MODEL_DECISION ?? OPENAI_MODEL` (`apps/api/src/env.ts`).
+  With no provider, `tryRepair` degrades to `null` without any call.
+- **Telemetry / privacy:** repair counts ride the assistant message as
+  `metadata.agent.repair { attempted, succeeded }` (counts only — this is why proposals
+  are processed BEFORE `createMessage`). Logs carry intent + failure class + error
+  counts only, never payload contents.
 
 ### `ChatRepository.createProposal`
 
 File: `apps/api/src/modules/chat/chat.repository.ts`
 
-Persists raw proposals with validation status and validation errors. Nothing is
-applied to structured state until the user accepts a valid proposal through the
-proposal apply flow. Accepted workout/nutrition changes create new revisions; the
-`log_workout_activity` LOG intent instead creates an `ad_hoc` `workout_sessions` row and
-**never** a revision (`ProposalApplyService` → `WorkoutsService.applyLogWorkoutActivityProposal`).
+Persists the processed (normalized, possibly repaired) proposals with their final
+validation status and validation errors. Nothing is applied to structured state until
+the user accepts a valid proposal through the proposal apply flow. Accepted
+workout/nutrition changes create new revisions; the `log_workout_activity` LOG intent
+instead creates an `ad_hoc` `workout_sessions` row and **never** a revision
+(`ProposalApplyService` → `WorkoutsService.applyLogWorkoutActivityProposal`).
+
+### Tolerant Client Proposal Contract
+
+Because the server intentionally persists invalid proposals, the client contract is
+**tolerant by design** (`packages/types/src/ai-proposal.ts`):
+
+- `aiProposalSchema` runs the per-intent `proposedChanges` check **only when
+  `validationStatus === "valid"`**; invalid / pending-validation proposals keep
+  `proposedChanges` as raw `unknown`. A proposal that CLAIMS to be valid with a
+  non-conforming payload still fails parse (honesty floor).
+- `AiProposal` is the discriminated union `ValidatedAiProposal | UnvalidatedAiProposal`
+  with the `isValidatedProposal()` guard. The web routes every non-validated proposal to
+  the generic card (`apps/web/src/components/proposals/inline-proposal-card.tsx`) — an
+  honest invalid notice with disabled Apply and working Reject/Modify — before any
+  intent-specific card dispatch.
+- `tolerantArraySchema` (`packages/types/src/zod-tolerant.ts`) wraps
+  `chatTurnResponseSchema.proposals` (`packages/types/src/chat-turn.ts`) and the web
+  read paths (`listProposals`, thread-detail messages in `apps/web/src/lib/api.ts`): a
+  malformed element is dropped (warn with label/index/issue paths only — never element
+  contents) instead of failing the whole response parse.
+- `chatProposalRevisionSchema.originalProposal.proposedChanges` is relaxed to
+  `z.unknown()` with a 64 KB serialized cap (`MAX_REVISION_ORIGINAL_CHANGES_JSON_CHARS`),
+  so **Modify works for invalid proposals** too.
+- The web SSE path treats a present-but-unparseable `final` frame as a distinct
+  `final_unparseable` failure (`apps/web/src/lib/chat-stream.ts`) and
+  `shouldFallbackToSync` returns **false** for it — the backend turn succeeded and was
+  persisted, so re-sending through the sync endpoint would buy a duplicate paid LLM
+  turn. The client refetches the thread instead (the tolerant contract reveals the
+  persisted turn).
 
 ### Accept-time display-contract recompute seam
 
@@ -1335,11 +1455,24 @@ prompt/health content. The three-method surface
 itself is unchanged; only the wrapped return type and the optional abort signal are
 new.
 
-Structured output is **strict OpenAI `json_schema` structured outputs** (not legacy
-JSON mode). Each call sends `response_format: { type: "json_schema", json_schema:
-{ name, strict: true, schema } }` using hand-authored wire schemas in
-`apps/api/src/modules/ai/openai-wire-schemas.ts`
-(`routerDecisionWireSchema`, `domainLlmStepWireSchema`, `finalDecisionWireSchema`).
+Structured output is **OpenAI `json_schema` structured outputs** (not legacy JSON
+mode). Each call sends `response_format: { type: "json_schema", json_schema:
+{ name, strict, schema } }` using wire schemas from
+`apps/api/src/modules/ai/openai-wire-schemas.ts`. The router and final-decision
+stages always use `strict: true` hand-authored schemas (`routerDecisionWireSchema`,
+`finalDecisionWireSchema`). The **domain step is per-turn**:
+`buildDomainStepWireSchema(allowedProposalIntents)` returns `strict: true` with typed
+per-intent candidate envelopes when **every** allowed proposal intent of the turn has
+an **LLM emission schema** (`packages/types/src/llm-emission/` — 9 covered intents:
+the workout-plan intents, `log_workout_activity`, the nutrition-plan intents,
+`recommend_recipes`, `log_nutrition_incident`, `capture_wellbeing_checkin`;
+server-stamped fields are omitted from emission and `.optional()` fields are
+`.nullable()` by construction); otherwise it gracefully falls back to the permissive
+`domainLlmStepWireSchema` with `strict: false` — no behavior cliff, and the
+post-receive Zod parse still validates either way. Emission Zod schemas are converted
+via `toOpenAiStrictJsonSchema`
+(`apps/api/src/modules/ai/openai-json-schema.ts`, `z.toJSONSchema` + a strict-mode
+post-pass that asserts the construction rules).
 Because strict mode forces every field into `required` (optional fields are declared
 nullable-required, `type: ["T","null"]`), the provider runs a generic
 `stripExplicitNulls` normalization over the parsed payload before the Zod
@@ -1347,12 +1480,15 @@ shape-validation + parse, so `.optional()` Zod fields that arrive as explicit `n
 are dropped (and `.nullable().default(null)` fields such as `selectedAction` re-apply
 their null default). `stripExplicitNulls` must not log payload content.
 
-Transport goes through `fetchWithRetry`: up to **`MAX_RETRIES = 2`** retries (1 initial
-attempt + 2 retries) with exponential backoff (~300ms then ~1200ms), retrying **only**
-on network/transport failures (fetch rejection), HTTP 429, or HTTP 5xx. Other 4xx and
-JSON-parse failures throw immediately (no retry). The optional `AbortSignal` is
-forwarded to `fetch` and to the backoff `sleep`, so an aborted call (e.g. the domain
-timeout firing) cancels in-flight requests and pending retries.
+Transport goes through the shared OpenAI HTTP helper
+`fetchOpenAiJsonCompletionWithRetry` (`apps/api/src/modules/ai/openai-http.ts`, which
+also owns `stripExplicitNulls`; extracted from the provider so the coach fan-out stages
+and the proposal-repair provider share one implementation): up to **`MAX_RETRIES = 2`**
+retries (1 initial attempt + 2 retries) with exponential backoff (~300ms then ~1200ms),
+retrying **only** on network/transport failures (fetch rejection), HTTP 429, or HTTP
+5xx. Other 4xx and JSON-parse failures throw immediately (no retry). The optional
+`AbortSignal` is forwarded to `fetch` and to the backoff `sleep`, so an aborted call
+(e.g. the domain timeout firing) cancels in-flight requests and pending retries.
 
 Note: context compression uses a **distinct provider/interface** (`ContextCompressionProvider`,
 injected via `CONTEXT_COMPRESSION_PROVIDER`) that is separate from this `CoachAiProvider`
@@ -1516,7 +1652,12 @@ Schemas and defaults:
 - `ActionResolver` filters proposal intents to the active capability allowlist, scrubs
   any decision-maker / non-workout calorie fields, and re-stamps the estimate and trusted
   rate only from the workout `domain_answer` (fail-closed when absent).
-- `ChatService` validates every proposal before persistence.
+- `ChatService` normalizes and validates every proposal before persistence.
+  Normalization stamps trusted values only from server turn state (attachment ids,
+  server now, provenance) — never from LLM authority. Proposal self-repair is
+  payload-only, budgeted (2/turn), eligible for schema-class failures only (never
+  safety- or ownership-class), and the repaired payload always re-enters the full
+  normalize + validation stack — repair can never bypass a check.
 - The AI layer never writes directly to domain tables; accepted workout/nutrition
   changes create new revisions.
 
@@ -1546,7 +1687,8 @@ flowchart TD
   summaries --> decision["DecisionMakerExecutorService"]
   decision --> selected["selectedAction + selectedProposalIds[]"]
   selected --> resolver["ActionResolverService (resolve ids → payloads from candidateMap)"]
-  resolver --> validation["ProposalValidationService"]
+  resolver --> normalization["ProposalNormalizationService"]
+  normalization --> validation["ProposalValidationService (+ bounded self-repair)"]
   validation --> cards["Chat proposal cards"]
 ```
 
@@ -1695,6 +1837,23 @@ The following files/exports were deleted and are no longer active runtime paths:
   all router-selected domains) and the consent-gated `medical_document_save`
   action-variant (dropped from `ActionVariantCatalogService`). The
   LLM-recognized medical special save is **deferred**, not removed permanently.
+- `ProposalValidationService.normalizeWorkoutProposalExercises` — the ad-hoc workout
+  normalization inside the validation service. Replaced by the per-intent
+  `ProposalNormalizationService` registry
+  (`apps/api/src/modules/proposals/proposal-normalization.service.ts`), which runs as
+  an explicit pre-validation stage in `ChatService` (see Stage 11).
+- The workout **`pendingExerciseRef` uniqueness rule**
+  (`packages/types/src/workouts.ts`) — repeated refs across days are legal: they share
+  one `pendingExercises` definition, and the apply path
+  (`apps/api/src/modules/workouts/workout-plan-resolver.ts`) resolves each ref exactly
+  once via a per-ref **promise cache** (one `findOrCreateExercise` call per ref even
+  under concurrent day resolution, every entry sharing the same catalog `exerciseId`).
+  The kept rules: every ref has a `pendingExercises` definition, and no orphan
+  definitions.
+- The inline `fetchWithRetry` / `stripExplicitNulls` copies in
+  `openai-coach-provider.ts` — extracted to the shared `openai-http.ts` so the coach
+  provider and `OpenAiProposalRepairProvider` use one retry/normalization
+  implementation.
 
 Some historical enum values and parse compatibility remain only so old stored
 metadata can still be read safely:

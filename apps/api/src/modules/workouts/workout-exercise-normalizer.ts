@@ -12,8 +12,14 @@
  *  - Exact normalized-name match in catalog → exerciseId + snapshot from catalog row.
  *  - No match → pendingExerciseRef (stable slug) + minimal pendingExercises definition
  *    so `resolveWorkoutPlanProposalForApply` can create the catalog row on accept.
+ *
+ * Fault isolation: catalog lookup errors are caught per-exercise and logged as
+ * warnings; the normalizer degrades to pendingExerciseRef rather than killing
+ * the turn. Whole-step errors return the original changes unchanged so the turn
+ * survives (proposal validation may mark it invalid, but no 500).
  */
 
+import { Logger } from "@nestjs/common";
 import {
   isLegacyWorkoutPlanExerciseObject,
   isStructuredWorkoutPlanExercise,
@@ -24,6 +30,8 @@ import {
   type WorkoutPlanProposalChanges,
 } from "@health/types";
 import type { ExercisesService } from "../exercises/exercises.service.js";
+
+const normalizerLogger = new Logger("workout-exercise-normalizer");
 
 export interface NormalizeLegacyExercisesResult {
   /** Updated changes — legacy entries replaced with structured ones. */
@@ -52,6 +60,25 @@ export async function normalizeLegacyWorkoutPlanExercises(
   userId: string,
   changes: WorkoutPlanProposalChanges,
 ): Promise<NormalizeLegacyExercisesResult> {
+  try {
+    return await doNormalizeLegacyWorkoutPlanExercises(exercisesService, userId, changes);
+  } catch (err) {
+    // Whole-step fault isolation: catalog enrichment must never kill a turn.
+    // Return original changes unchanged so proposal validation can still run
+    // (it may mark the proposal invalid, but the turn survives as a 200).
+    normalizerLogger.warn(
+      "normalizeLegacyWorkoutPlanExercises failed — returning original changes unchanged",
+      { error: err instanceof Error ? err.message : String(err) },
+    );
+    return { changes, unmatchedNames: [] };
+  }
+}
+
+async function doNormalizeLegacyWorkoutPlanExercises(
+  exercisesService: ExercisesService,
+  userId: string,
+  changes: WorkoutPlanProposalChanges,
+): Promise<NormalizeLegacyExercisesResult> {
   // Collect unique unresolved names to avoid duplicate catalog queries.
   const uniqueNames = new Set<string>();
 
@@ -67,12 +94,23 @@ export async function normalizeLegacyWorkoutPlanExercises(
     return { changes, unmatchedNames: [] };
   }
 
-  // Resolve all unique names in parallel.
+  // Resolve all unique names in parallel, catching per-exercise errors.
+  // A failing lookup degrades to "unmatched" (pendingExerciseRef) rather
+  // than killing the whole normalization step.
   const catalogByName = new Map<string, Exercise | null>();
   await Promise.all(
     [...uniqueNames].map(async (name) => {
-      const exercise = await exercisesService.findExerciseByNormalizedName(name, userId);
-      catalogByName.set(name, exercise);
+      try {
+        const exercise = await exercisesService.findExerciseByNormalizedName(name, userId);
+        catalogByName.set(name, exercise);
+      } catch (err) {
+        normalizerLogger.warn(
+          `catalog lookup failed for exercise "${name}" — treating as unmatched`,
+          { error: err instanceof Error ? err.message : String(err) },
+        );
+        // Treat as unmatched so the entry becomes a pendingExerciseRef.
+        catalogByName.set(name, null);
+      }
     }),
   );
 

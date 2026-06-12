@@ -15,8 +15,39 @@ export async function resolveWorkoutPlanProposalForApply(
   changes: WorkoutPlanProposalChanges,
 ): Promise<WorkoutPlanPayload> {
   const pendingExercises = changes.pendingExercises ?? {};
-  const resolvedRefs = new Map<string, string>();
+  // Promise-cached per-ref resolution: days (and entries within a day) resolve
+  // concurrently, so the cache stores the in-flight promise. A ref repeated
+  // across days therefore triggers exactly one findOrCreateExercise call and
+  // every entry shares the same catalog exerciseId.
+  const resolvedRefs = new Map<string, Promise<string>>();
   const plan = stripWorkoutPlanProposalExtras(changes);
+
+  const resolveRef = (ref: string): Promise<string> => {
+    const cached = resolvedRefs.get(ref);
+
+    if (cached) {
+      return cached;
+    }
+
+    const definition = pendingExercises[ref];
+
+    if (!definition) {
+      throw new BadRequestException(
+        `Pending exercise definition "${ref}" was not found in the proposal.`,
+      );
+    }
+
+    const promise = exercisesService
+      .findOrCreateExercise({
+        ...definition,
+        userId,
+      })
+      .then((created) => created.id);
+
+    resolvedRefs.set(ref, promise);
+
+    return promise;
+  };
 
   const resolvedDays = await Promise.all(
     plan.days.map(async (day) => ({
@@ -28,25 +59,7 @@ export async function resolveWorkoutPlanProposalForApply(
           }
 
           const ref = entry.pendingExerciseRef;
-          let exerciseId = resolvedRefs.get(ref);
-
-          if (!exerciseId) {
-            const definition = pendingExercises[ref];
-
-            if (!definition) {
-              throw new BadRequestException(
-                `Pending exercise definition "${ref}" was not found in the proposal.`,
-              );
-            }
-
-            const created = await exercisesService.findOrCreateExercise({
-              ...definition,
-              userId,
-            });
-            exerciseId = created.id;
-            resolvedRefs.set(ref, exerciseId);
-          }
-
+          const exerciseId = await resolveRef(ref);
           const definition = pendingExercises[ref] as PendingExerciseDefinition;
 
           return {

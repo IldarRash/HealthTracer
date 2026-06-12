@@ -33,6 +33,7 @@ import {
   shouldShowInvalidValidationNotice,
 } from "../../lib/proposal-ui-state";
 import { ProposalEvidenceList } from "./proposal-evidence-list";
+import { WorkoutPlanDayDetails } from "./workout-plan-day-details";
 import { Badge, Button, ProposalFrame, ProposalFrameHeader, ProposalWhy, ProposalStateBand } from "../ui";
 
 type InlineProposalCardProps = {
@@ -50,6 +51,14 @@ function ProposalChangeSummaryView({
     return null;
   }
 
+  // For workout-plan proposals the last workoutDays.length `after` entries are
+  // flat day lines — swap them for expandable per-day detail rows.
+  const workoutDays = summary.workoutDays ?? [];
+  const flatAfterLines =
+    workoutDays.length > 0
+      ? summary.after.slice(0, summary.after.length - workoutDays.length)
+      : summary.after;
+
   return (
     <div className="proposal-change-summary">
       {summary.before.length > 0 ? (
@@ -66,10 +75,11 @@ function ProposalChangeSummaryView({
         <div>
           <strong>After</strong>
           <ul>
-            {summary.after.map((line) => (
+            {flatAfterLines.map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
+          <WorkoutPlanDayDetails days={workoutDays} />
         </div>
       ) : null}
     </div>

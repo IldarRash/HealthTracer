@@ -17,6 +17,7 @@ import { WellbeingCheckInsModule } from "../wellbeing-check-ins/wellbeing-check-
 import { WorkoutsModule } from "../workouts/workouts.module.js";
 import { ChatAttachmentsModule } from "../chat-attachments/chat-attachments.module.js";
 import { ProposalApplyService } from "./proposal-apply.service.js";
+import { ProposalNormalizationService } from "./proposal-normalization.service.js";
 import { ProposalValidationService } from "./proposal-validation.service.js";
 import { ProposalsController } from "./proposals.controller.js";
 import { ProposalsRepository } from "./proposals.repository.js";
@@ -46,9 +47,15 @@ import { ProposalsService } from "./proposals.service.js";
   providers: [
     ProposalsRepository,
     ProposalsService,
+    ProposalNormalizationService,
     ProposalValidationService,
     ProposalApplyService,
   ],
-  exports: [ProposalsService, ProposalValidationService, ProposalsRepository],
+  exports: [
+    ProposalsService,
+    ProposalNormalizationService,
+    ProposalValidationService,
+    ProposalsRepository,
+  ],
 })
 export class ProposalsModule {}
