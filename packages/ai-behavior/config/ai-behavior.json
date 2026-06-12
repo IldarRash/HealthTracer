@@ -168,7 +168,7 @@
             "flags": "i"
           },
           {
-            "source": "^что\\s+(?:в\\s+)?(?:моём?|у меня)\\s+план(?:е)?\\s+питани(?:я|е)\\s*\\??$",
+            "source": "^что\\s+(?:в\\s+)?(?:мо[её]м?|у меня)\\s+план(?:е)?\\s+питани(?:я|е)\\s*\\??$",
             "flags": "i"
           },
           {
@@ -186,7 +186,7 @@
             "flags": "i"
           },
           {
-            "source": "\\b(?:change|modify|update|create|build|add|remove|edit)\\b",
+            "source": "\\b(?:add|remove|edit)\\b",
             "flags": "i"
           }
         ]
@@ -216,7 +216,7 @@
             "flags": "i"
           },
           {
-            "source": "^недельный\\s+прогресс\\s*\\??$",
+            "source": "^(?:мой\\s+)?недельный\\s+прогресс\\s*\\??$",
             "flags": "i"
           }
         ],
@@ -256,7 +256,7 @@
             "flags": "i"
           },
           {
-            "source": "^что\\s+(?:в\\s+)?(?:моём?|у меня)\\s+план(?:е)?\\s+тренировок\\s*\\??$",
+            "source": "^что\\s+(?:в\\s+)?(?:мо[её]м?|у меня)\\s+план(?:е)?\\s+тренировок\\s*\\??$",
             "flags": "i"
           },
           {
@@ -274,7 +274,7 @@
             "flags": "i"
           },
           {
-            "source": "\\b(?:change|modify|update|create|build|add|remove|edit|adapt|improve|make|recommend)\\b",
+            "source": "\\b(?:add|remove|edit|improve|make)\\b",
             "flags": "i"
           },
           {
@@ -312,8 +312,8 @@
       },
       "weeklyProgress": {
         "introTemplate": "Your weekly progress for {{weekStart}} – {{weekEnd}}:",
-        "workoutLineTemplate": "Workouts: {{completed}} of {{planned}} planned session(s) completed ({{adherencePercent}}% adherence)",
-        "habitLineTemplate": "Habits: {{completed}} completed, {{missed}} missed ({{adherencePercent}}% adherence)",
+        "workoutLineTemplate": "Workouts: {{completed}} of {{planned}} planned session(s) completed{{adherenceNote}}",
+        "habitLineTemplate": "Habits: {{completed}} completed, {{missed}} missed{{adherenceNote}}",
         "trendsHeaderLine": "Trends:",
         "trendLineTemplate": "- {{message}}",
         "noSummaryLine": "You don't have a weekly progress summary yet. It will appear after your first tracked week."

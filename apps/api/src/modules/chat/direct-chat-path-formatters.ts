@@ -89,6 +89,11 @@ export function formatNutritionPlanReadMessage(
 
 const MAX_WEEKLY_PROGRESS_TREND_LINES = 3;
 
+/** Renders ` (67% adherence)` or an empty string when adherence is unknown. */
+function formatAdherencePercent(adherencePercent: number | null): string {
+  return adherencePercent != null ? ` (${Math.round(adherencePercent)}% adherence)` : "";
+}
+
 export function formatWeeklyProgressReadMessage(
   weeklyProgress: WeeklyProgressSummaryResponse | null,
   templates: DirectPathWeeklyProgressReplies = DEFAULT_REPLY_TEMPLATES.weeklyProgress,
@@ -113,8 +118,7 @@ export function formatWeeklyProgressReadMessage(
       interpolateBehaviorTemplate(templates.workoutLineTemplate, {
         completed: workout.plannedCompletedCount,
         planned: workout.plannedCount,
-        adherencePercent:
-          workout.adherencePercent != null ? Math.round(workout.adherencePercent) : "—",
+        adherenceNote: formatAdherencePercent(workout.adherencePercent),
       }),
     );
   }
@@ -126,8 +130,7 @@ export function formatWeeklyProgressReadMessage(
       interpolateBehaviorTemplate(templates.habitLineTemplate, {
         completed: habits.completedCount,
         missed: habits.missedCount,
-        adherencePercent:
-          habits.adherencePercent != null ? Math.round(habits.adherencePercent) : "—",
+        adherenceNote: formatAdherencePercent(habits.adherencePercent),
       }),
     );
   }

@@ -89,7 +89,7 @@ const NUTRITION_PLAN_MATCH_PATTERNS = [
   pattern(`^what(?:${APOSTROPHE}s| is)\\s+(?:in\\s+)?(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$`),
   pattern("^show\\s+(?:me\\s+)?(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$"),
   pattern("^(?:my\\s+)?(?:nutrition|meal|diet)\\s+plan\\s*\\??$"),
-  pattern("^что\\s+(?:в\\s+)?(?:моём?|у меня)\\s+план(?:е)?\\s+питани(?:я|е)\\s*\\??$"),
+  pattern("^что\\s+(?:в\\s+)?(?:мо[её]м?|у меня)\\s+план(?:е)?\\s+питани(?:я|е)\\s*\\??$"),
   pattern("^покажи\\s+(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$"),
   pattern("^(?:мой\\s+)?план\\s+питани(?:я|е)\\s*\\??$"),
 ];
@@ -100,7 +100,7 @@ const WEEKLY_PROGRESS_MATCH_PATTERNS = [
   pattern("^how\\s+(?:was|did)\\s+(?:my|the)\\s+week(?:\\s+go)?\\s*\\??$"),
   pattern("^(?:покажи\\s+)?(?:мой\\s+)?прогресс\\s+за\\s+(?:эту\\s+|последнюю\\s+)?неделю\\s*\\??$"),
   pattern("^как\\s+прошла\\s+(?:моя\\s+)?неделя\\s*\\??$"),
-  pattern("^недельный\\s+прогресс\\s*\\??$"),
+  pattern("^(?:мой\\s+)?недельный\\s+прогресс\\s*\\??$"),
 ];
 
 const WEEKLY_PROGRESS_ANALYTIC_NEGATIVE_EN = pattern(
@@ -120,13 +120,14 @@ const WORKOUT_PLAN_MATCH_PATTERNS = [
   pattern(`^what(?:${APOSTROPHE}s| is)\\s+(?:in\\s+)?(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$`),
   pattern("^show\\s+(?:me\\s+)?(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$"),
   pattern("^(?:my\\s+)?(?:workout|training)\\s+plan\\s*\\??$"),
-  pattern("^что\\s+(?:в\\s+)?(?:моём?|у меня)\\s+план(?:е)?\\s+тренировок\\s*\\??$"),
+  pattern("^что\\s+(?:в\\s+)?(?:мо[её]м?|у меня)\\s+план(?:е)?\\s+тренировок\\s*\\??$"),
   pattern("^покажи\\s+(?:мой\\s+)?план\\s+тренировок\\s*\\??$"),
   pattern("^(?:мой\\s+)?план\\s+тренировок\\s*\\??$"),
 ];
 
+// Only verbs NOT already covered by shared.adviceOrImplicitMutation (which is always applied).
 const WORKOUT_PLAN_MUTATION_NEGATIVE_EN = pattern(
-  "\\b(?:change|modify|update|create|build|add|remove|edit|adapt|improve|make|recommend)\\b",
+  "\\b(?:add|remove|edit|improve|make)\\b",
 );
 
 const WORKOUT_PLAN_MUTATION_NEGATIVE_RU = pattern(
@@ -177,7 +178,8 @@ export function buildDefaultDirectPathKindMatchers(): DirectPathKindMatcherConfi
       negativePatterns: [
         // adviceOrImplicitMutation already covers should/could/would/can i/do i/shall i
         shared.adviceOrImplicitMutation,
-        pattern("\\b(?:change|modify|update|create|build|add|remove|edit)\\b"),
+        // Only verbs NOT already covered by shared.adviceOrImplicitMutation.
+        pattern("\\b(?:add|remove|edit)\\b"),
       ],
     },
     {

@@ -115,6 +115,8 @@ describe("detectDirectChatPathCandidateFromConfig", () => {
       "Покажи план питания",
       "Мой план питания",
       "план питания",
+      "что в моем плане питания",
+      "что в моём плане питания",
     ])("matches RU pattern: %s", (message) => {
       const candidate = detectDirectChatPathCandidateFromConfig(config, message);
       expect(candidate).not.toBeNull();
@@ -166,6 +168,7 @@ describe("detectDirectChatPathCandidateFromConfig", () => {
       "Прогресс за эту неделю",
       "Как прошла неделя?",
       "Недельный прогресс",
+      "мой недельный прогресс",
     ])("matches RU pattern: %s", (message) => {
       const candidate = detectDirectChatPathCandidateFromConfig(config, message);
       expect(candidate).not.toBeNull();
@@ -233,6 +236,8 @@ describe("detectDirectChatPathCandidateFromConfig", () => {
       "Покажи план тренировок",
       "Мой план тренировок",
       "план тренировок",
+      "что в моем плане тренировок",
+      "что в моём плане тренировок",
     ])("matches RU pattern: %s", (message) => {
       const candidate = detectDirectChatPathCandidateFromConfig(config, message);
       expect(candidate).not.toBeNull();
@@ -253,6 +258,10 @@ describe("detectDirectChatPathCandidateFromConfig", () => {
       "Измени мой план тренировок",
       "Адаптируй план тренировок",
       "Улучши мой план тренировок",
+      // Anchoring is the only guard against complaint/feedback phrasing — pin it.
+      "мой план тренировок слишком тяжелый",
+      "My workout plan is too hard",
+      "мой план тренировок не подходит",
     ])("does NOT match mutation/advice phrasing (falls through to fan-out): %s", (message) => {
       const candidate = detectDirectChatPathCandidateFromConfig(config, message);
       expect(candidate?.kind ?? null).not.toBe("workout_plan_read");

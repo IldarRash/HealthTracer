@@ -109,9 +109,8 @@ export const DEFAULT_DIRECT_PATH_REPLY_TEMPLATES: DirectPathReplyTemplates = {
   weeklyProgress: {
     introTemplate: "Your weekly progress for {{weekStart}} – {{weekEnd}}:",
     workoutLineTemplate:
-      "Workouts: {{completed}} of {{planned}} planned session(s) completed ({{adherencePercent}}% adherence)",
-    habitLineTemplate:
-      "Habits: {{completed}} completed, {{missed}} missed ({{adherencePercent}}% adherence)",
+      "Workouts: {{completed}} of {{planned}} planned session(s) completed{{adherenceNote}}",
+    habitLineTemplate: "Habits: {{completed}} completed, {{missed}} missed{{adherenceNote}}",
     trendsHeaderLine: "Trends:",
     trendLineTemplate: "- {{message}}",
     noSummaryLine:

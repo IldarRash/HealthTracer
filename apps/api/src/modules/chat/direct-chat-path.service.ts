@@ -188,7 +188,7 @@ export class DirectChatPathService {
       kind,
       status,
       message: formatNutritionPlanReadMessage(activePlan, replyTemplates.nutritionPlan),
-      refreshHints: [],
+      refreshHints: this.resolveRefreshHints(kind, status),
     };
   }
 

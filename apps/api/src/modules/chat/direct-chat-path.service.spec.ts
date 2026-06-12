@@ -487,6 +487,7 @@ describe("DirectChatPathService", () => {
     expect(result?.metadata.outcome).toMatchObject({
       kind: "nutrition_plan_read",
       status: "executed",
+      // Resolved via resolveRefreshHints from config (refreshHintsOnExecuted is []).
       refreshHints: [],
     });
     expect(result?.reply).toBe(formatNutritionPlanReadMessage(activePlan));
@@ -845,6 +846,34 @@ describe("formatWeeklyProgressReadMessage", () => {
         "- Workout consistency improved this week.",
       ].join("\n"),
     );
+  });
+
+  it("omits the adherence parenthetical entirely when adherence is null", () => {
+    const weeklyProgress = buildWeeklyProgressResponse();
+    const nullAdherence: WeeklyProgressSummaryResponse = {
+      ...weeklyProgress,
+      summary: {
+        ...weeklyProgress.summary,
+        sourceAggregates: {
+          ...weeklyProgress.summary.sourceAggregates,
+          workout: {
+            ...weeklyProgress.summary.sourceAggregates.workout!,
+            adherencePercent: null,
+          },
+          habits: {
+            ...weeklyProgress.summary.sourceAggregates.habits!,
+            adherencePercent: null,
+          },
+        },
+      },
+    };
+
+    const result = formatWeeklyProgressReadMessage(nullAdherence);
+
+    expect(result).toContain("Workouts: 2 of 3 planned session(s) completed");
+    expect(result).toContain("Habits: 5 completed, 2 missed");
+    expect(result).not.toContain("adherence");
+    expect(result).not.toContain("—%");
   });
 
   it("is template-driven: custom config templates change the rendered text", () => {
