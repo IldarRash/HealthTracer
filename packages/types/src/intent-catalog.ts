@@ -203,7 +203,10 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Do not claim medical conclusions from progress data.",
     ],
     promptInstructions:
-      "Summarize weekly trends first, then optionally propose plan adjustments grounded in observed progress.",
+      "Summarize observed trends first, then optionally propose plan adjustments grounded in observed progress. " +
+      "Candidate proposals MUST cite specific bucket evidence from the provided progress history — concrete dates and numbers " +
+      "(bucket start dates, adherence percentages, completed/skipped counts, check-in counts) — in their reason field. " +
+      "Keep interpretations non-diagnostic: never attribute trends to a disease and never recommend medical care.",
     mappedAgentIntent: "review_progress",
   },
   {

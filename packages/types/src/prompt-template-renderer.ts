@@ -57,6 +57,11 @@ export type CompiledPromptTemplates = {
       attachmentContextJson: string;
       /** Resolved response language (e.g. "en", "ru"). Empty string = fall back to message detection. */
       responseLanguage: string;
+      /**
+       * Appended to the dynamic suffix only on deep-review turns (Phase 4).
+       * Empty string otherwise — must never modify the static prefix.
+       */
+      deepReviewSuffix: string;
     },
   ): string;
   renderFinalDecision(values: {
@@ -82,6 +87,11 @@ export type CompiledPromptTemplates = {
      * Empty string for confident routes — must never modify the static prefix.
      */
     lowConfidenceRouteSuffix: string;
+    /**
+     * Appended to the dynamic suffix only on deep-review turns (Phase 4).
+     * Empty string otherwise — must never modify the static prefix.
+     */
+    deepReviewSuffix: string;
   }): string;
 };
 

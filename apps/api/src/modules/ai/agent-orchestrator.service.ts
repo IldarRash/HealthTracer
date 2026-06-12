@@ -12,8 +12,10 @@ import type {
   BuildAgentContextRequest,
   CandidateProposalSummary,
   ChatAttachmentCategory,
+  ContextCompressionQuality,
   ContextDepth,
   ContextTimeRange,
+  DeepReviewPromptContext,
   ProposalExplainerTurnContext,
   ProgressReporter,
   RawAiProposal,
@@ -23,6 +25,7 @@ import type {
 import {
   agentTurnTelemetrySchema,
   createFallbackDomainAnswer,
+  deriveDeepReviewDataQuality,
 } from "@health/types";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ClerkAuthContext } from "../../auth.types.js";
@@ -225,12 +228,17 @@ export class AgentOrchestratorService {
       plan.contextBudget,
     );
 
+    // Compression dataQuality feeds the deepReview sufficiency block (worst-of).
+    let compressionDataQuality: ContextCompressionQuality | undefined;
+
     if (plan.requiresCompression) {
       const compression = await this.contextCompressionService.compressForTurn({
         packet: contextPacket,
         reviewSignals: plan,
         budget: plan.contextBudget,
       });
+
+      compressionDataQuality = compression.summary?.dataQuality;
 
       if (compression.summary) {
         coachingContext.contextCompressionSummary = compression.summary;
@@ -292,6 +300,13 @@ export class AgentOrchestratorService {
     // SystemPlannerService guarantees plan.executorMode is never deterministic by
     // coercing any deterministic mode to the fan-out default (logged as pre_ai_gate.miss).
     // ---------------------------------------------------------------------------
+
+    // Phase 4: deep-review sufficiency block — built only when the plan selected a
+    // review budget profile AND the packet carries the progress_history_review slice.
+    // Threaded into every domain request and the final-decision request so the
+    // {{deepReviewSuffix}} instruction frames observed vs uncertain + analyzed range.
+    const deepReview = buildDeepReviewPromptContext(plan, contextPacket, compressionDataQuality);
+
     return this.runFanOutTurn(input, {
       plan,
       contextPacket,
@@ -299,6 +314,7 @@ export class AgentOrchestratorService {
       capabilityTurnMetadata,
       routerResult,
       responseLanguage: preprocessorResult.responseLanguage,
+      deepReview,
       onProgress,
       turnStart,
       routerLatencyMs,
@@ -322,6 +338,8 @@ export class AgentOrchestratorService {
       routerResult: RouterLlmResult | undefined;
       /** Resolved response language (hint ?? detected). Null = fall back to message detection. */
       responseLanguage: string | null;
+      /** Deep-review sufficiency block (Phase 4). Undefined on non-review turns. */
+      deepReview: DeepReviewPromptContext | undefined;
       onProgress?: ProgressReporter;
       /** Turn entry timestamp for total latency calculation. */
       turnStart: number;
@@ -331,7 +349,7 @@ export class AgentOrchestratorService {
       contextLatencyMs: number;
     },
   ): Promise<OrchestratedCoachTurnResult> {
-    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
+    const { plan, contextPacket, primaryCoachingContext, capabilityTurnMetadata, routerResult, responseLanguage, deepReview, onProgress, turnStart, routerLatencyMs, contextLatencyMs } = params;
     const selectedDomains = plan.fanout.selectedDomains;
 
     // Emit domains_running stage with the selected domain names (structural info only,
@@ -379,6 +397,7 @@ export class AgentOrchestratorService {
       primaryCoachingContext,
       responseLanguage,
       attachmentTextMap,
+      deepReview,
     );
     const domainsLatencyMs = Date.now() - domainsStart;
 
@@ -463,6 +482,8 @@ export class AgentOrchestratorService {
       // Thread low-confidence flag from planner fanout so the decision template can
       // ask a clarifying question rather than guess the domain (Change 2 / Slice 5).
       lowConfidenceRoute: plan.fanout.lowConfidenceRoute,
+      // Phase 4: deep-review sufficiency framing for the decision template.
+      ...(deepReview !== undefined ? { deepReview } : {}),
     });
     const decisionLatencyMs = Date.now() - decisionStart;
 
@@ -475,6 +496,7 @@ export class AgentOrchestratorService {
       selectedProposalIdCount: decisionResult.output.selectedProposalIds.length,
       consentRequired: decisionResult.output.consentRequired,
       lowConfidenceRoute: plan.fanout.lowConfidenceRoute === true,
+      deepReview: deepReview !== undefined,
     });
 
     // Extract the workout domain calorie estimate and rate from the fan-out results.
@@ -596,6 +618,7 @@ export class AgentOrchestratorService {
       routerResult,
       domainResults,
       decisionResult,
+      deepReviewApplied: deepReview !== undefined,
       resolvedProposalCount,
       droppedByAllowlist,
       idResolutionDropCount,
@@ -732,6 +755,7 @@ export class AgentOrchestratorService {
     primaryCoachingContext: Record<string, unknown>,
     responseLanguage: string | null,
     attachmentTextMap: ReadonlyMap<string, AttachmentTextExtractionResult>,
+    deepReview: DeepReviewPromptContext | undefined,
   ): Promise<Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>> {
     try {
       const results = await Promise.all(
@@ -806,6 +830,8 @@ export class AgentOrchestratorService {
             provider: this.provider,
             responseLanguage,
             attachmentTextMap,
+            // Phase 4: same deepReview block for every selected domain.
+            ...(deepReview !== undefined ? { deepReview } : {}),
           });
 
           return { domain: domainEntry.domain, result: domainResult };
@@ -882,6 +908,8 @@ function buildFanOutTurnMetadata(params: {
   domainResults: Array<{ domain: DomainFanoutEntry["domain"]; result: DomainLlmExecutorResult }>;
   /** The full decision-maker result (output + degraded flag). */
   decisionResult: DecisionMakerResult;
+  /** True when the turn carried a deepReview block (Phase 4). Boolean only — no health data. */
+  deepReviewApplied: boolean;
   /** Proposal count after ActionResolver (union-allowlist filtering applied). */
   resolvedProposalCount: number;
   /** Proposals dropped by ActionResolver allowlist (resolved but outside union allowlist). */
@@ -906,6 +934,7 @@ function buildFanOutTurnMetadata(params: {
     routerResult,
     domainResults,
     decisionResult,
+    deepReviewApplied,
     resolvedProposalCount,
     droppedByAllowlist,
     idResolutionDropCount,
@@ -983,6 +1012,8 @@ function buildFanOutTurnMetadata(params: {
       ...(plan.fanout.lowConfidenceRoute === true
         ? { lowConfidenceRoute: true as const }
         : {}),
+      // Phase 4: boolean-only deep-review marker (mirrors lowConfidenceRoute surfacing).
+      ...(deepReviewApplied ? { deepReview: true as const } : {}),
       ...(decisionResult.usage !== undefined ? { usage: decisionResult.usage } : {}),
     },
     resolution: {
@@ -1085,6 +1116,54 @@ function buildDomainContextRequest(
     depth: CAPABILITY_TO_DEPTH[cap] ?? "medium",
     timeRange: CAPABILITY_TO_TIME_RANGE[cap] ?? "14d",
     includeDocuments: false,
+  };
+}
+
+/**
+ * Build the deep-review sufficiency block for this turn (Phase 4).
+ *
+ * Built ONLY when:
+ *  - the planner selected a review budget profile (deep_review / deep_history), AND
+ *  - the primary context packet carries the progress_history_review slice
+ *    (its numeric-only ProgressHistoryReviewSummary).
+ *
+ * Field sources (per the Phase 4 spec):
+ *  - requestedPeriodDays ← plan.requestedLookbackDays (null when none was asked)
+ *  - grantedPeriodDays   ← plan.grantedLookbackDays, falling back to the
+ *    summary's own grantedPeriodDays when the plan grant is null (e.g. a review
+ *    profile triggered without an explicit lookback phrase)
+ *  - dataQuality         ← worst of the summary's per-domain dataSufficiency
+ *    values and the compression summary's dataQuality when present
+ *
+ * Returns undefined on every non-review turn — the suffix stays empty and the
+ * static prompt prefixes remain untouched.
+ */
+function buildDeepReviewPromptContext(
+  plan: DomainFanoutPlan,
+  contextPacket: AgentContextPacket,
+  compressionDataQuality: ContextCompressionQuality | undefined,
+): DeepReviewPromptContext | undefined {
+  const profile = plan.contextBudget.profile;
+
+  if (profile !== "deep_review" && profile !== "deep_history") {
+    return undefined;
+  }
+
+  const progressHistory = [contextPacket.slice, ...contextPacket.supplementarySlices]
+    .map((slice) => slice.progressHistory)
+    .find((summary) => summary !== undefined);
+
+  if (!progressHistory) {
+    return undefined;
+  }
+
+  return {
+    requestedPeriodDays: plan.requestedLookbackDays,
+    grantedPeriodDays: plan.grantedLookbackDays ?? progressHistory.grantedPeriodDays,
+    dataQuality: deriveDeepReviewDataQuality(
+      progressHistory.dataSufficiency,
+      compressionDataQuality ?? null,
+    ),
   };
 }
 

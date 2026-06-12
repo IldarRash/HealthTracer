@@ -138,6 +138,55 @@ describe("FinalDecisionRequest schema", () => {
     expect(parsed.userMessage).toBe("ambiguous question");
     expect(parsed.lowConfidenceRoute).toBe(true);
   });
+
+  it("deepReview is absent by default (non-review turns)", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "Hello",
+    });
+
+    expect(parsed.deepReview).toBeUndefined();
+  });
+
+  it("round-trips the deepReview block (Phase 4 sufficiency framing)", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "проанализируй последние полгода",
+      deepReview: {
+        requestedPeriodDays: 180,
+        grantedPeriodDays: 180,
+        dataQuality: "partial",
+      },
+    });
+
+    expect(parsed.deepReview).toEqual({
+      requestedPeriodDays: 180,
+      grantedPeriodDays: 180,
+      dataQuality: "partial",
+    });
+  });
+
+  it("accepts deepReview with a null requestedPeriodDays and rejects free-text dataQuality", () => {
+    const parsed = finalDecisionRequestSchema.parse({
+      userMessage: "review my progress",
+      deepReview: {
+        requestedPeriodDays: null,
+        grantedPeriodDays: 90,
+        dataQuality: "insufficient",
+      },
+    });
+
+    expect(parsed.deepReview?.requestedPeriodDays).toBeNull();
+
+    expect(
+      finalDecisionRequestSchema.safeParse({
+        userMessage: "review my progress",
+        deepReview: {
+          requestedPeriodDays: null,
+          grantedPeriodDays: 90,
+          dataQuality: "great data",
+        },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

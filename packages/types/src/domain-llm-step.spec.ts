@@ -80,6 +80,55 @@ describe("DomainLlmStepRequest schema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("deepReview is absent by default and round-trips when provided (Phase 4)", () => {
+    expect(domainLlmStepRequestSchema.parse(baseRequest).deepReview).toBeUndefined();
+
+    const parsed = domainLlmStepRequestSchema.parse({
+      ...baseRequest,
+      deepReview: {
+        requestedPeriodDays: 365,
+        grantedPeriodDays: 180,
+        dataQuality: "partial",
+      },
+    });
+
+    expect(parsed.deepReview).toEqual({
+      requestedPeriodDays: 365,
+      grantedPeriodDays: 180,
+      dataQuality: "partial",
+    });
+  });
+
+  it("accepts the full 6-tool review_progress allowlist (regression: cap matches capability config)", () => {
+    const parsed = domainLlmStepRequestSchema.parse({
+      ...baseRequest,
+      allowedTools: [
+        "getWeeklyProgressContext",
+        "getUserContextSlice",
+        "getRecentAdherence",
+        "getActivePlanDetail",
+        "searchExerciseCatalog",
+        "getProgressHistory",
+      ],
+    });
+
+    expect(parsed.allowedTools).toHaveLength(6);
+  });
+
+  it("rejects a deepReview block carrying free text", () => {
+    const result = domainLlmStepRequestSchema.safeParse({
+      ...baseRequest,
+      deepReview: {
+        requestedPeriodDays: 365,
+        grantedPeriodDays: 180,
+        dataQuality: "partial",
+        summaryText: "user felt bad in March",
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

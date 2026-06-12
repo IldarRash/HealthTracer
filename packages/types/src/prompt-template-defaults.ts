@@ -1,3 +1,8 @@
+import {
+  PROGRESS_HISTORY_BUCKET_METRICS,
+  PROGRESS_HISTORY_METRIC_LEGEND,
+} from "./progress-history.js";
+
 // Parallel-domain pipeline template keys
 export const ROUTER_DECISION_TEMPLATE_KEY = "router" as const;
 export const DOMAIN_WORKOUT_TEMPLATE_KEY = "domain_workout" as const;
@@ -19,6 +24,19 @@ export const PROMPT_TEMPLATE_KEYS = [
 ] as const;
 
 export type PromptTemplateKey = (typeof PROMPT_TEMPLATE_KEYS)[number];
+
+/**
+ * Static metric legend block for the domain/decision template STATIC prefixes
+ * (Phase 4). Built once at module load from the EN legend so the prefix stays
+ * byte-stable and placeholder-free (one language keeps it static; the LLM
+ * answers in {{responseLanguage}} regardless). Code-owned text — NOT user data.
+ */
+export const PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK: string = [
+  "PROGRESS HISTORY METRIC LEGEND (numeric review aggregates; applies when progressHistory buckets are present in the structured coaching context):",
+  ...PROGRESS_HISTORY_BUCKET_METRICS.map(
+    (metric) => `- ${metric}: ${PROGRESS_HISTORY_METRIC_LEGEND.en[metric]}`,
+  ),
+].join("\n");
 
 export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, readonly string[]> = {
   // Phase 2 router — first-LLM domain routing stage
@@ -46,6 +64,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "safetyConstraints",
     "attachmentContextJson",
     "responseLanguage",
+    "deepReviewSuffix",
   ],
   // Phase 2 domain nutrition LLM
   [DOMAIN_NUTRITION_TEMPLATE_KEY]: [
@@ -61,6 +80,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "safetyConstraints",
     "attachmentContextJson",
     "responseLanguage",
+    "deepReviewSuffix",
   ],
   // Phase 2 domain health LLM
   [DOMAIN_HEALTH_TEMPLATE_KEY]: [
@@ -76,6 +96,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "safetyConstraints",
     "attachmentContextJson",
     "responseLanguage",
+    "deepReviewSuffix",
   ],
   // Phase 2 final decision-maker LLM
   [FINAL_DECISION_TEMPLATE_KEY]: [
@@ -88,6 +109,7 @@ export const PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS: Record<PromptTemplateKey, re
     "safetyConstraints",
     "responseLanguage",
     "lowConfidenceRouteSuffix",
+    "deepReviewSuffix",
   ],
 };
 
@@ -160,6 +182,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Also set workoutCaloriePerHourRate in your domain_answer to the same kcal/hour value.",
     "Do NOT set estimatedSessionCalorieBurn — the backend recomputes the total on accept.",
     "Example displayContract: {\"version\":1,\"title\":\"Volleyball session\",\"fields\":[{\"key\":\"caloriePerHourRate\",\"label\":\"Burn rate\",\"kind\":\"readonly\",\"unit\":\"kcal/hour\",\"value\":400,\"editable\":false},{\"key\":\"durationMinutes\",\"label\":\"Duration\",\"kind\":\"slider\",\"unit\":\"min\",\"value\":60,\"min\":1,\"max\":600,\"step\":5,\"editable\":true}],\"derived\":[{\"target\":\"totalCalories\",\"label\":\"Estimated calories\",\"unit\":\"kcal\",\"op\":\"rate_per_hour\",\"inputs\":[\"caloriePerHourRate\",\"durationMinutes\"],\"isPrimaryTotal\":true}]}",
+    // [METRIC-LEGEND] Marker: static progress-history metric legend (Phase 4; placeholder-free)
+    PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK,
     // --- DYNAMIC SUFFIX (per-turn values; placed last to avoid breaking the cache prefix) ---
     // [LANG] Marker: language instruction
     "Write all user-facing text (summary, proposal title, proposal reason) in {{responseLanguage}} (use 'en' for English, 'ru' for Russian). If empty, match the language of the user's message.",
@@ -175,6 +199,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Structured coaching context:",
     "{{coachingContextJson}}",
     "User message: {{userMessage}}",
+    // [DEEP-REVIEW-SUFFIX] Marker: inserted only on deep-review turns (Phase 4)
+    "{{deepReviewSuffix}}",
   ].join("\n"),
   // ---------------------------------------------------------------------------
   // Phase 2 domain nutrition LLM
@@ -198,6 +224,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "log_nutrition_incident — proposedChanges is a food log entry:",
     '{"intent":"log_nutrition_incident","targetDomain":"nutrition","title":"Log meal","reason":"User reported eating a meal","proposedChanges":{"incidentDateTime":"2026-06-05T13:00:00.000Z","items":[{"name":"Chicken breast","quantity":"200g","calories":330,"proteinGrams":62,"carbsGrams":0,"fatGrams":7}],"estimatedCalories":330,"estimatedMacros":{"proteinGrams":62,"carbsGrams":0,"fatGrams":7},"confidence":"medium","provenance":{"source":"text_estimate"},"imageRefs":[]}}',
     "If a food_photo attachment with hasImage=true is present, analyze the image content directly and return an approximate log_nutrition_incident proposal with estimated calories and macros.",
+    // [METRIC-LEGEND] Marker: static progress-history metric legend (Phase 4; placeholder-free)
+    PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK,
     // --- DYNAMIC SUFFIX (per-turn values; placed last to avoid breaking the cache prefix) ---
     // [LANG] Marker: language instruction
     "Write all user-facing text (summary, proposal title, proposal reason) in {{responseLanguage}} (use 'en' for English, 'ru' for Russian). If empty, match the language of the user's message.",
@@ -213,6 +241,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Structured coaching context:",
     "{{coachingContextJson}}",
     "User message: {{userMessage}}",
+    // [DEEP-REVIEW-SUFFIX] Marker: inserted only on deep-review turns (Phase 4)
+    "{{deepReviewSuffix}}",
   ].join("\n"),
   // ---------------------------------------------------------------------------
   // Phase 2 domain health LLM
@@ -239,6 +269,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "muscleTone must be one of: above_average, average, below_average.",
     "muscleMap values must be one of: strong, mid, weak.",
     "Reject any physique assessment request that includes diagnostic language (e.g. 'disease', 'condition', 'disorder', 'treat', 'prescribe', 'diagnose', 'медицинский диагноз', 'лечение', 'заболевание').",
+    // [METRIC-LEGEND] Marker: static progress-history metric legend (Phase 4; placeholder-free)
+    PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK,
     // --- DYNAMIC SUFFIX (per-turn values; placed last to avoid breaking the cache prefix) ---
     // [LANG] Marker: language instruction
     "Write all user-facing text (summary) in {{responseLanguage}} (use 'en' for English, 'ru' for Russian). If empty, match the language of the user's message.",
@@ -254,6 +286,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "Structured coaching context:",
     "{{coachingContextJson}}",
     "User message: {{userMessage}}",
+    // [DEEP-REVIEW-SUFFIX] Marker: inserted only on deep-review turns (Phase 4)
+    "{{deepReviewSuffix}}",
   ].join("\n"),
   // ---------------------------------------------------------------------------
   // Phase 2 final decision-maker LLM
@@ -287,6 +321,8 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     '→ Correct output: {"reply":"Here is your 3-day strength plan...","selectedAction":"create_workout_plan","selectedProposalIds":["cand_workout_0"],"consentRequired":false}',
     '→ Wrong output: {"reply":"Here is your plan...","selectedAction":"plain_reply","selectedProposalIds":[],"consentRequired":false}',
     '→ Wrong output (FORBIDDEN): {"reply":"...","selectedAction":"create_workout_plan","proposals":[{"intent":"create_workout_plan",...}],"consentRequired":false}',
+    // [METRIC-LEGEND] Marker: static progress-history metric legend (Phase 4; placeholder-free)
+    PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK,
     // --- DYNAMIC SUFFIX (per-turn values; placed last to avoid breaking the cache prefix) ---
     // [LANG] Marker: language instruction
     "Write all user-facing text (reply field) in {{responseLanguage}} (use 'en' for English, 'ru' for Russian). If empty, match the language of the user's message.",
@@ -301,5 +337,7 @@ export const DEFAULT_PROMPT_TEMPLATE_BODIES: Record<PromptTemplateKey, string> =
     "User message: {{userMessage}}",
     // [LOW-CONFIDENCE-SUFFIX] Marker: inserted only when routing confidence was low
     "{{lowConfidenceRouteSuffix}}",
+    // [DEEP-REVIEW-SUFFIX] Marker: inserted only on deep-review turns (Phase 4)
+    "{{deepReviewSuffix}}",
   ].join("\n"),
 };

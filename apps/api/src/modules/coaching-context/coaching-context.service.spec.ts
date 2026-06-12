@@ -811,6 +811,13 @@ describe("CoachingContextService — progress_history_review slice (Phase 3)", (
     expect(reviewSlice?.recoveryContext).toBeUndefined();
     expect(reviewSlice?.documentContext).toBeUndefined();
     expect(reviewSlice?.ragResults).toBeUndefined();
+
+    // Phase 4 floor regression: under allowDocuments=false NO slice of the
+    // deep-review packet carries document or RAG text — not just the review slice.
+    for (const slice of [packet.slice, ...packet.supplementarySlices]) {
+      expect(slice.documentContext).toBeUndefined();
+      expect(slice.ragResults).toBeUndefined();
+    }
   });
 
   it("threads planner-injected slice requests via options for route-less domain packets", async () => {

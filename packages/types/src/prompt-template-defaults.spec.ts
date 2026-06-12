@@ -9,13 +9,16 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROMPT_TEMPLATE_BODIES,
+  PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK,
   PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS,
   ROUTER_DECISION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,
   DOMAIN_NUTRITION_TEMPLATE_KEY,
   DOMAIN_HEALTH_TEMPLATE_KEY,
   FINAL_DECISION_TEMPLATE_KEY,
+  type PromptTemplateKey,
 } from "./prompt-template-defaults.js";
+import { PROGRESS_HISTORY_METRIC_LEGEND } from "./progress-history.js";
 import { compilePromptTemplates } from "./prompt-template-renderer.js";
 
 // ---------------------------------------------------------------------------
@@ -268,6 +271,7 @@ describe("prompt-template-renderer — renderDomainStep and renderFinalDecision 
       safetyConstraints: "none",
       attachmentContextJson: "none",
       responseLanguage: "ru",
+      deepReviewSuffix: "",
     });
 
     expect(rendered).toContain("ru");
@@ -288,6 +292,7 @@ describe("prompt-template-renderer — renderDomainStep and renderFinalDecision 
       safetyConstraints: "none",
       attachmentContextJson: "none",
       responseLanguage: "ru",
+      deepReviewSuffix: "",
     });
 
     expect(rendered).toContain("ru");
@@ -308,6 +313,7 @@ describe("prompt-template-renderer — renderDomainStep and renderFinalDecision 
       safetyConstraints: "none",
       attachmentContextJson: "none",
       responseLanguage: "ru",
+      deepReviewSuffix: "",
     });
 
     expect(rendered).toContain("ru");
@@ -325,6 +331,7 @@ describe("prompt-template-renderer — renderDomainStep and renderFinalDecision 
       safetyConstraints: "none",
       responseLanguage: "ru",
       lowConfidenceRouteSuffix: "",
+      deepReviewSuffix: "",
     });
 
     expect(rendered).toContain("ru");
@@ -358,6 +365,7 @@ describe("prompt-template-defaults — Fix 3: static prefix has no unresolved {{
       safetyConstraints: "none",
       attachmentContextJson: "none",
       responseLanguage: "en",
+      deepReviewSuffix: "",
     });
     const splitMarker = "Write all user-facing text";
     const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
@@ -379,6 +387,7 @@ describe("prompt-template-defaults — Fix 3: static prefix has no unresolved {{
       safetyConstraints: "none",
       attachmentContextJson: "none",
       responseLanguage: "en",
+      deepReviewSuffix: "",
     });
     const splitMarker = "Write all user-facing text";
     const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
@@ -400,6 +409,7 @@ describe("prompt-template-defaults — Fix 3: static prefix has no unresolved {{
       safetyConstraints: "none",
       attachmentContextJson: "none",
       responseLanguage: "en",
+      deepReviewSuffix: "",
     });
     const splitMarker = "Write all user-facing text";
     const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
@@ -418,6 +428,7 @@ describe("prompt-template-defaults — Fix 3: static prefix has no unresolved {{
       safetyConstraints: "none",
       responseLanguage: "en",
       lowConfidenceRouteSuffix: "",
+      deepReviewSuffix: "",
     });
     const splitMarker = "Write all user-facing text";
     const prefix = rendered.substring(0, rendered.indexOf(splitMarker));
@@ -448,8 +459,10 @@ describe("PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS — unchanged by W2", () => {
     expect(placeholders).toContain("allowedProposalIntents");
     expect(placeholders).toContain("attachmentContextJson");
     expect(placeholders).toContain("responseLanguage");
-    // 12 placeholders — 11 original + responseLanguage (i18n feature)
-    expect(placeholders).toHaveLength(12);
+    // Phase 4: deepReviewSuffix — injected as empty string on non-review turns
+    expect(placeholders).toContain("deepReviewSuffix");
+    // 13 placeholders — 11 original + responseLanguage (i18n) + deepReviewSuffix (Phase 4)
+    expect(placeholders).toHaveLength(13);
   });
 
   it("decision template requires its placeholders including responseLanguage, Slice 2, and Slice 5 additions", () => {
@@ -464,8 +477,10 @@ describe("PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS — unchanged by W2", () => {
     expect(placeholders).toContain("responseLanguage");
     // Slice 5: lowConfidenceRouteSuffix — injected as empty string for confident routes
     expect(placeholders).toContain("lowConfidenceRouteSuffix");
-    // 9 placeholders: 8 (through Slice 2) + lowConfidenceRouteSuffix (Slice 5)
-    expect(placeholders).toHaveLength(9);
+    // Phase 4: deepReviewSuffix — injected as empty string on non-review turns
+    expect(placeholders).toContain("deepReviewSuffix");
+    // 10 placeholders: 8 (through Slice 2) + lowConfidenceRouteSuffix (Slice 5) + deepReviewSuffix (Phase 4)
+    expect(placeholders).toHaveLength(10);
   });
 });
 
@@ -576,6 +591,7 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
         safetyConstraints: "none",
         attachmentContextJson: "none",
         responseLanguage: "en",
+        deepReviewSuffix: "",
       };
 
       const render1 = compiled.renderDomainStep("workout", {
@@ -609,6 +625,7 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
         safetyConstraints: "none",
         attachmentContextJson: "none",
         responseLanguage: "en",
+        deepReviewSuffix: "",
       };
 
       const render1 = compiled.renderDomainStep("nutrition", {
@@ -641,6 +658,7 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
         safetyConstraints: "none",
         attachmentContextJson: "none",
         responseLanguage: "en",
+        deepReviewSuffix: "",
       };
 
       const render1 = compiled.renderDomainStep("health", {
@@ -670,6 +688,7 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
         safetyConstraints: "none",
         responseLanguage: "en",
         lowConfidenceRouteSuffix: "",
+        deepReviewSuffix: "",
       };
 
       const render1 = compiled.renderFinalDecision({
@@ -704,6 +723,7 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
         safetyConstraints: "none",
         responseLanguage: "en",
         lowConfidenceRouteSuffix: "ROUTING NOTE: low confidence",
+        deepReviewSuffix: "",
       });
 
       const emptyRender = compiled.renderFinalDecision({
@@ -716,6 +736,7 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
         safetyConstraints: "none",
         responseLanguage: "en",
         lowConfidenceRouteSuffix: "",
+        deepReviewSuffix: "",
       });
 
       // Static prefix must be byte-identical regardless of the suffix flag.
@@ -730,5 +751,170 @@ describe("prompt-template-defaults — Slice 4: cache-friendly ordering (static 
       // And must NOT appear when the suffix is empty.
       expect(emptyRender).not.toContain("ROUTING NOTE: low confidence");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4 — deep-review suffix placement + static metric legend
+// ---------------------------------------------------------------------------
+
+/**
+ * First per-turn dynamic line of each template body — everything before it is
+ * the STATIC prefix (must stay byte-stable and placeholder-free).
+ */
+const STATIC_PREFIX_END_MARKERS: Record<PromptTemplateKey, string> = {
+  [ROUTER_DECISION_TEMPLATE_KEY]: "Normalized user message:",
+  [DOMAIN_WORKOUT_TEMPLATE_KEY]: "Write all user-facing text",
+  [DOMAIN_NUTRITION_TEMPLATE_KEY]: "Write all user-facing text",
+  [DOMAIN_HEALTH_TEMPLATE_KEY]: "Write all user-facing text",
+  [FINAL_DECISION_TEMPLATE_KEY]: "Write all user-facing text",
+};
+
+const FAN_OUT_TEMPLATE_KEYS = [
+  DOMAIN_WORKOUT_TEMPLATE_KEY,
+  DOMAIN_NUTRITION_TEMPLATE_KEY,
+  DOMAIN_HEALTH_TEMPLATE_KEY,
+  FINAL_DECISION_TEMPLATE_KEY,
+] as const;
+
+describe("prompt-template-defaults — Phase 4: static prefixes are placeholder-free", () => {
+  const allKeys = Object.keys(STATIC_PREFIX_END_MARKERS) as PromptTemplateKey[];
+
+  for (const key of allKeys) {
+    it(`${key} static prefix contains NO {{...}} placeholder`, () => {
+      const body = DEFAULT_PROMPT_TEMPLATE_BODIES[key];
+      const markerIndex = body.indexOf(STATIC_PREFIX_END_MARKERS[key]);
+      expect(markerIndex).toBeGreaterThan(0);
+
+      const staticPrefix = body.substring(0, markerIndex);
+      expect(staticPrefix.length).toBeGreaterThan(100);
+      expect(staticPrefix).not.toMatch(/\{\{/);
+    });
+  }
+});
+
+describe("prompt-template-defaults — Phase 4: {{deepReviewSuffix}} placement", () => {
+  for (const key of FAN_OUT_TEMPLATE_KEYS) {
+    it(`${key} carries {{deepReviewSuffix}} in the dynamic suffix only`, () => {
+      const body = DEFAULT_PROMPT_TEMPLATE_BODIES[key];
+      const markerIndex = body.indexOf(STATIC_PREFIX_END_MARKERS[key]);
+      const suffixIndex = body.indexOf("{{deepReviewSuffix}}");
+
+      expect(suffixIndex).toBeGreaterThan(-1);
+      // The placeholder must live AFTER the static prefix ends (suffix-only).
+      expect(suffixIndex).toBeGreaterThan(markerIndex);
+    });
+  }
+
+  it("router template does NOT carry {{deepReviewSuffix}} (router never coaches)", () => {
+    expect(DEFAULT_PROMPT_TEMPLATE_BODIES[ROUTER_DECISION_TEMPLATE_KEY]).not.toContain(
+      "deepReviewSuffix",
+    );
+  });
+});
+
+describe("prompt-template-defaults — Phase 4: static metric legend in prefixes", () => {
+  it("legend block is built from the EN legend and is placeholder-free", () => {
+    expect(PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK).not.toMatch(/\{\{/);
+    expect(PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK).toContain(
+      PROGRESS_HISTORY_METRIC_LEGEND.en.workoutAdherencePercent,
+    );
+    expect(PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK).toContain(
+      PROGRESS_HISTORY_METRIC_LEGEND.en.avgMoodScore,
+    );
+    // One language only (EN) keeps the prefix static; no RU legend text leaks in.
+    expect(PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK).not.toContain(
+      PROGRESS_HISTORY_METRIC_LEGEND.ru.workoutAdherencePercent,
+    );
+  });
+
+  for (const key of FAN_OUT_TEMPLATE_KEYS) {
+    it(`${key} carries the metric legend inside the STATIC prefix`, () => {
+      const body = DEFAULT_PROMPT_TEMPLATE_BODIES[key];
+      const markerIndex = body.indexOf(STATIC_PREFIX_END_MARKERS[key]);
+      const legendIndex = body.indexOf("PROGRESS HISTORY METRIC LEGEND");
+
+      expect(legendIndex).toBeGreaterThan(-1);
+      expect(legendIndex).toBeLessThan(markerIndex);
+      expect(body).toContain(PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK);
+    });
+  }
+
+  it("router template does NOT carry the metric legend", () => {
+    expect(DEFAULT_PROMPT_TEMPLATE_BODIES[ROUTER_DECISION_TEMPLATE_KEY]).not.toContain(
+      "PROGRESS HISTORY METRIC LEGEND",
+    );
+  });
+});
+
+describe("prompt-template-defaults — Phase 4: deepReviewSuffix render behavior", () => {
+  const compiled = compilePromptTemplates({ templates: {} });
+  const splitMarker = "Write all user-facing text";
+
+  it("decision deepReviewSuffix renders in the suffix only and never alters the static prefix", () => {
+    const baseValues = {
+      userMessage: "Test",
+      domainOutputsJson: "[]",
+      actionVariantCatalogJson: "[]",
+      candidateProposalSummariesJson: "[]",
+      recentMessagesJson: "[]",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      responseLanguage: "en",
+      lowConfidenceRouteSuffix: "",
+    };
+
+    const reviewRender = compiled.renderFinalDecision({
+      ...baseValues,
+      deepReviewSuffix: "DEEP REVIEW NOTE: test marker",
+    });
+    const defaultRender = compiled.renderFinalDecision({
+      ...baseValues,
+      deepReviewSuffix: "",
+    });
+
+    const prefix1 = reviewRender.substring(0, reviewRender.indexOf(splitMarker));
+    const prefix2 = defaultRender.substring(0, defaultRender.indexOf(splitMarker));
+    expect(prefix1).toBe(prefix2);
+
+    expect(reviewRender.substring(reviewRender.indexOf(splitMarker))).toContain(
+      "DEEP REVIEW NOTE: test marker",
+    );
+    expect(defaultRender).not.toContain("DEEP REVIEW NOTE");
+  });
+
+  it("domain_workout deepReviewSuffix renders in the suffix only and never alters the static prefix", () => {
+    const baseValues = {
+      domain: "workout",
+      userMessage: "Test",
+      iteration: "1",
+      maxIterations: "3",
+      priorToolResultsJson: "[]",
+      coachingContextJson: "{}",
+      allowedTools: "getProgressHistory",
+      allowedProposalIntents: "adapt_workout_plan_from_progress",
+      safetyFlags: "none",
+      safetyConstraints: "none",
+      attachmentContextJson: "none",
+      responseLanguage: "en",
+    };
+
+    const reviewRender = compiled.renderDomainStep("workout", {
+      ...baseValues,
+      deepReviewSuffix: "DEEP REVIEW NOTE: test marker",
+    });
+    const defaultRender = compiled.renderDomainStep("workout", {
+      ...baseValues,
+      deepReviewSuffix: "",
+    });
+
+    const prefix1 = reviewRender.substring(0, reviewRender.indexOf(splitMarker));
+    const prefix2 = defaultRender.substring(0, defaultRender.indexOf(splitMarker));
+    expect(prefix1).toBe(prefix2);
+
+    expect(reviewRender.substring(reviewRender.indexOf(splitMarker))).toContain(
+      "DEEP REVIEW NOTE: test marker",
+    );
+    expect(defaultRender).not.toContain("DEEP REVIEW NOTE");
   });
 });

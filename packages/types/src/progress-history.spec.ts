@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   clampProgressHistoryLookback,
+  deepReviewPromptContextSchema,
+  deriveDeepReviewDataQuality,
+  resolveWorstDataSufficiency,
   MAX_PROGRESS_HISTORY_BUCKETS,
   PROGRESS_HISTORY_BUCKET_CAPS,
   PROGRESS_HISTORY_BUCKET_METRICS,
@@ -270,5 +273,112 @@ describe("PROGRESS_HISTORY_METRIC_LEGEND", () => {
       expect(PROGRESS_HISTORY_METRIC_LEGEND.en[metric]?.length).toBeGreaterThan(0);
       expect(PROGRESS_HISTORY_METRIC_LEGEND.ru[metric]?.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4 — deep-review prompt context + worst-of data quality
+// ---------------------------------------------------------------------------
+
+describe("deepReviewPromptContextSchema", () => {
+  it("round-trips a clamped review block", () => {
+    const block = {
+      requestedPeriodDays: 365,
+      grantedPeriodDays: 180,
+      dataQuality: "partial" as const,
+    };
+
+    expect(deepReviewPromptContextSchema.parse(block)).toEqual(block);
+  });
+
+  it("accepts a null requestedPeriodDays (review profile without an explicit lookback ask)", () => {
+    const block = {
+      requestedPeriodDays: null,
+      grantedPeriodDays: 90,
+      dataQuality: "sufficient" as const,
+    };
+
+    expect(deepReviewPromptContextSchema.parse(block)).toEqual(block);
+  });
+
+  it("rejects unknown keys, zero granted days, and free-text dataQuality", () => {
+    expect(
+      deepReviewPromptContextSchema.safeParse({
+        requestedPeriodDays: null,
+        grantedPeriodDays: 90,
+        dataQuality: "sufficient",
+        note: "free text",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      deepReviewPromptContextSchema.safeParse({
+        requestedPeriodDays: null,
+        grantedPeriodDays: 0,
+        dataQuality: "sufficient",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      deepReviewPromptContextSchema.safeParse({
+        requestedPeriodDays: null,
+        grantedPeriodDays: 90,
+        dataQuality: "looks fine to me",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("resolveWorstDataSufficiency / deriveDeepReviewDataQuality", () => {
+  it.each([
+    [[], "sufficient"],
+    [["sufficient"], "sufficient"],
+    [["sufficient", "sufficient"], "sufficient"],
+    [["sufficient", "partial"], "partial"],
+    [["partial", "sufficient", "partial"], "partial"],
+    [["partial", "insufficient"], "insufficient"],
+    [["insufficient", "sufficient"], "insufficient"],
+    [["insufficient", "partial", "sufficient", "insufficient"], "insufficient"],
+  ] as const)("worst of %j is %s", (values, expected) => {
+    expect(resolveWorstDataSufficiency([...values])).toBe(expected);
+  });
+
+  it("derives the worst of the four per-domain sufficiency values", () => {
+    expect(
+      deriveDeepReviewDataQuality({
+        workout: "sufficient",
+        habits: "sufficient",
+        recovery: "partial",
+        wellbeing: "sufficient",
+      }),
+    ).toBe("partial");
+  });
+
+  it("compression dataQuality further degrades the derived quality (worst-of)", () => {
+    expect(
+      deriveDeepReviewDataQuality(
+        {
+          workout: "sufficient",
+          habits: "sufficient",
+          recovery: "sufficient",
+          wellbeing: "sufficient",
+        },
+        "insufficient",
+      ),
+    ).toBe("insufficient");
+  });
+
+  it("a better compression dataQuality never improves the derived quality", () => {
+    expect(
+      deriveDeepReviewDataQuality(
+        {
+          workout: "insufficient",
+          habits: "sufficient",
+          recovery: "sufficient",
+          wellbeing: "sufficient",
+        },
+        "sufficient",
+      ),
+    ).toBe("insufficient");
   });
 });

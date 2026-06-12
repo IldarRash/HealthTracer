@@ -1500,6 +1500,9 @@ export {
 
 export {
   clampProgressHistoryLookback,
+  deepReviewPromptContextSchema,
+  deriveDeepReviewDataQuality,
+  resolveWorstDataSufficiency,
   MAX_PROGRESS_HISTORY_BUCKETS,
   MAX_PROGRESS_HISTORY_PLAN_CHANGE_MARKERS,
   MIN_PROGRESS_HISTORY_PERIOD_DAYS,
@@ -1518,6 +1521,7 @@ export {
   progressHistoryPlanChangeMarkerSchema,
   progressHistoryReviewSummarySchema,
   resolveProgressHistoryGranularity,
+  type DeepReviewPromptContext,
   type ProgressHistoryBucket,
   type ProgressHistoryBucketMetric,
   type ProgressHistoryDataSufficiency,
@@ -1874,6 +1878,7 @@ export {
   DOMAIN_NUTRITION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,
   FINAL_DECISION_TEMPLATE_KEY,
+  PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK,
   PROMPT_TEMPLATE_KEYS,
   PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS,
   ROUTER_DECISION_TEMPLATE_KEY,

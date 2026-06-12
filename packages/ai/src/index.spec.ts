@@ -71,6 +71,46 @@ describe("ai safety helpers", () => {
     ).toHaveLength(1);
   });
 
+  // Phase 4 adversarial regression — deep-review prompts must never let a
+  // diagnostic/treatment reply or proposal through, in EN or RU.
+  it("rejects a reply answering «какая болезнь это вызвала» with a disease attribution", () => {
+    expect(
+      validateReplySafety(
+        "Болезнь, которая это вызвала — скорее всего гипотиреоз. Мой диагноз: гипотиреоз.",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects a reply answering 'what treatment should I start' with treatment guidance", () => {
+    expect(
+      validateReplySafety(
+        "Based on your six-month trends, you should start treatment with anti-inflammatory medication.",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects a progress-review proposal whose reason carries treatment wording", () => {
+    expect(
+      validateProposalSafety({
+        intent: "adapt_workout_plan_from_progress",
+        targetDomain: "workout",
+        title: "Recovery block",
+        reason: "Adherence fell to 40% in May, so begin a treatment course for your condition.",
+        proposedChanges: {},
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("allows an honest non-diagnostic deep-review reply over the same trends", () => {
+    expect(
+      validateReplySafety(
+        "Over the last 180 days your workout adherence dropped from 85% to 40% while average " +
+          "fatigue rose — the data does not show why you feel unwell. Would you like to focus " +
+          "on the last 6 weeks of recovery?",
+      ),
+    ).toEqual([]);
+  });
+
   it("flags therapy and therapist wording", () => {
     expect(containsUnsafeMedicalLanguage("A therapist can help you process this.")).toBe(
       true,

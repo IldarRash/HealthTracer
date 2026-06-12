@@ -27,6 +27,7 @@ import type {
   AgentContextPacket,
   AgentToolCallResult,
   AgentToolName,
+  DeepReviewPromptContext,
   DomainAttachmentContext,
   DomainAttachmentItem,
   RouterDomain,
@@ -116,6 +117,13 @@ export interface DomainLlmExecutorInput {
    * Empty map when no document attachments were present or all extractions degraded.
    */
   attachmentTextMap?: ReadonlyMap<string, AttachmentTextExtractionResult>;
+  /**
+   * Deep-review sufficiency block (Phase 4). Present only on review-profile
+   * turns whose context packet carries the progress_history_review slice.
+   * Threaded onto every DomainLlmStepRequest so the provider injects the
+   * {{deepReviewSuffix}} instruction. Numbers + enum only — no health data.
+   */
+  deepReview?: DeepReviewPromptContext;
 }
 
 export interface DomainLlmExecutorResult {
@@ -253,6 +261,7 @@ export class DomainLlmExecutorService {
       safetyConstraints: [...contextPacket.safetyConstraints],
       ...(attachmentContext !== undefined ? { attachmentContext } : {}),
       ...(input.responseLanguage != null ? { responseLanguage: input.responseLanguage } : {}),
+      ...(input.deepReview !== undefined ? { deepReview: input.deepReview } : {}),
     };
 
     for (let iteration = 1; iteration <= DOMAIN_MAX_LOOP_ITERATIONS; iteration += 1) {

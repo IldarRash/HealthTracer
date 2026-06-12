@@ -247,6 +247,85 @@ export const progressHistoryReviewSummarySchema = z
 export type ProgressHistoryReviewSummary = z.infer<typeof progressHistoryReviewSummarySchema>;
 
 // ---------------------------------------------------------------------------
+// Deep-review prompt context (Phase 4 — sufficiency framing)
+//
+// Carried on FinalDecisionRequest and DomainLlmStepRequest for review turns so
+// the prompt templates can frame what is observed vs uncertain, name the
+// analyzed range, and (when data quality is not "sufficient") offer exactly
+// one narrowing follow-up. Numbers + enum only — never free text.
+// ---------------------------------------------------------------------------
+
+export const deepReviewPromptContextSchema = z
+  .object({
+    /** Lookback the user asked for. Null when no explicit period was requested. */
+    requestedPeriodDays: z.number().int().min(1).max(36500).nullable(),
+    /** Lookback actually granted after the ladder/profile clamp. */
+    grantedPeriodDays: z
+      .number()
+      .int()
+      .min(1)
+      .max(PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS),
+    /**
+     * Worst-of data quality across the review summary's per-domain
+     * dataSufficiency values (and the compression summary's dataQuality when
+     * present). Derived via deriveDeepReviewDataQuality.
+     */
+    dataQuality: progressHistoryDomainSufficiencySchema,
+  })
+  .strict();
+
+export type DeepReviewPromptContext = z.infer<typeof deepReviewPromptContextSchema>;
+
+const DATA_SUFFICIENCY_SEVERITY: Readonly<
+  Record<ProgressHistoryDomainSufficiency, number>
+> = {
+  sufficient: 0,
+  partial: 1,
+  insufficient: 2,
+};
+
+/**
+ * Worst-of reduction over sufficiency values:
+ * insufficient > partial > sufficient. Empty input → "sufficient".
+ */
+export function resolveWorstDataSufficiency(
+  values: readonly ProgressHistoryDomainSufficiency[],
+): ProgressHistoryDomainSufficiency {
+  let worst: ProgressHistoryDomainSufficiency = "sufficient";
+
+  for (const value of values) {
+    if (DATA_SUFFICIENCY_SEVERITY[value] > DATA_SUFFICIENCY_SEVERITY[worst]) {
+      worst = value;
+    }
+  }
+
+  return worst;
+}
+
+/**
+ * Derive the deepReview dataQuality: the worst of the review summary's
+ * per-domain dataSufficiency values, further degraded by the compression
+ * summary's dataQuality when present (same enum values by construction).
+ */
+export function deriveDeepReviewDataQuality(
+  dataSufficiency: ProgressHistoryDataSufficiency,
+  compressionDataQuality?: ProgressHistoryDomainSufficiency | null,
+): ProgressHistoryDomainSufficiency {
+  const values: ProgressHistoryDomainSufficiency[] = [
+    dataSufficiency.workout,
+    dataSufficiency.habits,
+    dataSufficiency.recovery,
+    dataSufficiency.wellbeing,
+  ];
+
+  if (compressionDataQuality != null) {
+    values.push(compressionDataQuality);
+  }
+
+  return resolveWorstDataSufficiency(values);
+}
+
+// ---------------------------------------------------------------------------
 // Static metric legend (code-owned, NOT user data).
 //
 // One-line EN/RU description per bucket metric. Rides in the static prefix of

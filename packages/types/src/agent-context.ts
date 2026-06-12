@@ -758,6 +758,12 @@ export const agentFanOutDecisionDiagnosticsSchema = z.object({
    * turns with decision-maker outputs. Optional/back-compat: absent on pre-Slice-5 rows.
    */
   lowConfidenceRoute: z.boolean().optional(),
+  /**
+   * True when this turn carried a deep-review sufficiency block (Phase 4) into
+   * the domain/decision requests. Boolean only — never period numbers or any
+   * health data. Absent on non-review turns.
+   */
+  deepReview: z.boolean().optional(),
   /** Token + latency usage for the decision-maker LLM call. Absent on fallback paths. */
   usage: agentProviderUsageSchema.optional(),
 });
