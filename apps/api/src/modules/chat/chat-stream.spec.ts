@@ -489,8 +489,9 @@ describe("ChatService.sendMessage — onProgress threading", () => {
       } as never,
       {
         assertAiMessageAllowed: vi.fn().mockResolvedValue(undefined),
-        recordAiMessageUsage: vi.fn().mockResolvedValue(undefined),
+        recordAiMessageUsage: vi.fn().mockResolvedValue(1),
       } as never,
+      { recordTurn: vi.fn() } as never,
     );
   }
 
