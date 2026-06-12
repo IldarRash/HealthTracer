@@ -23,14 +23,18 @@ import {
   validateFinalDecisionOutputShape,
   validateRouterDecisionOutputShape,
 } from "@health/types";
+import { fetchOpenAiJsonCompletionWithRetry, stripExplicitNulls } from "./openai-http.js";
 import {
   DOMAIN_LLM_STEP_SCHEMA_NAME,
   FINAL_DECISION_SCHEMA_NAME,
   ROUTER_DECISION_SCHEMA_NAME,
-  domainLlmStepWireSchema,
+  buildDomainStepWireSchema,
   finalDecisionWireSchema,
   routerDecisionWireSchema,
 } from "./openai-wire-schemas.js";
+
+/** Error-message label threaded into the shared OpenAI HTTP helper. */
+const PROVIDER_ERROR_LABEL = "OpenAI coach provider";
 
 export class OpenAiCoachProviderMissingKeyError extends Error {
   constructor() {
@@ -60,48 +64,6 @@ export interface OpenAiCoachProviderOptions {
    */
   models?: OpenAiCoachProviderStageModels;
   promptTemplates?: CompiledPromptTemplates;
-}
-
-interface OpenAiUsage {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-}
-
-interface OpenAiChatCompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-    };
-  }>;
-  usage?: OpenAiUsage;
-  error?: {
-    message?: string;
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Retry configuration
-// ---------------------------------------------------------------------------
-
-/** Maximum total attempts (1 initial + up to MAX_RETRIES retries). */
-const MAX_RETRIES = 2 as const;
-
-/** Base delay in ms for exponential backoff: attempt 1 ≈ 300ms, attempt 2 ≈ 1200ms. */
-const RETRY_BASE_DELAY_MS = 300 as const;
-
-/**
- * Returns true for conditions that should trigger a retry.
- * ONLY retries on network failures (fetch rejection) or HTTP 429/5xx.
- * Does NOT retry on 4xx (except 429) or parse failures.
- */
-function isRetryableStatus(status: number): boolean {
-  return status === 429 || status >= 500;
-}
-
-function retryDelayMs(attempt: number): number {
-  // attempt is 1-based: first retry = 300ms, second retry = 1200ms (4×base)
-  return RETRY_BASE_DELAY_MS * Math.pow(4, attempt - 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -171,14 +133,18 @@ export class OpenAiCoachProvider implements CoachAiProvider {
     // (preserves the cacheable static prefix).
     const hasMultimodalContent = imageDataUris.length > 0 || textBlocks.length > 0;
 
-    // strict:false — the domain step schema has open-ended objects (tool input,
-    // per-intent candidateProposals) and OpenAI strict mode rejects any object
-    // with additionalProperties:true. The schema still guides generation; Zod
+    // Per-turn wire schema: strict:true with typed per-intent candidate
+    // envelopes when every allowed proposal intent has an LLM emission schema
+    // (packages/types/src/llm-emission); otherwise the permissive shape with
+    // strict:false — a graceful fallback with no behavior change. Zod still
     // validates post-receive and the executor degrades safely on mismatch.
+    const domainStepWireSchema = buildDomainStepWireSchema(
+      request.allowedProposalIntents,
+    );
     const domainStepSchema = {
       name: DOMAIN_LLM_STEP_SCHEMA_NAME,
-      schema: domainLlmStepWireSchema,
-      strict: false,
+      schema: domainStepWireSchema.schema,
+      strict: domainStepWireSchema.strict,
     };
 
     const { payload, usage } =
@@ -371,132 +337,22 @@ export class OpenAiCoachProvider implements CoachAiProvider {
   }
 
   /**
-   * Executes a single fetch against the OpenAI completions endpoint with
-   * bounded retries and returns the parsed JSON payload plus usage metadata.
-   *
-   * Retry policy:
-   *  - Network errors (fetch rejection): retry
-   *  - HTTP 429 (rate limit): retry with backoff
-   *  - HTTP 5xx: retry with backoff
-   *  - HTTP 4xx other than 429: throw immediately (no retry)
-   *  - Schema/parse failures (content parse): throw immediately (no retry)
+   * Delegates to the shared OpenAI HTTP helper (`openai-http.ts`) with this
+   * provider's API key and error label. Retry/backoff policy lives there.
    */
   private async fetchWithRetry(
     body: Record<string, unknown>,
     model: string,
     signal?: AbortSignal,
   ): Promise<{ payload: unknown; usage: ProviderUsage }> {
-    const startMs = Date.now();
-    let retries = 0;
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= 1 + MAX_RETRIES; attempt++) {
-      if (attempt > 1) {
-        const delay = retryDelayMs(attempt - 1);
-        await sleep(delay, signal);
-      }
-
-      try {
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${this.options.apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-          signal,
-        });
-
-        const completionResponse = (await response.json()) as OpenAiChatCompletionResponse;
-
-        if (!response.ok) {
-          const message =
-            completionResponse.error?.message ??
-            `OpenAI coach provider request failed with status ${response.status}.`;
-
-          if (!isRetryableStatus(response.status)) {
-            throw new Error(message);
-          }
-
-          // Retryable HTTP error — track and loop
-          lastError = new Error(message);
-          retries++;
-          continue;
-        }
-
-        const content = completionResponse.choices?.[0]?.message?.content;
-
-        if (!content) {
-          throw new Error("OpenAI coach provider returned an empty response.");
-        }
-
-        let parsedPayload: unknown;
-
-        try {
-          parsedPayload = JSON.parse(content) as unknown;
-        } catch {
-          throw new Error("OpenAI coach provider returned non-JSON content.");
-        }
-
-        const latencyMs = Date.now() - startMs;
-        const usage: ProviderUsage = {
-          promptTokens: completionResponse.usage?.prompt_tokens ?? 0,
-          completionTokens: completionResponse.usage?.completion_tokens ?? 0,
-          totalTokens: completionResponse.usage?.total_tokens ?? 0,
-          latencyMs,
-          retries,
-          model,
-        };
-
-        return { payload: parsedPayload, usage };
-      } catch (error) {
-        // On the last attempt, rethrow. For network errors on non-final attempts, retry.
-        if (attempt >= 1 + MAX_RETRIES) {
-          throw error instanceof Error ? error : new Error(String(error));
-        }
-
-        if (!(error instanceof Error) || !isNetworkError(error)) {
-          // Non-network JS error (including parse failures) — do not retry
-          throw error;
-        }
-
-        // Network error on a non-final attempt: retry
-        lastError = error;
-        retries++;
-      }
-    }
-
-    // Exhausted all attempts
-    throw lastError ?? new Error("OpenAI coach provider: all retry attempts exhausted.");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
-/** Returns true when the error looks like a network/transport failure (not an HTTP/parse error). */
-function isNetworkError(error: Error): boolean {
-  // fetch() rejects with a TypeError on network failures; other errors (protocol,
-  // CORS, etc.) may also surface this way. This is a heuristic — it prevents retrying
-  // application-level 4xx JSON errors masquerading as thrown errors.
-  return error instanceof TypeError || error.name === "TypeError";
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException("Aborted", "AbortError"));
-      return;
-    }
-
-    const id = setTimeout(resolve, ms);
-
-    signal?.addEventListener("abort", () => {
-      clearTimeout(id);
-      reject(new DOMException("Aborted", "AbortError"));
+    return fetchOpenAiJsonCompletionWithRetry({
+      apiKey: this.options.apiKey,
+      body,
+      model,
+      signal,
+      errorLabel: PROVIDER_ERROR_LABEL,
     });
-  });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -683,52 +539,6 @@ function buildOpenAiFinalDecisionPrompt(
     responseLanguage: request.responseLanguage ?? "",
     lowConfidenceRouteSuffix,
   });
-}
-
-// ---------------------------------------------------------------------------
-// Payload normalization
-// ---------------------------------------------------------------------------
-
-/**
- * Recursively strip object properties whose value is exactly `null`.
- *
- * OpenAI strict mode forces every field to appear in `required`, so optional
- * fields are declared as nullable-required (type: ["T","null"]) in the wire
- * schema. Zod `.optional()` fields accept `undefined` but not `null`, so we
- * strip all explicit nulls before the Zod parse.
- *
- * Rules:
- *  - Only removes properties whose value is exactly `null` from plain objects.
- *  - Recurses into object property values and array element objects.
- *  - Never removes array elements themselves (only their null-valued properties).
- *  - Fields that are `.nullable()` WITHOUT `.optional()` and have a `.default(null)`
- *    in Zod (e.g. `selectedAction`) are safe to strip: the Zod default re-applies
- *    null when the field is absent.
- *
- * Security note: MUST NOT log payload content.
- */
-function stripExplicitNulls(value: unknown): unknown {
-  if (value === null || value === undefined) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => stripExplicitNulls(item));
-  }
-
-  if (typeof value === "object") {
-    const result: Record<string, unknown> = {};
-
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (v !== null) {
-        result[k] = stripExplicitNulls(v);
-      }
-    }
-
-    return result;
-  }
-
-  return value;
 }
 
 export function createOpenAiCoachProvider(

@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { AiProposal } from "@health/types";
+import { canAcceptProposal, getAcceptDisabledReason } from "../../lib/proposal-ui-state";
+import { InlineProposalCard as InlineProposalCardRouter } from "./inline-proposal-card";
+import { InlineProposalCard as GenericInlineProposalCard } from "./inline-proposal-card-generic";
 
 /** Normalize CRLF → LF so assertions work cross-platform. */
 function readSource(path: string): string {
@@ -260,7 +264,9 @@ describe("InlineProposalCard contract routing", () => {
     const parseContractCallIndex = inlineProposalSource.indexOf("parseDisplayContract(");
     // Use JSX usage (angle bracket) so we skip the import line
     const contractCardJsxIndex = inlineProposalSource.indexOf("<ContractProposalCard");
-    const genericCardJsxIndex = inlineProposalSource.indexOf("<GenericInlineProposalCard");
+    // The FIRST generic usage is the invalid-proposal guard; the LAST one is
+    // the no-contract fallback that must come after ContractProposalCard.
+    const genericCardJsxIndex = inlineProposalSource.lastIndexOf("<GenericInlineProposalCard");
 
     expect(wellbeingIndex).toBeGreaterThan(-1);
     expect(nutritionIndex).toBeGreaterThan(-1);
@@ -286,6 +292,85 @@ describe("InlineProposalCard contract routing", () => {
     // The generic card import and usage must both be present as the final fallback
     expect(inlineProposalSource).toContain('import { InlineProposalCard as GenericInlineProposalCard }');
     expect(inlineProposalSource).toContain("<GenericInlineProposalCard");
+  });
+
+  it("routes unvalidated proposals to the generic card before every specialized card", () => {
+    const unvalidatedGuardIndex = inlineProposalSource.indexOf(
+      "!isValidatedProposal(props.proposal)",
+    );
+    const firstIntentCheckIndex = inlineProposalSource.indexOf(
+      'props.proposal.intent === "capture_wellbeing_checkin"',
+    );
+
+    expect(unvalidatedGuardIndex).toBeGreaterThan(-1);
+    expect(unvalidatedGuardIndex).toBeLessThan(firstIntentCheckIndex);
+  });
+});
+
+describe("InlineProposalCard unvalidated routing (direct call)", () => {
+  function makeUnvalidatedProposal(
+    intent: AiProposal["intent"],
+    targetDomain: AiProposal["targetDomain"],
+    validationStatus: "pending_validation" | "invalid",
+  ): AiProposal {
+    return {
+      id: "14a08176-64a7-4a2d-8a44-581807368394",
+      userId: "5d6e7f84-5334-4c2f-85f8-6e7a1dff2b81",
+      threadId: "24b19287-75b8-4a3e-9c10-691908479405",
+      sourceMessageId: null,
+      intent,
+      targetDomain,
+      title: "Pending proposal",
+      reason: "Awaiting validation.",
+      // Raw, untyped LLM payload — must never reach a specialized card.
+      proposedChanges: { mood: "not-a-number", items: "junk" },
+      status: "pending",
+      validationStatus,
+      validationErrors: [],
+      userDecisionAt: null,
+      appliedReference: null,
+      createdAt: "2026-06-12T12:00:00.000Z",
+      updatedAt: "2026-06-12T12:00:00.000Z",
+    };
+  }
+
+  it("routes a pending_validation capture_wellbeing_checkin proposal to the generic card without crashing", () => {
+    const proposal = makeUnvalidatedProposal(
+      "capture_wellbeing_checkin",
+      "general",
+      "pending_validation",
+    );
+
+    const element = InlineProposalCardRouter({ proposal });
+    expect(element.type).toBe(GenericInlineProposalCard);
+    expect(element.props.proposal).toBe(proposal);
+  });
+
+  it("routes a pending_validation save_body_analysis proposal to the generic card without crashing", () => {
+    const proposal = makeUnvalidatedProposal("save_body_analysis", "body", "pending_validation");
+
+    const element = InlineProposalCardRouter({ proposal });
+    expect(element.type).toBe(GenericInlineProposalCard);
+  });
+
+  it("still routes invalid proposals to the generic card", () => {
+    const proposal = makeUnvalidatedProposal("log_nutrition_incident", "nutrition", "invalid");
+
+    const element = InlineProposalCardRouter({ proposal });
+    expect(element.type).toBe(GenericInlineProposalCard);
+  });
+
+  it("keeps Apply disabled with an explanatory reason for pending_validation", () => {
+    const proposal = makeUnvalidatedProposal(
+      "capture_wellbeing_checkin",
+      "general",
+      "pending_validation",
+    );
+
+    expect(canAcceptProposal(proposal)).toBe(false);
+    const reason = getAcceptDisabledReason(proposal);
+    expect(reason).toBeTruthy();
+    expect(reason).toContain("Apply is unavailable");
   });
 });
 

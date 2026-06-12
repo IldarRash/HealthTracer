@@ -12,10 +12,56 @@ import {
 } from "@health/types";
 import { summarizeNutritionProposalChanges } from "./nutrition-ui-state";
 
+export type WorkoutDayExerciseSummary = {
+  name: string;
+  sets: number | null;
+  reps: string | null;
+  durationSeconds: number | null;
+};
+
+export type WorkoutDaySummary = {
+  /** Flat day line, e.g. "Monday: Upper body (5 exercises)" — identical to the matching `after` entry. */
+  label: string;
+  exercises: WorkoutDayExerciseSummary[];
+};
+
 export type ProposalChangeSummary = {
   before: string[];
   after: string[];
+  /**
+   * Structured per-day breakdown, present only for workout-plan proposals whose
+   * payload parsed. The last `workoutDays.length` entries of `after` are the
+   * matching flat day lines (the view swaps them for expandable day rows).
+   */
+  workoutDays?: WorkoutDaySummary[];
 };
+
+/**
+ * Format one exercise prescription for the expandable day rows:
+ * - sets + reps            → "3×8-12"
+ * - duration (reps absent) → "10min" (sets-prefixed when sets are present)
+ * - reps only              → "8-12"
+ * Returns null when the entry carries no prescription details.
+ */
+export function formatWorkoutExercisePrescription(
+  exercise: WorkoutDayExerciseSummary,
+): string | null {
+  if (exercise.sets != null && exercise.reps != null) {
+    return `${exercise.sets}×${exercise.reps}`;
+  }
+
+  if (exercise.durationSeconds != null) {
+    const minutes = Math.max(1, Math.round(exercise.durationSeconds / 60));
+    const duration = `${minutes}min`;
+    return exercise.sets != null ? `${exercise.sets}×${duration}` : duration;
+  }
+
+  if (exercise.reps != null) {
+    return exercise.reps;
+  }
+
+  return null;
+}
 
 const WEEKDAY_LABELS: Record<string, string> = {
   sunday: "Sunday",
@@ -51,21 +97,32 @@ function summarizeWorkoutProposalChanges(proposal: AiProposal): ProposalChangeSu
   }
 
   const coachingSummary = summarizeWorkoutPlanForCoaching(payload);
+  const workoutDays: WorkoutDaySummary[] = coachingSummary.days.map((day) => {
+    const label = formatWeekdayLabel(day.weekday) ?? "Training day";
+    const exerciseLabel =
+      day.exerciseCount === 1 ? "1 exercise" : `${day.exerciseCount} exercises`;
+
+    return {
+      label: `${label}: ${day.focus} (${exerciseLabel})`,
+      exercises: day.exercises.map((exercise) => ({
+        name: exercise.name,
+        sets: exercise.sets ?? null,
+        reps: exercise.reps ?? null,
+        durationSeconds: exercise.durationSeconds ?? null,
+      })),
+    };
+  });
+
   const after: string[] = [
     coachingSummary.title,
     coachingSummary.summary,
-    ...coachingSummary.days.map((day) => {
-      const label = formatWeekdayLabel(day.weekday) ?? "Training day";
-      const exerciseLabel =
-        day.exerciseCount === 1 ? "1 exercise" : `${day.exerciseCount} exercises`;
-      return `${label}: ${day.focus} (${exerciseLabel})`;
-    }),
+    ...workoutDays.map((day) => day.label),
   ];
 
   const before =
     payload.adaptationMetadata?.operations.map((operation) => operation.description) ?? [];
 
-  return { before, after };
+  return { before, after, workoutDays };
 }
 
 function summarizeHabitProposalChanges(proposal: AiProposal): ProposalChangeSummary {

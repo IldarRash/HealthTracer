@@ -1247,11 +1247,10 @@ export function getWorkoutProposalDomainErrors(
   const pendingDefinitions = changes.pendingExercises ?? {};
 
   if (pendingRefs.length > 0) {
+    // The same ref may legitimately repeat across days (the same exercise yields
+    // the same name slug); the apply path caches per-ref resolution, so repeated
+    // refs intentionally share one pendingExercises definition.
     const uniqueRefs = new Set(pendingRefs);
-
-    if (uniqueRefs.size !== pendingRefs.length) {
-      errors.push("workout: pendingExerciseRef values must be unique within the plan.");
-    }
 
     for (const ref of uniqueRefs) {
       if (!pendingDefinitions[ref]) {

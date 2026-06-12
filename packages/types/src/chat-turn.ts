@@ -15,6 +15,7 @@ import { chatAttachmentOutcomeSchema, chatMessageAttachmentMetaSchema } from "./
 import { aiProposalSchema } from "./ai-proposal.js";
 import type { AiProposal } from "./ai-proposal.js";
 import { directChatPathKindSchema } from "./direct-chat-path.js";
+import { tolerantArraySchema } from "./zod-tolerant.js";
 
 // ---------------------------------------------------------------------------
 // Chat thread / message schemas
@@ -105,7 +106,9 @@ export const chatTurnResponseSchema = z.object({
   thread: chatThreadSchema,
   userMessage: chatMessageSchema,
   assistantMessage: chatMessageSchema,
-  proposals: z.array(aiProposalSchema),
+  // Tolerant: one malformed proposal must never fail the whole turn response
+  // (sync endpoint and the SSE final frame both embed this schema).
+  proposals: tolerantArraySchema(aiProposalSchema, "chatTurn.proposal"),
   attachmentOutcomes: z.array(z.lazy(() => chatAttachmentOutcomeSchema)).optional(),
   /**
    * When true, the AI pipeline produced a consent-gated outcome that requires

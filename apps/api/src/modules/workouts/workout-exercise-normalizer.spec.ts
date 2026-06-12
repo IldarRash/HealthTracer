@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Exercise } from "@health/types";
-import { normalizeExerciseName } from "@health/types";
+import {
+  getWorkoutProposalDomainErrors,
+  normalizeExerciseName,
+  workoutPlanProposalChangesSchema,
+} from "@health/types";
 import {
   hasLegacyExerciseEntries,
   normalizeLegacyWorkoutPlanExercises,
@@ -295,9 +299,48 @@ describe("normalizeLegacyWorkoutPlanExercises", () => {
     expect(exercises[1]?.pendingExerciseRef).toBe("unknown-drill");
     expect(unmatchedNames).toEqual(["Unknown Drill"]);
   });
+
+  it("live regression: the same legacy exercise name on two days normalizes to a repeated ref that passes domain validation", async () => {
+    // Pins the live failure: an LLM plan repeating {name, sets, reps} across days
+    // normalizes to the same pendingExerciseRef on both days with ONE shared
+    // pendingExercises definition — and the result must pass
+    // getWorkoutProposalDomainErrors with requireStructuredPlan (the repeated-ref
+    // uniqueness rule that rejected the live proposal is deleted).
+    const service = makeExercisesService({}); // no catalog match → pendingExerciseRef path
+    const changes = workoutPlanProposalChangesSchema.parse({
+      ...BASE_CHANGES,
+      days: [
+        {
+          weekday: "monday",
+          focus: "Power",
+          exercises: [{ name: "Pogo Jump", sets: 2, reps: "20" }],
+        },
+        {
+          weekday: "thursday",
+          focus: "Power",
+          exercises: [{ name: "Pogo Jump", sets: 3, reps: "15" }],
+        },
+      ],
+    });
+
+    const { changes: result } = await normalizeLegacyWorkoutPlanExercises(
+      service as never,
+      USER_ID,
+      changes,
+    );
+
+    const firstEntry = result.days[0]?.exercises[0] as Record<string, unknown>;
+    const secondEntry = result.days[1]?.exercises[0] as Record<string, unknown>;
+    expect(firstEntry.pendingExerciseRef).toBe("pogo-jump");
+    expect(secondEntry.pendingExerciseRef).toBe("pogo-jump");
+    expect(Object.keys(result.pendingExercises ?? {})).toEqual(["pogo-jump"]);
+
+    const errors = getWorkoutProposalDomainErrors(result, { requireStructuredPlan: true });
+    expect(errors).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// End-to-end: normalizeWorkoutProposalExercises via ProposalValidationService
+// End-to-end: workout-plan normalization via ProposalNormalizationService
 // ---------------------------------------------------------------------------
-// Tested separately in proposal-validation.service.spec.ts to keep test file focused.
+// Tested separately in proposal-normalization.service.spec.ts to keep test file focused.
