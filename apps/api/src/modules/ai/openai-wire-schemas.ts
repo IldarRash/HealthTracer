@@ -17,10 +17,28 @@
  * in domainLlmStepOutputSchema is not expressible as a strict JSON schema; the calorie-
  * domain restriction is enforced by the Zod parse after the provider returns.
  *
+ * The domain step additionally has a PER-TURN builder (`buildDomainStepWireSchema`):
+ * when every allowed proposal intent of the turn has a typed LLM emission schema
+ * (packages/types/src/llm-emission), the builder returns a fully strict schema whose
+ * candidateProposals items are an anyOf of per-intent envelopes and whose tool_request
+ * variants enumerate the read-only tool input shapes. Otherwise it gracefully falls
+ * back to the permissive strict:false shape — no behavior cliff.
+ *
  * Unit tests in openai-wire-schemas.spec.ts verify that a valid sample that satisfies
  * each wire schema also passes the corresponding Zod contract — keeping the schemas
  * in sync.
  */
+
+import {
+  agentToolNameSchema as agentToolNameZodSchema,
+  buildLlmCandidateEnvelopeSchema,
+  contextDepthSchema,
+  contextSlicePurposeSchema,
+  contextTimeRangeSchema,
+  hasLlmEmissionSchemaForIntent,
+  type LlmEmissionCoveredIntent,
+} from "@health/types";
+import { toOpenAiStrictJsonSchema } from "./openai-json-schema.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,10 +68,9 @@ function nullableNumber(): JsonSchema {
 }
 
 /** Boolean-or-null */
-// Retained for future use; unused currently.
-// function nullableBoolean(): JsonSchema {
-//   return { type: ["boolean", "null"] };
-// }
+function nullableBoolean(): JsonSchema {
+  return { type: ["boolean", "null"] };
+}
 
 /** An array whose items match the given schema. */
 function arrayOf(items: JsonSchema): JsonSchema {
@@ -114,9 +131,16 @@ const agentSafetyFlagSchema: JsonSchema = {
   enum: [...AGENT_SAFETY_FLAG_VALUES],
 };
 
+// Derived from the authoritative Zod enum so the wire contract can never
+// drift from the live tool set (it previously hardcoded a stale list that
+// still advertised the removed getDocumentContext and omitted newer tools).
+const AGENT_TOOL_NAME_VALUES = agentToolNameZodSchema.options;
+
+type AgentToolNameValue = (typeof AGENT_TOOL_NAME_VALUES)[number];
+
 const agentToolNameSchema: JsonSchema = {
   type: "string",
-  enum: ["getUserContextSlice", "getDocumentContext", "getWeeklyProgressContext"],
+  enum: [...AGENT_TOOL_NAME_VALUES],
 };
 
 const routerDomainSchema: JsonSchema = {
@@ -143,7 +167,6 @@ export const routerDecisionWireSchema: JsonSchema = strictObject(
         ["domain", "confidence", "intentHints", "toolHints", "signalHints"],
       ),
     ),
-    contextNeeds: arrayOf({ type: "string" }),
     directCommand: nullable(
       strictObject(
         {
@@ -157,7 +180,7 @@ export const routerDecisionWireSchema: JsonSchema = strictObject(
     safetyFlags: arrayOf(agentSafetyFlagSchema),
     confidence: { type: "number" },
   },
-  ["selectedDomains", "contextNeeds", "directCommand", "safetyFlags", "confidence"],
+  ["selectedDomains", "directCommand", "safetyFlags", "confidence"],
 );
 
 // ---------------------------------------------------------------------------
@@ -185,29 +208,34 @@ const toolRequestWireSchema: JsonSchema = strictObject(
   ["kind", "tool", "input", "rationale"],
 );
 
-const domainAnswerWireSchema: JsonSchema = strictObject(
-  {
-    kind: { type: "string", enum: ["domain_answer"] },
-    domain: routerDomainSchema,
-    summary: { type: "string" },
-    candidateProposals: arrayOf({
-      type: "object",
-      additionalProperties: true, // untyped records; Zod validates per-intent
-    }),
-    domainSignals: arrayOf({ type: "string" }),
-    workoutCalorieEstimate: nullableNumber(),
-    workoutCaloriePerHourRate: nullableNumber(),
-  },
-  [
-    "kind",
-    "domain",
-    "summary",
-    "candidateProposals",
-    "domainSignals",
-    "workoutCalorieEstimate",
-    "workoutCaloriePerHourRate",
-  ],
-);
+/** Domain answer with caller-supplied candidateProposals item schema. */
+function buildDomainAnswerWireSchema(candidateItemSchema: JsonSchema): JsonSchema {
+  return strictObject(
+    {
+      kind: { type: "string", enum: ["domain_answer"] },
+      domain: routerDomainSchema,
+      summary: { type: "string" },
+      candidateProposals: arrayOf(candidateItemSchema),
+      domainSignals: arrayOf({ type: "string" }),
+      workoutCalorieEstimate: nullableNumber(),
+      workoutCaloriePerHourRate: nullableNumber(),
+    },
+    [
+      "kind",
+      "domain",
+      "summary",
+      "candidateProposals",
+      "domainSignals",
+      "workoutCalorieEstimate",
+      "workoutCaloriePerHourRate",
+    ],
+  );
+}
+
+const domainAnswerWireSchema: JsonSchema = buildDomainAnswerWireSchema({
+  type: "object",
+  additionalProperties: true, // untyped records; Zod validates per-intent
+});
 
 /**
  * Wire schema for DomainLlmStepOutput (generateDomainStep response).
@@ -225,6 +253,159 @@ export const domainLlmStepWireSchema: JsonSchema = {
   required: ["result"],
   additionalProperties: false,
 };
+
+// ---------------------------------------------------------------------------
+// Per-turn strict domain step wire schema (typed candidateProposals)
+// ---------------------------------------------------------------------------
+//
+// tool_request decision: in the STRICT schema the open-ended `input` object is
+// not allowed (additionalProperties:true is rejected), so the six read-only
+// tool input shapes are enumerated as one strict variant per tool — the small
+// input contracts from packages/types/src/agent-context.ts, with optional
+// fields as nullable-required. The permissive open-ended `input` survives only
+// in the strict:false fallback schema above.
+
+/**
+ * Strict per-tool input wire shapes. Optional Zod fields appear as
+ * nullable-required; stripExplicitNulls turns null into "absent" before the
+ * per-tool Zod input parse in AgentToolRegistryService.
+ */
+const TOOL_INPUT_WIRE_SCHEMAS: Record<AgentToolNameValue, JsonSchema> = {
+  // Enums derived from the authoritative Zod schemas (agent-context.ts) so the
+  // wire contract can never drift from the live slice purposes/depths/ranges.
+  getUserContextSlice: strictObject(
+    {
+      purpose: { type: "string", enum: [...contextSlicePurposeSchema.options] },
+      depth: nullable({ type: "string", enum: [...contextDepthSchema.options] }),
+      timeRange: nullable({ type: "string", enum: [...contextTimeRangeSchema.options] }),
+      includeRawData: nullableBoolean(),
+    },
+    ["purpose", "depth", "timeRange", "includeRawData"],
+  ),
+  // Input is ignored by the executor — an empty strict object keeps the wire honest.
+  getWeeklyProgressContext: strictObject({}, []),
+  searchExerciseCatalog: strictObject(
+    {
+      query: nullableString(),
+      muscle: nullableString(),
+      equipment: nullableString(),
+      difficulty: nullable({
+        type: "string",
+        enum: ["beginner", "intermediate", "advanced"],
+      }),
+      limit: nullableNumber(),
+    },
+    ["query", "muscle", "equipment", "difficulty", "limit"],
+  ),
+  searchRecipeCatalog: strictObject(
+    {
+      mealType: nullableString(),
+      tags: nullable(arrayOf({ type: "string" })),
+      restrictions: nullable(arrayOf({ type: "string" })),
+      limit: nullableNumber(),
+    },
+    ["mealType", "tags", "restrictions", "limit"],
+  ),
+  getActivePlanDetail: strictObject(
+    { domain: { type: "string", enum: ["workout", "nutrition"] } },
+    ["domain"],
+  ),
+  getRecentAdherence: strictObject(
+    { domain: nullable({ type: "string", enum: ["workout", "nutrition", "health"] }) },
+    ["domain"],
+  ),
+  // Mirrors getProgressHistoryInputSchema (periodDays required; clamped server-side).
+  getProgressHistory: strictObject({ periodDays: { type: "integer" } }, ["periodDays"]),
+};
+
+/** One strict tool_request variant per read-only tool (computed once). */
+const STRICT_TOOL_REQUEST_VARIANTS: readonly JsonSchema[] = AGENT_TOOL_NAME_VALUES.map(
+  (tool) =>
+    strictObject(
+      {
+        kind: { type: "string", enum: ["tool_request"] },
+        tool: { type: "string", enum: [tool] },
+        input: TOOL_INPUT_WIRE_SCHEMAS[tool],
+        rationale: nullableString(),
+      },
+      ["kind", "tool", "input", "rationale"],
+    ),
+);
+
+/** Memo cache keyed by the sorted, deduplicated intent list. */
+const domainStepWireSchemaCache = new Map<string, JsonSchema>();
+
+export interface DomainStepWireSchemaResult {
+  schema: JsonSchema;
+  strict: boolean;
+}
+
+/**
+ * Build the domain-step wire schema for one turn, from the turn's clamped
+ * allowedProposalIntents (SystemPlanner output — the capability catalog floor).
+ *
+ * strict:true only when the list is non-empty AND every intent has a typed
+ * LLM emission schema; the candidateProposals items then become an anyOf of
+ * per-intent strict envelopes ({intent, targetDomain, title, reason,
+ * proposedChanges}; candidate IDs stay code-assigned and are never emitted).
+ *
+ * Otherwise returns the existing permissive shape with strict:false — a
+ * per-turn graceful fallback with NO behavior change versus the previous
+ * always-permissive schema. An empty intent list also falls back: an empty
+ * anyOf is invalid JSON schema, and such turns (e.g. health/explainer routes)
+ * produce no proposals anyway.
+ */
+export function buildDomainStepWireSchema(
+  allowedProposalIntents: readonly string[],
+): DomainStepWireSchemaResult {
+  const uniqueIntents = [...new Set(allowedProposalIntents)].sort();
+  const coveredIntents: LlmEmissionCoveredIntent[] = [];
+
+  for (const intent of uniqueIntents) {
+    if (!hasLlmEmissionSchemaForIntent(intent)) {
+      return { schema: domainLlmStepWireSchema, strict: false };
+    }
+
+    coveredIntents.push(intent);
+  }
+
+  if (coveredIntents.length === 0) {
+    return { schema: domainLlmStepWireSchema, strict: false };
+  }
+
+  const cacheKey = coveredIntents.join(",");
+  const cached = domainStepWireSchemaCache.get(cacheKey);
+
+  if (cached) {
+    return { schema: cached, strict: true };
+  }
+
+  const envelopeSchemas = coveredIntents.map(
+    (intent) =>
+      toOpenAiStrictJsonSchema(buildLlmCandidateEnvelopeSchema(intent)) as JsonSchema,
+  );
+
+  const candidateItemSchema: JsonSchema =
+    envelopeSchemas.length === 1 ? envelopeSchemas[0]! : { anyOf: envelopeSchemas };
+
+  const schema: JsonSchema = {
+    type: "object",
+    properties: {
+      result: {
+        anyOf: [
+          ...STRICT_TOOL_REQUEST_VARIANTS,
+          buildDomainAnswerWireSchema(candidateItemSchema),
+        ],
+      },
+    },
+    required: ["result"],
+    additionalProperties: false,
+  };
+
+  domainStepWireSchemaCache.set(cacheKey, schema);
+
+  return { schema, strict: true };
+}
 
 // ---------------------------------------------------------------------------
 // Final decision output wire schema

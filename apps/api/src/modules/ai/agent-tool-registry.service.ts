@@ -14,8 +14,10 @@ import {
   agentToolCallRequestSchema,
   agentToolCallResultSchema,
   getActivePlanDetailInputSchema,
+  getProgressHistoryInputSchema,
   getRecentAdherenceInputSchema,
   getUserContextSliceInputSchema,
+  MIN_PROGRESS_HISTORY_PERIOD_DAYS,
   recentAdherenceResultSchema,
   searchExerciseCatalogInputSchema,
   searchExerciseCatalogResultSchema,
@@ -34,6 +36,7 @@ import type { ClerkAuthContext } from "../../auth.types.js";
 import { CoachingContextService } from "../coaching-context/coaching-context.service.js";
 import { ContextBudgetPolicyService } from "../coaching-context/context-budget-policy.service.js";
 import { ExercisesService } from "../exercises/exercises.service.js";
+import { ProgressHistoryAggregateService } from "../progress/progress-history-aggregate.service.js";
 import { RecipesService } from "../recipes/recipes.service.js";
 import { WorkoutsService } from "../workouts/workouts.service.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
@@ -52,6 +55,7 @@ export class AgentToolRegistryService {
     private readonly recipesService: RecipesService,
     private readonly workoutsService: WorkoutsService,
     private readonly nutritionService: NutritionService,
+    private readonly progressHistoryAggregateService: ProgressHistoryAggregateService,
   ) {}
 
   listAvailableTools(): AgentToolName[] {
@@ -67,6 +71,7 @@ export class AgentToolRegistryService {
       "searchRecipeCatalog",
       "getActivePlanDetail",
       "getRecentAdherence",
+      "getProgressHistory",
     ];
   }
 
@@ -103,6 +108,8 @@ export class AgentToolRegistryService {
         return this.executeGetActivePlanDetail(auth, request.input);
       case "getRecentAdherence":
         return this.executeGetRecentAdherence(auth, request.input);
+      case "getProgressHistory":
+        return this.executeGetProgressHistory(auth, request.input);
       default: {
         const _exhaustive: never = request.tool;
         return this.unsupportedToolResult(_exhaustive);
@@ -170,7 +177,6 @@ export class AgentToolRegistryService {
     const slice = await this.coachingContextService.getUserContextSlice(auth, {
       purpose: "weekly_review",
       includeRawData: false,
-      includeDocuments: false,
     });
 
     const result = slice.weeklyProgress ?? null;
@@ -455,7 +461,6 @@ export class AgentToolRegistryService {
     const slice = await this.coachingContextService.getUserContextSlice(auth, {
       purpose: "weekly_review",
       includeRawData: false,
-      includeDocuments: false,
     });
 
     const workoutExecution = slice.recentWorkoutExecution ?? null;
@@ -503,6 +508,44 @@ export class AgentToolRegistryService {
       tool: "getRecentAdherence",
       ok: true,
       result: validated.data,
+    });
+  }
+
+  /**
+   * getProgressHistory — adaptive-lookback numeric aggregates for deep reviews.
+   * periodDays is clamped server-side: minimum 7 days here, granularity-ladder
+   * cap inside the aggregate service. The result is numeric-only by schema
+   * construction (progressHistoryReviewSummarySchema cannot carry free text).
+   * Allowlisted only on review capabilities (review_progress, longevity_overview).
+   */
+  private async executeGetProgressHistory(
+    auth: ClerkAuthContext,
+    input: Record<string, unknown>,
+  ): Promise<AgentToolCallResult> {
+    const parsed = getProgressHistoryInputSchema.safeParse(input);
+
+    if (!parsed.success) {
+      return agentToolCallResultSchema.parse({
+        tool: "getProgressHistory",
+        ok: false,
+        errors: parsed.error.issues.map(
+          (issue) => `${issue.path.join(".") || "input"}: ${issue.message}`,
+        ),
+      });
+    }
+
+    const clampedPeriodDays = Math.max(MIN_PROGRESS_HISTORY_PERIOD_DAYS, parsed.data.periodDays);
+    // No result re-validation: the aggregate service already returns its summary
+    // through progressHistoryReviewSummarySchema.parse (fails loudly on drift).
+    const summary = await this.progressHistoryAggregateService.buildReviewSummaryForAuth(
+      auth,
+      clampedPeriodDays,
+    );
+
+    return agentToolCallResultSchema.parse({
+      tool: "getProgressHistory",
+      ok: true,
+      result: summary,
     });
   }
 }

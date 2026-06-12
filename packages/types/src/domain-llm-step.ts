@@ -7,6 +7,7 @@ import {
 import { routerDomainSchema } from "./router-decision.js";
 import { messagePreprocessorLanguageCodeSchema } from "./message-preprocessor.js";
 import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
+import { deepReviewPromptContextSchema } from "./progress-history.js";
 
 // ---------------------------------------------------------------------------
 // Bounded attachment context for domain LLM steps
@@ -110,8 +111,11 @@ export const domainLlmStepRequestSchema = z.object({
     .default([]),
   coachingContext: z.record(z.string(), z.unknown()).default({}),
 
-  // Per-domain allowlists (clamped by SystemPlanner before reaching the executor)
-  allowedTools: z.array(agentToolNameSchema).max(5).default([]),
+  // Per-domain allowlists (clamped by SystemPlanner before reaching the executor).
+  // Max 6 matches capabilityConfigSchema.allowedTools — review_progress carries 6
+  // tools since Phase 1 added getProgressHistory; a smaller cap here would make
+  // every review_progress domain step degrade on schema parse.
+  allowedTools: z.array(agentToolNameSchema).max(6).default([]),
   allowedProposalIntents: z.array(z.string().min(1).max(80)).max(10).default([]),
 
   // Safety
@@ -138,6 +142,14 @@ export const domainLlmStepRequestSchema = z.object({
    * Null/absent means fall back to detecting from the user's message.
    */
   responseLanguage: messagePreprocessorLanguageCodeSchema.nullable().optional(),
+  /**
+   * Deep-review sufficiency framing (Phase 4). Present only on review-profile
+   * turns whose context packet carries the progress_history_review slice.
+   * Drives the {{deepReviewSuffix}} injection in the domain templates —
+   * the same request-field → suffix channel as lowConfidenceRoute on
+   * FinalDecisionRequest (domains have no other instruction channel).
+   */
+  deepReview: deepReviewPromptContextSchema.optional(),
 });
 
 export type DomainLlmStepRequest = z.infer<typeof domainLlmStepRequestSchema>;

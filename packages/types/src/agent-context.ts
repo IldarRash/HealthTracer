@@ -1,12 +1,13 @@
 import { z } from "zod";
+import { aiBiomarkerContextSummarySchema } from "./biomarker-context.js";
 import { isoDateSchema, isoDateTimeSchema } from "./dates.js";
-import { aiDocumentContextSummarySchema } from "./documents.js";
 import { aiMetricsContextSummarySchema } from "./device-metrics.js";
 import { personalContextSummarySchema } from "./goal-hierarchy.js";
 import { habitAdherencePlanSummarySchema } from "./habits.js";
 import { aiRecoveryContextSummarySchema } from "./recovery.js";
 import { aiWellbeingContextSummarySchema } from "./wellbeing-check-ins.js";
 import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
+import { progressHistoryReviewSummarySchema } from "./progress-history.js";
 
 const progressDataStatusValues = ["sufficient", "partial", "insufficient"] as const;
 const trendDirectionValues = ["up", "down", "stable", "unknown"] as const;
@@ -19,6 +20,8 @@ export const contextSlicePurposeSchema = z.enum([
   "weekly_review",
   "longevity_overview",
   "health_context",
+  // Deep-review numeric aggregates (planner-injected on review budget profiles).
+  "progress_history_review",
 ]);
 
 export type ContextSlicePurpose = z.infer<typeof contextSlicePurposeSchema>;
@@ -89,7 +92,6 @@ export const contextSliceRequestSchema = z.object({
   type: contextSlicePurposeSchema,
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
-  includeDocuments: z.boolean().optional(),
 });
 
 export type ContextSliceRequest = z.infer<typeof contextSliceRequestSchema>;
@@ -124,7 +126,6 @@ export const getUserContextSliceInputSchema = z.object({
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
   includeRawData: z.boolean().default(false),
-  includeDocuments: z.boolean().default(false),
 });
 
 export type GetUserContextSliceInput = z.input<typeof getUserContextSliceInputSchema>;
@@ -256,17 +257,6 @@ export const contextSourceRefSchema = z.object({
 
 export type ContextSourceRef = z.infer<typeof contextSourceRefSchema>;
 
-export const ragContextResultSchema = z.object({
-  documentId: z.string().uuid(),
-  summaryId: z.string().uuid(),
-  title: z.string().min(1).max(160),
-  snippet: z.string().min(1).max(500),
-  provenance: z.string().min(1).max(240),
-  consentScope: z.string().min(1).max(80),
-});
-
-export type RagContextResult = z.infer<typeof ragContextResultSchema>;
-
 export const userContextSliceSchema = z.object({
   purpose: contextSlicePurposeSchema,
   depth: contextDepthSchema,
@@ -293,11 +283,21 @@ export const userContextSliceSchema = z.object({
   recentHabitAdherence: habitAdherencePlanSummarySchema.nullable().optional(),
   weeklyProgress: weeklyProgressContextSummarySchema.nullable().optional(),
   recentWorkoutExecution: workoutExecutionSummarySchema.nullable().optional(),
+  /**
+   * Deep-review numeric aggregates (progress_history_review slices only).
+   * Numbers/enums/ISO dates by construction — structurally unable to carry
+   * free text, so it is NOT gated by allowSensitiveHealthContext.
+   */
+  progressHistory: progressHistoryReviewSummarySchema.optional(),
   metricsSummary: aiMetricsContextSummarySchema.optional(),
   wellbeingSummary: aiWellbeingContextSummarySchema.optional(),
   recoveryContext: aiRecoveryContextSummarySchema.optional(),
-  documentContext: aiDocumentContextSummarySchema.optional(),
-  ragResults: z.array(ragContextResultSchema).max(5).optional(),
+  /**
+   * Structured, catalog-labeled, consent-gated biomarker readings.
+   * Exempt from the `allowDocuments` context-budget floor by design: this is
+   * user-visible, user-editable structured state — never document-derived text.
+   */
+  biomarkerContext: aiBiomarkerContextSummarySchema.optional(),
   relevantMemories: z.array(userMemoryItemSchema).max(20).default([]),
   snapshots: z.array(contextSnapshotItemSchema).max(5).default([]),
   recommendationConstraints: z.array(z.string().min(1).max(240)).max(10).default([]),
@@ -312,7 +312,6 @@ export const buildAgentContextRequestSchema = z.object({
   purpose: contextSlicePurposeSchema.optional(),
   depth: contextDepthSchema.optional(),
   timeRange: contextTimeRangeSchema.optional(),
-  includeDocuments: z.boolean().optional(),
 });
 
 export type BuildAgentContextRequest = z.infer<typeof buildAgentContextRequestSchema>;
@@ -351,7 +350,6 @@ export const intentRouteResultSchema = z.object({
   purpose: contextSlicePurposeSchema,
   depth: contextDepthSchema,
   timeRange: contextTimeRangeSchema,
-  includeDocuments: z.boolean(),
   routingMethod: agentRoutingMethodSchema,
   requiredContextSlices: z.array(contextSliceRequestSchema).min(1).max(MAX_CONTEXT_SLICES),
   safetyFlags: z.array(agentSafetyFlagSchema).max(10).default([]),
@@ -387,6 +385,7 @@ export const agentToolNameSchema = z.enum([
   "searchRecipeCatalog",
   "getActivePlanDetail",
   "getRecentAdherence",
+  "getProgressHistory",
 ]);
 
 export type AgentToolName = z.infer<typeof agentToolNameSchema>;
@@ -519,6 +518,20 @@ export const recentAdherenceResultSchema = z.object({
 
 export type RecentAdherenceResult = z.infer<typeof recentAdherenceResultSchema>;
 
+/**
+ * getProgressHistory — adaptive-lookback numeric progress aggregates.
+ * periodDays is clamped server-side (min 7, granularity-ladder cap); the result
+ * is a ProgressHistoryReviewSummary (numbers/enums/ISO dates only — see
+ * progress-history.ts). Allowlisted only on review capabilities.
+ */
+export const getProgressHistoryInputSchema = z
+  .object({
+    periodDays: z.number().int().min(1).max(36500),
+  })
+  .strict();
+
+export type GetProgressHistoryInput = z.input<typeof getProgressHistoryInputSchema>;
+
 export const agentToolCallRequestSchema = z.object({
   tool: agentToolNameSchema,
   input: z.record(z.string(), z.unknown()),
@@ -613,7 +626,12 @@ export function validateAgentLoopOutputShape(value: unknown): string[] {
 }
 
 export const agentCitationSchema = z.object({
-  sourceType: z.enum(["structured_state", "document_summary", "memory", "snapshot"]),
+  sourceType: z.enum([
+    "structured_state",
+    "biomarker_reading",
+    "memory",
+    "snapshot",
+  ]),
   label: z.string().min(1).max(160),
   referenceId: z.string().uuid().optional(),
 });
@@ -734,6 +752,12 @@ export const agentFanOutDecisionDiagnosticsSchema = z.object({
    * turns with decision-maker outputs. Optional/back-compat: absent on pre-Slice-5 rows.
    */
   lowConfidenceRoute: z.boolean().optional(),
+  /**
+   * True when this turn carried a deep-review sufficiency block (Phase 4) into
+   * the domain/decision requests. Boolean only — never period numbers or any
+   * health data. Absent on non-review turns.
+   */
+  deepReview: z.boolean().optional(),
   /** Token + latency usage for the decision-maker LLM call. Absent on fallback paths. */
   usage: agentProviderUsageSchema.optional(),
 });
@@ -853,6 +877,16 @@ export const agentTurnMetadataSchema = z.object({
   missingContextNotes: z.array(z.string().min(1).max(240)).max(5).default([]),
   /** Per-stage fan-out diagnostics (router/domains/decision/resolution). Optional/additive. */
   fanOut: agentFanOutDiagnosticsSchema.optional(),
+  /**
+   * Proposal self-repair telemetry for this turn (counts only — never payloads).
+   * Present only when at least one repair was attempted.
+   */
+  repair: z
+    .object({
+      attempted: z.number().int().min(0),
+      succeeded: z.number().int().min(0),
+    })
+    .optional(),
 });
 
 export type AgentTurnMetadata = z.infer<typeof agentTurnMetadataSchema>;
@@ -866,7 +900,7 @@ export const DEFAULT_AGENT_SAFETY_CONSTRAINTS = [
   "Do not prescribe medication or claim to treat diseases.",
   "Prefer wellness coaching, habits, and structured plan suggestions.",
   "Plan changes must be proposals requiring user approval.",
-  "Do not expose raw health documents or private wellbeing notes.",
+  "Do not expose raw lab reports or private wellbeing notes.",
 ] as const;
 
 export const INTENT_TO_SLICE_PURPOSE: Record<AgentIntent, ContextSlicePurpose> = {
@@ -891,6 +925,7 @@ export function resolveDefaultDepthForPurpose(purpose: ContextSlicePurpose): Con
     case "weekly_review":
     case "longevity_overview":
     case "health_context":
+    case "progress_history_review":
       return "large";
   }
 }
@@ -911,11 +946,11 @@ export function resolveDefaultTimeRangeForPurpose(
       return "90d";
     case "health_context":
       return "30d";
+    // Display metadata only — the real review lookback is the turn-level
+    // grantedLookbackDays threaded by the planner (clamped per budget profile).
+    case "progress_history_review":
+      return "90d";
   }
-}
-
-export function shouldIncludeDocumentsForPurpose(purpose: ContextSlicePurpose): boolean {
-  return purpose === "health_context";
 }
 
 export function resolveDefaultExpectedResponseMode(
@@ -948,8 +983,6 @@ export function normalizeContextSlicePlan(
       type: request.type,
       depth: request.depth ?? resolveDefaultDepthForPurpose(request.type),
       timeRange: request.timeRange ?? resolveDefaultTimeRangeForPurpose(request.type),
-      includeDocuments:
-        request.includeDocuments ?? shouldIncludeDocumentsForPurpose(request.type),
     });
 
     if (normalized.length >= MAX_CONTEXT_SLICES) {
@@ -962,7 +995,6 @@ export function normalizeContextSlicePlan(
       type: "general_chat",
       depth: resolveDefaultDepthForPurpose("general_chat"),
       timeRange: resolveDefaultTimeRangeForPurpose("general_chat"),
-      includeDocuments: false,
     });
   }
 
@@ -974,7 +1006,6 @@ export function buildContextSliceRequestForIntent(
   options?: {
     depth?: ContextDepth;
     timeRange?: ContextTimeRange;
-    includeDocuments?: boolean;
   },
 ): ContextSliceRequest {
   const purpose = INTENT_TO_SLICE_PURPOSE[intent];
@@ -983,7 +1014,6 @@ export function buildContextSliceRequestForIntent(
     type: purpose,
     depth: options?.depth ?? resolveDefaultDepthForPurpose(purpose),
     timeRange: options?.timeRange ?? resolveDefaultTimeRangeForPurpose(purpose),
-    includeDocuments: options?.includeDocuments ?? shouldIncludeDocumentsForPurpose(purpose),
   };
 }
 
@@ -1009,7 +1039,6 @@ export function buildRouteFromCatalogIntent(input: {
     purpose: primary.type,
     depth: primary.depth ?? resolveDefaultDepthForPurpose(primary.type),
     timeRange: primary.timeRange ?? resolveDefaultTimeRangeForPurpose(primary.type),
-    includeDocuments: primary.includeDocuments ?? shouldIncludeDocumentsForPurpose(primary.type),
     routingMethod: input.routingMethod,
     requiredContextSlices: slicePlan,
     safetyFlags: input.safetyFlags ?? [],

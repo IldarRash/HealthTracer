@@ -7,10 +7,11 @@ import type {
   UserContextSlice,
 } from "@health/types";
 import {
+  buildLookbackClampNote,
   clampContextDepth,
   clampContextBudgetPolicy,
+  clampProgressHistoryLookback,
   buildDefaultAiBehaviorConfig,
-  resolveContextBudgetPolicyForProfile,
   resolveContextBudgetProfilePolicy,
   tryCompileContextBudgetMessagePattern,
 } from "@health/types";
@@ -32,11 +33,28 @@ export interface ContextPlanReviewSignals {
   isMultiDomainReview: boolean;
   isProgressReview: boolean;
   hasExtendedLookback: boolean;
+  /** Preprocessor review_request signal (deterministic; false when absent). */
+  reviewRequest: boolean;
+  /** Preprocessor-detected lookback ask in days (null when no period phrase matched). */
+  requestedLookbackDays: number | null;
+}
+
+/** Deterministic preprocessor hints consumed by budget-profile selection. */
+export interface ContextBudgetPreprocessorHints {
+  requestedLookbackDays: number | null;
+  reviewRequest: boolean;
 }
 
 export interface ContextBudgetPlanMetadata extends ContextPlanReviewSignals {
   contextBudget: ContextBudgetPolicy;
   requiresCompression: boolean;
+  /**
+   * Lookback actually granted for this turn: the Phase 1 granularity-ladder
+   * clamp of requestedLookbackDays, further capped by the selected profile's
+   * maxLookbackDays. Null when no lookback was requested. Phase 3 threads this
+   * into the progress_history_review slice request.
+   */
+  grantedLookbackDays: number | null;
 }
 
 export interface ApplyContextBudgetResult {
@@ -57,6 +75,7 @@ export class ContextBudgetPolicyService {
   private readonly progressReviewSlicePurposes: ReadonlySet<ContextSliceRequest["type"]>;
   private readonly monthlyReviewCatalogIntentIds: ReadonlySet<CatalogIntentId>;
   private readonly monthlyReviewAgentIntents: ReadonlySet<IntentRouteResult["intent"]>;
+  private readonly deepHistoryMinLookbackDays: number;
 
   constructor(private readonly aiBehaviorConfigService: AiBehaviorConfigService) {
     const triggers = this.aiBehaviorConfigService.getContextBudgets().triggers;
@@ -79,12 +98,14 @@ export class ContextBudgetPolicyService {
     this.progressReviewSlicePurposes = new Set(triggers.progressReviewSlicePurposes);
     this.monthlyReviewCatalogIntentIds = new Set(triggers.monthlyReviewCatalogIntentIds);
     this.monthlyReviewAgentIntents = new Set(triggers.monthlyReviewAgentIntents);
+    this.deepHistoryMinLookbackDays = triggers.deepHistoryMinLookbackDays;
   }
 
   detectReviewSignals(input: {
     userMessage: string;
     route: IntentRouteResult;
     selectedCapabilities?: readonly CatalogIntentId[];
+    preprocessor?: ContextBudgetPreprocessorHints;
   }): ContextPlanReviewSignals {
     const slicePlan = input.route.requiredContextSlices;
     const isProgressReview =
@@ -113,27 +134,41 @@ export class ContextBudgetPolicyService {
       isMultiDomainReview,
       isProgressReview,
       hasExtendedLookback,
+      reviewRequest: input.preprocessor?.reviewRequest ?? false,
+      requestedLookbackDays: input.preprocessor?.requestedLookbackDays ?? null,
     };
   }
 
+  /**
+   * Deterministic budget-profile selection:
+   * 1. review-ish turn (any review signal OR the preprocessor review_request)
+   *    with a requested lookback beyond deepHistoryMinLookbackDays → deep_history;
+   * 2. otherwise the existing deep_review triggers (monthly / multi-domain /
+   *    progress review with extended lookback) → deep_review;
+   * 3. everything else → default.
+   */
   resolveBudgetForTurn(signals: ContextPlanReviewSignals): ContextBudgetPolicy {
     const contextBudgets = this.aiBehaviorConfigService.getContextBudgets();
     const useDeepReview =
       signals.isMonthlyReview ||
       signals.isMultiDomainReview ||
       (signals.isProgressReview && signals.hasExtendedLookback);
+    const isReviewishTurn =
+      useDeepReview || signals.isProgressReview || signals.reviewRequest;
+    const useDeepHistory =
+      isReviewishTurn &&
+      signals.requestedLookbackDays !== null &&
+      signals.requestedLookbackDays > this.deepHistoryMinLookbackDays;
+    const profile = useDeepHistory ? "deep_history" : useDeepReview ? "deep_review" : "default";
 
-    return clampContextBudgetPolicy(
-      useDeepReview
-        ? resolveContextBudgetProfilePolicy(contextBudgets, "deep_review")
-        : resolveContextBudgetProfilePolicy(contextBudgets, "default"),
-    );
+    return clampContextBudgetPolicy(resolveContextBudgetProfilePolicy(contextBudgets, profile));
   }
 
   buildPlanMetadata(input: {
     userMessage: string;
     route: IntentRouteResult;
     selectedCapabilities?: readonly CatalogIntentId[];
+    preprocessor?: ContextBudgetPreprocessorHints;
   }): ContextBudgetPlanMetadata {
     const signals = this.detectReviewSignals(input);
     const contextBudget = this.resolveBudgetForTurn(signals);
@@ -142,6 +177,10 @@ export class ContextBudgetPolicyService {
       ...signals,
       contextBudget,
       requiresCompression: contextBudget.requiresCompression,
+      grantedLookbackDays: resolveGrantedLookbackDays(
+        signals.requestedLookbackDays,
+        contextBudget,
+      ),
     };
   }
 
@@ -189,13 +228,11 @@ export class ContextBudgetPolicyService {
       slice.timeRange != null
         ? clampTimeRangeToLookback(slice.timeRange, budget.maxLookbackDays)
         : undefined;
-    const includeDocuments = budget.allowDocuments && slice.includeDocuments === true;
 
     return {
       type: slice.type,
       ...(depth ? { depth } : {}),
       ...(timeRange ? { timeRange } : {}),
-      includeDocuments,
     };
   }
 
@@ -207,16 +244,6 @@ export class ContextBudgetPolicyService {
         ...next,
         wellbeingSummary: undefined,
         recoveryContext: undefined,
-        documentContext: undefined,
-        ragResults: undefined,
-      };
-    }
-
-    if (!budget.allowDocuments) {
-      next = {
-        ...next,
-        documentContext: undefined,
-        ragResults: undefined,
       };
     }
 
@@ -227,6 +254,23 @@ export class ContextBudgetPolicyService {
     }
 
     return truncateSliceRawItems(next, budget.maxRawItems);
+  }
+
+  /**
+   * Render the honest lookback-clamp note from the config-sourced degradation
+   * templates (contextBudgets.degradationNotes — never hardcoded prose).
+   */
+  renderLookbackClampNote(
+    grantedLookbackDays: number,
+    requestedLookbackDays: number,
+    responseLanguage: string | null | undefined,
+  ): string {
+    return buildLookbackClampNote(
+      this.aiBehaviorConfigService.getContextBudgets().degradationNotes,
+      grantedLookbackDays,
+      requestedLookbackDays,
+      responseLanguage,
+    );
   }
 
   private describeSliceClamp(
@@ -246,14 +290,45 @@ export class ContextBudgetPolicyService {
       );
     }
 
-    if (before.includeDocuments === true && after.includeDocuments !== true) {
-      notes.push(
-        `Slice "${before.type}" document expansion denied by context budget (allowDocuments=false).`,
-      );
-    }
-
     return notes;
   }
+}
+
+/**
+ * Phase 3 injection predicate: the progress_history_review slice is appended
+ * only on a review budget profile (deep_review / deep_history) AND when the
+ * turn is review-ish per the Phase 2 signals (monthly review, progress review,
+ * or the preprocessor review_request). A purely multi-domain deep_review turn
+ * (e.g. "help with training and nutrition") is deliberately excluded — it is
+ * not a retrospective and must not trigger the history aggregation query.
+ */
+export function shouldInjectProgressHistoryReview(
+  metadata: ContextBudgetPlanMetadata,
+): boolean {
+  const profile = metadata.contextBudget.profile;
+  const isReviewProfile = profile === "deep_review" || profile === "deep_history";
+  const isReviewish =
+    metadata.isMonthlyReview || metadata.isProgressReview || metadata.reviewRequest;
+
+  return isReviewProfile && isReviewish;
+}
+
+/**
+ * Granted lookback = Phase 1 granularity-ladder clamp, further capped by the
+ * selected profile's maxLookbackDays. Null when nothing was requested.
+ */
+export function resolveGrantedLookbackDays(
+  requestedLookbackDays: number | null,
+  budget: ContextBudgetPolicy,
+): number | null {
+  if (requestedLookbackDays === null) {
+    return null;
+  }
+
+  return Math.min(
+    clampProgressHistoryLookback(requestedLookbackDays).grantedPeriodDays,
+    budget.maxLookbackDays,
+  );
 }
 
 export function clampTimeRangeToLookback(
@@ -277,30 +352,14 @@ export function clampTimeRangeToLookback(
   return best;
 }
 
-export function resolveContextBudgetProfileForSignals(
-  signals: ContextPlanReviewSignals,
-): ContextBudgetPolicy["profile"] {
-  return signals.isMonthlyReview ||
-    signals.isMultiDomainReview ||
-    (signals.isProgressReview && signals.hasExtendedLookback)
-    ? "deep_review"
-    : "default";
-}
-
-export function resolveContextBudgetPolicyForSignals(
-  signals: ContextPlanReviewSignals,
-): ContextBudgetPolicy {
-  return resolveContextBudgetPolicyForProfile(resolveContextBudgetProfileForSignals(signals));
-}
-
 function countRawItemsInSlice(slice: UserContextSlice): number {
   return (
     (slice.activeGoals?.length ?? 0) +
     (slice.relevantMemories?.length ?? 0) +
     (slice.snapshots?.length ?? 0) +
-    (slice.ragResults?.length ?? 0) +
     (slice.weeklyProgress?.trends?.length ?? 0) +
-    (slice.documentContext?.items.length ?? 0)
+    (slice.biomarkerContext?.items.length ?? 0) +
+    (slice.progressHistory?.buckets.length ?? 0)
   );
 }
 
@@ -318,6 +377,23 @@ function truncateSliceRawItems(slice: UserContextSlice, maxRawItems: number): Us
     return taken;
   };
 
+  // Progress-history buckets first (they are the core review data) and from the
+  // OLDEST end: buckets are ordered ascending by bucketStart, so keeping the
+  // tail keeps the most recent periods.
+  if (next.progressHistory?.buckets.length) {
+    const buckets = next.progressHistory.buckets;
+    const keep = Math.min(buckets.length, Math.max(0, remaining));
+
+    if (keep < buckets.length) {
+      next.progressHistory = {
+        ...next.progressHistory,
+        buckets: buckets.slice(buckets.length - keep),
+      };
+    }
+
+    remaining -= keep;
+  }
+
   if (next.activeGoals) {
     next.activeGoals = take(next.activeGoals);
   }
@@ -330,10 +406,6 @@ function truncateSliceRawItems(slice: UserContextSlice, maxRawItems: number): Us
     next.snapshots = take(next.snapshots) ?? [];
   }
 
-  if (next.ragResults) {
-    next.ragResults = take(next.ragResults);
-  }
-
   if (next.weeklyProgress?.trends) {
     next.weeklyProgress = {
       ...next.weeklyProgress,
@@ -341,10 +413,10 @@ function truncateSliceRawItems(slice: UserContextSlice, maxRawItems: number): Us
     };
   }
 
-  if (next.documentContext?.items) {
-    next.documentContext = {
-      ...next.documentContext,
-      items: take(next.documentContext.items) ?? [],
+  if (next.biomarkerContext?.items) {
+    next.biomarkerContext = {
+      ...next.biomarkerContext,
+      items: take(next.biomarkerContext.items) ?? [],
     };
   }
 

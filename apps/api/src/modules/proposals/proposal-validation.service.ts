@@ -46,7 +46,7 @@ import {
 import { containsUnsafeWellnessInsightLanguage } from "@health/types";
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
-import { DocumentSignalsRepository } from "../documents/document-signals.repository.js";
+import { BiomarkersRepository } from "../biomarkers/biomarkers.repository.js";
 import { ExercisesService } from "../exercises/exercises.service.js";
 import { GoalsRepository } from "../goals/goals.repository.js";
 import { toGoal } from "../goals/goal.mapper.js";
@@ -62,10 +62,6 @@ import { RecipesRepository } from "../recipes/recipes.repository.js";
 import { WorkoutsRepository } from "../workouts/workouts.repository.js";
 import { ChatAttachmentsRepository } from "../chat-attachments/chat-attachments.repository.js";
 import { toOwnedChatAttachmentRef } from "../chat-attachments/chat-attachment.mapper.js";
-import {
-  hasLegacyExerciseEntries,
-  normalizeLegacyWorkoutPlanExercises,
-} from "../workouts/workout-exercise-normalizer.js";
 import {
   captureWellbeingCheckinProposalPayloadSchema,
   getLogWorkoutActivityDomainErrors,
@@ -92,7 +88,6 @@ export class ProposalValidationService {
     private readonly progressRepository: ProgressRepository,
     private readonly exercisesService: ExercisesService,
     private readonly habitsService: HabitsService,
-    private readonly documentSignalsRepository: DocumentSignalsRepository,
     private readonly metricsAiContextService: MetricsAiContextService,
     private readonly goalsRepository: GoalsRepository,
     private readonly recoveryContextService: RecoveryContextService,
@@ -103,6 +98,7 @@ export class ProposalValidationService {
     private readonly nutritionRepository: NutritionRepository,
     private readonly recipesRepository: RecipesRepository,
     private readonly chatAttachmentsRepository: ChatAttachmentsRepository,
+    private readonly biomarkersRepository: BiomarkersRepository,
   ) {}
 
   validateRawProposal(proposal: RawAiProposal): ProposalValidationResult {
@@ -131,50 +127,6 @@ export class ProposalValidationService {
     }
 
     return { valid: true, errors: [] };
-  }
-
-  /**
-   * Bridge legacy `{name, reps, sets}` exercise entries in a create_workout_plan or
-   * adapt_workout_plan raw proposal to the structured catalog-backed form before
-   * schema + domain validation runs.
-   *
-   * Must be called BEFORE validateRawProposal for workout-plan intents when the
-   * proposedChanges may contain LLM-emitted name-only exercise entries.
-   *
-   * Returns the proposal unchanged when:
-   *  - the intent is not a workout plan intent
-   *  - proposedChanges does not parse as WorkoutPlanProposalChanges
-   *  - all exercises are already in the structured form
-   *
-   * Callers (ChatService) should replace the rawProposal.proposedChanges with the
-   * returned object before calling validateRawProposal.
-   */
-  async normalizeWorkoutProposalExercises(
-    userId: string,
-    intent: ProposalIntent,
-    proposedChanges: unknown,
-  ): Promise<unknown> {
-    if (intent !== "create_workout_plan" && intent !== "adapt_workout_plan") {
-      return proposedChanges;
-    }
-
-    const parsed = workoutPlanProposalChangesSchema.safeParse(proposedChanges);
-
-    if (!parsed.success) {
-      return proposedChanges;
-    }
-
-    if (!hasLegacyExerciseEntries(parsed.data)) {
-      return proposedChanges;
-    }
-
-    const { changes } = await normalizeLegacyWorkoutPlanExercises(
-      this.exercisesService,
-      userId,
-      parsed.data,
-    );
-
-    return changes;
   }
 
   async validateWellbeingCheckinProposalContext(
@@ -472,21 +424,6 @@ export class ProposalValidationService {
     );
 
     for (const [index, ref] of evidenceRefs.entries()) {
-      if (ref.type === "document_signal") {
-        const owned = await this.documentSignalsRepository.findCorrelationEligibleSignalById(
-          userId,
-          ref.id,
-        );
-
-        if (!owned) {
-          errors.push(
-            `evidenceRefs[${index}].id: Approved document signal was not found for this user.`,
-          );
-        }
-
-        continue;
-      }
-
       if (ref.type === "weekly_progress_summary") {
         const exists = await this.progressRepository.summaryExistsForUser(userId, ref.id);
 
@@ -515,6 +452,22 @@ export class ProposalValidationService {
         errors.push(
           `evidenceRefs[${index}].type: Habit adherence evidence refs cannot be verified yet.`,
         );
+        continue;
+      }
+
+      if (ref.type === "biomarker_reading") {
+        // Guard before the DB lookup: a non-UUID id can never match a reading
+        // and would otherwise error at the Postgres layer.
+        const owned = z.string().uuid().safeParse(ref.id).success
+          ? await this.biomarkersRepository.findContextEligibleReadingById(userId, ref.id)
+          : null;
+
+        if (!owned) {
+          errors.push(
+            `evidenceRefs[${index}].id: Consented biomarker reading was not found for this user.`,
+          );
+        }
+
         continue;
       }
 

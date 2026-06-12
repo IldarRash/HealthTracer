@@ -465,6 +465,8 @@ describe("ChatService.sendMessage — onProgress threading", () => {
       { resolveFromAuth: vi.fn().mockResolvedValue(baseUser) } as never,
       aiService as never,
       noopProposalValidation as never,
+      { normalizeProposal: async (_intent: unknown, changes: unknown) => changes } as never,
+      { isAvailable: false, tryRepair: vi.fn().mockResolvedValue(null) } as never,
       { packChatWeeklyReviewProposals: vi.fn() } as never,
       { getCheckInForDate: vi.fn().mockResolvedValue({ checkIn: null }) } as never,
       { packChatRecipeRecommendationProposal: vi.fn().mockResolvedValue(null) } as never,

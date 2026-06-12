@@ -28,8 +28,11 @@ describe("ContextExpansionPolicyService", () => {
     }
   });
 
-  it("denies document expansion when allowDocuments is false", () => {
-    const denied = service.handleExpansionRequestOrDeny({
+  it("expansion requests cannot ask for documents — the flag is gone from the slice contract", () => {
+    // Document expansion is structurally impossible now: a legacy
+    // includeDocuments key is not part of ContextSliceRequest anymore, so an
+    // adversarial request degrades to a plain (document-free) slice request.
+    const result = service.evaluateRequest({
       budget: DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
       request: {
         roundIndex: 0,
@@ -40,13 +43,18 @@ describe("ContextExpansionPolicyService", () => {
             depth: "large",
             timeRange: "30d",
             includeDocuments: true,
-          },
+          } as unknown as { type: "health_context"; depth: "large"; timeRange: "30d" },
         ],
       },
     });
 
-    expect(denied.decision).toBe("denied");
-    expect(denied.denialReason).toContain("Document expansion");
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(
+        result.decision.approvedSlices.every((slice) => !("includeDocuments" in slice)),
+      ).toBe(true);
+    }
   });
 
   it("denies expansion immediately when maxExpansionRounds is zero", () => {

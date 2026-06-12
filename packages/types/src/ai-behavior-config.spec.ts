@@ -16,6 +16,8 @@ import {
 } from "./chat-action-proposals.js";
 import { AGENT_CAPABILITY_CONFIGS } from "./capability-config.js";
 import {
+  DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+  DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
   DEFAULT_CONTEXT_BUDGET_POLICY,
   DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
 } from "./context-budget.js";
@@ -94,12 +96,14 @@ describe("ai behavior config", () => {
       "mark_today_workout_done",
       "today_summary_read",
       "nutrition_plan_read",
+      "weekly_progress_read",
+      "workout_plan_read",
     ]);
-    expect(defaults.directPaths.kinds).toHaveLength(3);
+    expect(defaults.directPaths.kinds).toHaveLength(5);
     expect(defaults.directPaths.kinds[0]?.matchPatterns.length).toBeGreaterThan(0);
   });
 
-  it("includes suggestedQuickActions in defaults with all three action ids", () => {
+  it("includes suggestedQuickActions in defaults with all five action ids", () => {
     const defaults = buildDefaultAiBehaviorConfig();
 
     expect(defaults.suggestedQuickActions).toBeDefined();
@@ -107,6 +111,8 @@ describe("ai behavior config", () => {
     expect(ids).toContain("today_summary_read");
     expect(ids).toContain("mark_today_workout_done");
     expect(ids).toContain("nutrition_plan_read");
+    expect(ids).toContain("weekly_progress_read");
+    expect(ids).toContain("workout_plan_read");
   });
 
   it("falls back to suggestedQuickActions defaults when file config omits the key", () => {
@@ -130,6 +136,67 @@ describe("ai behavior config", () => {
 
     expect(defaults.contextBudgets.profiles.default).toEqual(DEFAULT_CONTEXT_BUDGET_POLICY);
     expect(defaults.contextBudgets.profiles.deep_review).toEqual(DEEP_REVIEW_CONTEXT_BUDGET_POLICY);
+    expect(defaults.contextBudgets.profiles.deep_history).toEqual(
+      DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+    );
+    expect(defaults.contextBudgets.triggers.deepHistoryMinLookbackDays).toBe(91);
+    expect(defaults.contextBudgets.degradationNotes).toEqual(
+      DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
+    );
+  });
+
+  it("matches RU/EN long-period review phrases with the default monthly trigger pattern", () => {
+    const defaults = buildDefaultAiBehaviorConfig();
+    const pattern = new RegExp(defaults.contextBudgets.triggers.monthlyReviewMessagePattern, "i");
+
+    for (const message of [
+      "как прошёл месяц",
+      "итоги за квартал",
+      "проанализируй последние полгода",
+      "review my last 6 months",
+      "how did half a year of training go",
+      "за всё время",
+      "вся история",
+      "my all-time progress",
+      "entire history",
+      "за последний год",
+    ]) {
+      expect(pattern.test(message)).toBe(true);
+    }
+
+    for (const message of ["составь план тренировок", "create a workout plan"]) {
+      expect(pattern.test(message)).toBe(false);
+    }
+  });
+
+  it("forces document/sensitive flags off for a malicious deep_history file profile", () => {
+    const defaults = buildDefaultAiBehaviorConfig();
+    const loaded = resolveLoadedAiBehaviorConfig({
+      fileValue: {
+        ...defaults,
+        contextBudgets: {
+          ...defaults.contextBudgets,
+          profiles: {
+            ...defaults.contextBudgets.profiles,
+            deep_history: {
+              ...defaults.contextBudgets.profiles.deep_history,
+              allowDocuments: true,
+              allowSensitiveHealthContext: true,
+            },
+          },
+        },
+      },
+      defaults,
+    });
+
+    expect(loaded.source).toBe("file");
+    expect(loaded.config.contextBudgets.profiles.deep_history.allowDocuments).toBe(false);
+    expect(
+      loaded.config.contextBudgets.profiles.deep_history.allowSensitiveHealthContext,
+    ).toBe(false);
+    expect(
+      loaded.warnings.some((warning) => warning.includes("deep_history")),
+    ).toBe(true);
   });
 
   it("loads file config without deprecated attachmentRouting", () => {

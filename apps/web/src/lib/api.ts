@@ -51,6 +51,7 @@ import {
   entitlementSchema,
   createCheckoutSessionResponseSchema,
   createPortalSessionResponseSchema,
+  tolerantArraySchema,
   type ActiveHabitPlanResponse,
   type ActiveNutritionPlanResponse,
   type GroceryListResponse,
@@ -104,22 +105,30 @@ import {
   type ProposalModifyResponse,
   type WorkoutPlanRevision,
   type WorkoutSession,
-  createHealthDocumentSchema,
-  correlationInsightPreviewResponseSchema,
+  biomarkerHistoryResponseSchema,
+  biomarkerReadingSchema,
+  biomarkersDashboardResponseSchema,
+  createBiomarkerReadingSchema,
+  createLabReportSchema,
+  labReportDetailSchema,
+  labReportListResponseSchema,
+  labReportSchema,
+  updateBiomarkerReadingSchema,
+  updateLabReportConsentSchema,
+  type BiomarkerHistoryResponse,
+  type BiomarkerKey,
+  type BiomarkerReading,
+  type BiomarkersDashboardResponse,
+  type CreateBiomarkerReadingInput,
+  type CreateLabReportInput,
+  type LabReport,
+  type LabReportDetail,
+  type UpdateBiomarkerReadingInput,
+  type UpdateLabReportConsentInput,
   currentUserStateSchema,
-  documentSearchResponseSchema,
-  documentSignalListResponseSchema,
-  documentSignalSchema,
-  healthDocumentDetailSchema,
-  healthDocumentListResponseSchema,
-  healthDocumentSchema,
-  healthDocumentSummarySchema,
   onboardingSchema,
   todayDayResponseSchema,
   todayHistoryResponseSchema,
-  updateDocumentConsentSchema,
-  updateDocumentSummaryReviewSchema,
-  updateDocumentSignalReviewSchema,
   updateTodayFeedbackSchema,
   updateTodayItemStatusSchema,
   upsertWellbeingCheckInSchema,
@@ -136,19 +145,8 @@ import {
   wellbeingCheckInHistoryResponseSchema,
   wellbeingCheckInResponseSchema,
   wellbeingCheckInUpsertResponseSchema,
-  type CreateHealthDocumentInput,
-  type CorrelationInsightPreviewResponse,
   type CurrentUserState,
-  type DocumentSearchResponse,
   type OnboardingInput,
-  type DocumentSignal,
-  type DocumentSignalListResponse,
-  type HealthDocument,
-  type HealthDocumentDetail,
-  type HealthDocumentSummary,
-  type UpdateDocumentConsentInput,
-  type UpdateDocumentSummaryReviewInput,
-  type UpdateDocumentSignalReviewInput,
   type UpsertWellbeingCheckInInput,
   type UpsertRecoveryCheckInInput,
   type RecoveryContextResponse,
@@ -227,11 +225,11 @@ export const apiQueryKeys = {
   healthMetricSnapshots: ["health-metric-snapshots"],
   healthMetricAggregates: ["health-metric-aggregates"],
   healthMetricsAiPreview: ["health-metrics-ai-preview"],
-  documents: ["documents"] as const,
-  documentDetail: (documentId: string) => ["document-detail", documentId] as const,
-  documentSignals: (documentId: string) => ["document-signals", documentId] as const,
-  documentSearch: (query: string) => ["document-search", query] as const,
-  correlationPreview: ["correlation-preview"] as const,
+  labReports: ["lab-reports"] as const,
+  labReportDetail: (reportId: string) => ["lab-report-detail", reportId] as const,
+  biomarkersDashboard: ["biomarkers-dashboard"] as const,
+  biomarkerHistory: (markerKey: string) => ["biomarker-history", markerKey] as const,
+  biomarkerHistoryPrefix: ["biomarker-history"] as const,
   wellbeingCheckIn: (date: string) => ["wellbeing-check-in", date] as const,
   wellbeingCheckInPrefix: ["wellbeing-check-in"] as const,
   wellbeingHistory: (limit = 7) => ["wellbeing-history", limit] as const,
@@ -255,7 +253,9 @@ export type SyncHealthMetricsResult = z.infer<typeof syncHealthMetricsResultSche
 
 const chatThreadDetailSchema = z.object({
   thread: chatThreadSchema,
-  messages: z.array(chatMessageSchema),
+  // Tolerant: one malformed persisted message must never make the whole
+  // conversation unloadable.
+  messages: tolerantArraySchema(chatMessageSchema, "chatThread.message"),
 });
 
 export async function getCurrentUser(token: string): Promise<ApiResult<User>> {
@@ -385,7 +385,12 @@ export async function listProposals(
   threadId?: string,
 ): Promise<ApiResult<AiProposal[]>> {
   const query = threadId ? `?threadId=${encodeURIComponent(threadId)}` : "";
-  return apiFetch(`/proposals${query}`, token, aiProposalSchema.array());
+  // Tolerant: a single malformed proposal row must not hide the rest.
+  return apiFetch(
+    `/proposals${query}`,
+    token,
+    tolerantArraySchema(aiProposalSchema, "proposals"),
+  );
 }
 
 export async function decideProposal(
@@ -834,10 +839,6 @@ export function getMetricsRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> 
   ];
 }
 
-export function getDocumentsRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
-  return [apiQueryKeys.documents, apiQueryKeys.longevityState, apiQueryKeys.correlationPreview];
-}
-
 export async function getActiveNutritionPlan(
   token: string,
 ): Promise<ApiResult<ActiveNutritionPlanResponse>> {
@@ -1217,142 +1218,146 @@ export async function previewHealthMetricsAiContext(
   );
 }
 
-export async function listDocuments(token: string): Promise<ApiResult<HealthDocument[]>> {
-  const result = await apiFetch("/documents", token, healthDocumentListResponseSchema);
+// ── Lab reports + biomarkers ────────────────────────────────────────────────
+
+/**
+ * Queries to refresh after anything that changes biomarker readings:
+ * upload+extract, extraction retry, report delete, and reading add/edit/delete.
+ * Consent-only changes need just `apiQueryKeys.labReports`.
+ */
+export function getBiomarkersRefreshQueryKeys(): ReadonlyArray<readonly unknown[]> {
+  return [
+    apiQueryKeys.labReports,
+    apiQueryKeys.biomarkersDashboard,
+    apiQueryKeys.biomarkerHistoryPrefix,
+  ];
+}
+
+export async function listLabReports(token: string): Promise<ApiResult<LabReport[]>> {
+  const result = await apiFetch("/lab-reports", token, labReportListResponseSchema);
   if (result.error) {
     return { error: result.error, requestId: result.requestId };
   }
 
-  return { data: result.data?.documents ?? [], requestId: result.requestId };
+  return { data: result.data?.reports ?? [], requestId: result.requestId };
 }
 
-export async function getDocument(
+export async function getLabReport(
   token: string,
-  documentId: string,
-): Promise<ApiResult<HealthDocumentDetail>> {
-  return apiFetch(`/documents/${encodeURIComponent(documentId)}`, token, healthDocumentDetailSchema);
+  reportId: string,
+): Promise<ApiResult<LabReportDetail>> {
+  return apiFetch(
+    `/lab-reports/${encodeURIComponent(reportId)}`,
+    token,
+    labReportDetailSchema,
+  );
 }
 
-export async function createDocument(
+export async function createLabReport(
   token: string,
-  input: CreateHealthDocumentInput,
-): Promise<ApiResult<HealthDocumentDetail>> {
-  const body = createHealthDocumentSchema.parse(input);
-  return apiFetch("/documents", token, healthDocumentDetailSchema, {
+  input: CreateLabReportInput,
+): Promise<ApiResult<LabReport>> {
+  const body = createLabReportSchema.parse(input);
+  return apiFetch("/lab-reports", token, labReportSchema, {
     method: "POST",
     body,
   });
 }
 
-export async function parseDocument(
+/**
+ * POST /lab-reports/:reportId/extract — synchronous LLM extraction.
+ * Called right after upload and as the Retry action on failed reports
+ * (returns 409 while a concurrent extraction is processing).
+ */
+export async function extractLabReport(
   token: string,
-  documentId: string,
-): Promise<ApiResult<HealthDocumentDetail>> {
+  reportId: string,
+): Promise<ApiResult<LabReportDetail>> {
   return apiFetch(
-    `/documents/${encodeURIComponent(documentId)}/parse`,
+    `/lab-reports/${encodeURIComponent(reportId)}/extract`,
     token,
-    healthDocumentDetailSchema,
+    labReportDetailSchema,
     { method: "POST" },
   );
 }
 
-export async function updateDocumentConsent(
+export async function updateLabReportConsent(
   token: string,
-  documentId: string,
-  input: UpdateDocumentConsentInput,
-): Promise<ApiResult<HealthDocument>> {
-  const body = updateDocumentConsentSchema.parse(input);
+  reportId: string,
+  input: UpdateLabReportConsentInput,
+): Promise<ApiResult<LabReport>> {
+  const body = updateLabReportConsentSchema.parse(input);
   return apiFetch(
-    `/documents/${encodeURIComponent(documentId)}/consent`,
+    `/lab-reports/${encodeURIComponent(reportId)}/consent`,
     token,
-    healthDocumentSchema,
+    labReportSchema,
     { method: "PATCH", body },
   );
 }
 
-export async function reviewDocumentSummary(
+export async function deleteLabReport(
   token: string,
-  documentId: string,
-  input: UpdateDocumentSummaryReviewInput,
-): Promise<ApiResult<HealthDocumentSummary>> {
-  const body = updateDocumentSummaryReviewSchema.parse(input);
+  reportId: string,
+): Promise<ApiResult<LabReport>> {
   return apiFetch(
-    `/documents/${encodeURIComponent(documentId)}/summary/review`,
+    `/lab-reports/${encodeURIComponent(reportId)}`,
     token,
-    healthDocumentSummarySchema,
-    { method: "PATCH", body },
-  );
-}
-
-export async function searchDocuments(
-  token: string,
-  query: string,
-  limit = 20,
-): Promise<ApiResult<DocumentSearchResponse>> {
-  const params = new URLSearchParams({
-    q: query,
-    limit: String(limit),
-  });
-  return apiFetch(`/documents/search?${params.toString()}`, token, documentSearchResponseSchema);
-}
-
-export async function deleteDocument(
-  token: string,
-  documentId: string,
-): Promise<ApiResult<HealthDocument>> {
-  return apiFetch(
-    `/documents/${encodeURIComponent(documentId)}`,
-    token,
-    healthDocumentSchema,
+    labReportSchema,
     { method: "DELETE" },
   );
 }
 
-export async function listDocumentSignals(
+export async function getBiomarkersDashboard(
   token: string,
-  documentId: string,
-): Promise<ApiResult<DocumentSignalListResponse>> {
+): Promise<ApiResult<BiomarkersDashboardResponse>> {
+  return apiFetch("/biomarkers", token, biomarkersDashboardResponseSchema);
+}
+
+export async function getBiomarkerHistory(
+  token: string,
+  markerKey: BiomarkerKey,
+): Promise<ApiResult<BiomarkerHistoryResponse>> {
   return apiFetch(
-    `/documents/${encodeURIComponent(documentId)}/signals`,
+    `/biomarkers/${encodeURIComponent(markerKey)}`,
     token,
-    documentSignalListResponseSchema,
+    biomarkerHistoryResponseSchema,
   );
 }
 
-export async function extractDocumentSignals(
+export async function createBiomarkerReading(
   token: string,
-  documentId: string,
-): Promise<ApiResult<DocumentSignalListResponse>> {
-  return apiFetch(
-    `/documents/${encodeURIComponent(documentId)}/extract-signals`,
-    token,
-    documentSignalListResponseSchema,
-    { method: "POST" },
-  );
+  input: CreateBiomarkerReadingInput,
+): Promise<ApiResult<BiomarkerReading>> {
+  const body = createBiomarkerReadingSchema.parse(input);
+  return apiFetch("/biomarkers/readings", token, biomarkerReadingSchema, {
+    method: "POST",
+    body,
+  });
 }
 
-export async function reviewDocumentSignal(
+export async function updateBiomarkerReading(
   token: string,
-  documentId: string,
-  signalId: string,
-  input: UpdateDocumentSignalReviewInput,
-): Promise<ApiResult<DocumentSignal>> {
-  const body = updateDocumentSignalReviewSchema.parse(input);
+  readingId: string,
+  input: UpdateBiomarkerReadingInput,
+): Promise<ApiResult<BiomarkerReading>> {
+  const body = updateBiomarkerReadingSchema.parse(input);
   return apiFetch(
-    `/documents/${encodeURIComponent(documentId)}/signals/${encodeURIComponent(signalId)}/review`,
+    `/biomarkers/readings/${encodeURIComponent(readingId)}`,
     token,
-    documentSignalSchema,
+    biomarkerReadingSchema,
     { method: "PATCH", body },
   );
 }
 
-export async function previewCorrelationInsights(
+export async function deleteBiomarkerReading(
   token: string,
-): Promise<ApiResult<CorrelationInsightPreviewResponse>> {
+  readingId: string,
+): Promise<ApiResult<BiomarkerReading>> {
   return apiFetch(
-    "/documents/correlations/preview",
+    `/biomarkers/readings/${encodeURIComponent(readingId)}`,
     token,
-    correlationInsightPreviewResponseSchema,
+    biomarkerReadingSchema,
+    { method: "DELETE" },
   );
 }
 

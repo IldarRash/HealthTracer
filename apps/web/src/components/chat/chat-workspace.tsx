@@ -58,7 +58,9 @@ import {
   resolveStageCopy,
   shouldFallbackToSync,
   streamChatMessage,
+  StreamError,
   type ChatTurnStreamEvent,
+  type StreamFailureReason,
 } from "../../lib/chat-stream";
 import { CrisisSupportPanel } from "../wellbeing/crisis-support-panel";
 import { ChatQuickActionChips } from "./chat-quick-action-chips";
@@ -148,6 +150,13 @@ export function ChatWorkspace() {
    */
   const [streamingCopy, setStreamingCopy] = useState<string | null>(null);
   const [streamingInFlight, setStreamingInFlight] = useState(false);
+  /**
+   * True after a `final_unparseable` stream failure: the backend turn succeeded
+   * and was persisted, but the final frame failed client-side validation. The
+   * thread is refetched (tolerant contract) and a system notice tells the user
+   * not to resend — resending would run a duplicate paid LLM turn.
+   */
+  const [streamRecoveryNotice, setStreamRecoveryNotice] = useState(false);
   const streamAbortRef = useRef<AbortController | null>(null);
 
   const threadsQuery = useQuery({
@@ -337,6 +346,7 @@ export function ChatWorkspace() {
       setDraft("");
       setOptimisticMessage(null);
       setPendingRevisionSend(null);
+      setStreamRecoveryNotice(false);
 
       setComposerAttachments((current) => {
         for (const attachment of current) {
@@ -429,6 +439,12 @@ export function ChatWorkspace() {
     },
     onError: () => {
       setOptimisticMessage(null);
+      // A failed-looking send may still have persisted messages server-side
+      // (e.g. the response parse failed after the turn ran). Refetch the thread
+      // through the tolerant contract so persisted messages are revealed.
+      if (primaryThreadId) {
+        void queryClient.invalidateQueries({ queryKey: ["chat-thread", primaryThreadId] });
+      }
     },
   });
 
@@ -469,6 +485,7 @@ export function ChatWorkspace() {
 
       setStreamingInFlight(true);
       setStreamingCopy(null);
+      setStreamRecoveryNotice(false);
 
       // Set optimistic user message so the thread renders immediately.
       const messageContent = content;
@@ -525,15 +542,23 @@ export function ChatWorkspace() {
           return;
         }
 
-        // finalTurn is null — stream failed before a final event was delivered.
+        // finalTurn is null — the stream failed before a usable final event.
         // shouldFallbackToSync governs whether we retry via the sync endpoint.
-        // Known limitation: shouldFallbackToSync always returns true for all
-        // current failure reasons; see chat-stream.ts for the documentation of
-        // why callers must check finalTurn before consulting it.
-        if (!shouldFallbackToSync("read_error")) {
+        const reason: StreamFailureReason =
+          err instanceof StreamError ? err.reason : "read_error";
+
+        if (!shouldFallbackToSync(reason)) {
+          // final_unparseable: the final frame ARRIVED — the backend turn
+          // succeeded and is persisted. Re-sending would run a duplicate paid
+          // LLM turn, so refetch instead: the tolerant contract reveals the
+          // persisted turn, and a system notice tells the user not to resend.
           setStreamingInFlight(false);
           setStreamingCopy(null);
           setOptimisticMessage(null);
+          setStreamRecoveryNotice(true);
+          void queryClient.invalidateQueries({ queryKey: ["chat-thread", primaryThreadId] });
+          void queryClient.invalidateQueries({ queryKey: ["proposals", primaryThreadId] });
+          void queryClient.invalidateQueries({ queryKey: apiQueryKeys.proposals });
           return;
         }
         // fall through to sync fallback
@@ -569,6 +594,7 @@ export function ChatWorkspace() {
       composerAttachments,
       getToken,
       primaryThreadId,
+      queryClient,
       sendMessageMutation,
     ],
   );
@@ -1028,6 +1054,11 @@ export function ChatWorkspace() {
 
           <ChatComposer onSubmit={handleSubmit}>
             <div className="chat-composer-inner">
+              {streamRecoveryNotice ? (
+                <p className="notice notice-inline" role="status">
+                  {t("streamRecoveredNotice")}
+                </p>
+              ) : null}
               {showRevisionSendRetry ? (
                 <div className="notice notice-inline" role="alert">
                   <p className="proposal-meta">

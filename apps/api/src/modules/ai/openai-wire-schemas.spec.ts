@@ -18,11 +18,21 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  LLM_EMISSION_COVERED_INTENTS,
+  agentToolNameSchema,
+  contextDepthSchema,
+  contextSlicePurposeSchema,
+  contextTimeRangeSchema,
   domainLlmStepOutputSchema,
   finalDecisionOutputSchema,
+  getActivePlanDetailInputSchema,
+  getRecentAdherenceInputSchema,
   routerDecisionOutputSchema,
+  searchExerciseCatalogInputSchema,
 } from "@health/types";
+import { stripExplicitNulls } from "./openai-http.js";
 import {
+  buildDomainStepWireSchema,
   domainLlmStepWireSchema,
   finalDecisionWireSchema,
   routerDecisionWireSchema,
@@ -34,7 +44,7 @@ import {
 // ---------------------------------------------------------------------------
 // Minimal valid samples — must satisfy both wire schema AND Zod contract.
 // For nullable-required wire fields: use null (wire schema value), then apply
-// stripExplicitNulls (mirrored below) before Zod parse, as the provider does.
+// the shared stripExplicitNulls before Zod parse, as the provider does.
 // ---------------------------------------------------------------------------
 
 const validRouterSample = {
@@ -47,7 +57,6 @@ const validRouterSample = {
       signalHints: ["fatigue"],
     },
   ],
-  contextNeeds: ["recent_workouts"],
   // directCommand is optional (undefined) in Zod; omit to keep sample valid
   safetyFlags: ["fatigue"],
   confidence: 0.85,
@@ -77,24 +86,7 @@ const validFinalDecisionSample = {
   consentRequired: false,
 };
 
-// ---------------------------------------------------------------------------
-// Helper: mirrors the generic stripExplicitNulls in openai-coach-provider.ts
-// ---------------------------------------------------------------------------
-
-function stripExplicitNulls(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (Array.isArray(value)) return value.map(stripExplicitNulls);
-  if (typeof value === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (v !== null) result[k] = stripExplicitNulls(v);
-    }
-    return result;
-  }
-  return value;
-}
-
-/** Applies generic null stripping (matches the provider's normalizePayload). */
+/** Applies the providers' shared null stripping before the Zod parse. */
 function normalizeForZod(payload: Record<string, unknown>): unknown {
   return stripExplicitNulls(payload);
 }
@@ -232,7 +224,6 @@ describe("stripExplicitNulls — null-stripping edge cases", () => {
           signalHints: [],
         },
       ],
-      contextNeeds: [],
       directCommand: { detected: true, kind: null, confidence: null },
       safetyFlags: [],
       confidence: 0.8,
@@ -253,7 +244,6 @@ describe("stripExplicitNulls — null-stripping edge cases", () => {
   it("router payload with directCommand: null (entire field null) strips the field entirely", () => {
     const withNullDirectCommandField = {
       selectedDomains: [],
-      contextNeeds: [],
       directCommand: null,
       safetyFlags: [],
       confidence: 0.5,
@@ -300,6 +290,19 @@ describe("stripExplicitNulls — null-stripping edge cases", () => {
     expect(result.success).toBe(true);
   });
 
+  it("buildDomainStepWireSchema strict tool_request sample (after null stripping) passes Zod domainLlmStepOutputSchema", () => {
+    const strictToolRequest = {
+      kind: "tool_request" as const,
+      tool: "getActivePlanDetail",
+      input: { domain: "workout" },
+      rationale: null,
+    };
+
+    const normalized = normalizeForZod(strictToolRequest as Record<string, unknown>);
+    const result = domainLlmStepOutputSchema.safeParse(normalized);
+    expect(result.success).toBe(true);
+  });
+
   it("final-decision selectedAction: null survives stripping (Zod default re-applies null)", () => {
     // selectedAction is .nullable().default(null): stripping null gives undefined → default kicks in.
     // The final result should be null (not undefined, not missing).
@@ -318,5 +321,222 @@ describe("stripExplicitNulls — null-stripping edge cases", () => {
       // The default re-applies null after stripping → selectedAction must be null.
       expect(result.data.selectedAction).toBeNull();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDomainStepWireSchema — per-turn strict schema with graceful fallback
+// ---------------------------------------------------------------------------
+
+const WORKOUT_DOMAIN_INTENTS = [
+  "create_workout_plan",
+  "adapt_workout_plan",
+  "adapt_workout_plan_from_progress",
+  "log_workout_activity",
+] as const;
+
+const NUTRITION_DOMAIN_INTENTS = [
+  "create_nutrition_plan",
+  "adjust_nutrition_plan",
+  "recommend_recipes",
+  "log_nutrition_incident",
+] as const;
+
+/** Recursively assert no node allows additional properties or open objects. */
+function assertNoOpenObjects(node: unknown, path: string): void {
+  if (node === null || typeof node !== "object") {
+    return;
+  }
+
+  if (Array.isArray(node)) {
+    node.forEach((entry, index) => assertNoOpenObjects(entry, `${path}[${index}]`));
+    return;
+  }
+
+  const record = node as Record<string, unknown>;
+
+  if (record["type"] === "object" || "properties" in record) {
+    expect(record["additionalProperties"], `additionalProperties at ${path}`).toBe(false);
+    expect(
+      [...((record["required"] as string[]) ?? [])].sort(),
+      `required==keys at ${path}`,
+    ).toEqual(Object.keys((record["properties"] as Record<string, unknown>) ?? {}).sort());
+  }
+
+  for (const [key, value] of Object.entries(record)) {
+    assertNoOpenObjects(value, `${path}/${key}`);
+  }
+}
+
+describe("buildDomainStepWireSchema", () => {
+  it("returns strict:true when every allowed intent is covered (workout domain set)", () => {
+    const { schema, strict } = buildDomainStepWireSchema(WORKOUT_DOMAIN_INTENTS);
+
+    expect(strict).toBe(true);
+    expect(schema).not.toBe(domainLlmStepWireSchema);
+    assertNoOpenObjects(schema, "#");
+  });
+
+  it("returns strict:true for the nutrition domain set", () => {
+    const { strict } = buildDomainStepWireSchema(NUTRITION_DOMAIN_INTENTS);
+    expect(strict).toBe(true);
+  });
+
+  it("returns strict:true for every covered intent on its own", () => {
+    for (const intent of LLM_EMISSION_COVERED_INTENTS) {
+      const { strict } = buildDomainStepWireSchema([intent]);
+      expect(strict, `intent ${intent}`).toBe(true);
+    }
+  });
+
+  it("strict schema enumerates one tool_request variant per read-only tool plus the domain answer", () => {
+    const { schema } = buildDomainStepWireSchema(["adapt_workout_plan"]);
+    const result = (schema as { properties: { result: { anyOf: Array<Record<string, unknown>> } } })
+      .properties.result;
+
+    // One tool_request variant per agentToolNameSchema tool + 1 domain_answer variant.
+    // Drift guard: derived from the Zod source so a tool rename/add/remove fails here.
+    expect(result.anyOf).toHaveLength(agentToolNameSchema.options.length + 1);
+
+    const toolEnums = result.anyOf
+      .map((variant) => (variant["properties"] as Record<string, { enum?: string[] }>)["tool"]?.enum?.[0])
+      .filter((tool): tool is string => tool !== undefined);
+
+    expect(toolEnums.sort()).toEqual([...agentToolNameSchema.options].sort());
+  });
+
+  it("strict tool-input enums mirror the Zod enum sources in packages/types agent-context", () => {
+    const { schema } = buildDomainStepWireSchema(["adapt_workout_plan"]);
+    const result = (schema as { properties: { result: { anyOf: Array<Record<string, unknown>> } } })
+      .properties.result;
+
+    const inputPropertiesFor = (tool: string): Record<string, { enum?: string[] }> => {
+      const variant = result.anyOf.find(
+        (entry) =>
+          (entry["properties"] as Record<string, { enum?: string[] }>)["tool"]?.enum?.[0] === tool,
+      ) as { properties: { input: { properties: Record<string, { enum?: string[] }> } } };
+
+      return variant.properties.input.properties;
+    };
+
+    const userContextSliceInput = inputPropertiesFor("getUserContextSlice");
+    expect(userContextSliceInput["purpose"]?.enum).toEqual([...contextSlicePurposeSchema.options]);
+    expect(userContextSliceInput["depth"]?.enum).toEqual([...contextDepthSchema.options]);
+    expect(userContextSliceInput["timeRange"]?.enum).toEqual([...contextTimeRangeSchema.options]);
+
+    const exerciseCatalogInput = inputPropertiesFor("searchExerciseCatalog");
+    expect(exerciseCatalogInput["difficulty"]?.enum).toEqual([
+      ...searchExerciseCatalogInputSchema.shape.difficulty.unwrap().options,
+    ]);
+
+    const activePlanDetailInput = inputPropertiesFor("getActivePlanDetail");
+    expect(activePlanDetailInput["domain"]?.enum).toEqual([
+      ...getActivePlanDetailInputSchema.shape.domain.options,
+    ]);
+
+    const recentAdherenceInput = inputPropertiesFor("getRecentAdherence");
+    expect(recentAdherenceInput["domain"]?.enum).toEqual([
+      ...getRecentAdherenceInputSchema.shape.domain.unwrap().options,
+    ]);
+  });
+
+  it("strict candidateProposals items are the per-intent envelope (single intent) with code-owned id absent", () => {
+    const { schema } = buildDomainStepWireSchema(["adapt_workout_plan"]);
+    const result = (schema as { properties: { result: { anyOf: Array<Record<string, unknown>> } } })
+      .properties.result;
+    const domainAnswer = result.anyOf.find(
+      (variant) =>
+        (variant["properties"] as Record<string, { enum?: string[] }>)["kind"]?.enum?.[0] ===
+        "domain_answer",
+    ) as { properties: { candidateProposals: { items: Record<string, unknown> } } };
+
+    const envelope = domainAnswer.properties.candidateProposals.items;
+    const envelopeProperties = envelope["properties"] as Record<string, { enum?: unknown[] }>;
+
+    expect(Object.keys(envelopeProperties).sort()).toEqual(
+      ["intent", "proposedChanges", "reason", "targetDomain", "title"].sort(),
+    );
+    // No `id` — candidate ids (cand_<domain>_<index>) are assigned in code.
+    expect("id" in envelopeProperties).toBe(false);
+    expect(envelopeProperties["intent"]?.enum).toEqual(["adapt_workout_plan"]);
+  });
+
+  it("multiple covered intents produce an anyOf of envelopes", () => {
+    const { schema } = buildDomainStepWireSchema(["create_workout_plan", "log_workout_activity"]);
+    const result = (schema as { properties: { result: { anyOf: Array<Record<string, unknown>> } } })
+      .properties.result;
+    const domainAnswer = result.anyOf.find(
+      (variant) =>
+        (variant["properties"] as Record<string, { enum?: string[] }>)["kind"]?.enum?.[0] ===
+        "domain_answer",
+    ) as { properties: { candidateProposals: { items: { anyOf: Array<Record<string, unknown>> } } } };
+
+    expect(domainAnswer.properties.candidateProposals.items.anyOf).toHaveLength(2);
+  });
+
+  it("falls back to the permissive strict:false schema when any intent is uncovered", () => {
+    const { schema, strict } = buildDomainStepWireSchema([
+      "adapt_workout_plan",
+      "update_profile", // uncovered
+    ]);
+
+    expect(strict).toBe(false);
+    expect(schema).toBe(domainLlmStepWireSchema);
+  });
+
+  it("falls back to the permissive strict:false schema for an empty intent list", () => {
+    const { schema, strict } = buildDomainStepWireSchema([]);
+
+    expect(strict).toBe(false);
+    expect(schema).toBe(domainLlmStepWireSchema);
+  });
+
+  it("memoizes by intent set (order- and duplicate-insensitive)", () => {
+    const first = buildDomainStepWireSchema(["adapt_workout_plan", "create_workout_plan"]);
+    const second = buildDomainStepWireSchema([
+      "create_workout_plan",
+      "adapt_workout_plan",
+      "create_workout_plan",
+    ]);
+
+    expect(second.schema).toBe(first.schema);
+  });
+
+  it("an emission-shaped domain_answer with a candidate (after null stripping) passes Zod domainLlmStepOutputSchema", () => {
+    const emissionShapedAnswer = {
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Plan drafted.",
+      candidateProposals: [
+        {
+          intent: "create_workout_plan",
+          targetDomain: "workout",
+          title: "3-Day Strength Plan",
+          reason: "User requested a plan",
+          proposedChanges: {
+            title: "3-Day Strength Plan",
+            summary: "Strength program",
+            days: [
+              {
+                weekday: "monday",
+                focus: "Push",
+                exercises: [
+                  { name: "Bench Press", target: null, sets: 4, reps: "8-10", notes: null },
+                ],
+              },
+            ],
+            notes: [],
+            displayContract: null,
+          },
+        },
+      ],
+      domainSignals: [],
+      workoutCalorieEstimate: null,
+      workoutCaloriePerHourRate: null,
+    };
+
+    const normalized = normalizeForZod(emissionShapedAnswer as Record<string, unknown>);
+    const result = domainLlmStepOutputSchema.safeParse(normalized);
+    expect(result.success).toBe(true);
   });
 });

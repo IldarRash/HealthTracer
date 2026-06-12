@@ -212,6 +212,9 @@ describe("OpenAiContextCompressionProvider — S5 context-leak regression", () =
         },
         { domain: "profile", label: "User profile summary" },
       ],
+      // The documentContext/ragResults slice fields were deleted from the
+      // contract with the documents module. Inject them adversarially (cast)
+      // to prove the provider still never echoes unknown document-text fields.
       slice: {
         ...createPacket().slice,
         documentContext: {
@@ -237,7 +240,7 @@ describe("OpenAiContextCompressionProvider — S5 context-leak regression", () =
             consentScope: "medical_review",
           },
         ],
-      },
+      } as unknown as ReturnType<typeof createPacket>["slice"],
     });
 
     const budget = { ...DEEP_REVIEW_CONTEXT_BUDGET_POLICY, allowDocuments: false };
@@ -481,5 +484,96 @@ describe("OpenAiContextCompressionProvider — S5 context-leak regression", () =
     const bodyStr = JSON.stringify(JSON.parse(fetchInit.body as string));
 
     expect(bodyStr).toContain("Recovery focus present with consent.");
+  });
+
+  it("includes numeric progressHistory while wellbeing stays excluded under allowSensitiveHealthContext=false (Phase 3 + S5)", async () => {
+    const fetchSpy = mockOpenAiFetch(buildMockCompressionResponse());
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const provider = new OpenAiContextCompressionProvider({
+      apiKey: "test-key",
+      model: "gpt-4o-mini",
+    });
+
+    const base = createPacket();
+    const packet = createPacket({
+      slice: {
+        ...base.slice,
+        progressHistory: {
+          requestedPeriodDays: 180,
+          grantedPeriodDays: 180,
+          granularity: "weekly",
+          buckets: [
+            {
+              bucketStart: "2026-04-27",
+              workout: {
+                plannedCount: 3,
+                completedCount: 2,
+                skippedCount: 1,
+                adherencePercent: 66.7,
+                activeDays: 2,
+                avgFatigue: 5.5,
+              },
+              habits: { adherencePercent: 80 },
+              recovery: {
+                wellSupportedDays: 2,
+                moderateLoadDays: 3,
+                prioritizeRecoveryDays: 1,
+                insufficientDataDays: 1,
+              },
+              wellbeing: { avgMoodScore: 3.5, avgStressScore: 2.5, checkInCount: 4 },
+            },
+          ],
+          planChangeMarkers: [{ isoDate: "2026-05-01", domain: "workout" }],
+          dataSufficiency: {
+            workout: "partial",
+            habits: "partial",
+            recovery: "insufficient",
+            wellbeing: "partial",
+          },
+          coveredDays: 42,
+          noteCodes: [],
+        },
+        wellbeingSummary: {
+          latestDate: "2026-05-25",
+          latestMoodScore: 4,
+          latestStressScore: 2,
+          windowDays: 7,
+          windowStart: "2026-05-19",
+          windowEnd: "2026-05-25",
+          checkInCount: 4,
+          moodAverage: 3.5,
+          stressAverage: 2.75,
+          moodTrendDirection: "up",
+          stressTrendDirection: "down",
+          currentStreak: 2,
+          dataSufficiency: "sufficient",
+          generatedAt: new Date().toISOString(),
+        },
+      },
+    });
+    // S5 floor unchanged: sensitive free-text-bearing context stays denied.
+    const budget = { ...DEEP_REVIEW_CONTEXT_BUDGET_POLICY, allowSensitiveHealthContext: false };
+
+    await provider.compress({
+      packet,
+      request: buildContextCompressionRequest({
+        packet,
+        reviewSignals: { isMonthlyReview: true, isMultiDomainReview: false, isProgressReview: true },
+        budget,
+      }),
+      budget,
+    });
+
+    const [, fetchInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const bodyStr = JSON.stringify(JSON.parse(fetchInit.body as string));
+
+    // The numeric-only review packet reaches the compression payload…
+    expect(bodyStr).toContain("progressHistory");
+    expect(bodyStr).toContain("2026-04-27");
+    expect(bodyStr).toContain("planChangeMarkers");
+    // …while the sensitive wellbeing summary stays excluded (existing S5 gate).
+    expect(bodyStr).not.toContain("Wellbeing:");
+    expect(bodyStr).not.toContain("check-ins over");
   });
 });

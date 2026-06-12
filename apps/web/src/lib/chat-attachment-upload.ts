@@ -1,5 +1,5 @@
 import type { CreateChatAttachmentInput } from "@health/types";
-import { readFileAsBase64 } from "./document-upload";
+import { readFileAsBase64 } from "./file-upload";
 import {
   normalizeAttachmentMimeType,
   validateChatAttachmentFile,

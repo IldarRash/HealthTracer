@@ -97,7 +97,6 @@ function makeOpenAiErrorResponse(status: number, message: string) {
 
 const validRouterOutput = {
   selectedDomains: [],
-  contextNeeds: [],
   directCommand: null,
   safetyFlags: [],
   confidence: 0.8,
@@ -296,7 +295,6 @@ describe("OpenAiCoachProvider", () => {
         selectedDomains: [
           { domain: "workout", confidence: 0.85, intentHints: [], toolHints: [], signalHints: [] },
         ],
-        contextNeeds: ["active_workout_plan"],
         safetyFlags: [],
         directCommand: { detected: false, kind: null, confidence: 0 },
         confidence: 0.85,
@@ -842,7 +840,6 @@ describe("OpenAiCoachProvider", () => {
             makeSuccessfulFetchResponse(
               JSON.stringify({
                 selectedDomains: [],
-                contextNeeds: [],
                 safetyFlags: [],
                 confidence: 0.5,
               }),
@@ -892,7 +889,6 @@ describe("OpenAiCoachProvider", () => {
             makeSuccessfulFetchResponse(
               JSON.stringify({
                 selectedDomains: [],
-                contextNeeds: [],
                 safetyFlags: [],
                 confidence: 0.5,
               }),
@@ -932,11 +928,12 @@ describe("OpenAiCoachProvider", () => {
       expect(jsonSchema["schema"]).toBeDefined();
     });
 
-    it("generateDomainStep sends json_schema response_format with strict:false and correct schema name", async () => {
+    it("generateDomainStep sends strict:false with the permissive schema when no proposal intents are allowed", async () => {
       const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
       vi.stubGlobal("fetch", fetchMock);
 
       const provider = makeProvider();
+      // validDomainStepRequest has allowedProposalIntents: [] → per-turn fallback.
       await provider.generateDomainStep(validDomainStepRequest as never);
 
       const body = getLastBody();
@@ -945,14 +942,52 @@ describe("OpenAiCoachProvider", () => {
       expect(responseFormat["type"]).toBe("json_schema");
 
       const jsonSchema = responseFormat["json_schema"] as Record<string, unknown>;
-      // strict:false is REQUIRED here: the domain step schema contains open-ended
-      // objects (tool input, per-intent candidateProposals) and OpenAI strict mode
-      // rejects any object schema with additionalProperties:true. Zod validates
-      // post-receive. Regression guard: live calls failed with
+      // The permissive fallback schema contains open-ended objects (tool input,
+      // candidateProposals records) and OpenAI strict mode rejects any object
+      // schema with additionalProperties:true, so it MUST be sent strict:false.
+      // Regression guard: live calls failed with
       // "Invalid schema for response_format 'domain_llm_step_output'" when strict was true.
       expect(jsonSchema["strict"]).toBe(false);
       expect(jsonSchema["name"]).toBe(DOMAIN_LLM_STEP_SCHEMA_NAME);
       expect(jsonSchema["schema"]).toBeDefined();
+    });
+
+    it("generateDomainStep sends strict:true with the typed schema when every allowed intent has an emission schema", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider();
+      await provider.generateDomainStep({
+        ...validDomainStepRequest,
+        allowedProposalIntents: ["create_workout_plan", "adapt_workout_plan"],
+      } as never);
+
+      const body = getLastBody();
+      const jsonSchema = (body["response_format"] as Record<string, unknown>)[
+        "json_schema"
+      ] as Record<string, unknown>;
+
+      expect(jsonSchema["strict"]).toBe(true);
+      expect(jsonSchema["name"]).toBe(DOMAIN_LLM_STEP_SCHEMA_NAME);
+      expect(jsonSchema["schema"]).toBeDefined();
+    });
+
+    it("generateDomainStep falls back to strict:false when any allowed intent lacks an emission schema", async () => {
+      const { fetchMock, getLastBody } = captureFetch(() => makeOpenAiResponse(validDomainOutput));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const provider = makeProvider();
+      await provider.generateDomainStep({
+        ...validDomainStepRequest,
+        allowedProposalIntents: ["create_workout_plan", "update_profile"],
+      } as never);
+
+      const body = getLastBody();
+      const jsonSchema = (body["response_format"] as Record<string, unknown>)[
+        "json_schema"
+      ] as Record<string, unknown>;
+
+      expect(jsonSchema["strict"]).toBe(false);
     });
 
     it("generateFinalDecision sends json_schema response_format with strict:true and correct schema name", async () => {
@@ -1518,6 +1553,140 @@ describe("OpenAiCoachProvider", () => {
       // No "hasText" attachment summary for no-attachment request.
       // (The attachmentContextJson is rendered as "none" by the prompt template.)
       expect(systemContent).not.toContain("hasText");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 4 — deepReviewSuffix injection (mirrors lowConfidenceRoute wiring)
+  // -------------------------------------------------------------------------
+
+  describe("deepReviewSuffix injection (Phase 4)", () => {
+    /** Capture the system prompt sent to OpenAI for one call. */
+    function captureSystemPrompt(content: string): {
+      getSystemPrompt: () => string;
+    } {
+      const capturedBodies: Array<{ messages?: Array<{ role: string; content: unknown }> }> = [];
+      const fakeFetch = vi.fn().mockImplementation((_url: string, opts: { body: string }) => {
+        capturedBodies.push(JSON.parse(opts.body) as (typeof capturedBodies)[number]);
+        return Promise.resolve(makeSuccessfulFetchResponse(content));
+      });
+      vi.stubGlobal("fetch", fakeFetch);
+
+      return {
+        getSystemPrompt: () => {
+          const messages = capturedBodies[0]?.messages ?? [];
+          return (messages.find((m) => m.role === "system")?.content as string) ?? "";
+        },
+      };
+    }
+
+    const finalDecisionContent = JSON.stringify({
+      reply: "Here is your six-month review.",
+      selectedAction: null,
+      selectedProposalIds: [],
+      consentRequired: false,
+    });
+
+    const domainAnswerContent = JSON.stringify({
+      kind: "domain_answer",
+      domain: "workout",
+      summary: "Reviewed long-range trends.",
+      candidateProposals: [],
+      domainSignals: [],
+    });
+
+    it("decision prompt carries the deep-review instruction + granted range when deepReview is present", async () => {
+      const capture = captureSystemPrompt(finalDecisionContent);
+      const provider = makeProvider();
+
+      await provider.generateFinalDecision({
+        ...makeFinalDecisionRequest(),
+        deepReview: {
+          requestedPeriodDays: null,
+          grantedPeriodDays: 180,
+          dataQuality: "sufficient",
+        },
+      } as FinalDecisionRequest);
+
+      const systemPrompt = capture.getSystemPrompt();
+      expect(systemPrompt).toContain("DEEP REVIEW NOTE");
+      expect(systemPrompt).toContain("the last 180 days");
+      // dataQuality=sufficient → no narrowing follow-up instruction.
+      expect(systemPrompt).not.toContain("narrowing follow-up");
+    });
+
+    it("decision prompt mentions BOTH periods and the one-narrowing-follow-up rule on a clamped, partial review", async () => {
+      const capture = captureSystemPrompt(finalDecisionContent);
+      const provider = makeProvider();
+
+      await provider.generateFinalDecision({
+        ...makeFinalDecisionRequest(),
+        deepReview: {
+          requestedPeriodDays: 365,
+          grantedPeriodDays: 180,
+          dataQuality: "partial",
+        },
+      } as FinalDecisionRequest);
+
+      const systemPrompt = capture.getSystemPrompt();
+      expect(systemPrompt).toContain("DEEP REVIEW NOTE");
+      // Clamped: both the granted and requested periods are named.
+      expect(systemPrompt).toContain("180 days");
+      expect(systemPrompt).toContain("365 days");
+      // Not sufficient → exactly one narrowing follow-up (period or domain).
+      expect(systemPrompt).toContain("partial");
+      expect(systemPrompt).toContain("exactly ONE narrowing follow-up");
+    });
+
+    it("decision prompt has NO deep-review note when deepReview is absent", async () => {
+      const capture = captureSystemPrompt(finalDecisionContent);
+      const provider = makeProvider();
+
+      await provider.generateFinalDecision(makeFinalDecisionRequest());
+
+      expect(capture.getSystemPrompt()).not.toContain("DEEP REVIEW NOTE");
+    });
+
+    it("domain prompt carries the domain deep-review instruction with the granted range", async () => {
+      const capture = captureSystemPrompt(domainAnswerContent);
+      const provider = makeProvider();
+
+      await provider.generateDomainStep(
+        makeDomainRequest("workout", {
+          deepReview: {
+            requestedPeriodDays: 180,
+            grantedPeriodDays: 180,
+            dataQuality: "insufficient",
+          },
+        }),
+      );
+
+      const systemPrompt = capture.getSystemPrompt();
+      expect(systemPrompt).toContain("DEEP REVIEW NOTE");
+      expect(systemPrompt).toContain("the last 180 days");
+      // Domain instruction demands bucket-evidence citations in candidate reasons.
+      expect(systemPrompt).toContain("bucket evidence");
+      expect(systemPrompt).toContain("insufficient");
+      expect(systemPrompt).toContain("exactly ONE narrowing follow-up");
+    });
+
+    it("domain prompt has NO deep-review note when deepReview is absent", async () => {
+      const capture = captureSystemPrompt(domainAnswerContent);
+      const provider = makeProvider();
+
+      await provider.generateDomainStep(makeDomainRequest("workout"));
+
+      expect(capture.getSystemPrompt()).not.toContain("DEEP REVIEW NOTE");
+    });
+
+    it("the static metric legend is ALWAYS in the domain/decision prompts (review and default turns alike)", async () => {
+      const capture = captureSystemPrompt(domainAnswerContent);
+      const provider = makeProvider();
+
+      await provider.generateDomainStep(makeDomainRequest("workout"));
+
+      // The legend rides in the static prefix — present even without deepReview.
+      expect(capture.getSystemPrompt()).toContain("PROGRESS HISTORY METRIC LEGEND");
     });
   });
 });

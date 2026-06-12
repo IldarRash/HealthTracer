@@ -3,7 +3,6 @@ export {
   type ParsedAiStructuredOutput,
 } from "./structured-output.js";
 export {
-  containsUnsafeDocumentSummaryLanguage,
   containsUnsafeMedicalLanguage,
   validateProposalSafety,
   validateReplySafety,
@@ -13,3 +12,12 @@ export {
   type ProviderCallResult,
   type ProviderUsage,
 } from "./coach-ai-provider.js";
+export {
+  type LabExtractionProvider,
+  type LabExtractionRequest,
+} from "./lab-extraction-provider.js";
+export {
+  type ProposalRepairProvider,
+  type ProposalRepairRequest,
+  type ProposalRepairResult,
+} from "./proposal-repair-provider.js";

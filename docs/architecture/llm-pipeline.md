@@ -39,7 +39,10 @@ persist, and apply them only after the user accepts. End to end:
 flowchart TD
   chat["Chat turn"] --> llm["LLM pipeline (router → domains → decision-maker)"]
   llm --> actionResolver["ActionResolverService"]
-  actionResolver --> validation["ProposalValidationService"]
+  actionResolver --> normalization["ProposalNormalizationService (per-intent bridge + trusted stamping)"]
+  normalization --> validation["ProposalValidationService"]
+  validation -- "schema-class invalid" --> repair["ProposalRepairService (one payload-only LLM repair) → re-normalize + full re-validate"]
+  repair --> validation
   validation --> pending["Pending proposal (review card)"]
   pending --> userDecision["User accept or reject"]
   userDecision --> apply["ProposalApplyService"]
@@ -51,7 +54,9 @@ response had `proposals: []` for the assistant message (diagnose upstream — se
 [Diagnosis & Troubleshooting](#diagnosis--troubleshooting)). Beyond fan-out LLM output,
 proposals can also come from deterministic code-owned injectors (wellbeing check-in,
 recipe recommendations, weekly-review packing); all sources pass the same
-`ProposalValidationService` stack. On accept, workout/nutrition changes create new
+per-intent normalization stage + `ProposalValidationService` stack (with one bounded
+self-repair LLM call for schema-class failures — see Stage 11). On accept,
+workout/nutrition changes create new
 revisions — `log_workout_activity` is a LOG intent that creates an `ad_hoc`
 `workout_sessions` row, never a plan revision (see Stage 11).
 
@@ -74,13 +79,16 @@ flowchart TD
   context --> domainLlms["Parallel domain LLMs (only-selected): workout / nutrition / health"]
   domainLlms --> decision["DecisionMakerExecutorService (final synthesis LLM)\nretries once; double failure → turnError"]
   decision --> actionResolver["ActionResolverService"]
-  actionResolver --> validation["Proposal safety and domain validation"]
+  actionResolver --> normalization["Proposal normalization (per-intent bridge + trusted stamping)"]
+  normalization --> validation["Proposal safety and domain validation\n(schema-class failure → one payload-only self-repair → full re-run)"]
   validation --> persistence["ChatRepository message and proposal persistence"]
 ```
 
 LLM call budget per eligible turn: **1 router (skipped for revision/explainer) + N
 selected domain LLMs (N ≤ 3, run in parallel) + 1 decision-maker (which retries once on
-failure, so up to 2 decision calls)**. Crisis, direct-path, and quota-exceeded turns make
+failure, so up to 2 decision calls) + up to 2 payload-only proposal-repair calls**
+(`MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN`, only for schema-invalid proposals — see
+Stage 11). Crisis, direct-path, and quota-exceeded turns make
 **zero LLM calls** — they return in ChatService before AiService is reached. **Every turn
 that reaches the orchestrator fans out**: there is no orchestrator-level deterministic
 branch. If `resolveResponseModeExecutorMode` ever returns a deterministic executor mode
@@ -110,9 +118,12 @@ Responsibilities:
 - Apply hard pre-AI gates: crisis support, proposal explainer no-proposal, and
   direct chat paths.
 - Call `AiService.generateCoachResponse` for the unified LLM pipeline.
-- Persist the assistant message with parse, safety, agent, and weekly-review
-  metadata.
-- Run the proposal validation stack and persist reviewable proposals.
+- Normalize, validate, and (when eligible) self-repair every proposal **before**
+  the assistant message is created, so repair telemetry rides the message metadata
+  (`ChatService.validateAndRepairProposal` — see Stage 11).
+- Persist the assistant message with parse, safety, agent (incl.
+  `agent.repair { attempted, succeeded }` when repair was attempted), and
+  weekly-review metadata, then persist the processed proposals.
 - Accept an **optional `onProgress` (`ProgressReporter`)** and emit coarse stage events
   for the SSE streaming endpoint (see "Streaming (SSE) variant of the chat turn" below).
   The argument is absent on the synchronous endpoint, so streaming is opt-in and never
@@ -127,8 +138,9 @@ shown to a user come from one of two sources:
   `packChatRecipeRecommendationProposal` (recipe recommendations), and
   `packChatWeeklyReviewProposals` (weekly-review packing).
 
-All proposals — LLM-sourced and code-injected — pass the same
-`ProposalValidationService` safety stack before persistence.
+All proposals — LLM-sourced and code-injected — pass the same per-intent
+normalization stage and `ProposalValidationService` safety stack before persistence
+(see Stage 11).
 
 When the UI shows assistant text but no proposal card, the API almost always returned
 `proposals: []`. Invalid proposals still persist and render as cards with disabled
@@ -235,7 +247,8 @@ or text/Markdown file resolves to `document_file` without a category picker.
 **Lazy per-turn text extraction.** `AttachmentTextExtractionService`
 (`apps/api/src/modules/chat-attachments/attachment-text-extraction.service.ts`)
 extracts plain text from `document_file` attachments **once per turn**, before the
-fan-out, reusing `extractPdfPlainText` from the documents module for PDFs and a
+fan-out, using `extractPdfPlainText`
+(`apps/api/src/modules/chat-attachments/pdf-text-extraction.ts`) for PDFs and a
 UTF-8 read for text/Markdown. Extraction is capped at
 `MAX_ATTACHMENT_TEXT_CONTENT_CHARS` (**12 000 chars**, truncated beyond), wrapped in
 a ~5 s timeout, and degrades independently to a status of `ok` / `empty` / `failed`
@@ -250,9 +263,10 @@ attachment metadata (used as the label in the prompt; see Stage 8).
 > "medical content only when `consentState === 'granted'`" code floor, **for now**.
 > The pre-upload medical/MIME consent gate and the `needs_consent` upload disposition
 > are gone (see "Removed Legacy Paths"). Floors that still hold: the context-budget
-> `allowDocuments=false` floor (about DB `health_documents` slices, **not** the
-> uploaded attachment) stays, there is **no** auto-persist or parsing of
-> `health_documents` from an attachment, and the legacy `recognition`/`categorySource`
+> `allowDocuments=false` floor (now meaning **raw document-derived text** slices, **not**
+> the uploaded attachment; the consent-gated `biomarkerContext` slice is exempt by design)
+> stays, there is **no** auto-persist or parsing of `lab_reports` / `biomarker_readings`
+> from an attachment, and the legacy `recognition`/`categorySource`
 > DB columns remain readable but are not used for runtime branching. (`category` is
 > still read to resolve a retention policy — `mime_inferred` resolves image uploads to
 > `unclassified` and document uploads to `document_file`, both with
@@ -311,30 +325,68 @@ envelope is produced, and
 there is no consent-gated medical-save proposal variant (that is deferred — see
 below).
 
-### Document upload (LIVE) vs attachment-driven save (deferred)
+### Lab-report upload (LIVE Biomarkers feature) vs attachment-driven save (deferred)
 
 `document_file` chat attachments are **context-only**: their text is extracted
 per-turn and fed to the domain LLMs, but **no attachment path may create or parse a
-`health_document` row** — the chat-attachments path stays context-only and this
-boundary is enforced and regression-tested. Durable, parsed document **storage** is a
-separate concern.
+`lab_report` / `biomarker_reading` row** — the chat-attachments path stays
+context-only and this boundary is enforced and regression-tested. Durable, parsed
+lab-report **storage** is a separate concern.
 
-**Durable PDF/text document upload + parse is implemented** — but as a separate,
-explicit **Profile Documents** feature (`apps/api/src/modules/documents/*`,
-`apps/web/src/components/documents/*`), **not** part of the chat-attachment pipeline.
-The user explicitly uploads a PDF/plain-text file under a five-scope, per-operation
-consent model (`upload_storage`, `parse_ocr`, `ai_summarization`,
-`semantic_indexing`, `coach_chat_context`) with revoke + delete; raw bytes live on
-the storage adapter (local filesystem in dev, encrypted access-controlled store in
-prod), extracted text is never persisted or logged, summaries are governed and
-non-diagnostic, and access is ownership-scoped.
+**Durable PDF/text lab-report upload + parse is implemented** — but as a separate,
+explicit **Biomarkers** feature (`apps/api/src/modules/biomarkers/*`,
+`apps/web/src/components/biomarkers/*`, web route `apps/web/app/biomarkers`),
+**not** part of the chat-attachment pipeline, and **not** part of the chat fan-out.
+The user explicitly uploads a PDF/plain-text lab report under a **two-level consent
+model** — a structurally-required upload-time `storeAndParse` (`z.literal(true)` in
+`createLabReportSchema`) plus an optional per-report `coachChat` toggle persisted as
+`coachContextConsentAt` (revoke-able via `PATCH /lab-reports/:id/consent`) — with
+delete. Raw bytes live on the storage adapter (local filesystem in dev, encrypted
+access-controlled store in prod), **extracted document text is never persisted or
+logged**, and access is ownership-scoped. This replaces the deleted five-scope
+health-documents feature (see "Removed Legacy Paths").
+
+#### Lab extraction pipeline (out-of-band)
+
+Extraction is a **dedicated pipeline that is NOT part of the chat fan-out**. It is a
+separate provider interface (`LabExtractionProvider` in `packages/ai`, live impl
+`OpenAiLabExtractionProvider` in `apps/api/src/modules/biomarkers`) so the
+`CoachAiProvider` three-method fan-out surface stays untouched. `LabReportsService.extract`
+(triggered by `POST /lab-reports/:id/extract`) runs: storage read → parse
+(`LabDocumentParser`) → dedicated lab-extraction LLM → Zod parse
+(`labExtractionOutputSchema`) → per-reading catalog/plausibility/unsafe-language
+validation → transactional reading replacement. Properties:
+
+- **Strict structured output:** OpenAI `response_format: json_schema` with `strict: true`
+  over a closed **47-key catalog enum** (`BIOMARKER_KEYS`); `temperature: 0`; system
+  prompt is static/cacheable (built from `BIOMARKER_CATALOG`) and the document text goes
+  **only** into the user message, never the system prompt, a log line, or a persisted field.
+- **Retry/timeout:** up to **2 retries** on network/429/5xx (same policy as the coach
+  provider), wrapped in a **60s `AbortSignal.timeout`** budget.
+- **Typed failure codes (never fake-success):** `file_unreadable`, `pdf_no_text`,
+  `content_too_large`, `not_a_lab_report`, `llm_unavailable`, `llm_invalid_output`,
+  `no_readings_extracted` — persisted as `lab_reports.failure_code` (fixed enum strings so
+  no document fragment leaks).
+- **Per-reading safety:** values must sit in the catalog plausibility band
+  (`BIOMARKER_PLAUSIBILITY_FACTOR`); unit/`valueText`/`referenceRangeText` pass an EN/RU
+  `containsUnsafeMedicalLanguage` screen; an individual failing reading is **dropped** (and
+  counted into `unmappedMarkerCount`), never failing the whole batch. Markers the LLM cannot
+  map to a catalog key are counted only — their free-text labels are never returned or stored.
+- `OPENAI_MODEL_LAB_EXTRACTION` env overrides the model (falls back to `OPENAI_MODEL`);
+  with no `OPENAI_API_KEY`, extract honestly returns `llm_unavailable` rather than crashing.
+
+Coach context never sees raw lab text: the only biomarker shape that may enter chat is the
+bounded `biomarkerContext` slice (≤30 items, **no reference ranges**), assembled by
+`BiomarkersService.buildBiomarkerContextSummary` from consent-eligible readings (manual
+readings are always eligible; extracted readings require the owning report's
+`coachContextConsentAt`). Proposal evidence may reference a `biomarker_reading`.
 
 Still **not** built (deferred), and still a hard boundary:
 
-- The LLM-recognized medical **special save**: a domain recognition signal → a
-  consent-gated save **proposal** → on accept, with consent, persist a
-  `health_document`. Document persistence is **explicit-upload only**; **no
-  attachment path may create or parse a `health_document`** (context-only,
+- The LLM-recognized **special save**: a domain recognition signal → a
+  consent-gated save **proposal** → on accept, with consent, persist a reading. Reading
+  persistence is **explicit-upload / manual-entry only**; **no
+  attachment path may create or parse a `lab_report` / `biomarker_reading`** (context-only,
   enforced and regression-tested).
 
 ## Stage 2: Code-Owned Pre-AI Gates
@@ -381,8 +433,13 @@ Files:
 - `apps/api/src/modules/chat/direct-chat-path-formatters.ts`
 - `apps/api/src/modules/ai/direct-chat-path-matcher.service.ts`
 
-Handles explicit deterministic actions. There are **three** direct-path kinds
-(`directChatPathKindSchema` in `packages/types/src/direct-chat-path.ts`):
+Handles explicit deterministic actions. There are **five** direct-path kinds
+(`directChatPathKindSchema` in `packages/types/src/direct-chat-path.ts`), detected in
+the config order `mark_today_workout_done` → `today_summary_read` →
+`nutrition_plan_read` → `weekly_progress_read` → `workout_plan_read`
+(`directPaths.detectionOrder` in `ai-behavior.json`,
+`DEFAULT_DIRECT_PATH_DETECTION_ORDER` in
+`packages/types/src/direct-chat-path-default-patterns.ts`):
 
 - `today_summary_read` — read-only Today summary (formatter
   `formatTodaySummaryReadMessage`).
@@ -390,9 +447,22 @@ Handles explicit deterministic actions. There are **three** direct-path kinds
 - `nutrition_plan_read` — read-only active-nutrition-plan readback (formatter
   `formatNutritionPlanReadMessage` in `direct-chat-path-formatters.ts`, RU/EN match
   patterns + `replyTemplates.nutritionPlan` in `ai-behavior.json`).
+- `weekly_progress_read` — read-only readback of the latest weekly progress summary
+  snapshot (`ProgressService.getLatestSummarySnapshot` — the same snapshot the
+  `weekly_review` context slice reads, never re-aggregated; formatter
+  `formatWeeklyProgressReadMessage`, `replyTemplates.weeklyProgress`). Its negative
+  patterns deliberately exclude **analytic phrasing** (`analy[sz]e`/`review`/`why`,
+  `проанализ`/`анализ`/`разбор`…) and **longer-than-week lookbacks**
+  (`month`/`quarter`/`year`/`all-time`, `месяц`/`полгода`/`за год`/`за всё время`…) so
+  those turns fall through to the fan-out / Tier-2 review path.
+- `workout_plan_read` — read-only active-workout-plan readback, symmetric with
+  `nutrition_plan_read` (`WorkoutsService.getCurrentActivePlan`, formatter
+  `formatWorkoutPlanReadMessage`, `replyTemplates.workoutPlan`). Its negative patterns
+  exclude create/change/adapt phrasing (EN + RU) so plan mutations stay proposal-only
+  through the fan-out.
 
 Direct paths resolve only when the message is clearly understood **and there is no
-attachment**; otherwise the turn falls through to the router. Two are read-only; only
+attachment**; otherwise the turn falls through to the router. Four are read-only; only
 `mark_today_workout_done` writes. Plan changes remain proposal-only.
 
 ### Free-Tier AI Message Quota Gate
@@ -508,9 +578,19 @@ Builds the deterministic **message-context** object from the raw user message:
 
 - original text
 - normalized text
-- detected language and basic signals
+- detected language and basic signals (incl. the `review_request` boolean — RU/EN
+  retrospective-review phrasing such as `анализ`/`разбор`/`итог`/`review`/`analy[sz]`/
+  `retrospect`)
 - attachment presence
 - direct-path candidate hints
+- `requestedLookbackDays: number | null` — deterministically detected lookback period
+  (`detectRequestedLookbackDays`): fixed RU/EN phrase rules (`сегодня`→1, `неделю`/`last
+  week`→7, `месяц`→30, `квартал`/`quarter`→90, `полгода`/`six months`→180, `год`/`year`→365)
+  plus numeric forms (`за 3 месяца`, `last 2 months`, `6 weeks`); the **longest** mentioned
+  period wins, and full-history asks (`за всё время`, `all time`, `entire history`) resolve
+  to `PROGRESS_HISTORY_FULL_LOOKBACK_DAYS` (= 731, the monthly-ladder grant). These two
+  signals drive the deterministic budget-profile selection in Stage 6 — the LLM never
+  decides the budget tier.
 
 Pure helpers and schemas live in `packages/types`
 (`packages/types/src/message-preprocessor.ts`).
@@ -563,7 +643,6 @@ Output: `RouterDecisionOutput` (`packages/types/src/router-decision.ts`):
 
 - `selectedDomains[]` (max 3) — each with `domain`, `confidence`, and per-domain
   `intentHints[]` / `toolHints[]` / `signalHints[]`
-- `contextNeeds[]`
 - `directCommand` signal
 - `safetyFlags[]`
 - `confidence`
@@ -573,10 +652,16 @@ Safety behavior (three-step validation pipeline):
 1. `validateRouterDecisionOutputShape` — shape guard: rejects forbidden user-facing
    fields such as direct replies or proposals.
 2. `routerDecisionOutputSchema.parse` — Zod parse applying schema defaults (e.g.
-   empty `selectedDomains` when absent).
+   empty `selectedDomains` when absent). **Count caps are enforced by slicing
+   in-schema, never by rejection**: `selectedDomains` is `.transform`-sliced to
+   `MAX_ROUTER_SELECTED_DOMAINS` (3) and each domain's
+   `intentHints`/`toolHints`/`signalHints` to `MAX_ROUTER_HINTS_PER_DOMAIN` (5), so a
+   router LLM emitting 4 valid domains or 6 valid hints degrades to the cap instead of
+   failing the whole parse onto the fallback route. Element validations (known
+   domain/tool names, hint length) still reject as before.
 3. `clampRouterDecisionOutput` — clamps `selectedDomains` to known `RouterDomain`
    values, `toolHints` to `AgentToolName` values, and `safetyFlags` to
-   `AgentSafetyFlag` values; caps `selectedDomains` at `MAX_ROUTER_SELECTED_DOMAINS`.
+   `AgentSafetyFlag` values; re-applies the same domain/hint count caps.
    `intentHints` pass through unclamped. Capability-catalog narrowing of
    tool/proposal allowlists happens downstream in `SystemPlannerService`, not here.
 
@@ -625,13 +710,34 @@ independent step that runs after `resolveRoute`:
 Planner output (`DomainFanoutPlan`):
 
 - `selectedDomains[]` — each with `{ domain, capabilityId, allowedTools,
-  allowedProposalIntents, contextBudget, executorMode }`, clamped to the capability
+  allowedProposalIntents, contextBudget, executorMode,
+  supplementaryContextSlices? }`, clamped to the capability
   catalog (the catalog is the floor; YAML/router can only narrow it).
 - decision-maker plan (action-variant catalog + budget)
 - per-domain context slice plans and compression requirements
+- turn-level lookback metadata: `requestedLookbackDays` (from the preprocessor) and
+  `grantedLookbackDays` (the ladder/profile clamp — see `ContextBudgetPolicyService`
+  below)
 
 Selected domains are capped at **3** (code constant). The planner never widens
 tool/proposal allowlists beyond the catalog.
+
+**Deep-review slice injection (deterministic).** `planTurn` receives the
+preprocessor result and threads only `requestedLookbackDays` +
+`simpleSignals.review_request` into the budget-profile selection
+(`resolvePreprocessorBudgetHints`). When `shouldInjectProgressHistoryReview`
+(`context-budget-policy.service.ts`) approves — a review budget profile
+(`deep_review` / `deep_history`) **and** a review-ish turn (monthly review, progress
+review, or the `review_request` signal) — the planner builds one
+`progress_history_review` slice request
+(`buildProgressHistoryReviewSliceRequest`: depth `large`, timeRange clamped to the
+budget's `maxLookbackDays` as display metadata) and appends it right after the
+primary slice on the route's `requiredContextSlices` **and** as
+`supplementaryContextSlices` on every fan-out domain entry
+(`appendSupplementarySliceRequests`, dedup + `MAX_CONTEXT_SLICES` cap). A purely
+multi-domain `deep_review` turn (e.g. "help with training and nutrition") is
+deliberately excluded — it is not a retrospective and never triggers the history
+aggregation. Default turns never carry the slice.
 
 Router confidence directly affects proposal availability. If the router result is not
 from the LLM, has confidence below `RULE_ROUTE_CONFIDENCE_THRESHOLD` (`0.75`), has no
@@ -686,6 +792,37 @@ Builds context budget and slice policy **per selected domain**. Code floors deny
 documents and sensitive health context by default, even if config tries to relax
 them, and the floor is re-applied to each per-domain packet.
 
+**Three budget profiles** (`contextBudgetProfileSchema` in
+`packages/types/src/context-budget.ts`, overridable via
+`contextBudgets.profiles` in `ai-behavior.json`, always re-floored):
+
+| profile | maxSlices | maxRawItems | maxLookbackDays | compression |
+| --- | --- | --- | --- | --- |
+| `default` | 3 (`MAX_CONTEXT_SLICES`) | 20 | 30 | no |
+| `deep_review` | 5 | 50 | 90 | mandatory |
+| `deep_history` | 6 | 60 | 731 (`PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS`) | mandatory |
+
+**Deterministic profile selection** (`resolveBudgetForTurn`) — the LLM never decides
+the tier:
+
+1. A review-ish turn (any deep-review trigger, the `isProgressReview` signal, or the
+   preprocessor `review_request`) with `requestedLookbackDays >
+   deepHistoryMinLookbackDays` (config, default **91** — so 90-day/quarter reviews
+   stay `deep_review`) → `deep_history`.
+2. Otherwise the existing `deep_review` triggers (monthly-review pattern/intents,
+   multi-domain review, progress review + extended lookback) → `deep_review`.
+3. Everything else → `default`.
+
+**Granted lookback** (`resolveGrantedLookbackDays`): the **granularity ladder** clamp
+(`clampProgressHistoryLookback` in `packages/types/src/progress-history.ts` — ≤14d →
+daily buckets (cap 31), ≤182d → weekly (cap 26), longer → monthly (cap 24, granted at
+most 731 days)) further capped by the selected profile's `maxLookbackDays`. A long ask
+is **clamped, never refused**. When `requestedLookbackDays > grantedLookbackDays`,
+`CoachingContextService` appends an honest clamp note rendered from the config-sourced
+EN/RU templates (`contextBudgets.degradationNotes.lookbackClamped`, schema
+`contextBudgetDegradationNotesSchema`, rendered via `renderLookbackClampNote` /
+`buildLookbackClampNote`) — never hardcoded prose.
+
 ## Stage 7: Coaching Context
 
 ### `CoachingContextService`
@@ -699,10 +836,45 @@ domain prompts.
 Responsibilities:
 
 - load user snapshot
-- assemble requested context slices for each selected domain
+- assemble requested context slices for each selected domain (route-derived plan +
+  planner-injected `supplementarySliceRequests`, deduped and capped by
+  `normalizeContextSlicePlan`)
 - apply safety constraints (per-packet budget floor re-applied)
-- record source refs and missing context notes
+- record source refs and missing context notes (incl. the config-sourced lookback
+  clamp note when `requestedLookbackDays > grantedLookbackDays` on a review turn)
 - expose read-only context tools used by the domain agent loops
+
+**`progress_history_review` slice (deep reviews).** A new slice purpose
+(`contextSlicePurposeSchema` in `packages/types/src/agent-context.ts`) carrying the
+numeric-only `ProgressHistoryReviewSummary` on `UserContextSlice.progressHistory`. Its
+builder case (`user-context-slice.builder.ts`) adds the summary plus a small
+recent-baseline contrast (`activeWorkoutPlan`, `recentWorkoutExecution`, small
+`weeklyProgress`) and deliberately includes **no** `wellbeingSummary` /
+`recoveryContext` / `documentContext` / `ragResults`.
+
+- **Lazy + once per turn.** The aggregation
+  (`ProgressHistoryAggregateService.buildReviewSummary`,
+  `apps/api/src/modules/progress/progress-history-aggregate.service.ts` — 6 parallel
+  numeric-projection queries over workout sessions, habit completions,
+  recovery/wellbeing check-ins, and plan-revision dates) runs **only** when the
+  resolved slice plan contains `progress_history_review` — default turns never trigger
+  it. On review turns the orchestrator **precomputes the summary once**
+  (`precomputeProgressHistorySummary`) and threads it via
+  `ProgressHistoryLookbackOptions.precomputedSummary` into every packet build (primary
+  + ≤3 domains), so the aggregation never re-runs per packet; the lazy compute path
+  remains for callers outside the fan-out turn.
+- **The sensitive floor stays untouched — STRUCTURALLY.**
+  `progressHistoryReviewSummarySchema` (`packages/types/src/progress-history.ts`) is
+  numbers, `z.enum` values, and regex-validated ISO dates **only** — there is no
+  unconstrained `z.string()` anywhere in the schema, and the aggregate service never
+  selects note/free-text columns. That structural guarantee is why
+  `slice.progressHistory` may pass `applyBudgetToBuiltSlice` while `wellbeingSummary`
+  and `recoveryContext` remain stripped under the unchanged
+  `allowSensitiveHealthContext=false` floor: wellbeing/recovery **trends** reach a deep
+  review as numbers, never as private text.
+- **Raw-item budgeting:** `progressHistory.buckets` count toward `maxRawItems`;
+  truncation keeps buckets first and trims from the **oldest** end (buckets are
+  ascending by `bucketStart`, so the most recent periods survive).
 
 ### `agent-prompt-context`
 
@@ -738,6 +910,12 @@ before any data reaches OpenAI:
   health context — are only read when `budget.allowSensitiveHealthContext` is `true`
   (mirroring the `applyBudgetToBuiltSlice` guard). `documentContext` and `ragResults`
   are intentionally never read.
+- `slice.progressHistory` (the deep-review numeric aggregates) is read **ungated** —
+  it is structurally safe (numbers/enums/ISO dates only by schema construction) and
+  already bounded by the per-granularity bucket caps. All slices in a turn share the
+  same turn-level summary, so the provider takes the first one found. The
+  wellbeing/recovery free-text gates above are unchanged. The compression summary's
+  `dataQuality` feeds the deep-review sufficiency block (worst-of; see Stage 9).
 
 `ContextCompressionProvider` is a **distinct interface** from `CoachAiProvider` — it
 has a single `compress` method and is never part of the three-method fan-out surface.
@@ -855,7 +1033,7 @@ File: `apps/api/src/modules/ai/agent-tool-registry.service.ts`
 
 Executes tool requests from a domain loop after executor allowlist checks.
 
-Tools (read-only context only):
+Tools (read-only context only, **7**):
 
 - `getUserContextSlice`
 - `getWeeklyProgressContext`
@@ -863,10 +1041,26 @@ Tools (read-only context only):
 - `searchRecipeCatalog` — recipe catalog lookup; wired to nutrition-domain capabilities only
 - `getActivePlanDetail` — current active plan summary; wired to workout, nutrition, and review_progress
 - `getRecentAdherence` — 7-day workout/habit adherence counts; wired to workout, nutrition, and review_progress
+- `getProgressHistory` — adaptive-lookback numeric progress aggregates for deep
+  reviews (`{ periodDays }`, clamped server-side: min
+  `MIN_PROGRESS_HISTORY_PERIOD_DAYS = 7`, granularity-ladder cap inside
+  `ProgressHistoryAggregateService`). Returns a `ProgressHistoryReviewSummary`
+  (numeric-only by schema construction); allowlisted **only** on `review_progress`
+  and `longevity_overview` (`packages/types/src/intent-catalog.ts`).
 
-`getDocumentContext` has been removed: document context in chat is intentionally unavailable under the `allowDocuments=false` context-budget floor. The consent-scoped design is deferred (see "Removed Legacy Paths").
+`getDocumentContext` has been removed: raw document-derived context in chat is intentionally unavailable under the `allowDocuments=false` context-budget floor (now meaning raw document-derived text slices). Structured biomarker context reaches chat **only** through the separate consent-gated `biomarkerContext` slice (≤30 items, no reference ranges) assembled by `BiomarkersService.buildBiomarkerContextSummary` — it is exempt from the `allowDocuments` floor by design (it is user-visible, user-editable, consent-gated structured state, not raw document text). There is no document-context tool.
 
 A tool request not allowed by the active domain capability is rejected.
+
+**Tool allowlist caps are 6** (`capabilityConfigSchema.allowedTools` and
+`domainLlmStepRequestSchema.allowedTools` both `.max(6)`): `review_progress` carries
+6 tools since `getProgressHistory` was added, and the previous cap of 5 would have
+made every review_progress domain step degrade on schema parse. The per-domain YAML
+`tools` cap equals the full catalog size (`agentToolNameSchema.options.length`) since
+YAML narrows the catalog. The OpenAI wire schema's tool-name enum is **derived from
+the authoritative Zod enum** (`openai-wire-schemas.ts` spreads
+`agentToolNameSchema.options`), so the wire contract can never drift from the live
+tool set.
 
 ## Stage 9: Decision-Maker LLM
 
@@ -882,7 +1076,8 @@ always resolves, degrading to a safe fallback on any provider error.
 
 Request (`finalDecisionRequestSchema`, `packages/types/src/final-decision.ts`):
 `{ userMessage, domainOutputs[] (≤3), candidateProposalSummaries[] (≤15),
-actionVariantCatalog, safetyFlags[], safetyConstraints[], responseLanguage?, recentMessages[] }`.
+actionVariantCatalog, safetyFlags[], safetyConstraints[], responseLanguage?,
+recentMessages[], lowConfidenceRoute, deepReview? }`.
 `candidateProposalSummaries[]` are the `id + intent + title + reason` descriptors built by
 the orchestrator (Stage 8); the decision-maker selects from these ids and never sees the
 full candidate payloads. `recentMessages[]` is capped at **6 messages / 4000 chars each**
@@ -912,6 +1107,45 @@ Decision-maker degradation is observable through orchestrator `parseErrors` entr
 start with `Decision-maker degraded:`. The fallback final decision
 (`createFallbackFinalDecision`) always has `selectedAction: null`,
 `selectedProposalIds: []`, and `consentRequired: false`.
+
+### Deep-review sufficiency framing (`deepReview` + `{{deepReviewSuffix}}`)
+
+On deep-review turns, an optional typed `deepReview` block
+(`deepReviewPromptContextSchema` in `packages/types/src/progress-history.ts` —
+`{ requestedPeriodDays, grantedPeriodDays, dataQuality }`, numbers + enum only) rides
+on **both** the `DomainLlmStepRequest` of every selected domain and the
+`FinalDecisionRequest`:
+
+- **Built only when** the plan selected a review budget profile (`deep_review` /
+  `deep_history`) **and** the primary context packet carries the
+  `progress_history_review` slice (`buildDeepReviewPromptContext` in
+  `agent-orchestrator.service.ts`). Undefined on every non-review turn.
+- `dataQuality` is the **worst-of** reduction (`deriveDeepReviewDataQuality` /
+  `resolveWorstDataSufficiency`) over the review summary's four per-domain
+  `dataSufficiency` values **plus** the compression summary's `dataQuality` when
+  compression produced one (`insufficient > partial > sufficient`).
+- The provider injects a `{{deepReviewSuffix}}` placeholder — the same
+  request-field → dynamic-suffix channel as `lowConfidenceRoute` →
+  `{{lowConfidenceRouteSuffix}}` — present in **all four** fan-out templates (three
+  domain templates + decision template), rendered as the empty string on normal turns
+  so the static prefixes stay byte-stable. `buildDeepReviewSuffix`
+  (`openai-coach-provider.ts`) composes the stage instruction
+  (`DEEP_REVIEW_DECISION_INSTRUCTION` for the decision template,
+  `DEEP_REVIEW_DOMAIN_INSTRUCTION` for domain templates: separate OBSERVED from
+  UNCERTAIN, cite concrete bucket dates/numbers, name the analyzed range, never
+  diagnostic wording), an analyzed-range sentence (naming the clamp honestly when
+  `requestedPeriodDays > grantedPeriodDays`), and — when `dataQuality` is not
+  `sufficient` — exactly **one** narrowing follow-up (shorter period or single
+  domain, never both, never more than one question).
+- A static **EN metric legend** (`PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK`, built
+  from `PROGRESS_HISTORY_METRIC_LEGEND.en` in `progress-history.ts`) sits in the
+  **static prefix** of the three domain templates and the decision template — one
+  line per `progressHistory` bucket metric, code-owned text, placeholder-free and
+  byte-stable, so the prompt-cache prefix/suffix split is preserved (the LLM still
+  answers in `{{responseLanguage}}`).
+- Diagnostics surface a **boolean-only** `deepReview: true` marker on
+  `agent.fanOut.decision` and the `decision_done` log — never period numbers or
+  health data.
 
 ### `ActionVariantCatalogService`
 
@@ -1000,9 +1234,13 @@ After an **LLM-backed (fan-out) turn**, `ChatService` attaches config-driven
 from the fan-out's selected domains by the pure helper
 `deriveQuickActionsForTurn` (`packages/types/src/suggested-quick-actions.ts`):
 
-- `today_summary_read` is always eligible.
-- `mark_today_workout_done` is added when `workout` is among the selected domains.
+- `today_summary_read` and `weekly_progress_read` are always eligible.
+- `mark_today_workout_done` and `workout_plan_read` are added when `workout` is among
+  the selected domains.
 - `nutrition_plan_read` is added when `nutrition` is among the selected domains.
+
+(Up to **5** chips; the configured `suggestedQuickActions.actions[]` defines one entry
+per direct-path kind.)
 
 The chip labels and localized `messageText` (`{ en, ru }`) come from the
 `suggestedQuickActions.actions[]` block in
@@ -1031,7 +1269,44 @@ Fields: `totalLatencyMs`, `routerLatencyMs`, `contextLatencyMs`, `decisionLatenc
 `toolsRequestedPerDomain[]`, `degradedDomains[]`, `finalActionType`, `proposalCount`,
 `validationFailureClasses[]`.
 
-## Stage 11: Proposal Validation And Persistence
+## Stage 11: Proposal Normalization, Validation And Persistence
+
+For every raw proposal (LLM-sourced and code-injected alike), `ChatService.validateAndRepairProposal`
+runs: **normalize → full validation stack → (schema-class failures only) one payload-only
+self-repair → re-normalize + full re-validate → final status**. This all happens **before**
+the assistant message is persisted, so repair telemetry can ride
+`metadata.agent.repair { attempted, succeeded }`. A transient failure inside the validation
+stack itself (e.g. a DB error in an async ownership check) degrades only THAT proposal to
+`validationStatus: "invalid"` with `validationErrors: ["proposal_validation_unavailable"]` —
+it never kills the whole paid turn.
+
+### `ProposalNormalizationService` (runs BEFORE the validation stack)
+
+File: `apps/api/src/modules/proposals/proposal-normalization.service.ts`
+
+Per-intent normalization registry. Normalizers **bridge known LLM shape variance to the
+canonical payload form — they never relax validation** (the full stack still runs on the
+normalized payload afterwards):
+
+- `create_workout_plan` / `adapt_workout_plan` — bridges legacy `{name, reps, sets}`
+  exercise entries to the catalog-backed form via `normalizeLegacyWorkoutPlanExercises`
+  (`apps/api/src/modules/workouts/workout-exercise-normalizer.ts`).
+- `adapt_workout_plan_from_progress` — the same bridge applied to the wrapper's nested
+  `.plan`.
+- `log_nutrition_incident` — pure normalizer `normalizeLogNutritionIncidentChanges`
+  (`packages/types/src/nutrition-incident-normalization.ts`) with **trusted server-side
+  stamping** from a per-turn `ProposalNormalizationContext` built once by `ChatService`
+  (`userId`, server `nowIso`, bounded turn-attachment metadata — never sourced from LLM
+  output): string `imageRefs` are coerced to objects and stamped from the turn's real
+  image-attachment ids, unknown `provenance.source` values are coerced to a known enum
+  value, and an out-of-window `incidentDateTime` is clamped to the server's now.
+
+Fault isolation: a throwing normalizer logs a warning (intent + error name only — never
+payload contents) and returns the ORIGINAL changes; validation may then mark the proposal
+invalid, but the turn survives.
+
+The old `ProposalValidationService.normalizeWorkoutProposalExercises` is **deleted** —
+this registry is its replacement (see "Removed Legacy Paths").
 
 ### Reply And Proposal Safety
 
@@ -1061,17 +1336,88 @@ File: `apps/api/src/modules/proposals/proposal-validation.service.ts`
 Validates proposal schema, ownership, provenance, attachment refs, recovery-aware
 workout changes (incl. calorie-estimate bounds), habits, wellbeing check-ins,
 recipe recommendations, nutrition incident image refs, and Today checklist
-references.
+references. `ChatService.runProposalValidationStack` runs the full stack and returns
+the three classification buckets (safety / schema / ownership-context) consumed by
+`classifyProposalValidationFailure` (`packages/types/src/ai-proposal.ts`) to decide
+repair eligibility.
+
+### Proposal Self-Repair (`ProposalRepairService`)
+
+Files:
+
+- `apps/api/src/modules/ai/proposal-repair.service.ts`
+- `apps/api/src/modules/ai/openai-proposal-repair-provider.ts`
+- `apps/api/src/modules/ai/proposal-repair.tokens.ts` (`PROPOSAL_REPAIR_PROVIDER` DI token)
+- `packages/ai/src/proposal-repair-provider.ts` (`ProposalRepairProvider` interface)
+
+When a proposal fails validation with a **schema-class** failure,
+`ChatService.validateAndRepairProposal` makes **one bounded, payload-only repair LLM
+call**: the provider re-emits a corrected `proposedChanges` JSON given the exact
+validation error strings plus the original payload. It is never a decision-maker re-run
+(the decision-maker selects candidates by id and does not write payloads). Hard bounds
+and floors:
+
+- **Eligibility:** schema-class failures only — **never safety-class** (the LLM must not
+  be asked to write around safety floors) and **never ownership-class** (server-side
+  facts the LLM cannot fix).
+- **Budget:** `MAX_PROPOSAL_REPAIR_ATTEMPTS_PER_TURN = 2` per turn (`chat.service.ts`);
+  proposals beyond the budget skip repair and persist invalid as normal.
+- **Timeout:** 10 s wall clock (`PROPOSAL_REPAIR_TIMEOUT_MS`) via `AbortController`,
+  covering the provider's HTTP retries.
+- **Envelope preserved:** only `proposedChanges` is replaced; intent, targetDomain,
+  title, reason, and evidenceRefs always stay from the original proposal. The assistant
+  reply text is never regenerated.
+- **No bypass:** the repaired payload re-enters the SAME normalize step and the FULL
+  validation stack; a still-invalid repair persists the honest invalid card with its
+  final errors.
+- **Optional provider:** `PROPOSAL_REPAIR_PROVIDER` is wired in `ai.module.ts` only when
+  the OpenAI provider is configured; the model resolves as
+  `OPENAI_REPAIR_MODEL ?? OPENAI_MODEL_DECISION ?? OPENAI_MODEL` (`apps/api/src/env.ts`).
+  With no provider, `tryRepair` degrades to `null` without any call.
+- **Telemetry / privacy:** repair counts ride the assistant message as
+  `metadata.agent.repair { attempted, succeeded }` (counts only — this is why proposals
+  are processed BEFORE `createMessage`). Logs carry intent + failure class + error
+  counts only, never payload contents.
 
 ### `ChatRepository.createProposal`
 
 File: `apps/api/src/modules/chat/chat.repository.ts`
 
-Persists raw proposals with validation status and validation errors. Nothing is
-applied to structured state until the user accepts a valid proposal through the
-proposal apply flow. Accepted workout/nutrition changes create new revisions; the
-`log_workout_activity` LOG intent instead creates an `ad_hoc` `workout_sessions` row and
-**never** a revision (`ProposalApplyService` → `WorkoutsService.applyLogWorkoutActivityProposal`).
+Persists the processed (normalized, possibly repaired) proposals with their final
+validation status and validation errors. Nothing is applied to structured state until
+the user accepts a valid proposal through the proposal apply flow. Accepted
+workout/nutrition changes create new revisions; the `log_workout_activity` LOG intent
+instead creates an `ad_hoc` `workout_sessions` row and **never** a revision
+(`ProposalApplyService` → `WorkoutsService.applyLogWorkoutActivityProposal`).
+
+### Tolerant Client Proposal Contract
+
+Because the server intentionally persists invalid proposals, the client contract is
+**tolerant by design** (`packages/types/src/ai-proposal.ts`):
+
+- `aiProposalSchema` runs the per-intent `proposedChanges` check **only when
+  `validationStatus === "valid"`**; invalid / pending-validation proposals keep
+  `proposedChanges` as raw `unknown`. A proposal that CLAIMS to be valid with a
+  non-conforming payload still fails parse (honesty floor).
+- `AiProposal` is the discriminated union `ValidatedAiProposal | UnvalidatedAiProposal`
+  with the `isValidatedProposal()` guard. The web routes every non-validated proposal to
+  the generic card (`apps/web/src/components/proposals/inline-proposal-card.tsx`) — an
+  honest invalid notice with disabled Apply and working Reject/Modify — before any
+  intent-specific card dispatch.
+- `tolerantArraySchema` (`packages/types/src/zod-tolerant.ts`) wraps
+  `chatTurnResponseSchema.proposals` (`packages/types/src/chat-turn.ts`) and the web
+  read paths (`listProposals`, thread-detail messages in `apps/web/src/lib/api.ts`): a
+  malformed element is dropped (warn with label/index/issue paths only — never element
+  contents) instead of failing the whole response parse.
+- `chatProposalRevisionSchema.originalProposal.proposedChanges` is relaxed to
+  `z.unknown()` with a 64 KB serialized cap (`MAX_REVISION_ORIGINAL_CHANGES_JSON_CHARS`),
+  so **Modify works for invalid proposals** too.
+- The web SSE path treats a present-but-unparseable `final` frame as a distinct
+  `final_unparseable` failure (`apps/web/src/lib/chat-stream.ts`) and
+  `shouldFallbackToSync` returns **false** for it — the backend turn succeeded and was
+  persisted, so re-sending through the sync endpoint would buy a duplicate paid LLM
+  turn. The client refetches the thread instead (the tolerant contract reveals the
+  persisted turn).
 
 ### Accept-time display-contract recompute seam
 
@@ -1149,11 +1495,24 @@ prompt/health content. The three-method surface
 itself is unchanged; only the wrapped return type and the optional abort signal are
 new.
 
-Structured output is **strict OpenAI `json_schema` structured outputs** (not legacy
-JSON mode). Each call sends `response_format: { type: "json_schema", json_schema:
-{ name, strict: true, schema } }` using hand-authored wire schemas in
-`apps/api/src/modules/ai/openai-wire-schemas.ts`
-(`routerDecisionWireSchema`, `domainLlmStepWireSchema`, `finalDecisionWireSchema`).
+Structured output is **OpenAI `json_schema` structured outputs** (not legacy JSON
+mode). Each call sends `response_format: { type: "json_schema", json_schema:
+{ name, strict, schema } }` using wire schemas from
+`apps/api/src/modules/ai/openai-wire-schemas.ts`. The router and final-decision
+stages always use `strict: true` hand-authored schemas (`routerDecisionWireSchema`,
+`finalDecisionWireSchema`). The **domain step is per-turn**:
+`buildDomainStepWireSchema(allowedProposalIntents)` returns `strict: true` with typed
+per-intent candidate envelopes when **every** allowed proposal intent of the turn has
+an **LLM emission schema** (`packages/types/src/llm-emission/` — 9 covered intents:
+the workout-plan intents, `log_workout_activity`, the nutrition-plan intents,
+`recommend_recipes`, `log_nutrition_incident`, `capture_wellbeing_checkin`;
+server-stamped fields are omitted from emission and `.optional()` fields are
+`.nullable()` by construction); otherwise it gracefully falls back to the permissive
+`domainLlmStepWireSchema` with `strict: false` — no behavior cliff, and the
+post-receive Zod parse still validates either way. Emission Zod schemas are converted
+via `toOpenAiStrictJsonSchema`
+(`apps/api/src/modules/ai/openai-json-schema.ts`, `z.toJSONSchema` + a strict-mode
+post-pass that asserts the construction rules).
 Because strict mode forces every field into `required` (optional fields are declared
 nullable-required, `type: ["T","null"]`), the provider runs a generic
 `stripExplicitNulls` normalization over the parsed payload before the Zod
@@ -1161,12 +1520,15 @@ shape-validation + parse, so `.optional()` Zod fields that arrive as explicit `n
 are dropped (and `.nullable().default(null)` fields such as `selectedAction` re-apply
 their null default). `stripExplicitNulls` must not log payload content.
 
-Transport goes through `fetchWithRetry`: up to **`MAX_RETRIES = 2`** retries (1 initial
-attempt + 2 retries) with exponential backoff (~300ms then ~1200ms), retrying **only**
-on network/transport failures (fetch rejection), HTTP 429, or HTTP 5xx. Other 4xx and
-JSON-parse failures throw immediately (no retry). The optional `AbortSignal` is
-forwarded to `fetch` and to the backoff `sleep`, so an aborted call (e.g. the domain
-timeout firing) cancels in-flight requests and pending retries.
+Transport goes through the shared OpenAI HTTP helper
+`fetchOpenAiJsonCompletionWithRetry` (`apps/api/src/modules/ai/openai-http.ts`, which
+also owns `stripExplicitNulls`; extracted from the provider so the coach fan-out stages
+and the proposal-repair provider share one implementation): up to **`MAX_RETRIES = 2`**
+retries (1 initial attempt + 2 retries) with exponential backoff (~300ms then ~1200ms),
+retrying **only** on network/transport failures (fetch rejection), HTTP 429, or HTTP
+5xx. Other 4xx and JSON-parse failures throw immediately (no retry). The optional
+`AbortSignal` is forwarded to `fetch` and to the backoff `sleep`, so an aborted call
+(e.g. the domain timeout firing) cancels in-flight requests and pending retries.
 
 Note: context compression uses a **distinct provider/interface** (`ContextCompressionProvider`,
 injected via `CONTEXT_COMPRESSION_PROVIDER`) that is separate from this `CoachAiProvider`
@@ -1306,11 +1668,20 @@ Schemas and defaults:
   intentional relaxation (for now):** image content — including a photo of a medical
   document — reaches the LLM (OpenAI) **before any consent**, consciously removing the
   previous "medical content only when consent is granted" code floor. Floors that
-  still hold: there is **no** auto-persist or parsing of a `health_document` from an
-  attachment, and the context-budget `allowDocuments=false` floor (DB
-  `health_documents` slices, not the uploaded attachment) is unchanged.
-- Context budgets deny document and sensitive health context by default, re-applied
-  to every per-domain packet; config cannot relax these floors.
+  still hold: there is **no** auto-persist or parsing of a `lab_report` /
+  `biomarker_reading` from an attachment, and the context-budget `allowDocuments=false`
+  floor (now meaning raw document-derived text slices, not the uploaded attachment; the
+  consent-gated `biomarkerContext` slice is exempt by design) is unchanged.
+- Context budgets deny raw document-derived text and sensitive health context by default,
+  re-applied to every per-domain packet; config cannot relax these floors. The deep-review
+  `progressHistory` slice field passes those floors **by structure, not by exemption**:
+  its schema is numbers/enums/ISO dates only (no unconstrained string anywhere), so
+  wellbeing/recovery trends reach reviews as aggregates while `wellbeingSummary` /
+  `recoveryContext` free text stays stripped.
+- **Lab extraction is an out-of-band pipeline**, separate from the chat fan-out
+  (`LabExtractionProvider` / `OpenAiLabExtractionProvider`). The document text it parses
+  never enters chat context, a log line, or a persisted field; every degradation is a typed
+  `failure_code`, never a fake success.
 - The router output is clamped to known domains, capabilities, and tools, and may
   not emit replies or proposals.
 - SystemPlanner owns final route, budget, executor modes, and allowlists, and caps
@@ -1326,7 +1697,12 @@ Schemas and defaults:
 - `ActionResolver` filters proposal intents to the active capability allowlist, scrubs
   any decision-maker / non-workout calorie fields, and re-stamps the estimate and trusted
   rate only from the workout `domain_answer` (fail-closed when absent).
-- `ChatService` validates every proposal before persistence.
+- `ChatService` normalizes and validates every proposal before persistence.
+  Normalization stamps trusted values only from server turn state (attachment ids,
+  server now, provenance) — never from LLM authority. Proposal self-repair is
+  payload-only, budgeted (2/turn), eligible for schema-class failures only (never
+  safety- or ownership-class), and the repaired payload always re-enters the full
+  normalize + validation stack — repair can never bypass a check.
 - The AI layer never writes directly to domain tables; accepted workout/nutrition
   changes create new revisions.
 
@@ -1356,7 +1732,8 @@ flowchart TD
   summaries --> decision["DecisionMakerExecutorService"]
   decision --> selected["selectedAction + selectedProposalIds[]"]
   selected --> resolver["ActionResolverService (resolve ids → payloads from candidateMap)"]
-  resolver --> validation["ProposalValidationService"]
+  resolver --> normalization["ProposalNormalizationService"]
+  normalization --> validation["ProposalValidationService (+ bounded self-repair)"]
   validation --> cards["Chat proposal cards"]
 ```
 
@@ -1505,6 +1882,42 @@ The following files/exports were deleted and are no longer active runtime paths:
   all router-selected domains) and the consent-gated `medical_document_save`
   action-variant (dropped from `ActionVariantCatalogService`). The
   LLM-recognized medical special save is **deferred**, not removed permanently.
+- **The entire health-documents module** (`apps/api/src/modules/documents/*` and the
+  `apps/web/src/components/documents/*` Profile UI) — replaced by the Biomarkers feature
+  (`apps/api/src/modules/biomarkers/*`). Migration `0038_biomarkers_replace_documents.sql`
+  **drops** the `health_documents`, `health_document_summaries`, and `document_signals`
+  tables (and their six `document_*` enums), and drops `chat_attachments.linked_document_id`.
+  Do not reintroduce:
+  - the `health_documents` / `health_document_summaries` / `document_signals` tables, the
+    `packages/types` `documents.ts` + `document-signals.ts` contracts, or the
+    `packages/db` documents schema file;
+  - the **five-scope per-document consent model** (`upload_storage`, `parse_ocr`,
+    `ai_summarization`, `semantic_indexing`, `coach_chat_context`) — superseded by the
+    biomarkers **two-level** consent (`storeAndParse` literal-`true` + per-report
+    `coachContextConsentAt`);
+  - the deterministic governed summaries, document-signal pattern extraction, document
+    correlations preview, semantic document search, and the `documentContext` /
+    `documentSignalContext` / `correlationInsights` chat-context slices (replaced by the
+    single `biomarkerContext` slice);
+  - the `document_signal` **proposal evidence** type (replaced by `biomarker_reading`);
+  - the `DOCUMENT_STORAGE_PATH` env var (replaced by `LAB_REPORT_STORAGE_PATH`).
+- `ProposalValidationService.normalizeWorkoutProposalExercises` — the ad-hoc workout
+  normalization inside the validation service. Replaced by the per-intent
+  `ProposalNormalizationService` registry
+  (`apps/api/src/modules/proposals/proposal-normalization.service.ts`), which runs as
+  an explicit pre-validation stage in `ChatService` (see Stage 11).
+- The workout **`pendingExerciseRef` uniqueness rule**
+  (`packages/types/src/workouts.ts`) — repeated refs across days are legal: they share
+  one `pendingExercises` definition, and the apply path
+  (`apps/api/src/modules/workouts/workout-plan-resolver.ts`) resolves each ref exactly
+  once via a per-ref **promise cache** (one `findOrCreateExercise` call per ref even
+  under concurrent day resolution, every entry sharing the same catalog `exerciseId`).
+  The kept rules: every ref has a `pendingExercises` definition, and no orphan
+  definitions.
+- The inline `fetchWithRetry` / `stripExplicitNulls` copies in
+  `openai-coach-provider.ts` — extracted to the shared `openai-http.ts` so the coach
+  provider and `OpenAiProposalRepairProvider` use one retry/normalization
+  implementation.
 
 Some historical enum values and parse compatibility remain only so old stored
 metadata can still be read safely:

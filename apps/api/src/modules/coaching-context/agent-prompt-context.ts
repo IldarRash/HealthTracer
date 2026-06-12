@@ -13,8 +13,6 @@ export const LEGACY_BROAD_COACHING_CONTEXT_KEYS = [
   "activeHabitRevisionId",
   "recentHabitAdherenceSummary",
   "weeklyProgressSummary",
-  "documentSignalContext",
-  "correlationInsights",
 ] as const;
 
 const SLICE_ENVELOPE_KEYS = new Set([
@@ -88,13 +86,8 @@ export function mapDomainToCitationSourceType(
 ): AgentCitation["sourceType"] {
   const normalized = domain.trim().toLowerCase();
 
-  if (
-    normalized === "document" ||
-    normalized === "document_summary" ||
-    normalized === "rag" ||
-    normalized.startsWith("document_")
-  ) {
-    return "document_summary";
+  if (normalized === "biomarker" || normalized.startsWith("biomarker_")) {
+    return "biomarker_reading";
   }
 
   if (normalized === "memory") {

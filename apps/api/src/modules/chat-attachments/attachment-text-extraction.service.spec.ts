@@ -14,10 +14,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_ATTACHMENT_TEXT_CONTENT_CHARS } from "@health/types";
 import { AttachmentTextExtractionService } from "./attachment-text-extraction.service.js";
-import * as documentProcessing from "../documents/document-processing.js";
+import * as pdfTextExtraction from "./pdf-text-extraction.js";
 
 // Hoist the PDF extraction mock so it intercepts the ESM import inside the service.
-vi.mock("../documents/document-processing.js", () => ({
+vi.mock("./pdf-text-extraction.js", () => ({
   extractPdfPlainText: vi.fn().mockResolvedValue({ plainText: "Extracted PDF content here." }),
 }));
 
@@ -129,7 +129,7 @@ describe("AttachmentTextExtractionService", () => {
       // Image-only PDFs or scanned PDFs without an OCR layer cause extractPdfPlainText
       // to throw a well-known error. The service maps this specific error to "empty"
       // (absence of content) rather than "failed" (processing error).
-      vi.spyOn(documentProcessing, "extractPdfPlainText").mockRejectedValueOnce(
+      vi.spyOn(pdfTextExtraction, "extractPdfPlainText").mockRejectedValueOnce(
         new Error("PDF did not contain extractable text."),
       );
 
@@ -151,7 +151,7 @@ describe("AttachmentTextExtractionService", () => {
 
     it("n3: PDF parse errors other than empty-text-layer surface as status 'failed'", async () => {
       // A corrupt or unreadable PDF throws a different error — should remain "failed".
-      vi.spyOn(documentProcessing, "extractPdfPlainText").mockRejectedValueOnce(
+      vi.spyOn(pdfTextExtraction, "extractPdfPlainText").mockRejectedValueOnce(
         new Error("Corrupt PDF stream."),
       );
 

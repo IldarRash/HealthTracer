@@ -24,8 +24,7 @@ describe("Privacy UI primitive contracts", () => {
     expect(privacySource).toContain("aria-controls={inputId}");
   });
 
-  it("styles consent checklist consistently with profile documents", () => {
-    expect(stylesSource).toContain(".documents-consent-options,");
+  it("styles consent checklist and file input trigger primitives", () => {
     expect(stylesSource).toContain(".consent-scope-checklist");
     expect(stylesSource).toContain(".file-input-trigger");
   });

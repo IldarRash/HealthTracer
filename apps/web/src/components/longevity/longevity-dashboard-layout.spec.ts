@@ -47,7 +47,7 @@ describe("LongevityDashboard layout regressions", () => {
     expect(componentSource).toMatch(/className="dashboard-card--span-6"[\s\S]*?label="Wellbeing"/);
     expect(componentSource).toMatch(/className="dashboard-card--span-6"[\s\S]*?label="Wellness"/);
     expect(componentSource).toMatch(/className="dashboard-card--span-6"[\s\S]*?label="Trends"/);
-    expect(componentSource).toMatch(/className="dashboard-card--span-6"[\s\S]*?label="Documents"/);
+    expect(componentSource).toMatch(/className="dashboard-card--span-6"[\s\S]*?label="Labs"/);
     expect(componentSource).toMatch(/className="dashboard-card--span-6 dashboard-card--coach"[\s\S]*?label="Coach"/);
   });
 
@@ -117,7 +117,7 @@ describe("LongevityDashboard layout regressions", () => {
     expect(stylesSource).toContain(".overview-deferred-domains > summary");
   });
 
-  it("uses overview inline empty states for sparse goals, wellness, and documents panels", () => {
+  it("uses overview inline empty states for sparse goals, wellness, and labs panels", () => {
     expect(componentSource).toContain("OverviewInlineEmptyState");
     expect(componentSource).not.toContain("<EmptyState");
   });
@@ -144,10 +144,11 @@ describe("LongevityDashboard layout regressions", () => {
     expect(componentSource).toContain("LONGEVITY_CTA_ROUTES.profileConsent");
   });
 
-  it("keeps documents panel metadata-only with explicit non-clinical hint", () => {
-    expect(componentSource).toContain("Metadata only — no clinical interpretation on this screen.");
-    expect(componentSource).toContain("parseStatusLabel");
-    expect(componentSource).toContain("consentLabel");
+  it("keeps the labs panel summary-only with explicit wellness-context hint", () => {
+    expect(componentSource).toContain(
+      "Wellness context only — values and typical ranges, no interpretation.",
+    );
+    expect(componentSource).toContain("buildBiomarkersLabsCardView");
     expect(componentSource).not.toContain("summaryText");
     expect(componentSource).not.toContain("extractedConstraints");
   });

@@ -1127,10 +1127,12 @@ export type TodayDayResponse = z.infer<typeof todayDayResponseSchema>;
 export {
   aiProposalSchema,
   aiStructuredOutputSchema,
+  chatProposalRevisionOriginalSchema,
   chatProposalRevisionSchema,
   createGoalProposalChangesSchema,
   emptyProposalChangesSchema,
   getProposedChangesSchemaForIntent,
+  isValidatedProposal,
   profileProposalChangesSchema,
   proposalDecisionSchema,
   proposalModifyResponseSchema,
@@ -1142,10 +1144,15 @@ export type {
   AiStructuredOutput,
   AiStructuredOutputInput,
   ChatProposalRevision,
+  ChatProposalRevisionOriginal,
   ProposalDecisionInput,
   ProposalModifyResponse,
   RawAiProposal,
+  UnvalidatedAiProposal,
+  ValidatedAiProposal,
 } from "./ai-proposal.js";
+
+export { tolerantArraySchema } from "./zod-tolerant.js";
 
 /** Union for untyped contexts; domain-specific intents use getProposedChangesSchemaForIntent. */
 export const proposalChangesSchema = z.union([
@@ -1264,17 +1271,23 @@ export {
 } from "./habits.js";
 export * from "./body-composition.js";
 export * from "./device-metrics.js";
-export * from "./document-signals.js";
-export * from "./documents.js";
+export * from "./proposal-evidence.js";
+export * from "./wellness-language.js";
+export * from "./biomarkers.js";
+export * from "./lab-reports.js";
+export * from "./biomarker-extraction.js";
+export * from "./biomarker-context.js";
 export * from "./exercises.js";
 export * from "./wellbeing-check-ins.js";
 export * from "./nutrition-incidents.js";
+export * from "./nutrition-incident-normalization.js";
 export * from "./recipes.js";
 export * from "./chat-action-proposals.js";
 export * from "./chat-attachments.js";
 export * from "./chat-attachment-category-source.js";
 export * from "./recovery.js";
 export * from "./llm-coerce.js";
+export * from "./llm-emission/index.js";
 export {
   buildCoachingHierarchySummary,
   coachingNoteCategorySchema,
@@ -1495,7 +1508,49 @@ export {
   type WorkoutDayState,
   type WorkoutWeekDaySummary,
   type WorkoutWeekStats,
+  type WorkoutWeekStatsSessionInput,
 } from "./workout-week-stats.js";
+
+export {
+  clampProgressHistoryLookback,
+  deepReviewPromptContextSchema,
+  deriveDeepReviewDataQuality,
+  resolveWorstDataSufficiency,
+  MAX_PROGRESS_HISTORY_BUCKETS,
+  MAX_PROGRESS_HISTORY_PLAN_CHANGE_MARKERS,
+  MIN_PROGRESS_HISTORY_PERIOD_DAYS,
+  PROGRESS_HISTORY_BUCKET_CAPS,
+  PROGRESS_HISTORY_BUCKET_METRICS,
+  PROGRESS_HISTORY_DAILY_MAX_DAYS,
+  PROGRESS_HISTORY_METRIC_LEGEND,
+  PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS,
+  PROGRESS_HISTORY_WEEKLY_MAX_DAYS,
+  progressHistoryBucketSchema,
+  progressHistoryDataSufficiencySchema,
+  progressHistoryDomainSufficiencySchema,
+  progressHistoryGranularitySchema,
+  progressHistoryNoteCodeSchema,
+  progressHistoryPlanChangeDomainSchema,
+  progressHistoryPlanChangeMarkerSchema,
+  progressHistoryReviewSummarySchema,
+  resolveProgressHistoryGranularity,
+  type DeepReviewPromptContext,
+  type ProgressHistoryBucket,
+  type ProgressHistoryBucketMetric,
+  type ProgressHistoryDataSufficiency,
+  type ProgressHistoryDomainSufficiency,
+  type ProgressHistoryGranularity,
+  type ProgressHistoryHabitBucket,
+  type ProgressHistoryLookbackGrant,
+  type ProgressHistoryMetricLegend,
+  type ProgressHistoryNoteCode,
+  type ProgressHistoryPlanChangeDomain,
+  type ProgressHistoryPlanChangeMarker,
+  type ProgressHistoryRecoveryBucket,
+  type ProgressHistoryReviewSummary,
+  type ProgressHistoryWellbeingBucket,
+  type ProgressHistoryWorkoutBucket,
+} from "./progress-history.js";
 
 export const weeklyReviewResponseSchema = z.object({
   summary: weeklyProgressSummaryResponseSchema,
@@ -1537,6 +1592,7 @@ export {
   getActivePlanDetailInputSchema,
   activePlanDetailSchema,
   getRecentAdherenceInputSchema,
+  getProgressHistoryInputSchema,
   recentAdherenceResultSchema,
   agentToolNameSchema,
   agentTurnCapabilityCompositionStrategySchema,
@@ -1567,12 +1623,10 @@ export {
   MAX_CONTEXT_SLICES,
   normalizeContextSlicePlan,
   nutritionPlanContextSummarySchema,
-  ragContextResultSchema,
   resolveDefaultDepthForPurpose,
   resolveDefaultExpectedResponseMode,
   resolveDefaultTimeRangeForPurpose,
   RULE_ROUTE_CONFIDENCE_THRESHOLD,
-  shouldIncludeDocumentsForPurpose,
   userContextSliceSchema,
   userMemoryCategorySchema,
   userMemoryItemSchema,
@@ -1638,7 +1692,6 @@ export {
   type GoalContextSummary,
   type IntentRouteResult,
   type NutritionPlanContextSummary,
-  type RagContextResult,
   type UserContextSlice,
   type UserMemoryCategory,
   type UserMemoryItem,
@@ -1728,8 +1781,11 @@ export {
   createFallbackPreprocessorResult,
   detectPreprocessorLanguage,
   detectPreprocessorSimpleSignals,
+  detectRequestedLookbackDays,
   EMPTY_MESSAGE_PREPROCESSOR_SIMPLE_SIGNALS,
   extractMentionedPreprocessorDates,
+  MAX_REQUESTED_LOOKBACK_DAYS,
+  PROGRESS_HISTORY_FULL_LOOKBACK_DAYS,
   messagePreprocessorInputSchema,
   messagePreprocessorLanguageCodeSchema,
   messagePreprocessorMentionedDateSchema,
@@ -1786,6 +1842,8 @@ export {
   directPathNutritionPlanRepliesSchema,
   directPathReplyTemplatesSchema,
   directPathTodaySummaryRepliesSchema,
+  directPathWeeklyProgressRepliesSchema,
+  directPathWorkoutPlanRepliesSchema,
   formatTodaySummaryReadMessage,
   formatWorkoutMarkedDoneMessage,
   type DirectPathItemStatusLabels,
@@ -1793,6 +1851,8 @@ export {
   type DirectPathNutritionPlanReplies,
   type DirectPathReplyTemplates,
   type DirectPathTodaySummaryReplies,
+  type DirectPathWeeklyProgressReplies,
+  type DirectPathWorkoutPlanReplies,
 } from "./direct-chat-path-replies.js";
 export { interpolateBehaviorTemplate } from "./behavior-template.js";
 export {
@@ -1832,6 +1892,7 @@ export {
   DOMAIN_NUTRITION_TEMPLATE_KEY,
   DOMAIN_WORKOUT_TEMPLATE_KEY,
   FINAL_DECISION_TEMPLATE_KEY,
+  PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK,
   PROMPT_TEMPLATE_KEYS,
   PROMPT_TEMPLATE_REQUIRED_PLACEHOLDERS,
   ROUTER_DECISION_TEMPLATE_KEY,
@@ -1910,6 +1971,8 @@ export {
   type QuickActionConfig,
   type SuggestedQuickActionsConfig,
   DEFAULT_SUGGESTED_QUICK_ACTIONS,
+  CONTEXT_BUDGET_PROFILE_IDS,
+  DEFAULT_MONTHLY_REVIEW_MESSAGE_PATTERN,
 } from "./ai-behavior-config.js";
 export {
   ATTACHMENT_BEHAVIOR_CONFIG_VERSION,
@@ -1943,14 +2006,18 @@ export {
   type AttachmentTurnStagesConfig,
 } from "./attachment-behavior-config.js";
 export {
+  buildLookbackClampNote,
   clampContextBudgetPolicy,
   clampContextDepth,
   CONTEXT_BUDGET_ABSOLUTE_LIMITS,
   CONTEXT_BUDGET_CONFIG_SAFETY_FLOOR,
   applyContextBudgetSafetyFloor,
   tryCompileContextBudgetMessagePattern,
+  contextBudgetDegradationNotesSchema,
   contextBudgetPolicySchema,
   contextBudgetProfileSchema,
+  DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+  DEFAULT_CONTEXT_BUDGET_DEGRADATION_NOTES,
   contextCompressionConfidenceSchema,
   contextCompressionQualitySchema,
   contextCompressionRequestSchema,
@@ -1971,6 +2038,7 @@ export {
   safeParseContextCompressionSummary,
   validateContextBudgetPolicy,
   validateContextCompressionOutputShape,
+  type ContextBudgetDegradationNotes,
   type ContextBudgetPolicy,
   type ContextBudgetPolicyInput,
   type ContextBudgetPolicyParseResult,

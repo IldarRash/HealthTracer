@@ -2,6 +2,19 @@ import { z } from "zod";
 import { isCalendarValidIsoDate } from "./dates.js";
 import { directChatPathCandidateSchema } from "./direct-chat-path.js";
 import { detectDirectChatPathCandidate } from "./direct-chat-path-matcher.js";
+import { PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS } from "./progress-history.js";
+
+/**
+ * Sentinel for "за всё время / all time / entire history" lookback requests.
+ * Aligned with the Phase 1 monthly-granularity clamp (24 calendar months,
+ * PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS) so a full-history ask lands
+ * exactly on what the granularity ladder can grant.
+ */
+export const PROGRESS_HISTORY_FULL_LOOKBACK_DAYS: number =
+  PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS;
+
+/** Upper bound for detected lookback requests (~100 years; matches requestedPeriodDays max). */
+export const MAX_REQUESTED_LOOKBACK_DAYS = 36500 as const;
 
 export const messagePreprocessorMentionedDateTokenSchema = z.enum([
   "today",
@@ -42,6 +55,13 @@ export const messagePreprocessorSimpleSignalsSchema = z.object({
    * decision-maker returning plain_reply when a valid proposal candidate exists.
    */
   plan_request: z.boolean(),
+  /**
+   * True when the user asks for a retrospective review/analysis of their data
+   * (EN + RU). Combined with requestedLookbackDays by the deterministic
+   * ContextBudgetPolicyService to select the deep_review/deep_history budget
+   * profiles — the LLM never decides the budget tier.
+   */
+  review_request: z.boolean(),
 });
 
 export type MessagePreprocessorSimpleSignals = z.infer<
@@ -58,6 +78,7 @@ export const EMPTY_MESSAGE_PREPROCESSOR_SIMPLE_SIGNALS: MessagePreprocessorSimpl
   document: false,
   attachment: false,
   plan_request: false,
+  review_request: false,
 };
 
 export const messagePreprocessorLanguageCodeSchema = z
@@ -87,6 +108,17 @@ export const messagePreprocessorResultSchema = z.object({
   mentionedDates: z.array(messagePreprocessorMentionedDateSchema),
   simpleSignals: messagePreprocessorSimpleSignalsSchema,
   directPathCandidate: directChatPathCandidateSchema.nullable(),
+  /**
+   * Deterministically detected lookback period (days) the user asked about,
+   * or null when no period phrase was found. The LONGEST mentioned period wins.
+   * Full-history asks resolve to PROGRESS_HISTORY_FULL_LOOKBACK_DAYS.
+   */
+  requestedLookbackDays: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_REQUESTED_LOOKBACK_DAYS)
+    .nullable(),
 });
 
 export type MessagePreprocessorResult = z.infer<typeof messagePreprocessorResultSchema>;
@@ -243,7 +275,120 @@ const SIGNAL_PATTERNS: ReadonlyArray<{
       /подправь\s+(?:мой\s+|мою\s+)?(?:план|программу|тренировк|питани|рацион)/i,
     ],
   },
+  {
+    // Retrospective review / analysis request (EN + RU). Read by the
+    // deterministic budget-profile selection (deep_review / deep_history).
+    key: "review_request",
+    patterns: [
+      /анализ/i, // also covers "проанализируй", "анализируй"
+      /разбор/i,
+      /как\s+повлиял/i,
+      /что\s+я\s+делал\s+не\s+так/i,
+      /итог/i, // итог, итоги
+      /оцени\s+(?:мой|мои|мо[еёю])/i,
+      /\breview\b/i,
+      /\banaly[sz]/i, // analyze, analysis, analyse
+      /\bretrospect/i,
+      /\bhow\s+did\b.*\b(?:affect|impact)/i,
+      /\bwhat\s+went\s+wrong\b/i,
+    ],
+  },
 ];
+
+// ---------------------------------------------------------------------------
+// Requested lookback detection (deterministic floor for adaptive reviews)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixed RU/EN period phrases → lookback days. Bare numeric forms
+ * ("за N месяцев", "last N months", "N weeks") are handled separately by
+ * NUMERIC_LOOKBACK_RULES. When several phrases match, the longest period wins.
+ */
+const LOOKBACK_PHRASE_RULES: ReadonlyArray<{ pattern: RegExp; days: number }> = [
+  // today → 1
+  { pattern: /сегодня/i, days: 1 },
+  { pattern: /\btoday\b/i, days: 1 },
+  // (за/последнюю) неделю / last|past week → 7
+  // NOTE: \w does not match Cyrillic in JS — use explicit [а-яё] stems.
+  { pattern: /(?:за|последн[а-яё]*)\s+недел/i, days: 7 },
+  { pattern: /\b(?:last|past)\s+week\b/i, days: 7 },
+  // две недели / two weeks → 14 (digit forms covered by numeric rules)
+  { pattern: /дв(?:е|ух)\s*недел/i, days: 14 },
+  { pattern: /\btwo\s+weeks\b/i, days: 14 },
+  // месяц / last|past month → 30
+  { pattern: /месяц/i, days: 30 },
+  { pattern: /\b(?:last|past|this)\s+month\b/i, days: 30 },
+  { pattern: /\bmonth\b/i, days: 30 },
+  // квартал / quarter → 90 ("3 months" / "90 days" via numeric rules)
+  { pattern: /квартал/i, days: 90 },
+  { pattern: /\bquarter\b/i, days: 90 },
+  // полгода / шесть месяцев / six months / half a year → 180
+  { pattern: /пол\s*года/i, days: 180 },
+  { pattern: /шесть\s*месяцев/i, days: 180 },
+  { pattern: /\bsix\s+months\b/i, days: 180 },
+  { pattern: /\bhalf\s+a?\s*year\b/i, days: 180 },
+  // год / year / 12 months → 365
+  // Cyrillic has no \b semantics in JS regex — guard with letter lookarounds so
+  // "год" does not match inside "полгода"/"погода"/"выгода"; the extra
+  // lookbehinds keep the spaced "пол года" (180) and calendar-year mentions
+  // ("на 2026 год", "в 2026 году") from also counting as a lookback year.
+  { pattern: /(?<![а-яё])(?<!пол\s)(?<!\d\s?)год(?:а|у)?(?![а-яё])/i, days: 365 },
+  { pattern: /(?<!half\s)(?<!half\sa\s)(?<!\d\s?)\byear\b/i, days: 365 },
+  { pattern: /\b12\s*months\b/i, days: 365 },
+  { pattern: /12\s*месяцев/i, days: 365 },
+  // full history → sentinel (731 = monthly ladder grant)
+  { pattern: /за\s+вс[её]\s+время/i, days: PROGRESS_HISTORY_FULL_LOOKBACK_DAYS },
+  { pattern: /вс(?:я|ю|ей)\s+истори/i, days: PROGRESS_HISTORY_FULL_LOOKBACK_DAYS },
+  { pattern: /\ball[\s-]?time\b/i, days: PROGRESS_HISTORY_FULL_LOOKBACK_DAYS },
+  { pattern: /\b(?:entire|whole|full)\s+history\b/i, days: PROGRESS_HISTORY_FULL_LOOKBACK_DAYS },
+];
+
+/**
+ * Generic numeric forms: "за 3 месяца" / "last 2 months" / "6 weeks" / "за 2 года".
+ * Each match contributes unit × N days; the longest mentioned period wins.
+ */
+const NUMERIC_LOOKBACK_RULES: ReadonlyArray<{ pattern: RegExp; daysPerUnit: number }> = [
+  // (?<!\d) guards against matching the tail of a longer number ("2026 год").
+  { pattern: /(?<!\d)(\d{1,4})\s*(?:days?|дн(?:ей|я|ь))/gi, daysPerUnit: 1 },
+  { pattern: /(?<!\d)(\d{1,3})\s*(?:weeks?|недел\w*)/gi, daysPerUnit: 7 },
+  { pattern: /(?<!\d)(\d{1,3})\s*(?:months?|месяц\w*)/gi, daysPerUnit: 30 },
+  { pattern: /(?<!\d)(\d{1,2})\s*(?:years?|год(?:а|у|ов)?|лет)/gi, daysPerUnit: 365 },
+];
+
+/**
+ * Detect the lookback period (days) a message asks about, or null when no
+ * RU/EN period phrase matches. Deterministic; the longest period mentioned
+ * wins (e.g. "сравни месяц и полгода" → 180, "за 2 года" → 730).
+ */
+export function detectRequestedLookbackDays(text: string): number | null {
+  let longest: number | null = null;
+
+  const consider = (days: number): void => {
+    const capped = Math.min(days, MAX_REQUESTED_LOOKBACK_DAYS);
+
+    if (capped >= 1 && (longest === null || capped > longest)) {
+      longest = capped;
+    }
+  };
+
+  for (const { pattern, days } of LOOKBACK_PHRASE_RULES) {
+    if (pattern.test(text)) {
+      consider(days);
+    }
+  }
+
+  for (const { pattern, daysPerUnit } of NUMERIC_LOOKBACK_RULES) {
+    for (const match of text.matchAll(pattern)) {
+      const count = Number.parseInt(match[1] ?? "", 10);
+
+      if (Number.isFinite(count) && count >= 1) {
+        consider(count * daysPerUnit);
+      }
+    }
+  }
+
+  return longest;
+}
 
 export function normalizePreprocessorText(text: string): string {
   return text.normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -358,6 +503,7 @@ export function preprocessMessage(input: MessagePreprocessorInput): MessagePrepr
     mentionedDates: extractMentionedPreprocessorDates(normalizedText),
     simpleSignals: detectPreprocessorSimpleSignals(normalizedText, hasAttachments),
     directPathCandidate: detectDirectChatPathCandidate(normalizedText, { hasAttachments }),
+    requestedLookbackDays: detectRequestedLookbackDays(normalizedText),
   };
 
   return messagePreprocessorResultSchema.parse(result);
@@ -385,5 +531,6 @@ export function createFallbackPreprocessorResult(
     mentionedDates: extractMentionedPreprocessorDates(normalizedText),
     simpleSignals: detectPreprocessorSimpleSignals(normalizedText, hasAttachments),
     directPathCandidate: detectDirectChatPathCandidate(normalizedText, { hasAttachments }),
+    requestedLookbackDays: detectRequestedLookbackDays(normalizedText),
   });
 }

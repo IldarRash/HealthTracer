@@ -40,6 +40,7 @@ import type { CoachAiProvider, ProviderUsage } from "@health/ai";
 import type {
   AgentSafetyFlag,
   CandidateProposalSummary,
+  DeepReviewPromptContext,
   DomainAnswer,
   FinalDecisionOutput,
   FinalDecisionRequest,
@@ -118,6 +119,13 @@ export interface DecisionMakerInput {
    * Defaults to false; must not be set for deterministic/revision/explainer routes.
    */
   lowConfidenceRoute?: boolean;
+  /**
+   * Deep-review sufficiency block (Phase 4). Present only on review-profile
+   * turns whose context packet carries the progress_history_review slice.
+   * Threaded into FinalDecisionRequest so the decision template's
+   * {{deepReviewSuffix}} frames observed vs uncertain and the analyzed range.
+   */
+  deepReview?: DeepReviewPromptContext;
 }
 
 export interface DecisionMakerResult {
@@ -243,6 +251,7 @@ export class DecisionMakerExecutorService {
       recentMessages: input.recentMessages != null ? [...input.recentMessages] : [],
       ...(input.responseLanguage != null ? { responseLanguage: input.responseLanguage } : {}),
       lowConfidenceRoute: input.lowConfidenceRoute === true,
+      ...(input.deepReview !== undefined ? { deepReview: input.deepReview } : {}),
     };
 
     let rawOutput: unknown;

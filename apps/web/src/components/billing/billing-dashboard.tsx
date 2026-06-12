@@ -281,7 +281,7 @@ export function BillingDashboard() {
             <FeatureRow>Weekly plans (view)</FeatureRow>
             <FeatureRow>Basic weekly trends</FeatureRow>
             <FeatureRow on={false}>Photo analysis of meals and workouts</FeatureRow>
-            <FeatureRow on={false}>Deep trends and documents</FeatureRow>
+            <FeatureRow on={false}>Deep trends and lab reports</FeatureRow>
           </div>
 
           {!isPro ? (
@@ -337,7 +337,7 @@ export function BillingDashboard() {
             <FeatureRow pro>Photo analysis of meals and workouts</FeatureRow>
             <FeatureRow pro>Deep trends and analytics</FeatureRow>
             <FeatureRow pro>Priority coaching suggestions</FeatureRow>
-            <FeatureRow pro>Documents and consent</FeatureRow>
+            <FeatureRow pro>Lab reports and biomarkers</FeatureRow>
             <FeatureRow pro>Plan export</FeatureRow>
           </div>
 

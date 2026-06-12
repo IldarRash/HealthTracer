@@ -270,6 +270,67 @@ describe("DomainLlmExecutorService", () => {
     expect(result.degradedReasons.join(" ")).toContain("per-domain allowlist");
   });
 
+  it("rejects getProgressHistory for a non-review capability allowlist", async () => {
+    // adjust_workout-style entry: getProgressHistory is allowlisted only on
+    // review_progress / longevity_overview, never on plain workout adjustment.
+    const provider = makeProvider({
+      kind: "tool_request",
+      tool: "getProgressHistory",
+      input: { periodDays: 180 },
+    });
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout", ["getUserContextSlice", "getWeeklyProgressContext"]),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput(),
+      provider,
+    });
+
+    expect(result.degraded).toBe(true);
+    expect(result.degradedReasons.join(" ")).toContain("getProgressHistory");
+    expect(result.degradedReasons.join(" ")).toContain("per-domain allowlist");
+    expect(toolRegistry.executeTool).not.toHaveBeenCalled();
+  });
+
+  it("executes getProgressHistory when the domain entry carries a review allowlist", async () => {
+    const generateDomainStep = vi
+      .fn()
+      .mockResolvedValueOnce({
+        output: {
+          kind: "tool_request",
+          tool: "getProgressHistory",
+          input: { periodDays: 180 },
+        },
+      })
+      .mockResolvedValueOnce({
+        output: {
+          kind: "domain_answer",
+          domain: "workout",
+          summary: "Long-range progress reviewed.",
+          candidateProposals: [],
+          domainSignals: [],
+        },
+      });
+
+    const provider = { ...makeProvider(null), generateDomainStep } as unknown as CoachAiProvider;
+
+    const result = await service.runDomainLoop({
+      domainEntry: makeDomainEntry("workout", ["getUserContextSlice", "getProgressHistory"]),
+      contextPacket: makeContextPacket(),
+      coachingContext: {},
+      orchestratorInput: makeOrchestratorInput({ userMessage: "Review my last six months" }),
+      provider,
+    });
+
+    expect(result.degraded).toBe(false);
+    expect(result.toolsInvoked).toContain("getProgressHistory");
+    expect(toolRegistry.executeTool).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tool: "getProgressHistory", input: { periodDays: 180 } }),
+    );
+  });
+
   // -------------------------------------------------------------------------
   // Loop exhaustion — no domain_answer within max iterations
   // -------------------------------------------------------------------------

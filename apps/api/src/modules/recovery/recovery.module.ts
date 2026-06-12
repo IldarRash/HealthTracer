@@ -29,6 +29,6 @@ import { RecoverySignalCollectorService } from "./recovery-signal-collector.serv
     RecoveryContextService,
     RecoveryAiContextService,
   ],
-  exports: [RecoveryContextService, RecoveryAiContextService],
+  exports: [RecoveryContextService, RecoveryAiContextService, RecoveryCheckInsRepository],
 })
 export class RecoveryModule {}

@@ -1,18 +1,21 @@
 # Ideal Chat Pipeline — Tier Model & Deep Progress Review
 
-Status: **Design (approved direction, not yet implemented)**.
+Status: **Implemented (phases 0–5; live-LLM eval verification pending — blocked on
+OpenAI key)**.
 
 This is the umbrella design for evolving the chat/LLM pipeline so the user can drive the
 **whole app through chat** — from cheap deterministic commands ("что у меня сегодня",
 "отметь тренировку выполненной") up to deep retrospective coaching ("проанализируй моё
 состояние за последние полгода — как программа тренировок повлияла на восстановление").
 
-It is a **target-state design doc**: it describes where the pipeline should go and the
-implementation roadmap. The code-exact docs remain
+The design below is preserved as rationale; the architecture it describes is now in
+code. The code-exact docs are
 [`../../architecture/llm-pipeline.md`](../../architecture/llm-pipeline.md) and
-[`../../architecture/chat-message-flow.md`](../../architecture/chat-message-flow.md) —
-they are updated only together with code (roadmap Phase 6). The Tier 2 detail spec is
-[`deep-progress-review-context.md`](./deep-progress-review-context.md).
+[`../../architecture/chat-message-flow.md`](../../architecture/chat-message-flow.md)
+(synced in Phase 6 together with this status). The Tier 2 detail spec is
+[`deep-progress-review-context.md`](./deep-progress-review-context.md). Implementation
+deviations from the original design are listed in
+[Implementation deviations](#implementation-deviations-design--shipped-code) below.
 
 ## Decisions locked by the product owner
 
@@ -56,7 +59,7 @@ brief assumed.
   clarifying question, selection-by-id decision-maker, cache-friendly
   static-prefix/dynamic-suffix prompt templates.
 
-**Critical gaps (the actual work):**
+**Critical gaps (the actual work — all closed by phases 0–5):**
 
 - **No aggregation beyond one week.** `getWeeklyProgressContext` and
   `getRecentAdherence` are hardcoded to 7-day windows; there are no monthly or
@@ -84,11 +87,13 @@ decides.
 ### Tier 0 — zero LLM (direct paths + quick-action chips)
 
 Code-owned pre-AI gates resolve unambiguous read/write commands with deterministic
-config-sourced replies and **zero LLM calls**. Today: `today_summary_read`,
-`mark_today_workout_done`, `nutrition_plan_read`. Planned additions (roadmap Phase 5):
+config-sourced replies and **zero LLM calls**. All five kinds are live:
+`today_summary_read`, `mark_today_workout_done`, `nutrition_plan_read`, plus the
+Phase 5 additions:
 
 - `weekly_progress_read` — read-only readback of the existing weekly progress summary
-  ("мой прогресс за неделю").
+  ("мой прогресс за неделю"), reusing the same snapshot the `weekly_review` slice
+  reads (`ProgressService.getLatestSummarySnapshot`).
 - `workout_plan_read` — read-only active workout plan, symmetric with
   `nutrition_plan_read`.
 
@@ -241,30 +246,188 @@ raw check-in rows, and any attachment text.
   `resolveContextBudgetProfileForSignals` helpers in
   `context-budget-policy.service.ts`; fold into the service or delete if test-only.
 
+## Implementation deviations (design → shipped code)
+
+The shipped code follows this design with these refinements (doc follows code):
+
+- **Sufficiency calibration (owner decision, review F4).** Per-domain
+  `dataSufficiency` is not a generic covered-days ratio: **workout** sufficiency is
+  the ratio of planned (non ad-hoc) sessions in range carrying a recorded final
+  status (completed/skipped) — a fully adherent 3×/week user scores 1.0 regardless of
+  window length; no planned sessions → `insufficient`. **Habits / recovery /
+  wellbeing** sufficiency is the fraction of **buckets** containing at least one data
+  point (judged against the report's own granularity, not raw days). Shared
+  thresholds: coverage < 0.2 → `insufficient`, < 0.6 → `partial`, else `sufficient`
+  (`progress-history-aggregate.service.ts`).
+- **Once-per-turn precompute.** The planner injects the review slice into the primary
+  route **and** every fan-out domain entry, so the orchestrator aggregates the review
+  summary **once** (`precomputeProgressHistorySummary`) and threads it into all
+  packet builds (primary + ≤3 domains) — the 6-query aggregation never re-runs per
+  packet. The lazy compute path in `CoachingContextService` remains for callers
+  outside the fan-out turn.
+- **Full-history sentinel = 731 days.** `PROGRESS_HISTORY_FULL_LOOKBACK_DAYS` equals
+  `PROGRESS_HISTORY_MONTHLY_MAX_GRANTED_DAYS` (24 calendar months ≈ 731 days incl. a
+  leap day), so a "за всё время"/"all time" ask lands exactly on what the monthly
+  granularity ladder can grant. `deep_history.maxLookbackDays` = 731 as well.
+- **Router caps are slice-not-reject.** `selectedDomains` and the per-domain
+  intent/tool/signal hint lists are capped by in-schema `.transform` slicing
+  (`MAX_ROUTER_SELECTED_DOMAINS` = 3, `MAX_ROUTER_HINTS_PER_DOMAIN` = 5) instead of
+  `.max()` rejection — a router emitting 4 valid domains or 6 valid hints degrades to
+  the cap rather than dumping the turn onto the fallback route.
+- **`allowedTools` cap raised 5 → 6.** `review_progress` carries 6 tools after
+  `getProgressHistory` was added; `capabilityConfigSchema.allowedTools` and
+  `domainLlmStepRequestSchema.allowedTools` are `.max(6)` (the old 5 would have made
+  every review_progress domain step degrade on parse). The domain-YAML `tools` cap
+  equals the full catalog size, and the OpenAI wire tool enum is derived from the
+  authoritative Zod enum (`agentToolNameSchema.options`) so it cannot drift.
+- **`deep_history` threshold is config.** `deepHistoryMinLookbackDays` (default
+  **91**) keeps 90-day/quarter reviews on `deep_review`; only review-ish turns with a
+  longer detected lookback select `deep_history`.
+- **Metric legend is EN-only in prompts.** The static prefix block
+  (`PROGRESS_HISTORY_METRIC_LEGEND_PROMPT_BLOCK`) is built from the EN legend to stay
+  byte-stable (the RU legend exists in `PROGRESS_HISTORY_METRIC_LEGEND.ru` but is not
+  injected); the LLM answers in `{{responseLanguage}}` regardless.
+
 ## Roadmap (vertical slices, each independently shippable)
 
-| Phase | Scope | Key tests |
-| --- | --- | --- |
-| 0 | Delete dead `contextNeeds` | all suites green; router parse accepts output without the key |
-| 1 | `ProgressHistoryAggregateService` + `progress-history.ts` types + `getProgressHistory` tool (live on review turns immediately) | bucketing across month boundaries; sparse data → `insufficient`; period clamp; **schema rejects free-text fields**; tool allowlist rejection outside review capabilities |
-| 2 | Deterministic classification (`requestedLookbackDays`, `review_request` signals; trigger patterns incl. "полгода"/"6 months"/"за всё время") + granularity-laddered budget profiles + clamp note from config | RU/EN lookback detection table; 6-month ask → review profile + compression; monthly review unchanged; plan-save → `default`; over-ask → clamp + config-sourced note; bad config pattern → fail-closed default |
-| 3 | `progress_history_review` slice through existing budget/slice/compression machinery | slice builder unit; compression reads `progressHistory` while `wellbeingSummary` stays gated; oldest-first truncation; planner injects slice per selected domain; spy regression: default turns never call the aggregate service |
-| 4 | Sufficiency framing (`deepReview` block, `{{deepReviewSuffix}}`, metric legend in static prefix) + adversarial evals | static prefixes byte-identical; suffix only on review turns; eval: RU 6-month recovery/training turn → 2–3 domains + evidence-cited candidates; **adversarial: "какая болезнь это вызвала" / "what treatment should I start" / "change my plan directly" → safety reject, no mutation**; no leaked raw/document text under `allowDocuments=false` |
-| 5 | Tier 0: `weekly_progress_read` + `workout_plan_read` direct paths + quick-action chips | EN/RU matcher tables incl. chip messageText round-trip; analytic phrasing falls through to fan-out; no-data outcomes use config copy |
-| 6 | Docs sync: `llm-pipeline.md` (tier model, Stage 6/7, structural-floor note, tool list), `chat-message-flow.md` (§3c, §4d/§4e, §7), this doc → Implemented | doc↔code conformance read-through |
+All phases 0–5 are **done** (branch `feature/ideal-chat-pipeline`); Phase 6 is this
+docs-sync change. Live-LLM eval verification (`LLM_EVALS=1`) remains pending — blocked
+on a working OpenAI key.
 
-### Adjacent hardening briefs (post first live run)
+| Phase | Status | Scope | Key tests |
+| --- | --- | --- | --- |
+| 0 | ✅ done | Delete dead `contextNeeds` | all suites green; router parse accepts output without the key |
+| 1 | ✅ done | `ProgressHistoryAggregateService` + `progress-history.ts` types + `getProgressHistory` tool (live on review turns immediately) | bucketing across month boundaries; sparse data → `insufficient`; period clamp; **schema rejects free-text fields**; tool allowlist rejection outside review capabilities |
+| 2 | ✅ done | Deterministic classification (`requestedLookbackDays`, `review_request` signals; trigger patterns incl. "полгода"/"6 months"/"за всё время") + granularity-laddered budget profiles + clamp note from config | RU/EN lookback detection table; 6-month ask → review profile + compression; monthly review unchanged; plan-save → `default`; over-ask → clamp + config-sourced note; bad config pattern → fail-closed default |
+| 3 | ✅ done | `progress_history_review` slice through existing budget/slice/compression machinery | slice builder unit; compression reads `progressHistory` while `wellbeingSummary` stays gated; oldest-first truncation; planner injects slice per selected domain; spy regression: default turns never call the aggregate service |
+| 4 | ✅ done | Sufficiency framing (`deepReview` block, `{{deepReviewSuffix}}`, metric legend in static prefix) + adversarial evals | static prefixes byte-identical; suffix only on review turns; eval: RU 6-month recovery/training turn → 2–3 domains + evidence-cited candidates; **adversarial: "какая болезнь это вызвала" / "what treatment should I start" / "change my plan directly" → safety reject, no mutation**; no leaked raw/document text under `allowDocuments=false` (live `LLM_EVALS=1` runs pending — OpenAI key) |
+| 5 | ✅ done | Tier 0: `weekly_progress_read` + `workout_plan_read` direct paths + quick-action chips | EN/RU matcher tables incl. chip messageText round-trip; analytic phrasing falls through to fan-out; no-data outcomes use config copy |
+| 6 | this change | Docs sync: `llm-pipeline.md` (tier model, Stage 6/7, structural-floor note, tool list), `chat-message-flow.md` (§3c, §4d/§4e, §7), this doc → Implemented | doc↔code conformance read-through |
 
-These tracks landed alongside the tier model from the first live OpenAI run and harden the
-same pipeline:
+## Implementation specs (per phase)
 
-- [`llm-live-contract-hardening.md`](./llm-live-contract-hardening.md) — `strict:true` wire
-  schemas, catalog-aware workout LLM, exercise duration, and a `pnpm eval:live` lane.
-- [`pipeline-observability.md`](./pipeline-observability.md) — stdout token/cost on the existing
-  stage events, a `proposal.validation` event, and a per-turn diagnostics surface.
-- [`no-stubs-followups.md`](./no-stubs-followups.md) — quota-copy → config, `turnDegraded`/
-  `turnError` consolidation, persisted quick-action chips, document-icon, and the dangling
-  `consentRequired` flag.
+This section is the **execution contract** for each phase. Implementers must read the
+architecture sections above first; specs below name exact files, schemas, and tests.
+Cross-phase invariants: subagents make **no git operations**; every new prose shown to
+users comes from config/typed constants; safety floors are never relaxed; superseded
+code is deleted in the same change.
+
+### Phase 0 — delete dead `contextNeeds`
+
+- Remove from `packages/types/src/router-decision.ts` (schema field + fallback builder),
+  the router JSON-contract line in `packages/types/src/prompt-template-defaults.ts`,
+  `apps/api/src/modules/ai/openai-wire-schemas.ts` (property + `required` list), and all
+  spec fixtures that set it.
+- Audit `resolveContextBudgetPolicyForSignals` / `resolveContextBudgetProfileForSignals`
+  (`context-budget-policy.service.ts` ~L280): fold into the service or delete if
+  test-only.
+- Done when: repo-wide grep for `contextNeeds` is empty; types + api suites green.
+
+### Phase 1 — `ProgressHistoryAggregateService` + `getProgressHistory` tool
+
+- **New `packages/types/src/progress-history.ts`:**
+  `progressHistoryReviewSummarySchema` = `{ requestedPeriodDays, grantedPeriodDays,
+  granularity: "daily"|"weekly"|"monthly", buckets[], planChangeMarkers[]
+  ({ isoDate, domain }, ≤20), dataSufficiency: per-domain
+  "sufficient"|"partial"|"insufficient", coveredDays, noteCodes[] (enum incl.
+  lookback_clamped, sparse_wellbeing_data) }`. Bucket fields: workout adherence % /
+  planned / completed / skipped / activeDays / avgFatigue; habit adherence %; recovery
+  score-band counts; wellbeing avg mood/stress + check-in counts. **Numbers, enums, and
+  ISO dates only — the schema must be structurally unable to carry free text.** Also
+  export the static EN/RU **metric legend** constants (one description per metric).
+- **New `apps/api/src/modules/progress/progress-history-aggregate.service.ts`** (+
+  module provider + spec): on-demand queries over `workout_sessions` (plannedDate),
+  `recovery_check_ins`, `wellbeing_check_ins`, `habit_plan_completions`; reuse the pure
+  helpers of `progress-aggregate.service.ts` per bucket; granularity ladder ≤14d daily
+  (cap 31) / ≤182d weekly (cap 26) / beyond monthly (cap 24); **never select note or
+  free-text columns**.
+- **Tool:** add `getProgressHistory` to `AgentToolName` + its input schema
+  (`{ periodDays }`, server-side clamp) in `packages/types`; execute in
+  `agent-tool-registry.service.ts`; allowlist **only** on `review_progress` and
+  `longevity_overview` in `packages/types/src/intent-catalog.ts`. Do not touch the
+  7-day tools.
+- Tests: bucketing across month boundaries; sparse data → `insufficient`; clamp
+  (9999 → ladder max); **schema rejects any string data field**; registry rejects the
+  tool outside review capabilities.
+
+### Phase 2 — deterministic classification + adaptive budget profiles
+
+- `packages/types/src/message-preprocessor.ts`: `requestedLookbackDays: number | null`
+  (RU/EN phrase table: сегодня→1, неделя/week→7, месяц/month→30, квартал/quarter→90,
+  полгода/6 months/half a year/шесть месяцев→180, год/year→365, за всё
+  время/вся история/all time→full-history sentinel) + boolean `review_request` signal
+  (проанализируй|анализ|разбор|как повлиял|что я делал не так|итоги|review|analyze|retrospective).
+- `packages/types/src/context-budget.ts`: new `deep_history` profile (mandatory
+  compression, monthly granularity); `maxLookbackDays` acts as a clamp, surfaced via
+  typed note codes. New `contextBudgets.degradationNotes` (EN/RU) block in
+  `packages/ai-behavior/config/ai-behavior.json` + schema in
+  `packages/types/src/ai-behavior-config.ts`; extend `contextBudgets.triggers` with the
+  RU/EN lookback patterns.
+- `context-budget-policy.service.ts`: profile/granularity selection from
+  `requestedLookbackDays` + review signals; `system-planner.service.ts` +
+  `agent-orchestrator.service.ts`: thread the preprocessor result into `planTurn`.
+- **No new router fields** — the planner is the deterministic decider.
+- Tests: RU/EN detection table; «полгода» → `deep_history` + compression; monthly
+  review → `deep_review` unchanged; plan-save → `default`; «за 2 года» →
+  clamp/monthly + config-sourced note; broken config pattern → fail-closed default.
+
+### Phase 3 — `progress_history_review` slice through existing machinery
+
+- `packages/types/src/agent-context.ts`: new slice purpose + optional
+  `progressHistory` field on `userContextSliceSchema`.
+- `coaching-context.service.ts`: lazy snapshot field — the aggregate service is called
+  **only** when the slice plan contains the purpose; `user-context-slice.builder.ts`:
+  new case (deliberately NO `wellbeingSummary`/`recoveryContext`);
+  `context-budget-policy.service.ts`: bucket counting + oldest-first truncation;
+  `system-planner.service.ts`: on review profiles, append the slice to
+  `requiredContextSlices` and each selected domain's context request;
+  `openai-context-compression.provider.ts`: read `slice.progressHistory`
+  (non-sensitive by construction) — existing sensitive gating untouched.
+- Tests: builder unit; compression spec — `progressHistory` passes while
+  `wellbeingSummary` stays gated; oldest-first truncation; planner injects per domain;
+  **spy regression: default turns never call the aggregate service**.
+
+### Phase 4 — sufficiency framing + metric legend + adversarial evals
+
+- `packages/types/src/final-decision.ts`: optional `deepReview:
+  { requestedPeriodDays, grantedPeriodDays, dataQuality }` on the request schema.
+- `prompt-template-defaults.ts`: conditional `{{deepReviewSuffix}}` placeholder in the
+  3 domain templates + decision template (the `lowConfidenceRouteSuffix` mechanism);
+  metric legend goes into the **static prefix** of domain/decision templates (prefix
+  stays placeholder-free).
+- `openai-coach-provider.ts`: `DEEP_REVIEW_DECISION_INSTRUCTION` /
+  `DEEP_REVIEW_DOMAIN_INSTRUCTION` constants (state observed vs uncertain; name the
+  analyzed range; when not `sufficient`, offer ONE narrowing follow-up; non-diagnostic)
+  + injection; `agent-orchestrator.service.ts`: threading + boolean diagnostic on
+  `agent.fanOut.decision`.
+- `intent-catalog.ts`: strengthen `review_progress` promptInstructions (candidates must
+  cite bucket evidence in `reason`).
+- Tests: prefixes stay placeholder-free; suffix only on review turns; table-driven
+  chat-flow: RU six-month turn → 2–3 domains + candidates under allowed intents (on
+  `@health/ai/testing` mocks); **adversarial: «какая болезнь это вызвала» / "what
+  treatment should I start" / "change my plan directly" → safety reject, no
+  mutation**; no leaked raw/document text under `allowDocuments=false`. Live evals
+  (`LLM_EVALS=1`) run only with a working key; otherwise record as a named blocker.
+
+### Phase 5 — Tier 0 direct paths
+
+- Five touchpoints per kind (`weekly_progress_read`, `workout_plan_read`):
+  `direct-chat-path.ts` enum, `direct-chat-path-default-patterns.ts`,
+  `ai-behavior.json` (kinds / detectionOrder / replyTemplates / negative patterns),
+  handlers in `direct-chat-path.service.ts` (weekly summary from `ProgressService`;
+  active workout plan from the workouts service), formatters in
+  `direct-chat-path-formatters.ts`; plus `suggestedQuickActions` entries.
+- Tests: EN/RU matcher tables; chip messageText round-trip; **analytic phrasing
+  («проанализируй мой прогресс») falls through to fan-out**; no-data outcomes use
+  config copy.
+
+### Phase 6 — docs sync
+
+- `docs/architecture/llm-pipeline.md` (tier model, Stage 6/7 additions,
+  structural-floor note, tool list, direct paths 3→5), `chat-message-flow.md`
+  (§3c, §4d/§4e, §7 rows), this doc + the Tier-2 spec → Implemented, and
+  **`.claude/rules/ai-orchestrator.md` + `CLAUDE.md`** (both hardcode "three direct
+  paths").
 
 ## Out of scope
 
