@@ -448,6 +448,10 @@ function buildOpenAiDomainStepPrompt(
   promptTemplates: CompiledPromptTemplates,
 ): string {
   const attachmentContextSummary = buildAttachmentContextSummary(request);
+  const deepReviewSuffix =
+    request.deepReview !== undefined
+      ? buildDeepReviewSuffix(request.deepReview, DEEP_REVIEW_DOMAIN_INSTRUCTION)
+      : "";
 
   return promptTemplates.renderDomainStep(request.domain, {
     domain: request.domain,
@@ -468,6 +472,7 @@ function buildOpenAiDomainStepPrompt(
       : "Do not diagnose, prescribe, or claim to treat diseases.",
     attachmentContextJson: attachmentContextSummary,
     responseLanguage: request.responseLanguage ?? "",
+    deepReviewSuffix,
   });
 }
 
@@ -515,6 +520,73 @@ const LOW_CONFIDENCE_ROUTE_INSTRUCTION =
   "If the user's goal is ambiguous, ask ONE short clarifying question in the response language " +
   "to understand what they need, rather than guessing. Do not make assumptions about domain.";
 
+// ---------------------------------------------------------------------------
+// Deep-review sufficiency framing (Phase 4)
+//
+// Injected into the {{deepReviewSuffix}} placeholder of the decision/domain
+// templates ONLY when the request carries a deepReview block — mirrors the
+// lowConfidenceRoute → LOW_CONFIDENCE_ROUTE_INSTRUCTION wiring exactly.
+// Placed in the DYNAMIC SUFFIX only so the static prefix stays cache-stable.
+// ---------------------------------------------------------------------------
+
+/**
+ * Decision-maker deep-review instruction: separate observed from uncertain,
+ * name the analyzed range in the user-facing reply, never diagnostic/treatment
+ * wording. The analyzed-range and follow-up sentences are appended by
+ * buildDeepReviewSuffix from the typed deepReview block.
+ */
+export const DEEP_REVIEW_DECISION_INSTRUCTION =
+  "DEEP REVIEW NOTE: This turn is a long-range progress review over aggregated history buckets. " +
+  "In your reply, clearly separate what is OBSERVED in the provided progress history (cite concrete bucket dates and numbers) " +
+  "from what is UNCERTAIN — never present an interpretation as established fact. " +
+  "Explicitly name the analyzed time range in the reply. " +
+  "Never use diagnosis, disease, or medical-care wording — describe wellness trends only.";
+
+/**
+ * Domain-LLM deep-review instruction: ground the summary and candidate reasons
+ * in the progress-history buckets; same observed-vs-uncertain and analyzed-range
+ * framing as the decision instruction.
+ */
+export const DEEP_REVIEW_DOMAIN_INSTRUCTION =
+  "DEEP REVIEW NOTE: This turn is a long-range progress review over aggregated history buckets. " +
+  "Ground your summary in the provided progressHistory buckets: state what is OBSERVED (cite concrete bucket dates and numbers) " +
+  "and what is UNCERTAIN — never present an interpretation as established fact. " +
+  "Candidate proposal reasons MUST cite specific bucket evidence (dates and numbers). " +
+  "Explicitly name the analyzed time range. " +
+  "Never use diagnosis, disease, or medical-care wording — describe wellness trends only.";
+
+/**
+ * Compose the full deep-review suffix from the typed deepReview block:
+ *  - the stage instruction (decision/domain constant above),
+ *  - the analyzed range (granted period; mentions the requested period when clamped),
+ *  - when dataQuality is not "sufficient": exactly ONE narrowing follow-up
+ *    (period or domain — never both, never more than one question).
+ *
+ * Numbers come from the validated deepReview block only — no user text, no health data.
+ */
+function buildDeepReviewSuffix(
+  deepReview: NonNullable<FinalDecisionRequest["deepReview"]>,
+  instruction: string,
+): string {
+  const clamped =
+    deepReview.requestedPeriodDays !== null &&
+    deepReview.requestedPeriodDays > deepReview.grantedPeriodDays;
+
+  const analyzedRangeSentence = clamped
+    ? `The analyzed range is the last ${deepReview.grantedPeriodDays} days: the user asked for ` +
+      `${deepReview.requestedPeriodDays} days, which was clamped to ${deepReview.grantedPeriodDays} days — say so honestly.`
+    : `The analyzed range is the last ${deepReview.grantedPeriodDays} days.`;
+
+  const followUpSentence =
+    deepReview.dataQuality === "sufficient"
+      ? ""
+      : ` Data quality for this period is ${deepReview.dataQuality}: state plainly what the data does not show, ` +
+        "and offer exactly ONE narrowing follow-up — either a shorter period or a single domain " +
+        "(training, nutrition, or recovery) — never both and never more than one question.";
+
+  return `${instruction} ${analyzedRangeSentence}${followUpSentence}`;
+}
+
 function buildOpenAiFinalDecisionPrompt(
   request: FinalDecisionRequest,
   promptTemplates: CompiledPromptTemplates,
@@ -523,6 +595,10 @@ function buildOpenAiFinalDecisionPrompt(
   const recentMessages = request.recentMessages ?? [];
   const lowConfidenceRouteSuffix =
     request.lowConfidenceRoute === true ? LOW_CONFIDENCE_ROUTE_INSTRUCTION : "";
+  const deepReviewSuffix =
+    request.deepReview !== undefined
+      ? buildDeepReviewSuffix(request.deepReview, DEEP_REVIEW_DECISION_INSTRUCTION)
+      : "";
 
   return promptTemplates.renderFinalDecision({
     userMessage: request.userMessage,
@@ -538,6 +614,7 @@ function buildOpenAiFinalDecisionPrompt(
       : "Do not diagnose, prescribe, or claim to treat diseases.",
     responseLanguage: request.responseLanguage ?? "",
     lowConfidenceRouteSuffix,
+    deepReviewSuffix,
   });
 }
 

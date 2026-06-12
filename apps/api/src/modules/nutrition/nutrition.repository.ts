@@ -61,6 +61,31 @@ export class NutritionRepository {
     return rows.map((row) => row.revision);
   }
 
+  /**
+   * Revision creation timestamps only (for plan-change markers) — never the
+   * revision payloads. Filtered to [createdFrom, createdTo] in SQL so a long
+   * revision history is never fetched wholesale.
+   */
+  async listRevisionCreatedAtByUserId(userId: string, createdFrom: Date, createdTo: Date) {
+    const rows = await this.db
+      .select({ createdAt: nutritionPlanRevisions.createdAt })
+      .from(nutritionPlanRevisions)
+      .innerJoin(
+        nutritionPlans,
+        eq(nutritionPlanRevisions.nutritionPlanId, nutritionPlans.id),
+      )
+      .where(
+        and(
+          eq(nutritionPlans.userId, userId),
+          gte(nutritionPlanRevisions.createdAt, createdFrom),
+          lte(nutritionPlanRevisions.createdAt, createdTo),
+        ),
+      )
+      .orderBy(desc(nutritionPlanRevisions.createdAt));
+
+    return rows.map((row) => row.createdAt);
+  }
+
   async findRevisionOwnedByUser(userId: string, revisionId: string) {
     const [row] = await this.db
       .select({ revision: nutritionPlanRevisions })

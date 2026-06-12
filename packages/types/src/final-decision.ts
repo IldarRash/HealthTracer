@@ -3,6 +3,7 @@ import { agentSafetyFlagSchema } from "./agent-context.js";
 import { domainAnswerSchema } from "./domain-llm-step.js";
 import { messagePreprocessorLanguageCodeSchema } from "./message-preprocessor.js";
 import { MAX_CHAT_USER_MESSAGE_CHARS } from "./message-limits.js";
+import { deepReviewPromptContextSchema } from "./progress-history.js";
 
 // ---------------------------------------------------------------------------
 // Action variant catalog entry
@@ -108,6 +109,13 @@ export const finalDecisionRequestSchema = z.object({
    * question rather than guessing which domain to serve.
    */
   lowConfidenceRoute: z.boolean().default(false),
+  /**
+   * Deep-review sufficiency framing (Phase 4). Present only on review-profile
+   * turns whose context packet carries the progress_history_review slice.
+   * Drives the {{deepReviewSuffix}} injection in the decision template —
+   * mirrors the lowConfidenceRoute → {{lowConfidenceRouteSuffix}} mechanism.
+   */
+  deepReview: deepReviewPromptContextSchema.optional(),
 });
 
 export type FinalDecisionRequest = z.infer<typeof finalDecisionRequestSchema>;

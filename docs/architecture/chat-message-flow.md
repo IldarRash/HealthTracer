@@ -113,13 +113,16 @@ proposal-revision is present or when attachments are present** (config
 `directPaths.blockWhenAttachments` / `blockWhenProposalRevision` = `true`) — so a message
 **with an attachment never takes a direct path; it falls through to the full LLM fan-out.**
 Detection order (config `directPaths.detectionOrder`): `mark_today_workout_done` →
-`today_summary_read` → `nutrition_plan_read`.
+`today_summary_read` → `nutrition_plan_read` → `weekly_progress_read` →
+`workout_plan_read`.
 
 | Kind | Trigger examples (EN / RU) | Outcome | Notes |
 | --- | --- | --- | --- |
 | `mark_today_workout_done` | "Mark today's workout done" / "отметь тренировку выполненной" | The narrow **write** path: marks the single pending Today workout item `completed`. | `clarification_required` (no read-only reply, but no write) if zero or >1 pending workouts. |
 | `today_summary_read` | "What's today?" / "что у меня сегодня" | Read-only Today summary from `todayService.getOrGenerateDay`. | Requires a "today"/"сегодня" mention (`requireTodayMention`). |
 | `nutrition_plan_read` | "Show my nutrition plan" / "мой план питания" | Read-only active nutrition plan from `nutritionService.getCurrentActivePlan`. | `refreshHintsOnExecuted: []` (no UI refresh hints). |
+| `weekly_progress_read` | "Show my weekly progress", "How was my week?" / "мой прогресс за неделю", "как прошла неделя" | Read-only latest weekly summary snapshot from `progressService.getLatestSummarySnapshot` (the same snapshot the `weekly_review` slice reads — never re-aggregated). | Negative patterns make **analytic phrasing** (`analy[sz]e`/`review`/`why` / `проанализ`/`разбор`/`почему`) and **longer-than-week lookbacks** (`month`/`quarter`/`year`/`all-time` / `месяц`/`полгода`/`за год`/`за всё время`) fall through to the fan-out (Tier-2 review path). Config `noSummaryLine` when no tracked week exists. |
+| `workout_plan_read` | "Show my workout plan", "What's in my training plan?" / "покажи план тренировок", "мой план тренировок" | Read-only active workout plan from `workoutsService.getCurrentActivePlan` (≤7 session lines + "…and N more"). | Negative patterns make create/change/adapt phrasing (`add`/`remove`/`edit`/`improve`/`make` / `созда`/`измени`/`адаптир`/`поменя`/`обнов`…) fall through — plan mutations stay proposal-only. Config `noActivePlanLine` when no active plan. |
 
 All reply text comes from `directPaths.replyTemplates` in config (`*-formatters.ts`); each
 kind has negative patterns excluding advice/mutation phrasing (`should`, `recommend`,
@@ -157,7 +160,13 @@ with `messagePreprocessorInputSchema` (fail → `createFallbackPreprocessorResul
 
 - **language detection** + resolved `responseLanguage` (`responseLanguageHint ?? detected`,
   where the hint is the persisted user locale — locale wins);
-- **signals** + normalized text;
+- **signals** + normalized text — incl. `review_request` (RU/EN retrospective-review
+  phrasing: `анализ`/`разбор`/`итог`/`review`/`analy[sz]`/`retrospect`…);
+- **`requestedLookbackDays: number | null`** (`detectRequestedLookbackDays`) — RU/EN
+  period phrases + numeric forms; the **longest** mentioned period wins; full-history
+  asks ("за всё время"/"all time") resolve to the 731-day sentinel
+  (`PROGRESS_HISTORY_FULL_LOOKBACK_DAYS`). Together with `review_request` this drives
+  the deterministic budget-profile selection in §4d — the LLM never decides the tier;
 - **`hasAttachments`** signal (`Boolean(attachmentTurn?.attachments.length)`);
 - a **direct-path candidate hint** (`directChatPathMatcherService.detect`) — informational
   only; the deterministic SystemPlanner decides routing.
@@ -210,6 +219,20 @@ event is not emitted and router metadata is recorded as `ran: false`.
   when the router ran (`source==="llm"`) but confidence < 0.75 or no domains — threaded to the
   decision-maker so it asks a clarifying question instead of guessing.
 
+**Budget profile selection (deterministic):** `planTurn` threads the preprocessor's
+`requestedLookbackDays` + `review_request` into
+`ContextBudgetPolicyService.resolveBudgetForTurn`: a review-ish turn with a requested
+lookback over `deepHistoryMinLookbackDays` (config, default 91) → `deep_history`;
+otherwise the monthly/multi-domain/progress-review triggers → `deep_review`; else
+`default`. `grantedLookbackDays` = granularity-ladder clamp
+(`clampProgressHistoryLookback`) further capped by the profile's `maxLookbackDays`.
+
+**Review-slice injection:** when `shouldInjectProgressHistoryReview` approves (review
+profile **and** review-ish turn), the planner appends one `progress_history_review`
+slice request after the primary slice on `requiredContextSlices` and as
+`supplementaryContextSlices` on every fan-out domain entry. Default turns never carry
+the slice.
+
 **Executor-mode coercion (safety floor):** `executorMode` comes from
 `resolveResponseModeExecutorMode`. If it returns a deterministic mode
 (`isDeterministicResponseModeExecutorMode`), the planner **coerces it to the fan-out default**
@@ -221,12 +244,25 @@ stub must not return).
 ### 4e. Context budgets + safety floors
 
 `coachingContextService.buildAgentContext` builds the primary packet under
-`plan.contextBudget`. The default budget (`contextBudgets.profiles.default` in
-`ai-behavior.json`) has **`allowDocuments=false` and `allowSensitiveHealthContext=false`** —
+`plan.contextBudget`. There are **three budget profiles**
+(`contextBudgets.profiles` in `ai-behavior.json`): `default` (3 slices / 20 raw items /
+30d, no compression), `deep_review` (5 / 50 / 90d, mandatory compression), and
+`deep_history` (6 / 60 / 731d, mandatory compression, monthly granularity). **All
+three** have `allowDocuments=false` and `allowSensitiveHealthContext=false` —
 code-level floors re-applied per packet; **config cannot relax them** (`security.md`). Per
 selected domain, `buildDomainContextPackets` builds one bounded packet from that domain's OWN
-capability (`buildDomainContextRequest`, `includeDocuments: false`); on build failure the
+capability (`buildDomainContextRequest`, `includeDocuments: false`) plus the
+planner-injected `supplementaryContextSlices`; on build failure the
 primary packet is reused as a safe fallback.
+
+On review turns the `progress_history_review` slice carries the numeric-only
+`ProgressHistoryReviewSummary` (numbers/enums/ISO dates by schema construction — that
+structural guarantee is why it passes while `wellbeingSummary`/`recoveryContext` stay
+floor-gated). The orchestrator **precomputes the aggregation once per turn**
+(`precomputeProgressHistorySummary`) and threads it into every packet build; when the
+requested lookback exceeds the grant, a config-sourced clamp note
+(`contextBudgets.degradationNotes.lookbackClamped`, EN/RU) is appended to the packet's
+missing-context notes.
 
 ### 4f. Attachment text extraction (12k cap; once per turn)
 
@@ -288,6 +324,14 @@ domain answers + bounded action-variant catalog + candidate summaries into one
   returns `turnError: { reason: "decision_failed" }` (logs `decision_maker.failed_after_retry`).
 - **Low-confidence:** `lowConfidenceRoute` from the plan is threaded so the template asks a
   clarifying question rather than guessing the domain.
+- **Deep review:** on review-profile turns whose packet carries the
+  `progress_history_review` slice, a typed `deepReview` block
+  (`{ requestedPeriodDays, grantedPeriodDays, dataQuality }`, where `dataQuality` is the
+  worst-of per-domain sufficiency + compression `dataQuality`) is threaded onto every
+  domain request and the decision request; the provider renders `{{deepReviewSuffix}}`
+  (the `lowConfidenceRouteSuffix` mechanism): observed vs uncertain, the analyzed range
+  (naming the clamp honestly), and — when data quality is not `sufficient` — exactly one
+  narrowing follow-up.
 
 ### 4i. ActionResolver
 
@@ -386,10 +430,12 @@ After the AI pipeline returns, still in `ChatService.sendMessage`:
 6. **suggestedQuickActions** derived for LLM-backed turns only (skipped on `turnError`):
    `deriveQuickActionsForTurn` (`packages/types/src/suggested-quick-actions.ts`) over the
    fan-out selected domains:
-   - always include `today_summary_read`;
-   - add `mark_today_workout_done` iff `workout` is among selected domains;
+   - always include `today_summary_read` and `weekly_progress_read`;
+   - add `mark_today_workout_done` and `workout_plan_read` iff `workout` is among
+     selected domains;
    - add `nutrition_plan_read` iff `nutrition` is among selected domains.
-   Definitions/labels come from `suggestedQuickActions.actions` in `ai-behavior.json`.
+   Up to 5 chips; definitions/labels come from `suggestedQuickActions.actions` in
+   `ai-behavior.json`.
 7. **Response shape:** `{ thread, userMessage, assistantMessage, proposals, (attachmentOutcomes),
    (consentRequired), (turnError), (suggestedQuickActions) }`. The `proposals` array is
    **element-tolerant** on the client (`tolerantArraySchema`, `chat-turn.ts`): one
@@ -425,6 +471,9 @@ LLM-call count is the number of pipeline LLM calls (router + N domains + decisio
 | "что у меня сегодня" | §3c `today_summary_read` | 0 | Read-only Today summary |
 | "отметь тренировку выполненной" | §3c `mark_today_workout_done` (write) | 0 | "Marked … as done" (or clarification if 0/>1 pending) |
 | "мой план питания" | §3c `nutrition_plan_read` | 0 | Read-only active nutrition plan |
+| "мой прогресс за неделю" | §3c `weekly_progress_read` | 0 | Read-only weekly summary snapshot (or config `noSummaryLine`) |
+| "покажи план тренировок" | §3c `workout_plan_read` | 0 | Read-only active workout plan (or config `noActivePlanLine`) |
+| "проанализируй последние полгода — как тренировки повлияли на восстановление" | direct paths decline (analytic + long lookback negatives) → §4 fan-out with `deep_history` profile, `progress_history_review` packet + `deepReview` framing | up to 5 | Long-range review grounded in numeric buckets; names the analyzed range; one narrowing follow-up when data is sparse |
 | Any of the above **with an attachment** | gates step aside (direct/explainer blocked when attachments) → §4 full fan-out | up to 5 | Coach reply; attachment as context (image vision / extracted text) |
 | Free-tier user over daily quota | §3d quota gate | 0 | Upgrade-to-Pro quota message |
 | Normal coaching question (1 domain) | §4 fan-out, 1 selected domain | 3 (router + 1 + decision) | Coach reply (+ proposals/quick actions per domain) |

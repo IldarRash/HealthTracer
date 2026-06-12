@@ -248,6 +248,7 @@ function makeOrchestrator(opts: {
     decisionMakerExecutorService,
     actionVariantCatalogService,
     attachmentTextExtractionService as never,
+    { buildReviewSummaryForAuth: vi.fn() } as never,
   );
 }
 

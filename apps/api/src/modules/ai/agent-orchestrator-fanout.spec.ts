@@ -70,7 +70,27 @@ function makeAuth(): ClerkAuthContext {
   return { clerkUserId: "clerk_001", email: "test@example.com", displayName: "Test" };
 }
 
-function makeContextPacket(): AgentContextPacket {
+/**
+ * Numeric-only progress-history summary fixture (Phase 4 deep-review tests).
+ * Worst per-domain sufficiency is "partial" → expected derived dataQuality.
+ */
+const PROGRESS_HISTORY_SUMMARY = {
+  requestedPeriodDays: 365,
+  grantedPeriodDays: 180,
+  granularity: "weekly" as const,
+  buckets: [],
+  planChangeMarkers: [],
+  dataSufficiency: {
+    workout: "sufficient" as const,
+    habits: "partial" as const,
+    recovery: "sufficient" as const,
+    wellbeing: "sufficient" as const,
+  },
+  coveredDays: 120,
+  noteCodes: [],
+};
+
+function makeContextPacket(opts: { withProgressHistory?: boolean } = {}): AgentContextPacket {
   return {
     purpose: "workout_adaptation",
     depth: "medium",
@@ -80,7 +100,21 @@ function makeContextPacket(): AgentContextPacket {
     safetyConstraints: [],
     missingContextNotes: [],
     sourceRefs: [],
-    supplementarySlices: [],
+    supplementarySlices: opts.withProgressHistory
+      ? [
+          {
+            purpose: "progress_history_review",
+            depth: "large",
+            timeRange: "1y",
+            generatedAt: new Date().toISOString(),
+            relevantMemories: [],
+            snapshots: [],
+            recommendationConstraints: [],
+            sourceRefs: [],
+            progressHistory: PROGRESS_HISTORY_SUMMARY,
+          },
+        ]
+      : [],
     slice: {
       purpose: "workout_adaptation",
       depth: "medium",
@@ -142,13 +176,22 @@ function makePresentationMetadata(): ResolvedCapabilityPresentationMetadata {
  */
 function makeFanoutPlan(
   selectedDomains: DomainFanoutEntry[],
-  opts: { lowConfidenceRoute?: boolean } = {},
+  opts: {
+    lowConfidenceRoute?: boolean;
+    /** Phase 4: deep_history review plan with the given lookbacks. */
+    deepReviewPlan?: { requestedLookbackDays: number | null; grantedLookbackDays: number | null };
+    requiresCompression?: boolean;
+  } = {},
 ): DomainFanoutPlan {
   return {
     route: makeRoute(),
     executorMode: "proposal_flow",
-    requiresCompression: false,
-    contextBudget: DEFAULT_CONTEXT_BUDGET_POLICY,
+    requiresCompression: opts.requiresCompression ?? false,
+    contextBudget: opts.deepReviewPlan
+      ? { ...DEFAULT_CONTEXT_BUDGET_POLICY, profile: "deep_history" as const }
+      : DEFAULT_CONTEXT_BUDGET_POLICY,
+    requestedLookbackDays: opts.deepReviewPlan?.requestedLookbackDays ?? null,
+    grantedLookbackDays: opts.deepReviewPlan?.grantedLookbackDays ?? null,
     presentationMetadata: makePresentationMetadata(),
     intentDefinition: {} as DomainFanoutPlan["intentDefinition"],
     catalogIntentId: "adjust_workout",
@@ -182,23 +225,50 @@ function makeOrchestrator(opts: {
   captureFinalDecisionRequest?: (req: FinalDecisionRequest) => void;
   /** Forward lowConfidenceRoute into the fanout plan metadata. */
   lowConfidenceRoute?: boolean;
+  /** Phase 4: deep_history review plan with the given lookbacks. */
+  deepReviewPlan?: { requestedLookbackDays: number | null; grantedLookbackDays: number | null };
+  /** Phase 4: include the progress_history_review slice on the context packet. */
+  withProgressHistory?: boolean;
+  /** Phase 4: compression summary returned by the mocked compression service. */
+  compressionSummary?: { dataQuality?: "sufficient" | "partial" | "insufficient" };
+  /** Phase 4: capture every DomainLlmExecutorService.runDomainLoop input. */
+  captureDomainLoopInput?: (input: { deepReview?: unknown }) => void;
+  /** F5: spy on the once-per-turn progress-history aggregation. */
+  progressHistoryAggregateSpies?: {
+    buildReviewSummaryForAuth: ReturnType<typeof vi.fn>;
+  };
+  /** F5: capture every CoachingContextService.buildAgentContext options arg. */
+  captureBuildAgentContextOptions?: (options: unknown) => void;
 }): AgentOrchestratorService {
-  const contextPacket = makeContextPacket();
+  const contextPacket = makeContextPacket({ withProgressHistory: opts.withProgressHistory });
 
   const coachingContextService = {
-    buildAgentContext: vi.fn().mockResolvedValue(contextPacket),
+    buildAgentContext: vi
+      .fn()
+      .mockImplementation((_auth, _request, _route, options: unknown) => {
+        opts.captureBuildAgentContextOptions?.(options);
+
+        return Promise.resolve(contextPacket);
+      }),
     toAgentPromptContext: vi.fn().mockReturnValue({ agentContext: {} }),
   } as unknown as CoachingContextService;
 
   const contextCompressionService = {
-    compressForTurn: vi.fn().mockResolvedValue({ summary: null, notes: [] }),
+    compressForTurn: vi.fn().mockResolvedValue({
+      summary: opts.compressionSummary ?? null,
+      notes: [],
+    }),
   } as unknown as ContextCompressionService;
 
   const contextExpansionPolicyService = {
     createPolicySnapshot: vi.fn().mockReturnValue({}),
   } as unknown as ContextExpansionPolicyService;
 
-  const plan = makeFanoutPlan(opts.selectedDomains, { lowConfidenceRoute: opts.lowConfidenceRoute });
+  const plan = makeFanoutPlan(opts.selectedDomains, {
+    lowConfidenceRoute: opts.lowConfidenceRoute,
+    deepReviewPlan: opts.deepReviewPlan,
+    requiresCompression: opts.compressionSummary !== undefined,
+  });
 
   const systemPlannerService = {
     planTurn: vi.fn().mockResolvedValue(plan),
@@ -231,16 +301,18 @@ function makeOrchestrator(opts: {
   // DomainLlmExecutorService is mocked to return the specified domain results.
   const domainResultQueue = [...opts.domainResults];
   const domainLlmExecutorService = {
-    runDomainLoop: vi.fn().mockImplementation(() =>
-      Promise.resolve(domainResultQueue.shift() ?? {
+    runDomainLoop: vi.fn().mockImplementation((input: { deepReview?: unknown }) => {
+      opts.captureDomainLoopInput?.(input);
+
+      return Promise.resolve(domainResultQueue.shift() ?? {
         domainAnswer: createFallbackDomainAnswer("workout"),
         candidateMap: new Map(),
         degraded: true,
         degradedReasons: ["No more domain results in queue."],
         loopIterations: 0,
         toolsInvoked: [],
-      }),
-    ),
+      });
+    }),
   } as unknown as DomainLlmExecutorService;
 
   // Real ActionResolverService — exercises the integrated resolution path.
@@ -263,6 +335,7 @@ function makeOrchestrator(opts: {
       safetyConstraints: input.safetyConstraints ?? [],
       responseLanguage: input.responseLanguage ?? null,
       recentMessages: input.recentMessages ?? [],
+      deepReview: input.deepReview,
     } as unknown as FinalDecisionRequest);
 
     return {
@@ -284,6 +357,10 @@ function makeOrchestrator(opts: {
     extractTurnAttachmentTexts: vi.fn().mockResolvedValue(new Map()),
   };
 
+  const progressHistoryAggregateService = (opts.progressHistoryAggregateSpies ?? {
+    buildReviewSummaryForAuth: vi.fn(),
+  }) as never;
+
   return new AgentOrchestratorService(
     coachingContextService,
     contextCompressionService,
@@ -297,6 +374,7 @@ function makeOrchestrator(opts: {
     decisionMakerExecutorService,
     actionVariantCatalogService,
     attachmentTextExtractionService as never,
+    progressHistoryAggregateService,
   );
 }
 
@@ -661,5 +739,217 @@ describe("AgentOrchestratorService — fan-out: lowConfidenceRoute in decision d
     const decision = result.agentMetadata.fanOut?.decision;
     expect(decision).toBeDefined();
     expect(decision?.lowConfidenceRoute).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4 — deepReview threading (domain requests + decision request + diagnostics)
+// ---------------------------------------------------------------------------
+
+describe("AgentOrchestratorService — fan-out: deepReview block (Phase 4)", () => {
+  function makeReviewDomainResult(): DomainLlmExecutorResult {
+    return {
+      domainAnswer: {
+        ...createFallbackDomainAnswer("workout"),
+        domain: "workout",
+        summary: "Long-range review summary.",
+        candidateProposals: [],
+      },
+      candidateMap: new Map(),
+      degraded: false,
+      degradedReasons: [],
+      loopIterations: 1,
+      toolsInvoked: [],
+    };
+  }
+
+  it("builds the deepReview block on a deep_history turn: plan lookbacks + worst-of dataQuality", async () => {
+    const domainLoopInputs: Array<{ deepReview?: unknown }> = [];
+    let capturedDecisionRequest: FinalDecisionRequest | undefined;
+
+    const orchestrator = makeOrchestrator({
+      domainResults: [makeReviewDomainResult()],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "Over the last 180 days your adherence dropped.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      deepReviewPlan: { requestedLookbackDays: 365, grantedLookbackDays: 180 },
+      withProgressHistory: true,
+      captureDomainLoopInput: (input) => domainLoopInputs.push(input),
+      captureFinalDecisionRequest: (req) => {
+        capturedDecisionRequest = req;
+      },
+    });
+
+    const result = await orchestrator.orchestrateCoachTurn(
+      makeOrchestratorInput("проанализируй последние полгода"),
+    );
+
+    // Worst of {sufficient, partial, sufficient, sufficient} = partial (fixture).
+    const expectedDeepReview = {
+      requestedPeriodDays: 365,
+      grantedPeriodDays: 180,
+      dataQuality: "partial",
+    };
+
+    // Every domain request carries the same deepReview block.
+    expect(domainLoopInputs).toHaveLength(1);
+    expect(domainLoopInputs[0]?.deepReview).toEqual(expectedDeepReview);
+
+    // The decision request carries the same block.
+    expect(capturedDecisionRequest?.deepReview).toEqual(expectedDeepReview);
+
+    // Diagnostics surface a boolean only (no period numbers, no health data).
+    expect(result.agentMetadata.fanOut?.decision?.deepReview).toBe(true);
+  });
+
+  it("compression dataQuality degrades the deepReview dataQuality (worst-of)", async () => {
+    let capturedDecisionRequest: FinalDecisionRequest | undefined;
+
+    const orchestrator = makeOrchestrator({
+      domainResults: [makeReviewDomainResult()],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "Honest but limited review.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      deepReviewPlan: { requestedLookbackDays: 365, grantedLookbackDays: 180 },
+      withProgressHistory: true,
+      compressionSummary: { dataQuality: "insufficient" },
+      captureFinalDecisionRequest: (req) => {
+        capturedDecisionRequest = req;
+      },
+    });
+
+    await orchestrator.orchestrateCoachTurn(
+      makeOrchestratorInput("проанализируй последние полгода"),
+    );
+
+    expect(capturedDecisionRequest?.deepReview).toEqual({
+      requestedPeriodDays: 365,
+      grantedPeriodDays: 180,
+      dataQuality: "insufficient",
+    });
+  });
+
+  it("does NOT build deepReview on a default turn (no review profile, no progress-history slice)", async () => {
+    const domainLoopInputs: Array<{ deepReview?: unknown }> = [];
+    let capturedDecisionRequest: FinalDecisionRequest | undefined;
+
+    const orchestrator = makeOrchestrator({
+      domainResults: [makeReviewDomainResult()],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "Here is your plan.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      captureDomainLoopInput: (input) => domainLoopInputs.push(input),
+      captureFinalDecisionRequest: (req) => {
+        capturedDecisionRequest = req;
+      },
+    });
+
+    const result = await orchestrator.orchestrateCoachTurn(makeOrchestratorInput());
+
+    expect(domainLoopInputs[0]?.deepReview).toBeUndefined();
+    expect(capturedDecisionRequest?.deepReview).toBeUndefined();
+    expect(result.agentMetadata.fanOut?.decision?.deepReview).toBeUndefined();
+  });
+
+  it("does NOT build deepReview when the profile is a review one but the packet lacks the progress-history slice", async () => {
+    let capturedDecisionRequest: FinalDecisionRequest | undefined;
+
+    const orchestrator = makeOrchestrator({
+      domainResults: [makeReviewDomainResult()],
+      selectedDomains: [makeDomainFanoutEntry("workout", ["adapt_workout_plan"])],
+      decisionOutput: {
+        reply: "Review without history slice.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      deepReviewPlan: { requestedLookbackDays: 180, grantedLookbackDays: 180 },
+      withProgressHistory: false,
+      captureFinalDecisionRequest: (req) => {
+        capturedDecisionRequest = req;
+      },
+    });
+
+    const result = await orchestrator.orchestrateCoachTurn(
+      makeOrchestratorInput("проанализируй последние полгода"),
+    );
+
+    expect(capturedDecisionRequest?.deepReview).toBeUndefined();
+    expect(result.agentMetadata.fanOut?.decision?.deepReview).toBeUndefined();
+  });
+
+  it("aggregates progress history exactly ONCE on a 3-domain deep-review turn and threads it to every packet build (F5)", async () => {
+    const reviewSlice = {
+      type: "progress_history_review" as const,
+      depth: "large" as const,
+      timeRange: "1y" as const,
+      includeDocuments: false,
+    };
+    const selectedDomains: DomainFanoutEntry[] = [
+      {
+        ...makeDomainFanoutEntry("workout", ["adapt_workout_plan"]),
+        supplementaryContextSlices: [reviewSlice],
+      },
+      {
+        ...makeDomainFanoutEntry("nutrition", ["log_nutrition_incident"]),
+        supplementaryContextSlices: [reviewSlice],
+      },
+      {
+        ...makeDomainFanoutEntry("nutrition", ["log_nutrition_incident"]),
+        domain: "health",
+        capabilityId: "longevity_overview",
+        supplementaryContextSlices: [reviewSlice],
+      },
+    ];
+    const buildReviewSummaryForAuth = vi.fn(async () => PROGRESS_HISTORY_SUMMARY);
+    const capturedOptions: unknown[] = [];
+
+    const orchestrator = makeOrchestrator({
+      domainResults: [
+        makeReviewDomainResult(),
+        makeReviewDomainResult(),
+        makeReviewDomainResult(),
+      ],
+      selectedDomains,
+      decisionOutput: {
+        reply: "Cross-domain review.",
+        selectedAction: null,
+        selectedProposalIds: [],
+        consentRequired: false,
+      },
+      deepReviewPlan: { requestedLookbackDays: 365, grantedLookbackDays: 180 },
+      withProgressHistory: true,
+      progressHistoryAggregateSpies: { buildReviewSummaryForAuth },
+      captureBuildAgentContextOptions: (options) => capturedOptions.push(options),
+    });
+
+    await orchestrator.orchestrateCoachTurn(
+      makeOrchestratorInput("проанализируй последние полгода"),
+    );
+
+    // The identical 6-query aggregation runs once per turn — not once per packet.
+    expect(buildReviewSummaryForAuth).toHaveBeenCalledTimes(1);
+    expect(buildReviewSummaryForAuth).toHaveBeenCalledWith(expect.anything(), 180);
+
+    // 1 primary + 3 domain packet builds, each handed the same precomputed summary.
+    expect(capturedOptions).toHaveLength(4);
+    for (const options of capturedOptions) {
+      expect(
+        (options as { progressHistoryLookback?: { precomputedSummary?: unknown } })
+          .progressHistoryLookback?.precomputedSummary,
+      ).toBe(PROGRESS_HISTORY_SUMMARY);
+    }
   });
 });

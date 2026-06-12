@@ -30,7 +30,11 @@
  */
 
 import {
+  agentToolNameSchema as agentToolNameZodSchema,
   buildLlmCandidateEnvelopeSchema,
+  contextDepthSchema,
+  contextSlicePurposeSchema,
+  contextTimeRangeSchema,
   hasLlmEmissionSchemaForIntent,
   type LlmEmissionCoveredIntent,
 } from "@health/types";
@@ -127,18 +131,10 @@ const agentSafetyFlagSchema: JsonSchema = {
   enum: [...AGENT_SAFETY_FLAG_VALUES],
 };
 
-/**
- * agentToolNameSchema enum values — mirrors agentToolNameSchema in
- * packages/types/src/agent-context.ts (read-only context tools only).
- */
-const AGENT_TOOL_NAME_VALUES = [
-  "getUserContextSlice",
-  "getWeeklyProgressContext",
-  "searchExerciseCatalog",
-  "searchRecipeCatalog",
-  "getActivePlanDetail",
-  "getRecentAdherence",
-] as const;
+// Derived from the authoritative Zod enum so the wire contract can never
+// drift from the live tool set (it previously hardcoded a stale list that
+// still advertised the removed getDocumentContext and omitted newer tools).
+const AGENT_TOOL_NAME_VALUES = agentToolNameZodSchema.options;
 
 type AgentToolNameValue = (typeof AGENT_TOOL_NAME_VALUES)[number];
 
@@ -171,7 +167,6 @@ export const routerDecisionWireSchema: JsonSchema = strictObject(
         ["domain", "confidence", "intentHints", "toolHints", "signalHints"],
       ),
     ),
-    contextNeeds: arrayOf({ type: "string" }),
     directCommand: nullable(
       strictObject(
         {
@@ -185,7 +180,7 @@ export const routerDecisionWireSchema: JsonSchema = strictObject(
     safetyFlags: arrayOf(agentSafetyFlagSchema),
     confidence: { type: "number" },
   },
-  ["selectedDomains", "contextNeeds", "directCommand", "safetyFlags", "confidence"],
+  ["selectedDomains", "directCommand", "safetyFlags", "confidence"],
 );
 
 // ---------------------------------------------------------------------------
@@ -276,22 +271,13 @@ export const domainLlmStepWireSchema: JsonSchema = {
  * per-tool Zod input parse in AgentToolRegistryService.
  */
 const TOOL_INPUT_WIRE_SCHEMAS: Record<AgentToolNameValue, JsonSchema> = {
+  // Enums derived from the authoritative Zod schemas (agent-context.ts) so the
+  // wire contract can never drift from the live slice purposes/depths/ranges.
   getUserContextSlice: strictObject(
     {
-      purpose: {
-        type: "string",
-        enum: [
-          "general_chat",
-          "daily_checkin",
-          "workout_adaptation",
-          "nutrition_adaptation",
-          "weekly_review",
-          "longevity_overview",
-          "health_context",
-        ],
-      },
-      depth: nullable({ type: "string", enum: ["small", "medium", "large"] }),
-      timeRange: nullable({ type: "string", enum: ["7d", "14d", "30d", "90d", "1y"] }),
+      purpose: { type: "string", enum: [...contextSlicePurposeSchema.options] },
+      depth: nullable({ type: "string", enum: [...contextDepthSchema.options] }),
+      timeRange: nullable({ type: "string", enum: [...contextTimeRangeSchema.options] }),
       includeRawData: nullableBoolean(),
       includeDocuments: nullableBoolean(),
     },
@@ -329,6 +315,8 @@ const TOOL_INPUT_WIRE_SCHEMAS: Record<AgentToolNameValue, JsonSchema> = {
     { domain: nullable({ type: "string", enum: ["workout", "nutrition", "health"] }) },
     ["domain"],
   ),
+  // Mirrors getProgressHistoryInputSchema (periodDays required; clamped server-side).
+  getProgressHistory: strictObject({ periodDays: { type: "integer" } }, ["periodDays"]),
 };
 
 /** One strict tool_request variant per read-only tool (computed once). */

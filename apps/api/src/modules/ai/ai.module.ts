@@ -4,6 +4,7 @@ import { ChatAttachmentsModule } from "../chat-attachments/chat-attachments.modu
 import { CoachingContextModule } from "../coaching-context/coaching-context.module.js";
 import { ExercisesModule } from "../exercises/exercises.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
+import { ProgressModule } from "../progress/progress.module.js";
 import { RecipesModule } from "../recipes/recipes.module.js";
 import { WorkoutsModule } from "../workouts/workouts.module.js";
 import { ActionResolverService } from "./action-resolver.service.js";
@@ -32,6 +33,7 @@ import { SystemPlannerService } from "./system-planner.service.js";
     CoachingContextModule,
     ExercisesModule,
     NutritionModule,
+    ProgressModule,
     RecipesModule,
     WorkoutsModule,
   ],

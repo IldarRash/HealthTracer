@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_CONTEXT_BUDGET_POLICY,
+  DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
   DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
   getTodayIsoDateInTimezone,
   getWeekStartIsoDate,
+  type IntentRouteResult,
 } from "@health/types";
 import { CoachingContextService } from "./coaching-context.service.js";
 import { ContextBudgetPolicyService } from "./context-budget-policy.service.js";
@@ -73,6 +75,7 @@ function createCoachingContextService(overrides: {
   workoutsRepository?: Record<string, unknown>;
   habitsRepository?: Record<string, unknown>;
   habitsService?: Record<string, unknown>;
+  progressHistoryAggregateService?: Record<string, unknown>;
 } = {}) {
   return new CoachingContextService(
     new ContextBudgetPolicyService(createDefaultAiBehaviorConfigService()),
@@ -169,6 +172,8 @@ function createCoachingContextService(overrides: {
     {
       getLatestSummarySnapshot: async () => ({
         summary: {
+          id: "b2000001-0000-4000-8000-000000000001",
+          generatedAt: new Date().toISOString(),
           weekStart: "2026-05-19",
           weekEnd: "2026-05-25",
           dataStatus: "partial",
@@ -178,6 +183,11 @@ function createCoachingContextService(overrides: {
               plannedSessions: 3,
               completedSessions: 2,
               skippedSessions: 0,
+              plannedCount: 3,
+              completedCount: 2,
+              skippedCount: 0,
+              adherencePercent: 66.7,
+              averageFatigue: 5,
             },
           },
           deferredDomains: [],
@@ -247,7 +257,50 @@ function createCoachingContextService(overrides: {
         date: "2026-05-25",
       }),
     } as never,
+    (overrides.progressHistoryAggregateService ??
+      {
+        buildReviewSummary: async () => createProgressHistorySummary(),
+      }) as never,
   );
+}
+
+function createProgressHistorySummary(overrides: Record<string, unknown> = {}) {
+  return {
+    requestedPeriodDays: 180,
+    grantedPeriodDays: 180,
+    granularity: "weekly" as const,
+    buckets: [
+      {
+        bucketStart: "2026-04-27",
+        workout: {
+          plannedCount: 3,
+          completedCount: 2,
+          skippedCount: 1,
+          adherencePercent: 66.7,
+          activeDays: 2,
+          avgFatigue: 5.5,
+        },
+        habits: { adherencePercent: 80 },
+        recovery: {
+          wellSupportedDays: 2,
+          moderateLoadDays: 3,
+          prioritizeRecoveryDays: 1,
+          insufficientDataDays: 1,
+        },
+        wellbeing: { avgMoodScore: 3.5, avgStressScore: 2.5, checkInCount: 4 },
+      },
+    ],
+    planChangeMarkers: [],
+    dataSufficiency: {
+      workout: "partial" as const,
+      habits: "partial" as const,
+      recovery: "insufficient" as const,
+      wellbeing: "partial" as const,
+    },
+    coveredDays: 42,
+    noteCodes: [],
+    ...overrides,
+  };
 }
 
 describe("CoachingContextService", () => {
@@ -662,5 +715,263 @@ describe("CoachingContextService", () => {
     expect(packet.missingContextNotes).toContain(
       "Large review context requires compression before full historical detail is available.",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — progress_history_review slice through the existing machinery
+// ---------------------------------------------------------------------------
+
+function createReviewRoute(
+  withProgressHistorySlice: boolean,
+): IntentRouteResult {
+  return {
+    intent: "review_progress",
+    catalogIntentId: "review_progress",
+    confidence: 0.9,
+    isConfident: true,
+    purpose: "weekly_review",
+    depth: "large",
+    timeRange: "7d",
+    includeDocuments: false,
+    routingMethod: "unified_turn_decision",
+    requiredContextSlices: withProgressHistorySlice
+      ? [
+          { type: "weekly_review", depth: "large", timeRange: "7d", includeDocuments: false },
+          {
+            type: "progress_history_review",
+            depth: "large",
+            timeRange: "1y",
+            includeDocuments: false,
+          },
+        ]
+      : [{ type: "weekly_review", depth: "large", timeRange: "7d", includeDocuments: false }],
+    safetyFlags: [],
+    expectedResponseMode: "recommendation_with_optional_proposal",
+  };
+}
+
+describe("CoachingContextService — progress_history_review slice (Phase 3)", () => {
+  it("NEVER calls the aggregate service on a default-profile plan (spy regression)", async () => {
+    const buildReviewSummary = vi.fn(async () => createProgressHistorySummary());
+    const service = createCoachingContextService({
+      progressHistoryAggregateService: { buildReviewSummary },
+    });
+
+    await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "How is my training going this week?",
+        intent: "review_progress",
+        purpose: "weekly_review",
+      },
+      createReviewRoute(false),
+      { contextBudget: DEFAULT_CONTEXT_BUDGET_POLICY },
+    );
+
+    expect(buildReviewSummary).not.toHaveBeenCalled();
+  });
+
+  it("calls the aggregate service once and includes the slice on a deep_history review plan", async () => {
+    const buildReviewSummary = vi.fn(async () => createProgressHistorySummary());
+    const service = createCoachingContextService({
+      progressHistoryAggregateService: { buildReviewSummary },
+    });
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "проанализируй последние полгода",
+        intent: "review_progress",
+        purpose: "weekly_review",
+      },
+      createReviewRoute(true),
+      {
+        contextBudget: DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+        progressHistoryLookback: {
+          requestedLookbackDays: 180,
+          grantedLookbackDays: 180,
+          responseLanguage: "ru",
+        },
+      },
+    );
+
+    expect(buildReviewSummary).toHaveBeenCalledTimes(1);
+    expect(buildReviewSummary).toHaveBeenCalledWith(userId, 180, expect.any(Date), "UTC");
+
+    const reviewSlice = [packet.slice, ...packet.supplementarySlices].find(
+      (slice) => slice.purpose === "progress_history_review",
+    );
+
+    expect(reviewSlice).toBeDefined();
+    expect(reviewSlice?.progressHistory?.granularity).toBe("weekly");
+    expect(reviewSlice?.progressHistory?.buckets).toHaveLength(1);
+    // Floors: the review slice never carries sensitive or document context.
+    expect(reviewSlice?.wellbeingSummary).toBeUndefined();
+    expect(reviewSlice?.recoveryContext).toBeUndefined();
+    expect(reviewSlice?.documentContext).toBeUndefined();
+    expect(reviewSlice?.ragResults).toBeUndefined();
+
+    // Phase 4 floor regression: under allowDocuments=false NO slice of the
+    // deep-review packet carries document or RAG text — not just the review slice.
+    for (const slice of [packet.slice, ...packet.supplementarySlices]) {
+      expect(slice.documentContext).toBeUndefined();
+      expect(slice.ragResults).toBeUndefined();
+    }
+  });
+
+  it("threads planner-injected slice requests via options for route-less domain packets", async () => {
+    const buildReviewSummary = vi.fn(async () => createProgressHistorySummary());
+    const service = createCoachingContextService({
+      progressHistoryAggregateService: { buildReviewSummary },
+    });
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "проанализируй последние полгода",
+        intent: "review_progress",
+        purpose: "weekly_review",
+        depth: "large",
+        timeRange: "7d",
+      },
+      undefined,
+      {
+        contextBudget: DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+        supplementarySliceRequests: [
+          {
+            type: "progress_history_review",
+            depth: "large",
+            timeRange: "1y",
+            includeDocuments: false,
+          },
+        ],
+        progressHistoryLookback: {
+          requestedLookbackDays: 365,
+          grantedLookbackDays: 365,
+          responseLanguage: "en",
+        },
+      },
+    );
+
+    expect(buildReviewSummary).toHaveBeenCalledTimes(1);
+    expect(
+      packet.supplementarySlices.some((slice) => slice.purpose === "progress_history_review"),
+    ).toBe(true);
+  });
+
+  it("uses the orchestrator-precomputed summary and skips the lazy aggregation (F5)", async () => {
+    const buildReviewSummary = vi.fn(async () => createProgressHistorySummary());
+    const service = createCoachingContextService({
+      progressHistoryAggregateService: { buildReviewSummary },
+    });
+    const precomputedSummary = createProgressHistorySummary();
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "проанализируй последние полгода",
+        intent: "review_progress",
+        purpose: "weekly_review",
+      },
+      createReviewRoute(true),
+      {
+        contextBudget: DEEP_HISTORY_CONTEXT_BUDGET_POLICY,
+        progressHistoryLookback: {
+          requestedLookbackDays: 180,
+          grantedLookbackDays: 180,
+          responseLanguage: "ru",
+          precomputedSummary,
+        },
+      },
+    );
+
+    expect(buildReviewSummary).not.toHaveBeenCalled();
+
+    const reviewSlice = [packet.slice, ...packet.supplementarySlices].find(
+      (slice) => slice.purpose === "progress_history_review",
+    );
+
+    expect(reviewSlice?.progressHistory).toEqual(precomputedSummary);
+  });
+
+  it("adds the RU config-sourced clamp note when requested lookback exceeds the grant", async () => {
+    const service = createCoachingContextService();
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "проанализируй последние два года",
+        intent: "review_progress",
+        purpose: "weekly_review",
+      },
+      createReviewRoute(true),
+      {
+        contextBudget: DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
+        progressHistoryLookback: {
+          requestedLookbackDays: 730,
+          grantedLookbackDays: 90,
+          responseLanguage: "ru",
+        },
+      },
+    );
+
+    expect(
+      packet.missingContextNotes.some((note) => note.startsWith("Показаны последние")),
+    ).toBe(true);
+  });
+
+  it("falls back to the EN clamp note copy for unknown response languages", async () => {
+    const service = createCoachingContextService();
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "analyze my last two years",
+        intent: "review_progress",
+        purpose: "weekly_review",
+      },
+      createReviewRoute(true),
+      {
+        contextBudget: DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
+        progressHistoryLookback: {
+          requestedLookbackDays: 730,
+          grantedLookbackDays: 90,
+          responseLanguage: null,
+        },
+      },
+    );
+
+    expect(packet.missingContextNotes.some((note) => note.startsWith("Showing the last"))).toBe(
+      true,
+    );
+  });
+
+  it("omits the clamp note when the requested lookback fits the grant", async () => {
+    const service = createCoachingContextService();
+
+    const packet = await service.buildAgentContext(
+      auth,
+      {
+        userMessage: "review my last month",
+        intent: "review_progress",
+        purpose: "weekly_review",
+      },
+      createReviewRoute(true),
+      {
+        contextBudget: DEEP_REVIEW_CONTEXT_BUDGET_POLICY,
+        progressHistoryLookback: {
+          requestedLookbackDays: 30,
+          grantedLookbackDays: 30,
+          responseLanguage: "en",
+        },
+      },
+    );
+
+    expect(
+      packet.missingContextNotes.some(
+        (note) => note.startsWith("Showing the last") || note.startsWith("Показаны последние"),
+      ),
+    ).toBe(false);
   });
 });

@@ -5,6 +5,7 @@ import type {
   CatalogIntentId,
   ChatAttachmentCategory,
   ContextBudgetPolicy,
+  ContextSliceRequest,
   ExpectedResponseMode,
   IntentRouteResult,
   ResolvedCapabilityPresentationMetadata,
@@ -12,10 +13,12 @@ import type {
   RouterDecisionOutput,
 } from "@health/types";
 import {
+  MAX_CONTEXT_SLICES,
   MAX_ROUTER_SELECTED_DOMAINS,
   RULE_ROUTE_CONFIDENCE_THRESHOLD,
   buildContextSliceRequestForIntent,
   buildRouteFromCatalogIntent,
+  resolveDefaultDepthForPurpose,
   isDeterministicResponseModeExecutorMode,
   mapExpectedResponseModeToDefaultExecutorMode,
   normalizePreprocessorText,
@@ -23,6 +26,7 @@ import {
   resolveProposalRevisionCapabilityId,
   resolveResponseModeExecutorMode,
   type DirectChatPathCandidate,
+  type MessagePreprocessorResult,
   type RouterDomain,
 } from "@health/types";
 import type { RouterLlmResult } from "./router-llm.service.js";
@@ -31,8 +35,11 @@ import type { CoachIntentDefinitionMetadata } from "./capability-intent-definiti
 import { AiBehaviorConfigService } from "./ai-behavior-config.service.js";
 import { CapabilityRegistryService } from "./capability-registry.service.js";
 import {
+  clampTimeRangeToLookback,
   ContextBudgetPolicyService,
+  shouldInjectProgressHistoryReview,
   type ContextBudgetPlanMetadata,
+  type ContextBudgetPreprocessorHints,
 } from "../coaching-context/context-budget-policy.service.js";
 import { DirectChatPathMatcherService } from "./direct-chat-path-matcher.service.js";
 import { ProposalExplainerMatcherService } from "./proposal-explainer-matcher.service.js";
@@ -77,6 +84,12 @@ export interface SystemPlannerTurnInput {
   proposalRevision?: SystemPlannerProposalRevisionContext;
   attachmentTurn?: SystemPlannerAttachmentTurnContext;
   routerResult?: RouterLlmResult;
+  /**
+   * Deterministic preprocessor output for this turn. The planner reads only
+   * requestedLookbackDays + simpleSignals.review_request to drive budget-profile
+   * selection (deep_review / deep_history) — the router/LLM never decides the tier.
+   */
+  preprocessorResult?: MessagePreprocessorResult;
 }
 
 export interface CapabilityPlanResult extends ContextBudgetPlanMetadata {
@@ -111,6 +124,13 @@ export interface DomainFanoutEntry {
   contextBudget: ContextBudgetPolicy;
   /** Per-domain executor mode, derived from capability policy and route signals. */
   executorMode: ResponseModeExecutorMode;
+  /**
+   * Planner-injected slice requests appended to this domain's context request
+   * (Phase 3: progress_history_review on review budget profiles). Empty/absent
+   * on default turns — the orchestrator threads these into
+   * CoachingContextService.buildAgentContext options.
+   */
+  supplementaryContextSlices?: readonly ContextSliceRequest[];
 }
 
 /**
@@ -201,6 +221,7 @@ export class SystemPlannerService {
         expectedResponseMode,
       },
       selectedCapabilities,
+      preprocessor: resolvePreprocessorBudgetHints(input.preprocessorResult),
     });
     const resolvedRoute = {
       ...route,
@@ -233,13 +254,37 @@ export class SystemPlannerService {
       });
     }
 
+    // Phase 3: on review budget profiles (deep_review / deep_history) for
+    // review-ish turns, append the progress_history_review slice to the route's
+    // slice plan AND to every selected fan-out domain's context request. The
+    // slice flows through the existing budget/slice/compression machinery —
+    // no side channels; default turns never carry it.
+    const injectedReviewSlices = shouldInjectProgressHistoryReview(budgetMetadata)
+      ? [buildProgressHistoryReviewSliceRequest(budgetMetadata.contextBudget)]
+      : [];
+    const routeWithReviewSlices =
+      injectedReviewSlices.length > 0
+        ? {
+            ...resolvedRoute,
+            requiredContextSlices: appendSupplementarySliceRequests(
+              resolvedRoute.requiredContextSlices,
+              injectedReviewSlices,
+            ),
+          }
+        : resolvedRoute;
+
     // Build the fan-out metadata for Phase 4.
     // - Confident router routes iterate all selectedDomains (up to MAX_ROUTER_SELECTED_DOMAINS).
     // - All other routes produce a single-entry fanout from the primary capability.
-    const fanout = this.buildFanoutMetadata(input, resolvedRoute, budgetMetadata.contextBudget);
+    const fanout = this.buildFanoutMetadata(
+      input,
+      routeWithReviewSlices,
+      budgetMetadata.contextBudget,
+      injectedReviewSlices,
+    );
 
     return {
-      route: resolvedRoute,
+      route: routeWithReviewSlices,
       intentDefinition,
       catalogIntentId: primaryCapabilityId,
       primaryCapabilityId,
@@ -273,6 +318,7 @@ export class SystemPlannerService {
     input: SystemPlannerTurnInput,
     resolvedRoute: IntentRouteResult,
     primaryContextBudget: ContextBudgetPolicy,
+    supplementaryContextSlices: readonly ContextSliceRequest[],
   ): DomainFanoutMetadata {
     const isConfidentRouterRoute =
       !input.proposalRevision &&
@@ -281,7 +327,12 @@ export class SystemPlannerService {
       input.routerResult.output.selectedDomains.length > 0;
 
     if (isConfidentRouterRoute) {
-      return this.buildRouterFanout(input, resolvedRoute, primaryContextBudget);
+      return this.buildRouterFanout(
+        input,
+        resolvedRoute,
+        primaryContextBudget,
+        supplementaryContextSlices,
+      );
     }
 
     // Low-confidence flag: true only when the router ran but confidence was below
@@ -295,7 +346,11 @@ export class SystemPlannerService {
 
     // Single-domain fanout: primary capability used as the sole domain entry.
     return {
-      ...this.buildSingleDomainFanout(resolvedRoute, primaryContextBudget),
+      ...this.buildSingleDomainFanout(
+        resolvedRoute,
+        primaryContextBudget,
+        supplementaryContextSlices,
+      ),
       lowConfidenceRoute: isLlmRouterLowConfidence,
     };
   }
@@ -313,6 +368,7 @@ export class SystemPlannerService {
     input: SystemPlannerTurnInput,
     resolvedRoute: IntentRouteResult,
     primaryContextBudget: ContextBudgetPolicy,
+    supplementaryContextSlices: readonly ContextSliceRequest[],
   ): DomainFanoutMetadata {
     const routerDomains = input.routerResult!.output.selectedDomains.slice(
       0,
@@ -352,6 +408,7 @@ export class SystemPlannerService {
         userMessage: input.userMessage,
         route: domainRoute,
         selectedCapabilities: [capabilityId],
+        preprocessor: resolvePreprocessorBudgetHints(input.preprocessorResult),
       });
       const contextBudget = domainBudgetMetadata.contextBudget;
 
@@ -372,12 +429,20 @@ export class SystemPlannerService {
         allowedProposalIntents: [...domainIntentDef.allowedProposalIntents],
         contextBudget,
         executorMode: domainExecutorMode,
+        supplementaryContextSlices,
       });
     }
 
     // If all domains failed capability mapping, fall back to single primary-domain entry.
     if (entries.length === 0) {
-      return { ...this.buildSingleDomainFanout(resolvedRoute, primaryContextBudget), lowConfidenceRoute: false };
+      return {
+        ...this.buildSingleDomainFanout(
+          resolvedRoute,
+          primaryContextBudget,
+          supplementaryContextSlices,
+        ),
+        lowConfidenceRoute: false,
+      };
     }
 
     return {
@@ -399,6 +464,7 @@ export class SystemPlannerService {
   private buildSingleDomainFanout(
     resolvedRoute: IntentRouteResult,
     contextBudget: ContextBudgetPolicy,
+    supplementaryContextSlices: readonly ContextSliceRequest[],
   ): DomainFanoutMetadata {
     const capabilityId = resolvedRoute.catalogIntentId;
     const capConfig = this.capabilityRegistryService.getConfig(capabilityId);
@@ -426,6 +492,7 @@ export class SystemPlannerService {
           allowedProposalIntents: [...intentDef.allowedProposalIntents],
           contextBudget,
           executorMode,
+          supplementaryContextSlices,
         },
       ],
       isMultiDomain: false,
@@ -695,6 +762,64 @@ export class SystemPlannerService {
 // ---------------------------------------------------------------------------
 // Module-level helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Extract the deterministic budget hints the ContextBudgetPolicyService reads
+ * from the preprocessor result. Returns undefined when no preprocessor result
+ * was threaded (e.g. focused planner unit tests) — selection then behaves as
+ * if no lookback/review signal was detected.
+ */
+function resolvePreprocessorBudgetHints(
+  preprocessorResult: MessagePreprocessorResult | undefined,
+): ContextBudgetPreprocessorHints | undefined {
+  if (!preprocessorResult) {
+    return undefined;
+  }
+
+  return {
+    requestedLookbackDays: preprocessorResult.requestedLookbackDays,
+    reviewRequest: preprocessorResult.simpleSignals.review_request,
+  };
+}
+
+/**
+ * Build the planner-injected progress_history_review slice request. The
+ * timeRange is display metadata clamped to the active budget's horizon; the
+ * real data lookback is the turn-level grantedLookbackDays threaded by the
+ * orchestrator into CoachingContextService.
+ */
+function buildProgressHistoryReviewSliceRequest(
+  contextBudget: ContextBudgetPolicy,
+): ContextSliceRequest {
+  return {
+    type: "progress_history_review",
+    depth: resolveDefaultDepthForPurpose("progress_history_review"),
+    timeRange: clampTimeRangeToLookback("1y", contextBudget.maxLookbackDays),
+    includeDocuments: false,
+  };
+}
+
+/**
+ * Insert injected slice requests right after the primary slice (index 0) so
+ * they survive the MAX_CONTEXT_SLICES cap without displacing the packet's
+ * primary purpose. Already-present purposes are not duplicated.
+ */
+function appendSupplementarySliceRequests(
+  slices: readonly ContextSliceRequest[],
+  injected: readonly ContextSliceRequest[],
+): ContextSliceRequest[] {
+  const [primary, ...rest] = slices;
+
+  if (!primary) {
+    return injected.slice(0, MAX_CONTEXT_SLICES);
+  }
+
+  const additions = injected.filter(
+    (request) => !slices.some((slice) => slice.type === request.type),
+  );
+
+  return [primary, ...additions, ...rest].slice(0, MAX_CONTEXT_SLICES);
+}
 
 /**
  * Map a CatalogIntentId to the closest RouterDomain for single-entry fanout cases

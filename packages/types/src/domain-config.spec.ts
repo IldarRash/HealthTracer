@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { agentToolNameSchema } from "./agent-context.js";
 import {
   DEFAULT_DOMAIN_CONFIGS,
   domainConfigSchema,
@@ -219,6 +220,15 @@ describe("domainConfigSchema", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it("accepts a narrowing that lists the full agent tool catalog (review set is 6 tools)", () => {
+    const result = domainConfigSchema.safeParse({
+      ...makeMinimalWorkoutConfig(),
+      tools: agentToolNameSchema.options,
+    });
+
+    expect(result.success).toBe(true);
   });
 
   it("rejects getDocumentContext as an invalid tool name (removed from enum)", () => {

@@ -51,7 +51,7 @@ export const intentCatalogEntrySchema = z.object({
     timeRange: z.string().optional(),
     includeDocuments: z.boolean().optional(),
   }),
-  allowedTools: z.array(agentToolNameSchema).max(5),
+  allowedTools: z.array(agentToolNameSchema).max(6),
   allowedProposalIntents: z.array(catalogProposalIntentSchema).max(15),
   safetyGuidance: z.array(z.string().min(1).max(240)).max(10),
   promptInstructions: z.string().min(1).max(4000),
@@ -196,14 +196,17 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Review my training and nutrition this week.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("review_progress"),
-    allowedTools: ["getWeeklyProgressContext", "getUserContextSlice", "getRecentAdherence", "getActivePlanDetail", "searchExerciseCatalog"],
+    allowedTools: ["getWeeklyProgressContext", "getUserContextSlice", "getRecentAdherence", "getActivePlanDetail", "searchExerciseCatalog", "getProgressHistory"],
     allowedProposalIntents: [...PROGRESS_PROPOSAL_INTENTS],
     safetyGuidance: [
       "Explain trends conservatively when data is partial or insufficient.",
       "Do not claim medical conclusions from progress data.",
     ],
     promptInstructions:
-      "Summarize weekly trends first, then optionally propose plan adjustments grounded in observed progress.",
+      "Summarize observed trends first, then optionally propose plan adjustments grounded in observed progress. " +
+      "Candidate proposals MUST cite specific bucket evidence from the provided progress history — concrete dates and numbers " +
+      "(bucket start dates, adherence percentages, completed/skipped counts, check-in counts) — in their reason field. " +
+      "Keep interpretations non-diagnostic: never attribute trends to a disease and never recommend medical care.",
     mappedAgentIntent: "review_progress",
   },
   {
@@ -218,7 +221,7 @@ export const AGENT_INTENT_CATALOG: readonly IntentCatalogEntry[] = [
       "Adjust my habit plan.",
     ],
     defaultContextSlice: buildContextSliceRequestForIntent("longevity_overview"),
-    allowedTools: ["getUserContextSlice", "getRecentAdherence"],
+    allowedTools: ["getUserContextSlice", "getRecentAdherence", "getProgressHistory"],
     allowedProposalIntents: [...HABIT_PROPOSAL_INTENTS, "create_goal", "update_goal"],
     safetyGuidance: [
       "Avoid medical longevity claims or treatment language.",

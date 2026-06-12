@@ -189,7 +189,6 @@ function buildMocks() {
         selectedDomains: [
           { domain: "workout", confidence: 0.85, intentHints: [], toolHints: [], signalHints: [] },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.85,
       },
@@ -299,6 +298,9 @@ function buildOrchestrator(mocks: ReturnType<typeof buildMocks>): AgentOrchestra
     mocks.decisionMakerExecutorService,
     mocks.actionVariantCatalogService,
     mocks.attachmentTextExtractionService as never,
+    // Returns undefined → orchestrator threads no precomputed summary and the
+    // (mocked) CoachingContextService lazy path stays authoritative.
+    { buildReviewSummaryForAuth: vi.fn() } as never,
   );
 }
 

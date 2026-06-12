@@ -8,16 +8,17 @@ const directPathsConfig = defaultConfig.directPaths;
 const quickActionsConfig = defaultConfig.suggestedQuickActions;
 
 describe("deriveQuickActionsForTurn", () => {
-  it("always includes today_summary_read regardless of selected domains", () => {
+  it("always includes today_summary_read and weekly_progress_read regardless of selected domains", () => {
     const actions = deriveQuickActionsForTurn({
       selectedDomains: [],
       quickActionsConfig,
     });
 
     expect(actions.some((a) => a.id === "today_summary_read")).toBe(true);
+    expect(actions.some((a) => a.id === "weekly_progress_read")).toBe(true);
   });
 
-  it("includes mark_today_workout_done when workout domain is selected", () => {
+  it("includes mark_today_workout_done and workout_plan_read when workout domain is selected", () => {
     const actions = deriveQuickActionsForTurn({
       selectedDomains: ["workout"],
       quickActionsConfig,
@@ -25,6 +26,7 @@ describe("deriveQuickActionsForTurn", () => {
 
     expect(actions.some((a) => a.id === "today_summary_read")).toBe(true);
     expect(actions.some((a) => a.id === "mark_today_workout_done")).toBe(true);
+    expect(actions.some((a) => a.id === "workout_plan_read")).toBe(true);
     expect(actions.some((a) => a.id === "nutrition_plan_read")).toBe(false);
   });
 
@@ -37,6 +39,7 @@ describe("deriveQuickActionsForTurn", () => {
     expect(actions.some((a) => a.id === "today_summary_read")).toBe(true);
     expect(actions.some((a) => a.id === "nutrition_plan_read")).toBe(true);
     expect(actions.some((a) => a.id === "mark_today_workout_done")).toBe(false);
+    expect(actions.some((a) => a.id === "workout_plan_read")).toBe(false);
   });
 
   it("includes both workout and nutrition quick actions on multi-domain fan-out", () => {
@@ -47,11 +50,13 @@ describe("deriveQuickActionsForTurn", () => {
 
     const ids = actions.map((a) => a.id);
     expect(ids).toContain("today_summary_read");
+    expect(ids).toContain("weekly_progress_read");
     expect(ids).toContain("mark_today_workout_done");
+    expect(ids).toContain("workout_plan_read");
     expect(ids).toContain("nutrition_plan_read");
   });
 
-  it("health domain alone adds no domain-specific actions beyond today_summary_read", () => {
+  it("health domain alone adds no domain-specific actions beyond the always-on reads", () => {
     const actions = deriveQuickActionsForTurn({
       selectedDomains: ["health"],
       quickActionsConfig,
@@ -59,7 +64,9 @@ describe("deriveQuickActionsForTurn", () => {
 
     const ids = actions.map((a) => a.id);
     expect(ids).toContain("today_summary_read");
+    expect(ids).toContain("weekly_progress_read");
     expect(ids).not.toContain("mark_today_workout_done");
+    expect(ids).not.toContain("workout_plan_read");
     expect(ids).not.toContain("nutrition_plan_read");
   });
 
@@ -160,4 +167,34 @@ describe("quick-action messageText round-trip through direct-path matcher", () =
     expect(candidate).not.toBeNull();
     expect(candidate?.kind).toBe("nutrition_plan_read");
   });
+
+  it.each(["en", "ru"] as const)(
+    "weekly_progress_read messageText (%s) matches its own kind",
+    (language) => {
+      const action = quickActionsConfig.actions.find((a) => a.id === "weekly_progress_read");
+      expect(action).toBeDefined();
+
+      const candidate = detectDirectChatPathCandidateFromConfig(
+        directPathsConfig,
+        action!.messageText[language],
+      );
+      expect(candidate).not.toBeNull();
+      expect(candidate?.kind).toBe("weekly_progress_read");
+    },
+  );
+
+  it.each(["en", "ru"] as const)(
+    "workout_plan_read messageText (%s) matches its own kind",
+    (language) => {
+      const action = quickActionsConfig.actions.find((a) => a.id === "workout_plan_read");
+      expect(action).toBeDefined();
+
+      const candidate = detectDirectChatPathCandidateFromConfig(
+        directPathsConfig,
+        action!.messageText[language],
+      );
+      expect(candidate).not.toBeNull();
+      expect(candidate?.kind).toBe("workout_plan_read");
+    },
+  );
 });

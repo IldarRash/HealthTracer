@@ -1037,6 +1037,12 @@ Day 5 — Lower (Accessory):
         // todayService — stub
         { getOrGenerateDay: async () => ({ items: [] }) } as never,
         usersService,
+        // nutritionService — stub the read-only part
+        {
+          getCurrentActivePlan: async () => ({ plan: null, activeRevision: null }),
+        } as never,
+        // progressService — stub the read-only part
+        { getLatestSummarySnapshot: async () => null } as never,
         // workoutsService — stub the read-only part
         {
           getCurrentActivePlan: async () => ({ plan: null, activeRevision: null }),

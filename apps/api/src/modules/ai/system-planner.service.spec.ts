@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   getCapabilityConfig,
+  preprocessMessage,
   routerDecisionOutputSchema,
   normalizeAiBehaviorConfig,
   RULE_ROUTE_CONFIDENCE_THRESHOLD,
@@ -28,7 +29,6 @@ function createRouterResultForPlanner(
     return {
       output: routerDecisionOutputSchema.parse({
         selectedDomains: [],
-        contextNeeds: [],
         safetyFlags: [],
         confidence,
       }),
@@ -50,12 +50,6 @@ function createRouterResultForPlanner(
           signalHints: [],
         },
       ],
-      contextNeeds:
-        domain === "workout"
-          ? ["active_workout_plan"]
-          : domain === "nutrition"
-            ? ["active_nutrition_plan"]
-            : [],
       safetyFlags: domainSafetyFlags,
       confidence,
     }),
@@ -406,7 +400,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: ["weekly_progress"],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -440,7 +433,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -472,7 +464,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -504,7 +495,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: 0.84,
       }),
@@ -536,7 +526,6 @@ describe("SystemPlannerService", () => {
             signalHints: [],
           },
         ],
-        contextNeeds: [],
         safetyFlags: [],
         confidence: RULE_ROUTE_CONFIDENCE_THRESHOLD - 0.01,
       }),
@@ -769,7 +758,6 @@ describe("SystemPlannerService", () => {
             { domain: "workout", confidence: 0.88, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "nutrition", confidence: 0.72, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.88,
         }),
@@ -813,7 +801,6 @@ describe("SystemPlannerService", () => {
             { domain: "nutrition", confidence: 0.78, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "health", confidence: 0.76, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.9,
         }),
@@ -893,7 +880,6 @@ describe("SystemPlannerService", () => {
             { domain: "workout", confidence: 0.88, intentHints: [], toolHints: [], signalHints: [] },
             { domain: "nutrition", confidence: 0.72, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.88,
         }),
@@ -943,7 +929,6 @@ describe("SystemPlannerService", () => {
           selectedDomains: [
             { domain: "workout", confidence: 0.3, intentHints: [], toolHints: [], signalHints: [] },
           ],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.3,
         }),
@@ -967,7 +952,6 @@ describe("SystemPlannerService", () => {
       const noDomainsLlmResult: RouterLlmResult = {
         output: routerDecisionOutputSchema.parse({
           selectedDomains: [],
-          contextNeeds: [],
           safetyFlags: [],
           confidence: 0.55,
         }),
@@ -1027,5 +1011,179 @@ describe("SystemPlannerService", () => {
 
       expect(plan.fanout.lowConfidenceRoute).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — preprocessor threading into budget-profile selection
+// ---------------------------------------------------------------------------
+
+describe("SystemPlannerService — preprocessor budget threading (Phase 2)", () => {
+  it("selects deep_history with compression for «проанализируй последние полгода»", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(plan.requiresCompression).toBe(true);
+    expect(plan.requestedLookbackDays).toBe(180);
+    expect(plan.grantedLookbackDays).toBe(180);
+    // Per-domain fan-out budgets must see the same deterministic hints.
+    expect(plan.fanout.selectedDomains[0]?.contextBudget.profile).toBe("deep_history");
+    // Floors stay denied on the review budget.
+    expect(plan.contextBudget.allowDocuments).toBe(false);
+    expect(plan.contextBudget.allowSensitiveHealthContext).toBe(false);
+  });
+
+  it("keeps a plan-creation turn on the default budget even with preprocessorResult", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "составь план тренировок";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("default");
+    expect(plan.requestedLookbackDays).toBeNull();
+    expect(plan.grantedLookbackDays).toBeNull();
+  });
+
+  it("behaves as no-lookback when preprocessorResult is omitted (focused-test compat)", async () => {
+    const { planner } = createPlannerHarness();
+
+    const plan = await planner.planTurn({
+      userMessage: "проанализируй последние полгода",
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+    });
+
+    // Review phrasing alone (trigger regex) may still select deep_review, but
+    // without the preprocessor lookback hint deep_history must not engage.
+    expect(plan.contextBudget.profile).not.toBe("deep_history");
+    expect(plan.requestedLookbackDays).toBeNull();
+    expect(plan.grantedLookbackDays).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — planner injection of the progress_history_review slice
+// ---------------------------------------------------------------------------
+
+function createMultiDomainRouterResult(
+  domains: ReadonlyArray<"workout" | "nutrition" | "health">,
+  confidence = 0.84,
+): RouterLlmResult {
+  return {
+    output: routerDecisionOutputSchema.parse({
+      selectedDomains: domains.map((domain) => ({
+        domain,
+        confidence,
+        intentHints: [],
+        toolHints: [],
+        signalHints: [],
+      })),
+      safetyFlags: [],
+      confidence,
+    }),
+    source: "llm",
+    validationErrors: [],
+  };
+}
+
+describe("SystemPlannerService — progress_history_review injection (Phase 3)", () => {
+  it("appends the slice to the route and to EVERY selected fan-out domain on a deep_history turn", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода — тренировки, питание и состояние";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createMultiDomainRouterResult(["workout", "nutrition", "health"]),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(true);
+    expect(plan.fanout.selectedDomains.length).toBeGreaterThan(1);
+
+    for (const entry of plan.fanout.selectedDomains) {
+      expect(
+        entry.supplementaryContextSlices?.some(
+          (slice) => slice.type === "progress_history_review",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("threads the slice into the single-entry fanout for a deep_history turn without a confident router", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.35, "fallback"),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("deep_history");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(true);
+    expect(plan.fanout.selectedDomains).toHaveLength(1);
+    expect(
+      plan.fanout.selectedDomains[0]?.supplementaryContextSlices?.some(
+        (slice) => slice.type === "progress_history_review",
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT inject the slice on a default-budget turn", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "составь план тренировок";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.contextBudget.profile).toBe("default");
+    expect(
+      plan.route.requiredContextSlices.some((slice) => slice.type === "progress_history_review"),
+    ).toBe(false);
+
+    for (const entry of plan.fanout.selectedDomains) {
+      expect(entry.supplementaryContextSlices ?? []).toHaveLength(0);
+    }
+  });
+
+  it("keeps the primary slice first so the packet purpose is unchanged by injection", async () => {
+    const { planner } = createPlannerHarness();
+    const userMessage = "проанализируй последние полгода";
+
+    const plan = await planner.planTurn({
+      userMessage,
+      recentMessages: [],
+      routerResult: createRouterResultForPlanner("workout", 0.84),
+      preprocessorResult: preprocessMessage({ userMessage, hasAttachments: false }),
+    });
+
+    expect(plan.route.requiredContextSlices[0]?.type).not.toBe("progress_history_review");
+    expect(plan.route.requiredContextSlices[1]?.type).toBe("progress_history_review");
+    // deep_history grants up to 24 months, so the display timeRange is "1y".
+    expect(plan.route.requiredContextSlices[1]?.timeRange).toBe("1y");
   });
 });
