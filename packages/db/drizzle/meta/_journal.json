@@ -288,6 +288,13 @@
       "when": 1781325164094,
       "tag": "0040_illegal_pete_wisdom",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1781366847963,
+      "tag": "0041_open_mephistopheles",
+      "breakpoints": true
     }
   ]
 }

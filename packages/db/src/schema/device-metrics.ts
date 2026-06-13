@@ -34,6 +34,7 @@ export const metricScopeEnum = pgEnum("metric_scope", [
   "weight",
   "workouts",
   "recovery_inputs",
+  "heart_rate",
 ]);
 
 export const healthMetricTypeEnum = pgEnum("health_metric_type", [
@@ -42,6 +43,7 @@ export const healthMetricTypeEnum = pgEnum("health_metric_type", [
   "weight",
   "workout",
   "recovery_input",
+  "heart_rate",
 ]);
 
 export const aggregatePeriodTypeEnum = pgEnum("aggregate_period_type", ["daily", "weekly"]);
@@ -56,7 +58,7 @@ export const deviceConsents = pgTable(
     provider: deviceProviderEnum("provider").notNull(),
     grantedScopes: jsonb("granted_scopes")
       .$type<
-        ("steps" | "sleep" | "weight" | "workouts" | "recovery_inputs")[]
+        ("steps" | "sleep" | "weight" | "workouts" | "recovery_inputs" | "heart_rate")[]
       >()
       .notNull()
       .default([]),
@@ -94,7 +96,7 @@ export const deviceConnections = pgTable(
     status: deviceConnectionStatusEnum("status").notNull().default("pending"),
     grantedScopes: jsonb("granted_scopes")
       .$type<
-        ("steps" | "sleep" | "weight" | "workouts" | "recovery_inputs")[]
+        ("steps" | "sleep" | "weight" | "workouts" | "recovery_inputs" | "heart_rate")[]
       >()
       .notNull()
       .default([]),
@@ -180,7 +182,7 @@ export const healthMetricAggregates = pgTable(
       .$type<Record<string, unknown>>()
       .notNull(),
     sourceMetricTypes: jsonb("source_metric_types")
-      .$type<("steps" | "sleep" | "weight" | "workout" | "recovery_input")[]>()
+      .$type<("steps" | "sleep" | "weight" | "workout" | "recovery_input" | "heart_rate")[]>()
       .notNull()
       .default([]),
     calculatedAt: timestamp("calculated_at", { withTimezone: true }).defaultNow().notNull(),

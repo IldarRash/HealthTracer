@@ -34,6 +34,7 @@ export const metricScopeSchema = z.enum([
   "weight",
   "workouts",
   "recovery_inputs",
+  "heart_rate",
 ]);
 
 export type MetricScope = z.infer<typeof metricScopeSchema>;
@@ -44,6 +45,7 @@ export const healthMetricTypeSchema = z.enum([
   "weight",
   "workout",
   "recovery_input",
+  "heart_rate",
 ]);
 
 export type HealthMetricType = z.infer<typeof healthMetricTypeSchema>;
@@ -129,6 +131,41 @@ export type RecoveryInputSnapshotPayload = z.infer<
   typeof recoveryInputSnapshotPayloadSchema
 >;
 
+export const heartRateSampleSchema = z
+  .object({
+    offsetSec: z.number().int().nonnegative(),
+    bpm: z.number().int().positive(),
+  })
+  .strict();
+
+export type HeartRateSample = z.infer<typeof heartRateSampleSchema>;
+
+export const heartRateZoneSummarySchema = z
+  .object({
+    z1Min: z.number().int().nonnegative(),
+    z2Min: z.number().int().nonnegative(),
+    z3Min: z.number().int().nonnegative(),
+    z4Min: z.number().int().nonnegative(),
+    z5Min: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type HeartRateZoneSummary = z.infer<typeof heartRateZoneSummarySchema>;
+
+export const heartRateSnapshotPayloadSchema = z
+  .object({
+    context: z.enum(["workout", "daily", "resting"]),
+    avgBpm: z.number().int().positive(),
+    maxBpm: z.number().int().positive(),
+    minBpm: z.number().int().positive(),
+    activityType: z.string().min(1).max(120).optional(),
+    samples: z.array(heartRateSampleSchema).max(720),
+    zoneSummary: heartRateZoneSummarySchema,
+  })
+  .strict();
+
+export type HeartRateSnapshotPayload = z.infer<typeof heartRateSnapshotPayloadSchema>;
+
 export const healthMetricSnapshotPayloadSchema = z.discriminatedUnion("metricType", [
   z.object({ metricType: z.literal("steps"), payload: stepsSnapshotPayloadSchema }),
   z.object({ metricType: z.literal("sleep"), payload: sleepSnapshotPayloadSchema }),
@@ -137,6 +174,10 @@ export const healthMetricSnapshotPayloadSchema = z.discriminatedUnion("metricTyp
   z.object({
     metricType: z.literal("recovery_input"),
     payload: recoveryInputSnapshotPayloadSchema,
+  }),
+  z.object({
+    metricType: z.literal("heart_rate"),
+    payload: heartRateSnapshotPayloadSchema,
   }),
 ]);
 
@@ -355,6 +396,13 @@ export const providerMetricRecordSchema = z.discriminatedUnion("metricType", [
       normalizedPayload: recoveryInputSnapshotPayloadSchema,
     })
     .strict(),
+  z
+    .object({
+      ...providerMetricRecordBaseSchema,
+      metricType: z.literal("heart_rate"),
+      normalizedPayload: heartRateSnapshotPayloadSchema,
+    })
+    .strict(),
 ]);
 
 const normalizedPayloadSchemaByMetricType = {
@@ -363,6 +411,7 @@ const normalizedPayloadSchemaByMetricType = {
   weight: weightSnapshotPayloadSchema,
   workout: workoutSnapshotPayloadSchema,
   recovery_input: recoveryInputSnapshotPayloadSchema,
+  heart_rate: heartRateSnapshotPayloadSchema,
 } as const;
 
 export type NormalizedMetricPayloadByType = {
@@ -371,6 +420,7 @@ export type NormalizedMetricPayloadByType = {
   weight: WeightSnapshotPayload;
   workout: WorkoutSnapshotPayload;
   recovery_input: RecoveryInputSnapshotPayload;
+  heart_rate: HeartRateSnapshotPayload;
 };
 
 export function parseNormalizedMetricPayload<T extends HealthMetricType>(
@@ -415,6 +465,7 @@ export const METRIC_SCOPE_TO_TYPE: Record<MetricScope, HealthMetricType> = {
   weight: "weight",
   workouts: "workout",
   recovery_inputs: "recovery_input",
+  heart_rate: "heart_rate",
 };
 
 export function metricTypeToScope(metricType: HealthMetricType): MetricScope {
@@ -429,5 +480,7 @@ export function metricTypeToScope(metricType: HealthMetricType): MetricScope {
       return "workouts";
     case "recovery_input":
       return "recovery_inputs";
+    case "heart_rate":
+      return "heart_rate";
   }
 }

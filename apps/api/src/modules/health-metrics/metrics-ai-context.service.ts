@@ -16,6 +16,9 @@ import { HealthMetricsRepository } from "./health-metrics.repository.js";
 type AggregateRow = typeof healthMetricAggregates.$inferSelect;
 type SnapshotRow = typeof healthMetricSnapshots.$inferSelect;
 
+// heart_rate is intentionally excluded: raw HR sample arrays are sensitive and
+// privacy-heavy. Only aggregated recovery_input (RHR, HRV, readiness) surfaces
+// here. Do not add heart_rate without a dedicated consent + summarisation gate.
 const AI_SAFE_METRIC_TYPES = new Set<HealthMetricType>([
   "steps",
   "sleep",
@@ -113,6 +116,11 @@ export class MetricsAiContextService {
             "recovery_input",
             record.normalizedPayload,
           ),
+        };
+      case "heart_rate":
+        return {
+          ...record,
+          normalizedPayload: this.sanitizeSnapshotPayload("heart_rate", record.normalizedPayload),
         };
     }
   }

@@ -20,10 +20,12 @@ flowchart LR
   subgraph secondaryRoutes [Secondary Routes]
     Training["Training weekly plan"]
     Nutrition["Nutrition weekly plan"]
+    Biomarkers["Biomarkers and lab consent"]
+    Sleep["Sleep monitor"]
+    Pulse["Pulse monitor"]
   end
 
   subgraph nestedRoutes [Nested Or Hidden Routes]
-    Biomarkers["Biomarkers and lab consent"]
     Metrics["Metrics settings"]
     Recipes["Recipe support"]
     DevTools["Developer tools"]
@@ -66,8 +68,8 @@ flowchart TD
 Navigation rules: Chat is the dominant header action and the preferred default landing
 route after authentication. Today, Longevity, and Profile are the other primary tabs.
 Training and Nutrition are not primary tabs but must stay easy to open from Today,
-Longevity, and proposal cards. Metrics, Biomarkers, Goals, Recipes, Progress, and developer
-tools are never primary tabs. Mobile may keep placeholders but should follow the same
+Longevity, and proposal cards. Biomarkers, Sleep, and Pulse are secondary-nav surfaces, not
+primary tabs. Metrics, Goals, Recipes, Progress, and developer tools are never primary tabs. Mobile may keep placeholders but should follow the same
 hierarchy when brought to parity.
 
 ## Primary Surfaces
@@ -83,8 +85,9 @@ Training and Nutrition remain visible, but they are not primary navigation tabs.
 
 - **Training** shows the active weekly workout plan, scheduled sessions, completion history, and plan revisions in a visual way.
 - **Nutrition** shows the active weekly nutrition plan, meal structure, hydration target, restrictions, and adherence in a visual way.
+- **Sleep** (`/sleep`) and **Pulse** (`/pulse`) are read-only, dark-themed wellness-monitor surfaces listed in the secondary nav. Sleep shows last night's duration/window/stages, a 30-day duration trend, and the 7-day average; Pulse shows resting-HR and HRV trends, the latest readiness, and recent workouts with fitness %HRmax zone distributions and per-workout HR lines. Both read self-view data from the existing device-metrics infrastructure (no manual entry, no wearable integration in MVP — data is seed-only). See [`domain-model.md`](./domain-model.md) and the [Sleep & Pulse monitors brief](../product/features/sleep-pulse-monitors.md).
 
-Users do not manually edit active workout or nutrition plans on these screens. Plan changes flow through Chat as typed AI proposals, user approval, backend validation, and revision-safe state updates.
+Users do not manually edit active workout or nutrition plans on these screens. Plan changes flow through Chat as typed AI proposals, user approval, backend validation, and revision-safe state updates. Sleep and Pulse are display-only — there are no write endpoints or manual-entry forms.
 
 ## Hidden Or Nested Surfaces
 
@@ -146,7 +149,7 @@ Longevity must not expose diagnosis, treatment guidance, biological age, clinica
 ## Implementation Implications
 
 - Primary web navigation should be `Chat`, `Today`, `Longevity`, `Profile`.
-- `/training` and `/nutrition` should remain routeable secondary pages, but not top-level nav items.
-- `/biomarkers`, `/metrics`, `/goals`, `/recipes`, `/progress`, proposal inspector, and dev routes should not be advertised in primary navigation.
+- `/training`, `/nutrition`, `/biomarkers`, `/sleep`, and `/pulse` are secondary-nav routes (in `SECONDARY_ROUTE_LINKS`), not top-level primary nav items.
+- `/metrics`, `/goals`, `/recipes`, `/progress`, proposal inspector, and dev routes should not be advertised in navigation.
 - App shell and design system components should make Chat visually dominant even when the user is on another surface.
 - Feature briefs in `docs/product/features` should include a `UX Placement` section that maps their UI to this surface model.

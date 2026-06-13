@@ -244,12 +244,14 @@ The product must not expose a numeric readiness score or clinical recovery score
 
 Basic user-provided or synced health and fitness metrics.
 
-- metric type: weight, sleep, steps, recovery, mood, soreness
+- metric type: weight, sleep, steps, recovery, mood, soreness, heart rate
 - value
 - unit
 - recordedAt
 - source
 - consent scope when synced from an integration
+
+Continuous heart rate is a `heart_rate` metric type on `healthMetricSnapshots` (payload — context, avg/max/min bpm, downsampled samples, per-zone minutes — in `normalizedPayload`), **not** a new table; resting HR / HRV / readiness stay as `recovery_input` snapshots. The dedicated read endpoints `GET /health-metrics/sleep`, `GET /health-metrics/pulse`, and `GET /health-metrics/pulse/workouts/:id` (ownership-scoped self-view) back the `/sleep` and `/pulse` web surfaces; `heart_rate` is intentionally excluded from AI context. See [`product-surface-architecture.md`](./product-surface-architecture.md) and the [Sleep & Pulse monitors brief](../product/features/sleep-pulse-monitors.md).
 
 ### Recipe
 

@@ -25,6 +25,8 @@
     "workouts": "Workouts",
     "nutrition": "Nutrition",
     "biomarkers": "Biomarkers",
+    "sleep": "Sleep",
+    "pulse": "Pulse",
     "plansView": "Plans · view",
     "mainNavLabel": "Main navigation",
     "primaryNavLabel": "Primary navigation",
@@ -326,6 +328,103 @@
       "peanuts": "Contains peanuts",
       "tree_nuts": "Contains tree nuts",
       "sesame": "Contains sesame"
+    }
+  },
+  "Sleep": {
+    "title": "Sleep",
+    "description": "Sleep duration, stages, and 30-day trends from your wearable data.",
+    "wellnessNote": "Wellness context only — not for diagnosis or treatment.",
+    "loading": "Loading your sleep data",
+    "errorTitle": "Sleep data could not be loaded",
+    "emptyTitle": "No sleep data yet",
+    "emptyDescription": "Sleep data will appear here once your wearable is connected and synced. Seed demo data to explore the view.",
+    "hero": {
+      "sectionTitle": "Last night",
+      "duration": "Duration",
+      "bedTime": "Bed",
+      "wakeTime": "Wake",
+      "noData": "No sleep recorded for last night."
+    },
+    "stages": {
+      "sectionTitle": "Sleep stages",
+      "deep": "Deep",
+      "rem": "REM",
+      "light": "Light",
+      "awake": "Awake",
+      "noData": "No stage breakdown available."
+    },
+    "trend": {
+      "sectionTitle": "30-day sleep duration",
+      "targetBand": "Typical target: 7–9h",
+      "noData": "Not enough data for a trend yet.",
+      "aria": "30-day sleep duration bar chart"
+    },
+    "average": {
+      "sectionTitle": "7-day average"
+    },
+    "recentNights": {
+      "sectionTitle": "Recent nights",
+      "date": "Date",
+      "duration": "Duration",
+      "bedTime": "Bed",
+      "wakeTime": "Wake",
+      "noData": "No recent nights recorded."
+    }
+  },
+  "Pulse": {
+    "title": "Pulse",
+    "description": "Resting heart rate, HRV, readiness, and workout heart-rate zones from your wearable.",
+    "wellnessNote": "Wellness context only — not for diagnosis or treatment. Heart-rate zones are fitness %HRmax bands, not medical classifications.",
+    "loading": "Loading your pulse data",
+    "errorTitle": "Pulse data could not be loaded",
+    "emptyTitle": "No pulse data yet",
+    "emptyDescription": "Resting HR, HRV, and workout data will appear here once your wearable is connected and synced.",
+    "rhr": {
+      "sectionTitle": "Resting heart rate",
+      "latest": "Latest RHR",
+      "noData": "No resting HR data yet.",
+      "trendAria": "Resting heart rate trend over time",
+      "noTrend": "Not enough data for a trend."
+    },
+    "hrv": {
+      "sectionTitle": "Heart rate variability (HRV)",
+      "latest": "Latest HRV",
+      "noData": "No HRV data yet.",
+      "trendAria": "HRV trend over time",
+      "noTrend": "Not enough data for a trend."
+    },
+    "readiness": {
+      "sectionTitle": "Readiness",
+      "noData": "No readiness score available.",
+      "sub": "readiness"
+    },
+    "zones": {
+      "sectionTitle": "Workout zone distribution",
+      "description": "Aggregate time across recent workouts by HR zone (%HRmax fitness bands).",
+      "noData": "No workout heart-rate data yet.",
+      "z1": "Z1 · Recovery",
+      "z2": "Z2 · Base",
+      "z3": "Z3 · Aerobic",
+      "z4": "Z4 · Threshold",
+      "z5": "Z5 · Peak"
+    },
+    "workouts": {
+      "sectionTitle": "Recent workouts",
+      "avg": "avg",
+      "max": "max",
+      "activityFallback": "Workout",
+      "hrButton": "HR",
+      "unitBpm": "bpm",
+      "unitMin": "min",
+      "selectHint": "Select a workout to see the HR trace",
+      "hrLine": {
+        "sectionTitle": "Heart-rate trace",
+        "aria": "Heart-rate trace for this workout",
+        "loading": "Loading HR trace…",
+        "noData": "No HR samples recorded for this workout.",
+        "error": "HR trace could not be loaded."
+      },
+      "noData": "No workout data yet."
     }
   },
   "Proposals": {

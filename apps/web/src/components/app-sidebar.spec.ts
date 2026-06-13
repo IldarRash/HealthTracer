@@ -11,11 +11,12 @@ const sidebarSource = readFileSync(
 );
 
 describe("AppSidebar information architecture", () => {
-  it("renders all four primary nav tabs and the three secondary plan links", () => {
+  it("renders all four primary nav tabs and the five secondary route links", () => {
     expect(sidebarSource).toContain("PRIMARY_NAV_LINKS");
     expect(sidebarSource).toContain("SECONDARY_ROUTE_LINKS");
     expect(PRIMARY_NAV_LINKS).toHaveLength(4);
-    expect(SECONDARY_ROUTE_LINKS).toHaveLength(3);
+    // Training, Nutrition, Biomarkers, Sleep, Pulse
+    expect(SECONDARY_ROUTE_LINKS).toHaveLength(5);
   });
 
   it("includes chat, today, longevity, profile, dumbbell, fork, and drop icon mappings", () => {
