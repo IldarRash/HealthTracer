@@ -1,5 +1,5 @@
 {
-  "extends": "../../packages/config/tsconfig/react.json",
+  "extends": "@health/config/tsconfig/react",
   "compilerOptions": {
     "allowJs": true,
     "incremental": true,
