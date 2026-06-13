@@ -7,13 +7,15 @@ import {
   biomarkerStatusColor,
   biomarkerStatusLabelKey,
   biomarkerStatusTone,
-  computeRangeBarModel,
+  computeMultiZoneRangeBarModel,
   deriveBiomarkerReadingStatus,
   formatReadingObservedDate,
   formatReadingValue,
+  resolveDisplayRanges,
 } from "../../lib/biomarkers-ui-state";
 import { Badge } from "../ui";
 import { BiomarkerRangeBar } from "./biomarker-range-bar";
+import { buildRangeBarAriaLabel } from "./biomarker-range-aria";
 
 export type BiomarkerCardProps = {
   marker: BiomarkersDashboardMarker;
@@ -28,18 +30,22 @@ export function BiomarkerCard({ marker }: BiomarkerCardProps) {
   const t = useTranslations("Biomarkers");
 
   const reading = marker.latestReading;
-  const status = deriveBiomarkerReadingStatus(reading, marker.typicalRange);
+  const { reference, optimal } = resolveDisplayRanges(reading, marker.typicalRange);
+  const status = deriveBiomarkerReadingStatus(reading, reference);
   const statusLabel = t(biomarkerStatusLabelKey(status));
-  const rangeModel =
-    status === "no_reference"
-      ? null
-      : computeRangeBarModel(reading?.value ?? null, marker.typicalRange);
+  const rangeModel = computeMultiZoneRangeBarModel(reading?.value ?? null, reference, optimal);
 
   const valueLabel = reading ? formatReadingValue(reading) : null;
   const unitLabel = reading?.unit ?? marker.canonicalUnit;
-  const rangeAriaLabel = marker.typicalRange
-    ? `${marker.displayLabel}: ${valueLabel ?? "—"} ${unitLabel} — ${statusLabel} ${marker.typicalRange.low}–${marker.typicalRange.high} ${marker.typicalRange.unit}`
-    : `${marker.displayLabel}: ${valueLabel ?? "—"} ${unitLabel} — ${statusLabel}`;
+  const rangeAriaLabel = buildRangeBarAriaLabel({
+    t,
+    label: marker.displayLabel,
+    valueLabel: valueLabel ?? "—",
+    unitLabel,
+    statusLabel,
+    reference,
+    optimal,
+  });
 
   return (
     <article

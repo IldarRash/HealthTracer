@@ -174,6 +174,8 @@ function sampleBiomarkersDashboard(input: {
                     valueText: null,
                     unit: "ng/mL",
                     referenceRangeText: null,
+                    referenceRange: null,
+                    optimalRange: null,
                     observedAt: "2026-05-20",
                     source: "extraction",
                     confidence: 0.9,

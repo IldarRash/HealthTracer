@@ -1,25 +1,31 @@
 import type { ReactElement } from "react";
-import type { BiomarkerRangeBarModel } from "../../lib/biomarkers-ui-state";
+import type { BiomarkerMultiZoneRangeBarModel } from "../../lib/biomarkers-ui-state";
 
 const OUTSIDE_ZONE_COLOR = "rgba(255,255,255,0.08)";
-const IN_RANGE_ZONE_COLOR =
+const REFERENCE_ZONE_COLOR =
   "color-mix(in srgb, var(--color-metric-green) 22%, transparent)";
+const OPTIMAL_ZONE_COLOR =
+  "color-mix(in srgb, var(--color-metric-green) 45%, transparent)";
 
 export type BiomarkerRangeBarProps = {
-  /** Geometry from computeRangeBarModel; null renders the no-reference variant. */
-  model: BiomarkerRangeBarModel | null;
+  /** Geometry from computeMultiZoneRangeBarModel; null renders the no-reference variant. */
+  model: BiomarkerMultiZoneRangeBarModel | null;
   /** Dot color from biomarkerStatusColor. */
   toneColor: string;
-  /** Full text alternative, e.g. "Vitamin D 20 ng/mL — below typical range 30–100 ng/mL". */
+  /**
+   * Full text alternative mentioning both the reference band and (when present)
+   * the optimal band, e.g. "Vitamin D 20 ng/mL — below typical range 30–100,
+   * optimal 40–60 ng/mL".
+   */
   ariaLabel: string;
   /** Caption for the no-reference variant (pre-translated). */
   noReferenceLabel: string;
 };
 
 /**
- * Presentational reference-range bar: muted outside zones, dim-green in-range
- * zone, and a status-toned position dot. Announced as a single image with a
- * full text alternative.
+ * Presentational two-zone reference bar: muted outside zones, a dim-green
+ * reference zone, a stronger optimal overlay zone, and a status-toned position
+ * dot. Announced as a single image with a full text alternative.
  */
 export function BiomarkerRangeBar({
   model,
@@ -35,12 +41,15 @@ export function BiomarkerRangeBar({
     );
   }
 
+  const hasOptimal = model.optimalStartPct !== null && model.optimalEndPct !== null;
+
   return (
     <div role="img" aria-label={ariaLabel}>
       <div style={{ position: "relative", padding: "4px 0" }} aria-hidden="true">
-        {/* Track with zone segments */}
+        {/* Track with reference zone segments */}
         <div
           style={{
+            position: "relative",
             display: "flex",
             height: 6,
             borderRadius: 3,
@@ -48,15 +57,29 @@ export function BiomarkerRangeBar({
           }}
         >
           <div
-            style={{ width: `${model.rangeStartPct}%`, background: OUTSIDE_ZONE_COLOR }}
+            style={{ width: `${model.referenceStartPct}%`, background: OUTSIDE_ZONE_COLOR }}
           />
           <div
             style={{
-              width: `${model.rangeEndPct - model.rangeStartPct}%`,
-              background: IN_RANGE_ZONE_COLOR,
+              width: `${model.referenceEndPct - model.referenceStartPct}%`,
+              background: REFERENCE_ZONE_COLOR,
             }}
           />
           <div style={{ flex: 1, background: OUTSIDE_ZONE_COLOR }} />
+
+          {/* Optimal overlay zone, absolutely positioned over the track */}
+          {hasOptimal ? (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: `${model.optimalStartPct}%`,
+                width: `${model.optimalEndPct! - model.optimalStartPct!}%`,
+                background: OPTIMAL_ZONE_COLOR,
+              }}
+            />
+          ) : null}
         </div>
 
         {/* Position dot */}
@@ -75,7 +98,7 @@ export function BiomarkerRangeBar({
         />
       </div>
 
-      {/* Low/high tick labels under the zone boundaries */}
+      {/* Low/high tick labels under the reference-zone boundaries */}
       <div
         aria-hidden="true"
         style={{
@@ -89,7 +112,7 @@ export function BiomarkerRangeBar({
         <span
           style={{
             position: "absolute",
-            left: `${model.rangeStartPct}%`,
+            left: `${model.referenceStartPct}%`,
             transform: "translateX(-50%)",
           }}
         >
@@ -98,7 +121,7 @@ export function BiomarkerRangeBar({
         <span
           style={{
             position: "absolute",
-            left: `${model.rangeEndPct}%`,
+            left: `${model.referenceEndPct}%`,
             transform: "translateX(-50%)",
           }}
         >

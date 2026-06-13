@@ -15,11 +15,14 @@ import type {
   UpdateLabReportConsentInput,
 } from "@health/types";
 import {
+  BIOMARKER_PLAUSIBILITY_FACTOR,
+  getBiomarkerCatalogEntry,
   labExtractionOutputSchema,
   MAX_LAB_REPORT_UPLOAD_BYTES,
   SUPPORTED_LAB_REPORT_MIME_TYPES,
   validateBiomarkerReadingValue,
 } from "@health/types";
+import type { BiomarkerKey } from "@health/types";
 import {
   BadRequestException,
   ConflictException,
@@ -329,6 +332,11 @@ export class LabReportsService {
  *  - the same unsafe-language check over referenceRangeText, so no
  *    diagnosis/treatment wording can reach a persisted row.
  *
+ * Structured reference/optimal ranges fail SOFT — a malformed pair (one-sided,
+ * low >= high) or a bound that fails the catalog plausibility clamp nulls only
+ * its own pair, the reading is kept. Numeric range fields carry no language, so
+ * the unsafe-language check stays scoped to the free-text referenceRangeText.
+ *
  * Dropped readings are returned only as a count; their content is discarded.
  * Per-reading observedAt falls back to the document-level observedAt.
  */
@@ -358,6 +366,19 @@ function validateExtractedReadings(output: LabExtractionOutput): {
     }
 
     const observedAtIso = reading.observedAt ?? output.observedAt;
+    const entry = getBiomarkerCatalogEntry(reading.biomarkerKey as BiomarkerKey);
+    const referenceRange = plausibleRangeOrNull(
+      reading.referenceRangeLow,
+      reading.referenceRangeHigh,
+      reading.unit,
+      entry,
+    );
+    const optimalRange = plausibleRangeOrNull(
+      reading.optimalRangeLow,
+      reading.optimalRangeHigh,
+      reading.unit,
+      entry,
+    );
 
     accepted.push({
       biomarkerKey: reading.biomarkerKey,
@@ -365,6 +386,10 @@ function validateExtractedReadings(output: LabExtractionOutput): {
       valueText: reading.valueText,
       unit: reading.unit,
       referenceRangeText: reading.referenceRangeText,
+      referenceRangeLow: referenceRange === null ? null : String(referenceRange.low),
+      referenceRangeHigh: referenceRange === null ? null : String(referenceRange.high),
+      optimalRangeLow: optimalRange === null ? null : String(optimalRange.low),
+      optimalRangeHigh: optimalRange === null ? null : String(optimalRange.high),
       observedAt: observedAtIso ? isoDateToTimestamp(observedAtIso) : null,
       source: "extraction",
       confidence: reading.confidence.toFixed(3),
@@ -372,4 +397,42 @@ function validateExtractedReadings(output: LabExtractionOutput): {
   }
 
   return { accepted, droppedCount };
+}
+
+/**
+ * Structural + catalog plausibility clamp for a structured range. Returns null
+ * for a malformed pair (one-sided, or low >= high) — the wire schema leaves
+ * these to fail soft here rather than sinking the whole report. Otherwise
+ * returns the pair unchanged when both bounds sit within the catalog's
+ * [typical.low/20, typical.high*20] band; returns null when either bound falls
+ * outside it. When the reading's unit does not match the catalog's typicalRange
+ * unit (case-insensitive trim — the same comparison used by
+ * deriveBiomarkerReadingStatus / catalog lookups), the pair is accepted as-is
+ * (no catalog band to compare against).
+ */
+function plausibleRangeOrNull(
+  low: number | null,
+  high: number | null,
+  readingUnit: string,
+  entry: ReturnType<typeof getBiomarkerCatalogEntry>,
+): { low: number; high: number } | null {
+  if (low === null || high === null || low >= high) {
+    return null;
+  }
+
+  const typical = entry?.typicalRange ?? null;
+
+  if (
+    typical &&
+    typical.unit.trim().toLowerCase() === readingUnit.trim().toLowerCase()
+  ) {
+    const floor = typical.low / BIOMARKER_PLAUSIBILITY_FACTOR;
+    const ceil = typical.high * BIOMARKER_PLAUSIBILITY_FACTOR;
+
+    if (low < floor || low > ceil || high < floor || high > ceil) {
+      return null;
+    }
+  }
+
+  return { low, high };
 }

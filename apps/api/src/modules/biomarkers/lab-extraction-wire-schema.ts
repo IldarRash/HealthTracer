@@ -62,6 +62,10 @@ const extractedReadingWireSchema: JsonSchema = strictObject({
   valueText: nullableString(),
   unit: { type: "string" },
   referenceRangeText: nullableString(),
+  referenceRangeLow: nullableNumber(),
+  referenceRangeHigh: nullableNumber(),
+  optimalRangeLow: nullableNumber(),
+  optimalRangeHigh: nullableNumber(),
   observedAt: nullableString(),
   confidence: { type: "number" },
 });

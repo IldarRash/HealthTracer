@@ -71,9 +71,28 @@ describe("labExtractionWireSchema", () => {
       "valueText",
       "unit",
       "referenceRangeText",
+      "referenceRangeLow",
+      "referenceRangeHigh",
+      "optimalRangeLow",
+      "optimalRangeHigh",
       "observedAt",
       "confidence",
     ]);
+  });
+
+  it("declares the four structured-range fields as nullable-required numbers", () => {
+    for (const field of [
+      "referenceRangeLow",
+      "referenceRangeHigh",
+      "optimalRangeLow",
+      "optimalRangeHigh",
+    ]) {
+      expect(readingSchema.properties?.[field]?.type, field).toEqual(["number", "null"]);
+      // strictObject() puts every property in required + additionalProperties:false.
+      expect(readingSchema.required).toContain(field);
+    }
+
+    expect(readingSchema.additionalProperties).toBe(false);
   });
 
   it("caps readings at 80 items", () => {
@@ -105,6 +124,10 @@ describe("labExtractionWireSchema", () => {
           valueText: null,
           unit: "mg/dL",
           referenceRangeText: "70 - 99",
+          referenceRangeLow: 70,
+          referenceRangeHigh: 99,
+          optimalRangeLow: 75,
+          optimalRangeHigh: 90,
           observedAt: null,
           confidence: 0.93,
         },

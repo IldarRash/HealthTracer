@@ -1,6 +1,7 @@
 import type { biomarkerReadings, labReports } from "@health/db";
 import type {
   BiomarkerKey,
+  BiomarkerRangeContract,
   BiomarkerReading,
   BiomarkerReadingSource,
   LabReport,
@@ -50,6 +51,23 @@ export function toLabReport(row: LabReportRow): LabReport {
   };
 }
 
+/**
+ * Materialize a structured range from its flat low/high columns in the reading's
+ * own unit. Returns null unless BOTH bounds are present (the DB invariant the
+ * extraction/Zod layer guarantees), so a half-populated pair never surfaces.
+ */
+function toBiomarkerRange(
+  low: string | null,
+  high: string | null,
+  unit: string,
+): BiomarkerRangeContract | null {
+  if (low === null || high === null) {
+    return null;
+  }
+
+  return { low: Number(low), high: Number(high), unit };
+}
+
 export function toBiomarkerReading(row: BiomarkerReadingRow): BiomarkerReading {
   return {
     id: row.id,
@@ -60,6 +78,12 @@ export function toBiomarkerReading(row: BiomarkerReadingRow): BiomarkerReading {
     valueText: row.valueText,
     unit: row.unit,
     referenceRangeText: row.referenceRangeText,
+    referenceRange: toBiomarkerRange(
+      row.referenceRangeLow,
+      row.referenceRangeHigh,
+      row.unit,
+    ),
+    optimalRange: toBiomarkerRange(row.optimalRangeLow, row.optimalRangeHigh, row.unit),
     observedAt: row.observedAt ? toIsoDate(row.observedAt) : null,
     source: row.source as BiomarkerReadingSource,
     confidence: row.confidence === null ? null : Number(row.confidence),

@@ -164,6 +164,11 @@ export class BiomarkersService {
       valueText: input.valueText ?? null,
       unit: input.unit.trim(),
       referenceRangeText: null,
+      // Manual readings carry no extracted ranges; the user enters a single value.
+      referenceRangeLow: null,
+      referenceRangeHigh: null,
+      optimalRangeLow: null,
+      optimalRangeHigh: null,
       observedAt: input.observedAt ? isoDateToTimestamp(input.observedAt) : null,
       source: "manual",
       confidence: null,
@@ -218,10 +223,20 @@ export class BiomarkersService {
           ? null
           : isoDateToTimestamp(input.observedAt);
 
+    // Stored ranges are only valid in the reading's original unit. Editing the
+    // unit invalidates them, so clear all four; otherwise carry them through.
+    const unitChanged =
+      input.unit !== undefined &&
+      input.unit.trim().toLowerCase() !== existing.unit.trim().toLowerCase();
+
     const updated = await this.biomarkersRepository.updateReading(user.id, readingId, {
       value: nextValue === null ? null : String(nextValue),
       valueText: nextValueText,
       unit: nextUnit.trim(),
+      referenceRangeLow: unitChanged ? null : existing.referenceRangeLow,
+      referenceRangeHigh: unitChanged ? null : existing.referenceRangeHigh,
+      optimalRangeLow: unitChanged ? null : existing.optimalRangeLow,
+      optimalRangeHigh: unitChanged ? null : existing.optimalRangeHigh,
       observedAt: nextObservedAt,
       userEdited: true,
       confidence: null,

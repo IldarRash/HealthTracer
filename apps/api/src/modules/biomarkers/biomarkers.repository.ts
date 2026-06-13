@@ -32,6 +32,11 @@ export interface NewBiomarkerReadingValues {
   valueText: string | null;
   unit: string;
   referenceRangeText: string | null;
+  /** Structured ranges in the reading's own unit (drizzle-numeric strings). */
+  referenceRangeLow: string | null;
+  referenceRangeHigh: string | null;
+  optimalRangeLow: string | null;
+  optimalRangeHigh: string | null;
   observedAt: Date | null;
   source: "extraction" | "manual";
   confidence: string | null;
@@ -41,6 +46,10 @@ export interface BiomarkerReadingUpdate {
   value: string | null;
   valueText: string | null;
   unit: string;
+  referenceRangeLow: string | null;
+  referenceRangeHigh: string | null;
+  optimalRangeLow: string | null;
+  optimalRangeHigh: string | null;
   observedAt: Date | null;
   userEdited: boolean;
   confidence: string | null;

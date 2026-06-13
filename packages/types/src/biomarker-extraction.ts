@@ -19,6 +19,16 @@ export const extractedReadingSchema = z
     valueText: z.string().min(1).max(40).nullable(),
     unit: z.string().min(1).max(40),
     referenceRangeText: z.string().min(1).max(120).nullable(),
+    // Structured ranges, FLAT and in the reading's own unit (no per-range unit).
+    // Reference is copied two-sided from the document; optimal is a wellness band
+    // from the model's general knowledge. Each bound is an independently nullable
+    // number: a malformed pair (one-sided, or low >= high) is NOT a schema error
+    // here — it must fail SOFT so one bad band never sinks the whole report. The
+    // service nulls such a pair per-reading while keeping the reading.
+    referenceRangeLow: z.number().finite().nullable(),
+    referenceRangeHigh: z.number().finite().nullable(),
+    optimalRangeLow: z.number().finite().nullable(),
+    optimalRangeHigh: z.number().finite().nullable(),
     observedAt: isoDateSchema.nullable(),
     confidence: z.number().min(0).max(1),
   })

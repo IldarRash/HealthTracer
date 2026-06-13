@@ -105,6 +105,22 @@ export type UpdateLabReportConsentInput = z.infer<
   typeof updateLabReportConsentSchema
 >;
 
+// ── Biomarker range (nested, materialized in the reading's own unit) ─────────
+
+/**
+ * A structured numeric low/high band carried in the reading's own unit. Both
+ * the lab-printed reference band and the wellness optimal band materialize to
+ * this shape on read; flat nullable columns store them, so there is no
+ * per-range unit and no value↔range unit mismatch.
+ */
+export const biomarkerRangeSchema = z.object({
+  low: z.number(),
+  high: z.number(),
+  unit: z.string().min(1).max(40),
+});
+
+export type BiomarkerRangeContract = z.infer<typeof biomarkerRangeSchema>;
+
 // ── Biomarker reading ────────────────────────────────────────────────────────
 
 export const biomarkerReadingSchema = z.object({
@@ -116,6 +132,8 @@ export const biomarkerReadingSchema = z.object({
   valueText: z.string().min(1).max(40).nullable(),
   unit: z.string().min(1).max(40),
   referenceRangeText: z.string().min(1).max(120).nullable(),
+  referenceRange: biomarkerRangeSchema.nullable(),
+  optimalRange: biomarkerRangeSchema.nullable(),
   observedAt: isoDateSchema.nullable(),
   source: biomarkerReadingSourceSchema,
   confidence: z.number().min(0).max(1).nullable(),
@@ -185,12 +203,6 @@ export const labReportDetailSchema = z.object({
 });
 
 export type LabReportDetail = z.infer<typeof labReportDetailSchema>;
-
-const biomarkerRangeSchema = z.object({
-  low: z.number(),
-  high: z.number(),
-  unit: z.string().min(1).max(40),
-});
 
 export const biomarkersDashboardMarkerSchema = z.object({
   key: biomarkerKeySchema,

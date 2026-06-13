@@ -10,6 +10,10 @@ const validReading = {
   valueText: null,
   unit: "mg/dL",
   referenceRangeText: "0-100 mg/dL",
+  referenceRangeLow: 0,
+  referenceRangeHigh: 100,
+  optimalRangeLow: 0,
+  optimalRangeHigh: 80,
   observedAt: "2026-05-01",
   confidence: 0.9,
 };
@@ -49,6 +53,75 @@ describe("extractedReadingSchema", () => {
         valueText: null,
       }),
     ).toThrow();
+  });
+
+  describe("structured ranges", () => {
+    it("parses valid both-set reference and optimal pairs", () => {
+      expect(() =>
+        extractedReadingSchema.parse({
+          ...validReading,
+          referenceRangeLow: 50,
+          referenceRangeHigh: 100,
+          optimalRangeLow: 50,
+          optimalRangeHigh: 80,
+        }),
+      ).not.toThrow();
+    });
+
+    it("accepts all-null ranges", () => {
+      expect(() =>
+        extractedReadingSchema.parse({
+          ...validReading,
+          referenceRangeLow: null,
+          referenceRangeHigh: null,
+          optimalRangeLow: null,
+          optimalRangeHigh: null,
+        }),
+      ).not.toThrow();
+    });
+
+    // Malformed pairs (one-sided, or low >= high) are intentionally NOT schema
+    // errors — they fail SOFT in the service (the pair is nulled, the reading
+    // kept) so one bad band never sinks the whole extraction.
+    it("parses a one-sided reference pair (low set, high null) for soft handling", () => {
+      expect(() =>
+        extractedReadingSchema.parse({
+          ...validReading,
+          referenceRangeLow: 50,
+          referenceRangeHigh: null,
+        }),
+      ).not.toThrow();
+    });
+
+    it("parses a one-sided optimal pair (high set, low null) for soft handling", () => {
+      expect(() =>
+        extractedReadingSchema.parse({
+          ...validReading,
+          optimalRangeLow: null,
+          optimalRangeHigh: 80,
+        }),
+      ).not.toThrow();
+    });
+
+    it("parses a reference pair where low >= high for soft handling", () => {
+      expect(() =>
+        extractedReadingSchema.parse({
+          ...validReading,
+          referenceRangeLow: 100,
+          referenceRangeHigh: 100,
+        }),
+      ).not.toThrow();
+    });
+
+    it("parses an optimal pair where low > high for soft handling", () => {
+      expect(() =>
+        extractedReadingSchema.parse({
+          ...validReading,
+          optimalRangeLow: 90,
+          optimalRangeHigh: 80,
+        }),
+      ).not.toThrow();
+    });
   });
 });
 

@@ -9,7 +9,7 @@ import type {
   LabReportStatus,
 } from "@health/types";
 import { BIOMARKER_AREA_ORDER } from "@health/types";
-import type { BadgeProps, DsTrendStripDayData } from "../components/ui";
+import type { BadgeProps } from "../components/ui";
 import { formatDateMedium, formatMonthDayShort } from "./date-format";
 
 // ---------------------------------------------------------------------------
@@ -138,46 +138,139 @@ export const RANGE_BAR_DOMAIN_PADDING_FRACTION = 0.25;
 /** The position dot is clamped into [2, 98]% so it never clips the track edges. */
 export const RANGE_BAR_POSITION_CLAMP: readonly [number, number] = [2, 98];
 
-export type BiomarkerRangeBarModel = {
-  /** Dot position along the track, percent, clamped to [2, 98]. */
-  positionPct: number;
-  /** Where the in-range zone starts/ends along the track, percent. */
-  rangeStartPct: number;
-  rangeEndPct: number;
-  /** Tick labels under the zone boundaries. */
-  lowLabel: string;
-  highLabel: string;
-};
-
-export function computeRangeBarModel(
-  value: number | null | undefined,
-  range: BiomarkerRange | null | undefined,
-): BiomarkerRangeBarModel | null {
-  if (value == null || range == null || !Number.isFinite(value)) {
-    return null;
-  }
-
-  const span = range.high - range.low;
+/**
+ * Padded-domain projection shared by every range-bar model. Pads a numeric
+ * domain by RANGE_BAR_DOMAIN_PADDING_FRACTION on each side and returns a `toPct`
+ * that maps a point onto the 0–100 track, plus a `clampedPositionPct` that keeps
+ * a value dot inside RANGE_BAR_POSITION_CLAMP. Returns null for a degenerate
+ * domain (non-finite or zero span).
+ */
+function buildRangeBarProjection(
+  domainLow: number,
+  domainHigh: number,
+): {
+  toPct: (point: number) => number;
+  clampedPositionPct: (value: number) => number;
+} | null {
+  const span = domainHigh - domainLow;
   if (!Number.isFinite(span) || span <= 0) {
     return null;
   }
 
   const padding = span * RANGE_BAR_DOMAIN_PADDING_FRACTION;
-  const domainMin = range.low - padding;
-  const domainMax = range.high + padding;
-  const domainSpan = domainMax - domainMin;
+  const domainMin = domainLow - padding;
+  const domainSpan = span + padding * 2;
 
   const toPct = (point: number): number => ((point - domainMin) / domainSpan) * 100;
   const [clampLow, clampHigh] = RANGE_BAR_POSITION_CLAMP;
-  const positionPct = Math.min(clampHigh, Math.max(clampLow, toPct(value)));
 
   return {
-    positionPct,
-    rangeStartPct: toPct(range.low),
-    rangeEndPct: toPct(range.high),
-    lowLabel: formatBiomarkerValue(range.low),
-    highLabel: formatBiomarkerValue(range.high),
+    toPct,
+    clampedPositionPct: (value) =>
+      Math.min(clampHigh, Math.max(clampLow, toPct(value))),
   };
+}
+
+// ── Multi-zone range bar (reference + optimal overlay) ───────────────────────
+
+export type BiomarkerMultiZoneRangeBarModel = {
+  /** Dot position along the track, percent, clamped to [2, 98]. */
+  positionPct: number;
+  /** Reference (in-range) zone boundaries along the track, percent. */
+  referenceStartPct: number;
+  referenceEndPct: number;
+  /** Optimal overlay zone boundaries, clamped inside the track; null when absent. */
+  optimalStartPct: number | null;
+  optimalEndPct: number | null;
+  /** Tick labels under the reference-zone boundaries. */
+  lowLabel: string;
+  highLabel: string;
+};
+
+/**
+ * Geometry for the two-zone bar: a reference band plus an optional optimal
+ * overlay, projected onto a single padded track whose domain is the union of
+ * both ranges. The optimal zone is clamped inside the track. Returns null
+ * without a reference-quality range (the optimal band alone cannot anchor the
+ * bar — status framing is reference-based).
+ */
+export function computeMultiZoneRangeBarModel(
+  value: number | null | undefined,
+  referenceRange: BiomarkerRange | null | undefined,
+  optimalRange: BiomarkerRange | null | undefined,
+): BiomarkerMultiZoneRangeBarModel | null {
+  if (value == null || referenceRange == null || !Number.isFinite(value)) {
+    return null;
+  }
+
+  // The reference band must itself be a valid span — the status framing and
+  // tick labels anchor on it; a degenerate reference cannot carry the bar even
+  // if an optimal band would widen the union domain.
+  const referenceSpan = referenceRange.high - referenceRange.low;
+  if (!Number.isFinite(referenceSpan) || referenceSpan <= 0) {
+    return null;
+  }
+
+  const domainLow = Math.min(
+    referenceRange.low,
+    optimalRange?.low ?? referenceRange.low,
+  );
+  const domainHigh = Math.max(
+    referenceRange.high,
+    optimalRange?.high ?? referenceRange.high,
+  );
+
+  const projection = buildRangeBarProjection(domainLow, domainHigh);
+  if (!projection) {
+    return null;
+  }
+
+  const clampTrack = (pct: number): number => Math.min(100, Math.max(0, pct));
+
+  const optimalUsable =
+    optimalRange != null &&
+    Number.isFinite(optimalRange.high - optimalRange.low) &&
+    optimalRange.high - optimalRange.low > 0;
+
+  return {
+    positionPct: projection.clampedPositionPct(value),
+    referenceStartPct: projection.toPct(referenceRange.low),
+    referenceEndPct: projection.toPct(referenceRange.high),
+    optimalStartPct: optimalUsable ? clampTrack(projection.toPct(optimalRange.low)) : null,
+    optimalEndPct: optimalUsable ? clampTrack(projection.toPct(optimalRange.high)) : null,
+    lowLabel: formatBiomarkerValue(referenceRange.low),
+    highLabel: formatBiomarkerValue(referenceRange.high),
+  };
+}
+
+/**
+ * Resolves the reference + optimal ranges to display for a reading. The
+ * lab-printed `referenceRange` wins over the catalog `typicalRange` fallback;
+ * the wellness `optimalRange` has no fallback. Both are unit-guarded against the
+ * reading's own unit exactly like deriveBiomarkerReadingStatus — a range in a
+ * different unit is dropped rather than silently compared.
+ */
+export function resolveDisplayRanges(
+  reading: Pick<BiomarkerReading, "unit" | "referenceRange" | "optimalRange"> | null | undefined,
+  typicalRange: BiomarkerRange | null | undefined,
+): { reference: BiomarkerRange | null; optimal: BiomarkerRange | null } {
+  if (!reading) {
+    return { reference: typicalRange ?? null, optimal: null };
+  }
+
+  const readingUnit = reading.unit.trim().toLowerCase();
+  const sameUnit = (range: BiomarkerRange | null | undefined): boolean =>
+    range != null && range.unit.trim().toLowerCase() === readingUnit;
+
+  const reference = sameUnit(reading.referenceRange)
+    ? reading.referenceRange
+    : sameUnit(typicalRange)
+      ? (typicalRange as BiomarkerRange)
+      : null;
+
+  const optimal = sameUnit(reading.optimalRange) ? reading.optimalRange : null;
+
+  return { reference, optimal };
 }
 
 // ── Dashboard grouping ──────────────────────────────────────────────────────
@@ -224,10 +317,8 @@ export function buildBiomarkersHeroView(
 
   for (const area of dashboard.areas) {
     for (const marker of area.markers) {
-      const status = deriveBiomarkerReadingStatus(
-        marker.latestReading,
-        marker.typicalRange ? { ...marker.typicalRange } : null,
-      );
+      const { reference } = resolveDisplayRanges(marker.latestReading, marker.typicalRange);
+      const status = deriveBiomarkerReadingStatus(marker.latestReading, reference);
       if (status !== "in_range" && status !== "no_reference") {
         outsideRangeCount += 1;
       }
@@ -245,23 +336,21 @@ export function buildBiomarkersHeroView(
   };
 }
 
-// ── Trend strip (detail page) ───────────────────────────────────────────────
+// ── History chart (recharts, detail page) ────────────────────────────────────
 
-export const TREND_STRIP_MAX_READINGS = 6;
+/** A reading guaranteed to carry a finite numeric value. */
+type NumericReading<R> = R & { value: number };
 
 /**
- * Builds DsTrendStrip days from reading history (most recent first as the API
- * returns it). Only numeric readings sharing the most recent reading's unit
- * are charted (values are stored as-reported and never converted). Values are
- * normalized to 0–100 within the charted set; bars are ordered oldest→newest.
- * Returns [] when fewer than 2 chartable readings exist.
+ * Numeric readings sharing the most recent reading's unit (values are stored
+ * as-reported and never converted), ordered oldest→newest, capped at maxReadings
+ * (no cap when omitted). Keeps the same-unit filtering rule in one place.
  */
-export function buildTrendStripDays(
-  readings: readonly Pick<BiomarkerReading, "value" | "unit" | "observedAt" | "createdAt">[],
-  maxReadings = TREND_STRIP_MAX_READINGS,
-): DsTrendStripDayData[] {
+function selectSameUnitNumericReadings<
+  R extends Pick<BiomarkerReading, "value" | "unit">,
+>(readings: readonly R[], maxReadings?: number): NumericReading<R>[] {
   const numeric = readings.filter(
-    (reading): reading is (typeof readings)[number] & { value: number } =>
+    (reading): reading is NumericReading<R> =>
       reading.value != null && Number.isFinite(reading.value),
   );
 
@@ -270,35 +359,87 @@ export function buildTrendStripDays(
     return [];
   }
 
-  const sameUnit = numeric
-    .filter((reading) => reading.unit.trim().toLowerCase() === referenceUnit)
-    .slice(0, maxReadings)
-    .reverse();
+  const sameUnit = numeric.filter(
+    (reading) => reading.unit.trim().toLowerCase() === referenceUnit,
+  );
 
-  if (sameUnit.length < 2) {
-    return [];
-  }
-
-  const values = sameUnit.map((reading) => reading.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const spread = max - min;
-
-  return sameUnit.map((reading) => ({
-    value:
-      spread === 0 ? 50 : Math.round(((reading.value - min) / spread) * 100),
-    label: formatTrendStripDayLabel(reading.observedAt ?? reading.createdAt),
-    state: "past" as const,
-  }));
+  return (maxReadings === undefined ? sameUnit : sameUnit.slice(0, maxReadings)).reverse();
 }
 
-function formatTrendStripDayLabel(isoDate: string): string {
-  const date = new Date(isoDate);
-  if (Number.isNaN(date.getTime())) {
-    return "";
+/** Padded fraction beyond the chart's value/band extent on the Y axis. */
+export const HISTORY_CHART_Y_PADDING_FRACTION = 0.08;
+
+export type BiomarkerHistoryChartPoint = {
+  /** Epoch ms of observedAt ?? createdAt — the numeric X coordinate. */
+  ts: number;
+  value: number;
+  /** Short "Jun 1" axis/tooltip label. */
+  label: string;
+};
+
+export type BiomarkerHistoryChartModel = {
+  points: BiomarkerHistoryChartPoint[];
+  unit: string;
+  referenceBand: { low: number; high: number } | null;
+  optimalBand: { low: number; high: number } | null;
+  yDomain: [number, number];
+};
+
+/**
+ * Pure model for the recharts history chart. Charts only numeric readings that
+ * share the most recent reading's unit (same filter as the trend strip), oldest
+ * → newest, with reference/optimal bands taken from the latest reading's ranges
+ * (catalog typicalRange as the reference fallback, both unit-guarded). The Y
+ * domain is padded to contain every point and visible band. Returns null when
+ * fewer than two chartable points exist.
+ */
+export function buildHistoryChartModel(
+  readings: readonly Pick<
+    BiomarkerReading,
+    "value" | "unit" | "observedAt" | "createdAt" | "referenceRange" | "optimalRange"
+  >[],
+  typicalRange?: BiomarkerRange | null,
+): BiomarkerHistoryChartModel | null {
+  const ordered = selectSameUnitNumericReadings(readings);
+  if (ordered.length < 2) {
+    return null;
   }
 
-  return formatMonthDayShort(date);
+  const unit = ordered[0]!.unit;
+  const points: BiomarkerHistoryChartPoint[] = ordered.map((reading) => {
+    const iso = reading.observedAt ?? reading.createdAt;
+    const date = new Date(iso);
+    return {
+      ts: date.getTime(),
+      value: reading.value,
+      label: Number.isNaN(date.getTime()) ? "" : formatMonthDayShort(date),
+    };
+  });
+
+  // Bands come from the most recent reading (the API returns newest-first;
+  // `ordered` is oldest→newest, so the latest is the last element).
+  const latest = ordered[ordered.length - 1]!;
+  const { reference, optimal } = resolveDisplayRanges(latest, typicalRange ?? null);
+  const referenceBand = reference ? { low: reference.low, high: reference.high } : null;
+  const optimalBand = optimal ? { low: optimal.low, high: optimal.high } : null;
+
+  const extentValues = [
+    ...points.map((point) => point.value),
+    ...(referenceBand ? [referenceBand.low, referenceBand.high] : []),
+    ...(optimalBand ? [optimalBand.low, optimalBand.high] : []),
+  ];
+  const min = Math.min(...extentValues);
+  const max = Math.max(...extentValues);
+  const span = max - min;
+  const pad = span === 0 ? Math.abs(max) * 0.1 || 1 : span * HISTORY_CHART_Y_PADDING_FRACTION;
+
+  return {
+    points,
+    unit,
+    referenceBand,
+    optimalBand,
+    yDomain: [min - pad, max + pad],
+  };
 }
 
 // ── Lab report rows ─────────────────────────────────────────────────────────
