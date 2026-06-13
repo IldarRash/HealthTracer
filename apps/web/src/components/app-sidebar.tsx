@@ -20,6 +20,8 @@ const NAV_ICON_MAP: Record<string, IconName> = {
   "/training": "dumbbell",
   "/nutrition": "fork",
   "/biomarkers": "drop",
+  "/sleep": "moon",
+  "/pulse": "heart",
 };
 
 type NavItemProps = {

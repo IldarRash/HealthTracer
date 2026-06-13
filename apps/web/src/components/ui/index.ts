@@ -119,3 +119,6 @@ export { Stat, type StatProps, type StatTone } from "./stat";
 export { Eyebrow, type EyebrowProps } from "./eyebrow";
 export { Stepper, type StepperProps } from "./stepper";
 export { CardHead, type CardHeadProps } from "./card-head";
+export { SectionCard } from "./section-card";
+export { DonutWithLegend, type DonutSegment } from "./donut-with-legend";
+export { ChartTooltipCard } from "./chart-tooltip-card";

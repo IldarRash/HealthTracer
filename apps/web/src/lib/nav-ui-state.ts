@@ -33,6 +33,8 @@ export const SECONDARY_ROUTE_LINKS: readonly NavLink[] = [
     labelKey: "Nav.biomarkers",
     wayfindingParent: { href: "/nutrition", labelKey: "Nav.nutrition" },
   },
+  { href: "/sleep", labelKey: "Nav.sleep" },
+  { href: "/pulse", labelKey: "Nav.pulse" },
 ] as const;
 
 export function isActivePath(

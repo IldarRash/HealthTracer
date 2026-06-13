@@ -33,15 +33,19 @@ describe("nav UI state", () => {
     expect(featured[0]?.labelKey).toBe("Nav.chat");
   });
 
-  it("keeps Training, Nutrition, and Biomarkers as secondary routes outside primary nav", () => {
+  it("keeps Training, Nutrition, Biomarkers, Sleep, and Pulse as secondary routes outside primary nav", () => {
     expect(SECONDARY_ROUTE_LINKS.map((link) => link.labelKey)).toEqual([
       "Nav.workouts",
       "Nav.nutrition",
       "Nav.biomarkers",
+      "Nav.sleep",
+      "Nav.pulse",
     ]);
     expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/training")).toBe(false);
     expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/nutrition")).toBe(false);
     expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/biomarkers")).toBe(false);
+    expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/sleep")).toBe(false);
+    expect(PRIMARY_NAV_LINKS.some((link) => link.href === "/pulse")).toBe(false);
   });
 
   it("marks the exact route and nested paths as active", () => {

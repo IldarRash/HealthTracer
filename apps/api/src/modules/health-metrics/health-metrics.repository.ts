@@ -253,4 +253,86 @@ export class HealthMetricsRepository {
       )
       .orderBy(desc(healthMetricAggregates.calculatedAt));
   }
+
+  /**
+   * List sleep snapshots for the user over the last N days, ordered newest first.
+   */
+  async listSleepSnapshotsForRange(
+    userId: string,
+    fromDate: Date,
+    toDate: Date,
+    limit: number,
+  ) {
+    return this.db
+      .select()
+      .from(healthMetricSnapshots)
+      .where(
+        and(
+          eq(healthMetricSnapshots.userId, userId),
+          eq(healthMetricSnapshots.metricType, "sleep"),
+          gte(healthMetricSnapshots.observedAt, fromDate),
+          lte(healthMetricSnapshots.observedAt, toDate),
+        ),
+      )
+      .orderBy(desc(healthMetricSnapshots.observedAt))
+      .limit(limit);
+  }
+
+  /**
+   * List the most recent recovery_input snapshots of the given inputType for trend data.
+   */
+  async listRecoveryInputSnapshotsByType(
+    userId: string,
+    inputType: string,
+    limit: number,
+  ) {
+    return this.db
+      .select()
+      .from(healthMetricSnapshots)
+      .where(
+        and(
+          eq(healthMetricSnapshots.userId, userId),
+          eq(healthMetricSnapshots.metricType, "recovery_input"),
+          sql`${healthMetricSnapshots.normalizedPayload}->>'inputType' = ${inputType}`,
+        ),
+      )
+      .orderBy(desc(healthMetricSnapshots.observedAt))
+      .limit(limit);
+  }
+
+  /**
+   * List heart_rate snapshots for the user, most recent first.
+   */
+  async listHeartRateSnapshots(userId: string, limit: number) {
+    return this.db
+      .select()
+      .from(healthMetricSnapshots)
+      .where(
+        and(
+          eq(healthMetricSnapshots.userId, userId),
+          eq(healthMetricSnapshots.metricType, "heart_rate"),
+        ),
+      )
+      .orderBy(desc(healthMetricSnapshots.observedAt))
+      .limit(limit);
+  }
+
+  /**
+   * Fetch a single heart_rate snapshot by id and userId (ownership-scoped).
+   */
+  async findHeartRateSnapshotById(userId: string, snapshotId: string) {
+    const [row] = await this.db
+      .select()
+      .from(healthMetricSnapshots)
+      .where(
+        and(
+          eq(healthMetricSnapshots.userId, userId),
+          eq(healthMetricSnapshots.id, snapshotId),
+          eq(healthMetricSnapshots.metricType, "heart_rate"),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
 }

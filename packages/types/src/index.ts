@@ -1337,6 +1337,8 @@ export {
 } from "./habits.js";
 export * from "./body-composition.js";
 export * from "./device-metrics.js";
+export * from "./heart-rate-zones.js";
+export * from "./vitals.js";
 export * from "./proposal-evidence.js";
 export * from "./wellness-language.js";
 export * from "./biomarkers.js";

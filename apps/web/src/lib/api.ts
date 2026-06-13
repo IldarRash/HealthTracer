@@ -1,6 +1,12 @@
 import {
   bodyCompositionAnalysisResponseSchema,
   type BodyCompositionAnalysisResponse,
+  sleepOverviewResponseSchema,
+  pulseOverviewResponseSchema,
+  workoutHeartRateDetailSchema,
+  type SleepOverviewResponse,
+  type PulseOverviewResponse,
+  type WorkoutHeartRateDetail,
   updateCurrentUserSchema,
   activeHabitPlanResponseSchema,
   activeNutritionPlanResponseSchema,
@@ -249,6 +255,9 @@ export const apiQueryKeys = {
   billingSubscription: ["billing-subscription"] as const,
   billingEntitlement: ["billing-entitlement"] as const,
   bodyAnalysisLatest: ["body-analysis-latest"] as const,
+  sleepOverview: ["sleep-overview"] as const,
+  pulseOverview: ["pulse-overview"] as const,
+  workoutHeartRate: (snapshotId: string) => ["workout-heart-rate", snapshotId] as const,
 } as const;
 
 const syncHealthMetricsResultSchema = z.object({
@@ -1437,6 +1446,34 @@ export async function createBillingPortalSession(
     method: "POST",
     body: {},
   });
+}
+
+// ── Sleep & Pulse monitors ──────────────────────────────────────────────────
+
+/** GET /health-metrics/sleep — sleep overview read model. */
+export async function getSleepOverview(
+  token: string,
+): Promise<ApiResult<SleepOverviewResponse>> {
+  return apiFetch("/health-metrics/sleep", token, sleepOverviewResponseSchema);
+}
+
+/** GET /health-metrics/pulse — pulse overview read model. */
+export async function getPulseOverview(
+  token: string,
+): Promise<ApiResult<PulseOverviewResponse>> {
+  return apiFetch("/health-metrics/pulse", token, pulseOverviewResponseSchema);
+}
+
+/** GET /health-metrics/pulse/workouts/:snapshotId — per-workout HR detail with samples. */
+export async function getWorkoutHeartRate(
+  token: string,
+  snapshotId: string,
+): Promise<ApiResult<WorkoutHeartRateDetail>> {
+  return apiFetch(
+    `/health-metrics/pulse/workouts/${encodeURIComponent(snapshotId)}`,
+    token,
+    workoutHeartRateDetailSchema,
+  );
 }
 
 /** GET /body/analysis/latest — latest body-composition analysis for the authenticated user. */

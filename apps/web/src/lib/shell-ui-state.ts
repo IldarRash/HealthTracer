@@ -20,6 +20,8 @@ const DARK_ROUTE_PREFIXES = [
   "/nutrition",
   "/recipes",
   "/biomarkers",
+  "/sleep",
+  "/pulse",
 ] as const;
 
 export function resolveRouteTheme(pathname: string): RouteTheme {

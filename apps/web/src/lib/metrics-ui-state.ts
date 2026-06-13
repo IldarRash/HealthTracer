@@ -73,6 +73,8 @@ export function metricTypeLabel(metricType: HealthMetricType): string {
       return "Workout";
     case "recovery_input":
       return "Recovery input";
+    case "heart_rate":
+      return "Heart rate";
   }
 }
 
@@ -197,6 +199,10 @@ export function formatSnapshotSummary(snapshot: HealthMetricSnapshot): string {
       }
       return "Recovery input snapshot";
     }
+    case "heart_rate": {
+      const avgBpm = payload.avgBpm;
+      return typeof avgBpm === "number" ? `${Math.round(avgBpm)} bpm avg` : "Heart rate snapshot";
+    }
   }
 }
 
@@ -238,6 +244,8 @@ export function formatAggregateSummary(aggregate: HealthMetricAggregate): string
       }
       return "Recovery summary";
     }
+    case "heart_rate":
+      return "Heart rate aggregate";
   }
 }
 

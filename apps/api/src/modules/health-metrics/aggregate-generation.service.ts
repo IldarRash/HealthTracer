@@ -103,6 +103,9 @@ async function buildAggregatePayload(
       return buildWorkoutAggregate(snapshots);
     case "recovery_input":
       return buildRecoveryAggregate(snapshots);
+    case "heart_rate":
+      // Heart rate snapshots are queried directly; no daily aggregate is computed.
+      return null;
     default:
       return null;
   }

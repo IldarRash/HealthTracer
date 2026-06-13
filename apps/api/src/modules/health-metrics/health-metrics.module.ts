@@ -7,6 +7,7 @@ import { HealthMetricsController } from "./health-metrics.controller.js";
 import { HealthMetricsRepository } from "./health-metrics.repository.js";
 import { HealthMetricsService } from "./health-metrics.service.js";
 import { MetricsAiContextService } from "./metrics-ai-context.service.js";
+import { VitalsReadService } from "./vitals-read.service.js";
 
 @Module({
   imports: [DatabaseModule, UsersModule, DeviceConnectionsModule],
@@ -16,6 +17,7 @@ import { MetricsAiContextService } from "./metrics-ai-context.service.js";
     AggregateGenerationService,
     MetricsAiContextService,
     HealthMetricsService,
+    VitalsReadService,
   ],
   exports: [HealthMetricsService, MetricsAiContextService, HealthMetricsRepository],
 })
