@@ -31,10 +31,10 @@ Index of the docs in this repo. Source of truth is always the code
 
 - [`feature-roadmap.md`](product/feature-roadmap.md) — product idea, phased
   roadmap, current implementation snapshot, and the open feature-brief index.
-- [`features/`](product/features) — feature briefs (open briefs; completed ones
-  are folded back into the roadmap and architecture docs).
-  - [`editable-proposals-performed-log.md`](product/features/editable-proposals-performed-log.md)
-    — universal editable display contract + plan-vs-performed log.
+- [`features/`](product/features) — briefs for not-yet-implemented work only;
+  completed briefs are folded back into the roadmap and architecture docs. The
+  one open brief is
+  [`llm-live-contract-hardening.md`](product/features/llm-live-contract-hardening.md).
 - [`mobile-parity.md`](product/mobile-parity.md) — explicit mobile (Expo)
   deferral, what web has that mobile lacks, and the trigger to revisit.
 
@@ -48,7 +48,3 @@ Index of the docs in this repo. Source of truth is always the code
 - [`design_handoff_plan_screens/`](design_handoff_plan_screens/README.md) —
   high-fidelity design references (tokens, atoms, screens) for the Longevity /
   Workouts / Nutrition surfaces and all their states.
-
-> A newer end-to-end interactive prototype lands under
-> `docs/design_handoff_prototype/` via PR #26. If that directory is not yet
-> present on this branch, it will be once #26 merges.

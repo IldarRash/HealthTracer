@@ -37,11 +37,11 @@ The web product is the primary product surface for the current planning directio
 - `Chat` — dominant coaching conversation and proposal approval surface.
 - `Today` — daily execution surface for today's workout, nutrition, stress/recovery check-in, mental wellbeing checkpoints, habits, and feedback.
 - `Longevity` — weekly overview for consistency, cross-domain trends, goals, recovery/wellbeing context, and safe coach prompts.
-- `Profile` — account, onboarding, personal context, goal hierarchy, documents, consent, and settings.
+- `Profile` — account, onboarding, personal context, goal hierarchy, biomarker/lab consent, device consent, and settings.
 
-Training and Nutrition remain routeable secondary views, but they are read-only weekly plan views rather than primary tabs. Users change workout and nutrition plans through Chat proposals, user approval, backend validation, and revision-safe state updates.
+Training and Nutrition remain routeable secondary views, but they are read-only weekly plan views rather than primary tabs. Biomarkers (`/biomarkers`, wayfinding parent Nutrition) is a consent-gated, wellness-only lab-report surface. Users change workout and nutrition plans through Chat proposals (see the proposal lifecycle in [`llm-pipeline.md`](./llm-pipeline.md)).
 
-See `docs/architecture/product-surface-architecture.md` for the complete surface model.
+See [`product-surface-architecture.md`](./product-surface-architecture.md) for the complete surface model.
 
 ## Backend
 
@@ -56,18 +56,16 @@ See `docs/architecture/product-surface-architecture.md` for the complete surface
 
 - PostgreSQL is the primary database.
 - Drizzle owns schema and migrations.
-- Plan entities are revision-safe: updates create revisions instead of overwriting the current plan in place.
+- Plan entities are revision-safe: updates create new revisions instead of overwriting the active plan in place — see the revision pattern in [`database.md`](./database.md).
 - Zod validates user inputs, API contracts, and AI structured outputs.
 
 ## AI
 
 - AI starts inside `apps/api/src/modules/ai`.
 - Use structured outputs and tool calling.
-- AI tools return proposals with reasons and typed changes.
-- Backend services validate and apply proposals.
+- AI tools return proposals with reasons and typed changes; backend services validate and apply them — see the proposal lifecycle in [`llm-pipeline.md`](./llm-pipeline.md).
 - The AI layer must not write directly to domain tables.
-- Chat attachments use the same unified LLM pipeline as text turns: upload creates ownership-scoped image refs, attachment stages perform plumbing only, and selected multimodal domain LLMs read image content directly as context.
-- There is no attachment recognition/classification side channel and no attachment-created proposal candidate path. Lab data persistence is explicit-upload only (the biomarkers module); no attachment path may insert `lab_reports` or `biomarker_readings` rows.
+- Chat attachments are context-only (images + document files), flowing through the same unified LLM pipeline as text turns — no recognition/classification side channel, no attachment-created proposal/lab path. See [`llm-pipeline.md`](./llm-pipeline.md) Stage 1; durable lab data is the explicit Biomarkers module only.
 
 ## Clients
 

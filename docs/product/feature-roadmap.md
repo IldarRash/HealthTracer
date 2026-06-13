@@ -45,7 +45,8 @@ adds two things to the coaching loop:
     `performed` aggregate (`aggregateNutritionIncidentsWeek`), separate from plan
     adherence, and still never mutate nutrition plan targets.
 
-Brief: [editable-proposals-performed-log.md](features/editable-proposals-performed-log.md).
+This direction is fully implemented (web + backend); the code-exact pipeline map is
+[architecture/llm-pipeline.md](../architecture/llm-pipeline.md).
 
 ## Product Surfaces
 
@@ -154,7 +155,7 @@ These capabilities extend the product toward AI-first coaching for a longer and 
 
 1. **Editable proposals + performed log follow-ups** — mobile UI for the editable contract
    cards and performed log, and migrating the nutrition-incident card onto the universal
-   display contract once it supports repeatable item groups (see brief below).
+   display contract once it supports repeatable item groups.
 2. **Weekly cross-domain review expansion** — extend Phase 10 beyond workout-only summaries
    (nutrition `performed`, ad-hoc activity, habits, recovery) surfaced through Longevity + Chat.
 3. **Longevity dashboard** — consumer overview once enough structured signals exist.
@@ -169,14 +170,12 @@ web IA, and the trigger for revisiting.
 
 ### Open Feature Brief Index
 
+Completed briefs are removed once their MVP behavior is captured in this roadmap and the
+architecture docs. Only briefs for not-yet-implemented work remain:
+
 | Feature | Brief | Depends on |
 |---------|-------|------------|
-| Editable proposals + performed log | [editable-proposals-performed-log.md](features/editable-proposals-performed-log.md) | Proposals, workouts, nutrition, Today, progress |
-| Real catalog data (exercises/recipes + user authoring) | [real-catalog-data.md](features/real-catalog-data.md) | Exercises, recipes, nutrition plan/revisions, proposals |
-| Body analysis + deeper nutrition (gap analysis) — archived | [archive/body-and-nutrition/00-overview.md](features/archive/body-and-nutrition/00-overview.md) | Chat attachments, profiles, nutrition plan/revisions, proposals, design system |
 | LLM live-contract hardening (strict wire schemas + catalog-aware workout) | [llm-live-contract-hardening.md](features/llm-live-contract-hardening.md) | AI fan-out pipeline, exercise catalog, types |
-| Pipeline observability (stdout token/cost + per-turn diagnostics) | [pipeline-observability.md](features/pipeline-observability.md) | AI orchestrator, chat module |
-| No-stubs program — conformance follow-ups | [no-stubs-followups.md](features/no-stubs-followups.md) | Chat, types, web chat UI, ai-behavior config |
 
 ## AI Safety and State Rules
 

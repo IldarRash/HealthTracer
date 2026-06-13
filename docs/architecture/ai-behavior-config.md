@@ -47,29 +47,29 @@ fixed in code — `workout | nutrition | health`
 ## Direct paths & quick actions (`ai-behavior.json`)
 
 `directPaths` configures the deterministic pre-AI shortcuts (matched in
-`detectionOrder`). There are **three** kinds:
+`detectionOrder`). There are **five** kinds — four read-only plus one narrow write:
 
 - `mark_today_workout_done` — the one narrow **write**.
 - `today_summary_read` — read-only Today summary.
-- `nutrition_plan_read` — read-only active-nutrition-plan readback. Its `matchPatterns`
-  cover **RU + EN** phrasings (e.g. "show my nutrition plan", "покажи мой план питания")
-  and a `negativePatterns` guard against advice/mutation phrasing.
+- `nutrition_plan_read` — read-only active-nutrition-plan readback (RU + EN
+  `matchPatterns`, `negativePatterns` guard against advice/mutation phrasing).
+- `weekly_progress_read` — read-only latest weekly-progress snapshot (negative patterns
+  exclude analytic phrasing and longer-than-week lookbacks).
+- `workout_plan_read` — read-only active-workout-plan readback (negative patterns exclude
+  create/change/adapt phrasing).
 
-`directPaths.replyTemplates` holds the deterministic reply copy per kind:
-`todaySummary`, `markWorkoutDone`, and **`nutritionPlan`** (`introTemplate`,
-`mealLineTemplate`, `macrosLineTemplate`, `noActivePlanLine`). The nutrition-plan
-formatter (`apps/api/src/modules/chat/direct-chat-path-formatters.ts`) interpolates these
-templates; safety floors are unaffected (all three are read/write product boundaries, not
-LLM routes).
+`directPaths.replyTemplates` holds the deterministic reply copy per kind: `todaySummary`,
+`markWorkoutDone`, `nutritionPlan`, `weeklyProgress`, and `workoutPlan`. The formatters
+(`apps/api/src/modules/chat/direct-chat-path-formatters.ts`) interpolate these templates;
+safety floors are unaffected (all five are read/write product boundaries, not LLM routes).
+See [`llm-pipeline.md`](./llm-pipeline.md) "Direct Chat Paths" for the full per-kind detail.
 
 `suggestedQuickActions.actions[]` configures the chips attached after **LLM (fan-out)**
 turns. Each action declares an `id` (a direct-path kind), `labelEn`/`labelRu`, and a
-localized `messageText` (`{ en, ru }`). The pure helper
-`deriveQuickActionsForTurn` ([`packages/types/src/suggested-quick-actions.ts`](../../packages/types/src/suggested-quick-actions.ts))
-selects which chips to show from the fan-out's selected domains (always
-`today_summary_read`; `mark_today_workout_done` when `workout` is selected;
-`nutrition_plan_read` when `nutrition` is selected). Tapping a chip sends its localized
-`messageText`, which then matches the matching deterministic direct path. See
+localized `messageText` (`{ en, ru }`); all five direct-path kinds have a chip. The pure
+helper `deriveQuickActionsForTurn` ([`packages/types/src/suggested-quick-actions.ts`](../../packages/types/src/suggested-quick-actions.ts))
+selects which chips to show from the fan-out's selected domains. Tapping a chip sends its
+localized `messageText`, which then matches the matching deterministic direct path. See
 [`llm-pipeline.md`](./llm-pipeline.md) "Suggested Quick Actions".
 
 ## Attachment categories & retention (`attachments.json`)

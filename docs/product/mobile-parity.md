@@ -20,10 +20,10 @@ is materially ahead. Mobile does not yet cover, among others:
 
 - **Longevity** (weekly cross-domain overview) and **Progress**.
 - **Profile / Onboarding / Goals** structured flows.
-- **Documents** (consent-gated upload/parse/review) and **Recipes**.
+- **Biomarkers** (consent-gated lab-report upload/parse/review) and **Recipes**.
 - **Billing** (Free/Pro) and **Proposals** review UI.
-- The **editable proposal cards + performed log** UI (see
-  [`features/editable-proposals-performed-log.md`](features/editable-proposals-performed-log.md)).
+- The **editable proposal cards + performed log** UI (see the "Current Direction"
+  section of [`feature-roadmap.md`](feature-roadmap.md)).
 
 ## What is explicitly out of scope for MVP
 

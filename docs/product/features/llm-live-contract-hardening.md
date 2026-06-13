@@ -7,8 +7,7 @@ Branch context: follow-up to the first live OpenAI run of the fan-out pipeline o
 compromises that landed to get the live run green.
 
 Related: the code-exact pipeline map is
-[`../../architecture/llm-pipeline.md`](../../architecture/llm-pipeline.md); the umbrella
-chat-pipeline design is [`ideal-chat-pipeline.md`](./ideal-chat-pipeline.md).
+[`../../architecture/llm-pipeline.md`](../../architecture/llm-pipeline.md).
 
 ## Problem (real owner case)
 

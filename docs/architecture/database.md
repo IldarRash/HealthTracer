@@ -126,7 +126,7 @@ for LOG (revision-free) intents (e.g. `workout_session:<id>` /
 `nutrition_incident:<id>`). A proposal payload may carry an optional,
 non-authoritative `displayContract` render hint; it is recomputed/clamped on
 accept and stripped before any revision is written, so it never persists on a
-revision (see [`../product/features/editable-proposals-performed-log.md`](../product/features/editable-proposals-performed-log.md)).
+revision (see the `AIProposal` entity in [`domain-model.md`](./domain-model.md)).
 
 ## Attachment And Incident Pattern
 
