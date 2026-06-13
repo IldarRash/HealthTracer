@@ -42,9 +42,3 @@ Index of the docs in this repo. Source of truth is always the code
 
 - [`railway.md`](deployment/railway.md) — Railway deploy + manual Drizzle
   migration procedure.
-
-## Design handoff
-
-- [`design_handoff_plan_screens/`](design_handoff_plan_screens/README.md) —
-  high-fidelity design references (tokens, atoms, screens) for the Longevity /
-  Workouts / Nutrition surfaces and all their states.
